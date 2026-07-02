@@ -101,7 +101,7 @@ export default function NeuralView({
               <div style={{ fontSize: 11, fontWeight: 700, color: hub.color, letterSpacing: "0.06em", whiteSpace: "nowrap", fontFamily: "inherit" }}>
                 {hub.label}
               </div>
-              <div style={{ fontSize: 9.5, color: "var(--t3)", textAlign: "center", letterSpacing: "0.04em", marginTop: 2 }}>
+              <div style={{ fontSize: 10.5, color: "var(--t2b)", textAlign: "center", letterSpacing: "0.04em", marginTop: 2 }}>
                 {hub.count} FILES
               </div>
             </div>
@@ -135,7 +135,7 @@ export default function NeuralView({
               padding: "0 8px",
             }}
           >
-            <span style={{ fontSize: 7.5, fontWeight: 700, color: "rgba(0,0,0,.55)", letterSpacing: ".06em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden" }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(0,0,0,.55)", letterSpacing: ".06em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden" }}>
               {fd.source}
             </span>
           </div>
@@ -151,7 +151,7 @@ export default function NeuralView({
             }}
           >
             <span style={{ fontSize: 26, fontWeight: 800, color: "rgba(0,0,0,.72)", lineHeight: 1 }}>{fd.count}</span>
-            <span style={{ fontSize: 8, fontWeight: 700, color: "rgba(0,0,0,.48)", letterSpacing: ".05em", textTransform: "uppercase", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: "rgba(0,0,0,.48)", letterSpacing: ".05em", textTransform: "uppercase", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {fd.label}
             </span>
           </div>

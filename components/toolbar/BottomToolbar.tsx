@@ -62,6 +62,7 @@ export default function BottomToolbar({
             onClick={onSelectTool}
             className="am-tb"
             title="Select"
+            aria-label="Select tool"
             style={{
               display: "flex",
               width: 34,
@@ -81,6 +82,7 @@ export default function BottomToolbar({
             onClick={onHandTool}
             className="am-tb"
             title="Pan"
+            aria-label="Pan tool"
             style={{
               display: "flex",
               width: 34,
@@ -103,6 +105,7 @@ export default function BottomToolbar({
       <button
         onClick={onAdd}
         title="Add"
+        aria-label="Add"
         style={{
           display: "flex",
           width: 34,
@@ -125,6 +128,7 @@ export default function BottomToolbar({
           <button
             onClick={onFit}
             title="Fit"
+            aria-label="Fit to content"
             style={{
               display: "flex",
               width: 34,

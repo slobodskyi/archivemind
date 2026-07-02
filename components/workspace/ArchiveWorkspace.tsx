@@ -18,7 +18,6 @@ interface ArchiveWorkspaceProps {
 export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProps) {
   const ws = useWorkspace(initialPhotos);
 
-  const showViewTabs = ws.projCurrent !== "all";
   const showCanvasTools = ws.view !== "map" && ws.view !== "timeline";
   const showAddToProject = ws.selectedIds.size > 0;
 
@@ -54,7 +53,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         />
       </PanZoomCanvas>
 
-      <AppHeader zoomPct={ws.zoomPct} showViewTabs={showViewTabs} />
+      <AppHeader zoomPct={ws.zoomPct} onZoomReset={ws.onZoomReset} />
 
       <LeftSidebar expanded={ws.sidebarExpanded} onToggle={ws.toggleSidebar} />
 

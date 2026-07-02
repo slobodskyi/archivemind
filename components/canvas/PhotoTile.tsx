@@ -118,6 +118,7 @@ export default function PhotoTile({
         >
           <button
             onClick={onOpen}
+            aria-label="Open photo"
             style={{
               display: "flex",
               width: 26,
@@ -135,6 +136,7 @@ export default function PhotoTile({
           </button>
           <button
             onClick={onDelete}
+            aria-label="Delete photo"
             style={{
               display: "flex",
               width: 26,

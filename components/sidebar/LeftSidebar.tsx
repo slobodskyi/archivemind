@@ -73,6 +73,7 @@ export default function LeftSidebar({
     >
       <button
         onClick={onToggle}
+        aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
         style={{
           display: "flex",
           alignItems: "center",
@@ -83,7 +84,7 @@ export default function LeftSidebar({
           border: 0,
           borderRadius: 2,
           background: "transparent",
-          color: "var(--tm)",
+          color: "var(--t2b)",
           cursor: "pointer",
         }}
       >
@@ -95,6 +96,7 @@ export default function LeftSidebar({
           <button
             key={t.key}
             onClick={t.onClick}
+            aria-label={t.label}
             className="tw"
             style={{
               display: "flex",
@@ -106,7 +108,7 @@ export default function LeftSidebar({
               border: 0,
               borderRadius: 2,
               background: t.active ? "color-mix(in srgb,var(--ac) 12%,transparent)" : "transparent",
-              color: t.active ? "var(--ac)" : "var(--t3)",
+              color: t.active ? "var(--ac)" : "var(--t2b)",
               cursor: "pointer",
               fontFamily: "inherit",
               whiteSpace: "nowrap",
@@ -138,6 +140,7 @@ export default function LeftSidebar({
           <button
             key={b.key}
             onClick={b.onClick}
+            aria-label={b.label}
             className="tw"
             style={{
               display: "flex",
@@ -149,7 +152,7 @@ export default function LeftSidebar({
               border: 0,
               borderRadius: 2,
               background: "transparent",
-              color: "var(--tm)",
+              color: "var(--t2b)",
               cursor: "pointer",
               fontFamily: "inherit",
               whiteSpace: "nowrap",

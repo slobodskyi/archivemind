@@ -74,13 +74,13 @@ export default function PhotoDrawer({
                 backgroundPosition: "center",
               }}
             />
-            <button onClick={onPrev} style={navBtn("left")}>
+            <button onClick={onPrev} aria-label="Previous photo" style={navBtn("left")}>
               <ChevronLeftIcon />
             </button>
-            <button onClick={onNext} style={navBtn("right")}>
+            <button onClick={onNext} aria-label="Next photo" style={navBtn("right")}>
               <ChevronRightIcon />
             </button>
-            <button onClick={onClose} style={navBtn("close")}>
+            <button onClick={onClose} aria-label="Close" style={navBtn("close")}>
               <CloseIcon width={13} height={13} strokeWidth={1.8} />
             </button>
           </div>

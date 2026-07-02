@@ -3,13 +3,13 @@ import { ChevronDownIcon, ShareIcon } from "@/components/icons/icons";
 interface AppHeaderProps {
   projLabel?: string;
   zoomPct?: string;
-  showViewTabs?: boolean;
+  onZoomReset?: () => void;
 }
 
 export default function AppHeader({
   projLabel = "All my files",
   zoomPct = "100%",
-  showViewTabs = false,
+  onZoomReset,
 }: AppHeaderProps) {
   return (
     <div
@@ -75,24 +75,12 @@ export default function AppHeader({
         <ChevronDownIcon />
       </button>
 
-      {showViewTabs && (
-        <div
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            transform: "translate(-50%,-50%)",
-            display: "flex",
-            gap: 1,
-            border: "1px solid var(--bd)",
-            borderRadius: 2,
-            padding: 2,
-          }}
-        />
-      )}
+      {/* View tabs (Neural/Timeline/Map/Sense) land here in Phase 2, once those views exist. */}
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button
+          onClick={onZoomReset}
+          aria-label="Reset zoom to fit"
           style={{
             display: "flex",
             alignItems: "center",
@@ -132,6 +120,7 @@ export default function AppHeader({
           SHARE
         </button>
         <button
+          aria-label="Account menu"
           style={{
             width: 30,
             height: 30,

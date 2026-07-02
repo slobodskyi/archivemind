@@ -510,6 +510,15 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (stateRef.current.drawerId) closeDrawer();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeDrawer]);
+
   // ── Derived values ────────────────────────────────────────────────────────
 
   const neuralLayout = useMemo(
