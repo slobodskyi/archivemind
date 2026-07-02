@@ -1,5 +1,5 @@
-import type { Photo, PhotoSource } from "@/types";
-import { PROJECTS_META, SOURCES } from "./mock-data";
+import type { Photo, PhotoGroup, PhotoSource } from "@/types";
+import { GROUPS, PROJECTS_META, SOURCES } from "./mock-data";
 import type { ViewMode } from "@/types";
 
 /**
@@ -331,4 +331,175 @@ export function fitView(
     tx: leftPad + pad + (availW - bw * sc) / 2 - xl * sc,
     ty: top + (availH - bh * sc) / 2 - yt * sc,
   };
+}
+
+// ── Timeline view: month columns + deterministic scattered tiles ───────────
+
+export const MONTH_LIST = ["Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026", "Jul 2026"];
+
+const COL_W = 340;
+const COL_GAP = 40;
+const TILE_MIN = 64;
+const TILE_MAX = 96;
+const TOP_Y = 16;
+const MIN_CELL = 116;
+const PER_ROW = Math.floor(COL_W / MIN_CELL); // 2
+
+export function monthOf(photo: Photo): string {
+  return MONTH_LIST[hash(photo.id) % MONTH_LIST.length];
+}
+
+export interface TimelineTilePos {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface TimelineMonthColumn {
+  key: string;
+  x: number;
+  colH: number;
+  count: number;
+}
+
+export interface TimelineLayout {
+  months: TimelineMonthColumn[];
+  tiles: Record<string, TimelineTilePos>;
+  colWidth: number;
+  colGap: number;
+}
+
+export function timelineLayout(
+  photos: Photo[],
+  tlOverrides: Record<string, { x: number; y: number }>,
+  availableHeight: number,
+): TimelineLayout {
+  const byMonth: Record<string, Photo[]> = {};
+  MONTH_LIST.forEach((m) => (byMonth[m] = []));
+  photos.forEach((p) => byMonth[monthOf(p)].push(p));
+  MONTH_LIST.forEach((m) => byMonth[m].sort((a, b) => hash(a.id + m) - hash(b.id + m)));
+
+  const months: TimelineMonthColumn[] = [];
+  const tiles: Record<string, TimelineTilePos> = {};
+
+  MONTH_LIST.forEach((m, mi) => {
+    const items = byMonth[m];
+    const rows = Math.max(1, Math.ceil(items.length / PER_ROW));
+    const colH = Math.max(availableHeight - TOP_Y - 20, rows * MIN_CELL);
+    const colX = mi * (COL_W + COL_GAP);
+    months.push({ key: m, x: colX, colH, count: items.length });
+
+    const cellW = COL_W / PER_ROW;
+    const cellH = colH / rows;
+    const jitterX = Math.max(4, cellW * 0.14);
+    const jitterY = Math.max(4, cellH * 0.14);
+
+    items.forEach((p, i) => {
+      const col = i % PER_ROW;
+      const row = Math.floor(i / PER_ROW);
+      const cx = colX + col * cellW + cellW / 2;
+      const cy = TOP_Y + row * cellH + cellH / 2;
+      const h1 = hash(p.id);
+      const h2 = hash(p.id) >>> 4;
+      const jx = (h1 % Math.round(jitterX * 2)) - jitterX;
+      const jy = (h2 % Math.round(jitterY * 2)) - jitterY;
+      const w = TILE_MIN + (hash(p.id + "w") % (TILE_MAX - TILE_MIN));
+      const h = Math.round(w * (p.h / p.w));
+      let bx = cx + jx - w / 2;
+      let by = cy + jy - h / 2;
+      if (tlOverrides[p.id]) {
+        bx = tlOverrides[p.id].x;
+        by = tlOverrides[p.id].y;
+      }
+      tiles[p.id] = { x: bx, y: by, w, h };
+    });
+  });
+
+  return { months, tiles, colWidth: COL_W, colGap: COL_GAP };
+}
+
+// ── Sense view: circle-pack bubbles clustered by group ──────────────────────
+
+export interface SenseBubble {
+  key: PhotoGroup;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  label: string;
+  count: number;
+  items: Photo[];
+}
+
+const GOLDEN_ANGLE = 2.39996;
+const PACK_ITERATIONS = 500;
+const PACK_CENTER_PULL = 0.012;
+
+/** Deterministic circle-packing relaxation — no Math.random anywhere. */
+export function packCircles(
+  items: { key: string; r: number }[],
+  cx: number,
+  cy: number,
+): Record<string, { x: number; y: number }> {
+  const nodes = items.map((it, i) => {
+    const angle = i * GOLDEN_ANGLE;
+    const radius = 40 + i * 6;
+    return { key: it.key, r: it.r, x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
+  });
+  for (let iter = 0; iter < PACK_ITERATIONS; iter++) {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i],
+          b = nodes[j];
+        const dx = b.x - a.x,
+          dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const minDist = a.r + b.r;
+        if (dist < minDist) {
+          const overlap = (minDist - dist) / 2;
+          const ux = dx / dist,
+            uy = dy / dist;
+          a.x -= ux * overlap;
+          a.y -= uy * overlap;
+          b.x += ux * overlap;
+          b.y += uy * overlap;
+        }
+      }
+    }
+    nodes.forEach((n) => {
+      n.x += (cx - n.x) * PACK_CENTER_PULL;
+      n.y += (cy - n.y) * PACK_CENTER_PULL;
+    });
+  }
+  const result: Record<string, { x: number; y: number }> = {};
+  nodes.forEach((n) => (result[n.key] = { x: n.x, y: n.y }));
+  return result;
+}
+
+export function senseBubbles(photos: Photo[]): SenseBubble[] {
+  const byGroup: Partial<Record<PhotoGroup, Photo[]>> = {};
+  photos.forEach((p) => {
+    (byGroup[p.group] = byGroup[p.group] || []).push(p);
+  });
+  const groupKeys = Object.keys(byGroup) as PhotoGroup[];
+  const sized = groupKeys.map((g) => ({
+    key: g,
+    size: Math.min(190, Math.max(88, 70 + (byGroup[g]?.length ?? 0) * 16)),
+  }));
+  const positions = packCircles(
+    sized.map((s) => ({ key: s.key, r: s.size / 2 })),
+    620,
+    460,
+  );
+  return sized.map((s) => ({
+    key: s.key,
+    x: positions[s.key].x,
+    y: positions[s.key].y,
+    size: s.size,
+    color: GROUPS[s.key].color,
+    label: GROUPS[s.key].label,
+    count: byGroup[s.key]?.length ?? 0,
+    items: byGroup[s.key] ?? [],
+  }));
 }

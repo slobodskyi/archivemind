@@ -1,0 +1,63 @@
+import type { ViewMode } from "@/types";
+import { ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
+
+interface ViewTabsProps {
+  show: boolean;
+  view: ViewMode;
+  onSelect: (v: ViewMode) => void;
+}
+
+const TABS: { key: Extract<ViewMode, "timeline" | "map" | "sense">; label: string; Icon: typeof ViewTimelineIcon }[] = [
+  { key: "timeline", label: "TIMELINE", Icon: ViewTimelineIcon },
+  { key: "map", label: "MAP", Icon: ViewMapIcon },
+  { key: "sense", label: "TOPIC", Icon: ViewSenseIcon },
+];
+
+export default function ViewTabs({ show, view, onSelect }: ViewTabsProps) {
+  if (!show) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: "50%",
+        transform: "translate(-50%,-50%)",
+        display: "flex",
+        gap: 1,
+        background: "transparent",
+        border: "1px solid var(--bd)",
+        borderRadius: 2,
+        padding: 2,
+      }}
+    >
+      {TABS.map(({ key, label, Icon }) => {
+        const active = view === key;
+        return (
+          <button
+            key={key}
+            onClick={() => onSelect(key)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              height: 28,
+              padding: "0 13px",
+              border: 0,
+              borderRadius: 2,
+              fontSize: 10.5,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              fontFamily: "inherit",
+              cursor: "pointer",
+              background: active ? "var(--bg-el)" : "transparent",
+              color: active ? "var(--t1)" : "var(--t3)",
+            }}
+          >
+            <Icon />
+            <span>{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}

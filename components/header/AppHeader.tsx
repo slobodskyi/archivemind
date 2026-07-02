@@ -1,15 +1,22 @@
+import type { ReactNode } from "react";
 import { ChevronDownIcon, ShareIcon } from "@/components/icons/icons";
 
 interface AppHeaderProps {
   projLabel?: string;
   zoomPct?: string;
   onZoomReset?: () => void;
+  onOpenProj?: () => void;
+  onOpenAcct?: () => void;
+  viewTabs?: ReactNode;
 }
 
 export default function AppHeader({
   projLabel = "All my files",
   zoomPct = "100%",
   onZoomReset,
+  onOpenProj,
+  onOpenAcct,
+  viewTabs,
 }: AppHeaderProps) {
   return (
     <div
@@ -29,6 +36,7 @@ export default function AppHeader({
       }}
     >
       <button
+        onClick={onOpenProj}
         style={{
           display: "flex",
           alignItems: "center",
@@ -75,7 +83,7 @@ export default function AppHeader({
         <ChevronDownIcon />
       </button>
 
-      {/* View tabs (Neural/Timeline/Map/Sense) land here in Phase 2, once those views exist. */}
+      {viewTabs}
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button
@@ -120,6 +128,7 @@ export default function AppHeader({
           SHARE
         </button>
         <button
+          onClick={onOpenAcct}
           aria-label="Account menu"
           style={{
             width: 30,
