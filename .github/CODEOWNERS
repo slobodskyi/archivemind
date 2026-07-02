@@ -1,0 +1,13 @@
+# CODEOWNERS
+#
+# This is a placeholder. ArchiveMind is currently UI/UX-only work with a single
+# active contributor at a time, so there are no vertical feature-slice
+# ownership boundaries to enforce yet.
+#
+# Once backend work starts (Supabase, Cloudflare R2, Gemini integration) and
+# the codebase splits into feature slices, map directories to owners below.
+#
+# Example syntax:
+# /src/features/archive-ingest/  @owner-github-handle
+#
+# No active rules below this line.

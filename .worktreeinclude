@@ -1,0 +1,4 @@
+# gitignored files Claude Code should still copy into new worktrees
+.env
+.env.local
+.env*.local

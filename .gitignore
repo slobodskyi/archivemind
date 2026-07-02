@@ -44,3 +44,8 @@ next-env.d.ts
 # original Claude Design mockup export — kept on disk as reference,
 # not tracked (vendored leaflet copies, binary uploads, screenshots)
 /AI-powered creator archive tool/
+
+# per-developer Claude Code state — see AGENTS.md / CONTRIBUTING.md
+.claude/worktrees/
+.claude/settings.local.json
+CLAUDE.local.md
