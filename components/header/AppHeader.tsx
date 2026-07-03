@@ -11,7 +11,7 @@ interface AppHeaderProps {
 }
 
 export default function AppHeader({
-  projLabel = "All my files",
+  projLabel = "My files",
   zoomPct = "100%",
   onZoomReset,
   onOpenProj,

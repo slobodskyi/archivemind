@@ -1029,7 +1029,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   );
 
   const projLabel =
-    state.projCurrent === "all" ? "All my files" : PROJECTS_META[state.projCurrent].label;
+    state.projCurrent === "all" ? "My files" : PROJECTS_META[state.projCurrent].label;
 
   const timelineLayoutResult = useMemo(
     () => computeTimelineLayout(projectPhotos, state.tlOverrides, canvasHeight),
