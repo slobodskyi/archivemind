@@ -143,6 +143,8 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         onOpenSearch={ws.openSearch}
         onToggleChat={ws.toggleChat}
         onOpenHelp={ws.openHelp}
+        photoCount={ws.photos.length}
+        onFlashToast={ws.flashToast}
       />
 
       <ChatPanel

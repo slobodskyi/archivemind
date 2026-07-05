@@ -26,6 +26,8 @@ interface LeftSidebarProps {
   onOpenSearch?: () => void;
   onToggleChat?: () => void;
   onOpenHelp?: () => void;
+  photoCount?: number;
+  onFlashToast?: (text: string) => void;
 }
 
 export default function LeftSidebar({
@@ -36,6 +38,8 @@ export default function LeftSidebar({
   onOpenSearch,
   onToggleChat,
   onOpenHelp,
+  photoCount = 0,
+  onFlashToast,
 }: LeftSidebarProps) {
   const sidebarW = expanded ? 220 : 52;
   const labelOp = expanded ? 1 : 0;
@@ -44,14 +48,14 @@ export default function LeftSidebar({
   const sbTools: SidebarTool[] = [
     { key: "search", label: "Smart Search", icon: <SearchIcon />, active: searchOpen, onClick: onOpenSearch },
     { key: "chat", label: "AI Chat", icon: <ChatIcon />, active: chatOpen, onClick: onToggleChat },
-    { key: "exif", label: "Extract EXIF", icon: <ExifIcon /> },
+    { key: "exif", label: "Extract EXIF", icon: <ExifIcon />, onClick: () => onFlashToast?.(`EXIF extracted for ${photoCount} files`) },
     { key: "tag", label: "Auto-Tag", icon: <TagIcon /> },
   ];
 
   const sbBottom: SidebarTool[] = [
-    { key: "logs", label: "Logs", icon: <LogsIcon /> },
+    { key: "logs", label: "Logs", icon: <LogsIcon />, onClick: () => onFlashToast?.("Activity log coming soon") },
     { key: "help", label: "Help", icon: <HelpIcon />, onClick: onOpenHelp },
-    { key: "privacy", label: "Privacy Policy", icon: <PrivacyIcon /> },
+    { key: "privacy", label: "Privacy Policy", icon: <PrivacyIcon />, onClick: () => onFlashToast?.("Privacy Policy coming soon") },
   ];
 
   return (
