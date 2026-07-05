@@ -46,7 +46,7 @@ export default function ProjectDropdown({ open, isAll, list, onClose, onSelectAl
           <span style={{ display: "flex", width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 2, background: "var(--bg-el)", color: "var(--t3)" }}>
             <FolderIcon />
           </span>
-          <span style={{ flex: 1, fontSize: 13, color: "var(--t1)", textAlign: "left" }}>My files</span>
+          <span style={{ flex: 1, fontSize: 13, color: "var(--t1)", textAlign: "left" }}>All my files</span>
           {isAll && <CheckIcon width={13} height={13} stroke="var(--ac)" strokeWidth={2.4} />}
         </button>
         <div style={{ height: 1, background: "var(--bd)", margin: "4px 0" }} />

@@ -31,7 +31,7 @@ export const HELP_FAQ: FaqItem[] = [
   },
   {
     q: "What is the Neural view?",
-    a: "My files shows every source you've connected — Google Drive, iCloud, Dropbox — as circles, with the folders and files inside them branching out as a connected graph.",
+    a: "All my files shows every source you've connected — Google Drive, iCloud, Dropbox — as circles, with the folders and files inside them branching out as a connected graph.",
   },
   {
     q: "How do project views differ?",

@@ -893,7 +893,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         return p;
       });
       setState({ photos, proc: { active: false, label: "", pct: 0 } });
-      flashToast(`${updated} photos captioned · ${updated * 4} tags added`);
+      flashToast(`${ids.length} photos captioned · ${updated * 4} tags added`);
     },
     [setState, flashToast],
   );
@@ -1029,7 +1029,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   );
 
   const projLabel =
-    state.projCurrent === "all" ? "My files" : PROJECTS_META[state.projCurrent].label;
+    state.projCurrent === "all" ? "All my files" : PROJECTS_META[state.projCurrent].label;
 
   const timelineLayoutResult = useMemo(
     () => computeTimelineLayout(projectPhotos, state.tlOverrides, canvasHeight),
