@@ -13,6 +13,14 @@ can't infer on its own.
   the other person has already pulled from.
 - Squash-merge into `main`; delete the branch after merge.
 
+## Branch protection
+`main` is protected by a GitHub repository ruleset (not classic branch
+protection): CI (`checks` — lint, typecheck, build) must pass, and force-pushes
+and branch deletion are blocked. Both maintainers are on the ruleset's bypass
+list, so either can push to `main` directly — but treat that as an escape hatch.
+The default stays: branch → PR → green CI → review → squash-merge. See
+`docs/decisions/0006-branch-protection-via-ruleset.md`.
+
 ## Parallel work with git worktrees
 Claude Code supports isolated sessions via worktrees, so two Claude sessions
 (yours and mine) never touch the same files on disk:
