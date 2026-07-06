@@ -33,21 +33,9 @@ interface Marquee {
   y1: number;
 }
 
-interface PreviewItem {
-  src: string;
-  onClick: () => void;
-}
-
 interface ImpState {
   open: boolean;
   at: "rail" | "toolbar";
-}
-
-interface PreviewState {
-  open: boolean;
-  kind: "map" | "sense" | null;
-  key: string | null;
-  items: PreviewItem[];
 }
 
 interface BulkOps {
@@ -78,7 +66,6 @@ interface WorkspaceState {
   search: boolean;
   helpOpen: boolean;
   imp: ImpState;
-  preview: PreviewState;
   expanded: { kind: "sense" | "map" | null; key: string | null };
   expandOverrides: Record<string, { x: number; y: number }>;
   projCurrent: ProjectKey | "all";
@@ -272,13 +259,6 @@ export interface Workspace {
   doUpload: () => void;
   closeImport: () => void;
 
-  // Preview modal
-  previewOpen: boolean;
-  previewTitle: string;
-  previewItems: PreviewItem[];
-  openPreview: (kind: "map" | "sense", key: string, items: PreviewItem[]) => void;
-  closePreview: () => void;
-
   // Expand overlays (sense / map marker drill-down)
   expanded: { kind: "sense" | "map" | null; key: string | null };
   expandOverrides: Record<string, { x: number; y: number }>;
@@ -332,7 +312,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     search: false,
     helpOpen: false,
     imp: { open: false, at: "rail" },
-    preview: { open: false, kind: null, key: null, items: [] },
     expanded: { kind: null, key: null },
     expandOverrides: {},
     projCurrent: "all",
@@ -891,18 +870,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [setState],
   );
 
-  // ── Preview modal ────────────────────────────────────────────────────────
-
-  const openPreview = useCallback(
-    (kind: "map" | "sense", key: string, items: PreviewItem[]) =>
-      setState({ preview: { open: true, kind, key, items } }),
-    [setState],
-  );
-  const closePreview = useCallback(
-    () => setState({ preview: { open: false, kind: null, key: null, items: [] } }),
-    [setState],
-  );
-
   // ── Bulk AI ──────────────────────────────────────────────────────────────
 
   const toggleBulkCaptions = useCallback(
@@ -1024,13 +991,12 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       if (s.drawerId) closeDrawer();
       else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();
-      else if (s.preview.open) closePreview();
       else if (s.expanded.kind) closeExpand();
       else if (s.chatOpen) closeChat();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closePreview, closeExpand, closeChat]);
+  }, [closeDrawer, closeSearch, closeHelp, closeExpand, closeChat]);
 
   useEffect(() => {
     return () => {
@@ -1206,12 +1172,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     addToolbar,
     doUpload,
     closeImport,
-
-    previewOpen: state.preview.open,
-    previewTitle: state.preview.key ?? "",
-    previewItems: state.preview.items,
-    openPreview,
-    closePreview,
 
     timelineLayout: timelineLayoutResult,
     onTlDown,

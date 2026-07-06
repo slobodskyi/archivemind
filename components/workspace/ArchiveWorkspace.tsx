@@ -22,7 +22,6 @@ import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import SearchModal from "@/components/modals/SearchModal";
 import HelpModal from "@/components/modals/HelpModal";
 import ImportDropdown from "@/components/modals/ImportDropdown";
-import PreviewModal from "@/components/modals/PreviewModal";
 import Toast from "@/components/modals/Toast";
 
 interface ArchiveWorkspaceProps {
@@ -113,8 +112,6 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
           deletePhoto={ws.deletePhoto}
         />
       )}
-
-      <PreviewModal open={ws.previewOpen} title={ws.previewTitle} items={ws.previewItems} onClose={ws.closePreview} />
 
       <AppHeader
         projLabel={ws.projLabel}
