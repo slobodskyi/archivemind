@@ -4,6 +4,8 @@ Date: 2026-07-02
 
 Status: Accepted
 
+**Superseded in part by 0011** — the seam is `getAssets`/`getAsset`, not `getPhotos`/`getPhoto`.
+
 ## Context
 
 We're in a mockup phase now (no backend) but a real backend (Supabase) is planned

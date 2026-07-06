@@ -14,7 +14,7 @@ cannot be re-fetched after the initial window.
 ## Decision
 
 At ingest, stream the Dropbox bytes **once** (within the 4 h window) and store the
-original in **R2**, exactly like a direct upload (`files.r2_original_key` set,
+original in **R2**, exactly like a direct upload (`files.r2_key` set,
 `origin='dropbox'`). `source_connections` is effectively Drive-only in the MVP.
 
 ## Consequences
