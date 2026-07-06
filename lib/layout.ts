@@ -1,71 +1,96 @@
-import type { Photo, PhotoGroup, PhotoSource } from "@/types";
-import { GROUPS, PROJECTS_META, SOURCES } from "./mock-data";
-import type { ViewMode } from "@/types";
+import type { Photo, ViewMode } from "@/types";
+import { COUNTRIES, GROUPS } from "./mock-data";
 
 /**
- * Pure, deterministic layout algorithms ported verbatim from the source.
- * No randomness anywhere — every position is a function of the fixed mock data
- * plus user drag overrides.
+ * Pure, deterministic layout logic ported verbatim from the v2 source mockup
+ * (docs/design/ArchiveMind-v2.dc.html, `computeLayout`/`fitView`/`onFit`/
+ * `onZoomReset`). No randomness anywhere — every position is a function of
+ * fixed mock data. See docs/decisions/0006-redesign-v2-full-replace.md.
  */
-
-export interface NodeOverrides {
-  hub: Record<string, { x: number; y: number }>;
-  folder: Record<string, { x: number; y: number }>;
-  file: Record<string, { x: number; y: number }>;
-}
-
-export const EMPTY_OVERRIDES: NodeOverrides = { hub: {}, folder: {}, file: {} };
 
 export interface TilePos {
   x: number;
   y: number;
   w: number;
   h: number;
-  cx: number;
-  cy: number;
 }
 
-export interface HubNode {
-  key: string;
+export interface TimelineTick {
+  x: number;
+  label: string;
+}
+
+export interface MapRegion {
   x: number;
   y: number;
   color: string;
   glow: string;
   label: string;
-  abbr: string;
   count: number;
 }
 
-export interface FolderNode {
-  key: string;
-  x: number;
-  y: number;
-  count: number;
-  label: string;
-  source: string;
-  bg: string;
-  tabBg: string;
-  shadow: string;
+export interface MapLand {
+  points: string;
+  fill: string;
+  stroke: string;
 }
 
 export interface EdgePath {
-  d: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
   stroke: string;
   op: number;
   w: number;
+  dash?: string;
+  anim?: string;
 }
 
-export interface NeuralOverlay {
-  hubs: HubNode[];
-  folders: FolderNode[];
-  hubEdges: EdgePath[];
-  folderEdges: EdgePath[];
-  looseEdges: EdgePath[];
+export interface SmartHub {
+  x: number;
+  y: number;
+  color: string;
+  glow: string;
+  label: string;
+  count: string;
 }
 
-export interface NeuralLayout {
+/** Discriminated by isTimeline/isMap/isSmart; all-false/undefined means canvas view (no decoration). */
+export interface LayoutOverlay {
+  isTimeline?: boolean;
+  tlTicks?: TimelineTick[];
+  axisX0?: number;
+  axisW?: number;
+
+  isMap?: boolean;
+  mapX?: number;
+  mapY?: number;
+  mapW?: number;
+  mapH?: number;
+  regions?: MapRegion[];
+  lands?: MapLand[];
+
+  isSmart?: boolean;
+  hubs?: SmartHub[];
+
+  edges?: EdgePath[];
+}
+
+export interface Layout {
   pos: Record<string, TilePos>;
-  overlay: NeuralOverlay;
+  overlay: LayoutOverlay;
+}
+
+export interface Rect {
+  width: number;
+  height: number;
+}
+
+export interface Transform {
+  scale: number;
+  tx: number;
+  ty: number;
 }
 
 // ── Helpers (verbatim) ──────────────────────────────────────────────────────
@@ -75,431 +100,206 @@ export function hexA(hex: string, a: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-export function hash(id: string): number {
-  let h = 5381;
-  for (let i = 0; i < id.length; i++) h = ((h * 33) ^ id.charCodeAt(i)) >>> 0;
-  return h;
+/** Parses a photo's 'MM-DD HH:mm' display time into a sortable minute offset. */
+export function timeMin(t: string): number {
+  const parts = (t || "06-18 12:00").split(" ");
+  const da = +parts[0].split("-")[1];
+  const hm = parts[1].split(":");
+  return (da * 24 + +hm[0]) * 60 + +hm[1];
 }
 
-export function folderKey(p: Photo): string | null {
-  return hash(p.id) % 3 === 0 ? null : p.source + "_" + p.project;
-}
-
-export function mkBez(
-  sx: number,
-  sy: number,
-  ex: number,
-  ey: number,
-  seed: number,
-  str: number,
-): string {
-  const dx = ex - sx,
-    dy = ey - sy,
-    len = Math.sqrt(dx * dx + dy * dy) || 1;
-  const side = (seed % 2 === 0 ? 1 : -1) * (0.18 + (seed % 7) * 0.025);
-  const cpx = (sx + ex) / 2 + (-dy / len) * len * side * str,
-    cpy = (sy + ey) / 2 + (dx / len) * len * side * str;
-  return (
-    "M " + sx.toFixed(1) + "," + sy.toFixed(1) +
-    " Q " + cpx.toFixed(1) + "," + cpy.toFixed(1) +
-    " " + ex.toFixed(1) + "," + ey.toFixed(1)
-  );
-}
-
-const FGRADS = [
-  "linear-gradient(140deg,#7bc4ff,#3a6fff)",
-  "linear-gradient(140deg,#ff9a7c,#ff4a3c)",
-  "linear-gradient(140deg,#7ee8df,#22b8c8)",
-  "linear-gradient(140deg,#d4a4ff,#8840e0)",
-  "linear-gradient(140deg,#ffe08a,#ffb400)",
-  "linear-gradient(140deg,#7ee8c8,#5be0a0)",
-];
-const FTABS = [
-  "rgba(44,90,220,.8)",
-  "rgba(220,58,44,.8)",
-  "rgba(28,164,180,.8)",
-  "rgba(128,72,210,.8)",
-  "rgba(200,148,0,.8)",
-  "rgba(44,180,128,.8)",
-];
-const FSHADOWS = [
-  "rgba(58,111,255,.35)",
-  "rgba(255,74,60,.35)",
-  "rgba(42,179,192,.35)",
-  "rgba(144,96,224,.35)",
-  "rgba(255,180,0,.35)",
-  "rgba(91,224,160,.35)",
-];
-
-const HUBPOS: Record<PhotoSource, { x: number; y: number }> = {
-  gdrive: { x: 700, y: 720 },
-  icloud: { x: 1750, y: 260 },
-  dropbox: { x: 2650, y: 760 },
+/** Hand-coded inline SVG polygon points per country, for the Map view (no Leaflet/basemap). */
+const LANDS: Record<string, string> = {
+  "United Kingdom": "530,300 575,312 590,360 574,420 545,442 518,400 524,348",
+  Sweden: "845,150 902,160 916,232 890,292 858,282 842,210",
+  Germany: "768,430 852,424 878,480 846,527 784,521 758,476",
+  Poland: "918,398 1022,393 1048,440 1010,477 938,472 912,436",
+  France: "588,508 682,520 702,582 660,642 598,652 558,590",
+  Ukraine: "1038,468 1182,463 1214,510 1170,552 1058,550 1028,506",
+  Italy: "820,608 856,618 872,680 902,762 876,778 854,706 834,660",
+  Spain: "428,708 562,703 602,760 560,812 438,817 408,766",
 };
 
-// ── Neural layout (verbatim algorithm) ──────────────────────────────────────
+/** Hardcoded "related photos" cross-links shown as dashed lines in the Smart view. */
+const SMART_CROSS_LINKS: [string, string][] = [
+  ["a", "d"],
+  ["b", "j"],
+  ["d", "c"],
+  ["e", "i"],
+  ["h", "l"],
+  ["f", "k"],
+  ["a", "g"],
+  ["j", "c"],
+  ["e", "h"],
+];
 
-export function layoutNeural(
-  photos: Photo[],
-  overrides: NodeOverrides = EMPTY_OVERRIDES,
-): NeuralLayout {
+// ── computeLayout: one function per view, all photos as siblings on one canvas ──
+
+export function computeLayout(view: ViewMode, photos: Photo[]): Layout {
   const pos: Record<string, TilePos> = {};
-  const hubEdges: EdgePath[] = [];
-  const folderEdges: EdgePath[] = [];
-  const looseEdges: EdgePath[] = [];
-  const hubs: HubNode[] = [];
-  const folders: FolderNode[] = [];
-  const OV = overrides || EMPTY_OVERRIDES;
+  let overlay: LayoutOverlay = {};
 
-  const bySrc: Record<string, Photo[]> = {};
-  photos.forEach((p) => {
-    (bySrc[p.source] = bySrc[p.source] || []).push(p);
-  });
-
-  (Object.keys(SOURCES) as PhotoSource[]).forEach((src) => {
-    let hub = HUBPOS[src];
-    if (OV.hub[src]) hub = OV.hub[src];
-    const meta = SOURCES[src];
-    const members = bySrc[src] || [];
-    hubs.push({
-      key: src,
-      x: hub.x,
-      y: hub.y,
-      color: meta.color,
-      glow: hexA(meta.color, 0.12),
-      label: meta.label,
-      abbr: meta.abbr,
-      count: members.length,
-    });
-    const byFolder: Record<string, Photo[]> = {};
-    const loose: Photo[] = [];
-    members.forEach((p) => {
-      const fk = folderKey(p);
-      if (fk) (byFolder[fk] = byFolder[fk] || []).push(p);
-      else loose.push(p);
-    });
-    const folderKeys = Object.keys(byFolder);
-    const nSlots = folderKeys.length + (loose.length ? 1 : 0);
-    let slot = 0;
-    const RF = 300;
-    folderKeys.forEach((fk, fi) => {
-      const ang = -Math.PI / 2 + (slot / Math.max(nSlots, 1)) * Math.PI * 2;
-      slot++;
-      let fx = hub.x + Math.cos(ang) * RF,
-        fy = hub.y + Math.sin(ang) * RF;
-      if (OV.folder[fk]) {
-        fx = OV.folder[fk].x;
-        fy = OV.folder[fk].y;
-      }
-      const fmembers = byFolder[fk];
-      const proj = fmembers[0].project;
-      const gi = hash(fk) % FGRADS.length;
-      folders.push({
-        key: fk,
-        x: fx - 54,
-        y: fy - 40,
-        count: fmembers.length,
-        label: PROJECTS_META[proj] ? PROJECTS_META[proj].label.split(" ")[0] : "Files",
-        source: meta.abbr,
-        bg: FGRADS[gi],
-        tabBg: FTABS[gi],
-        shadow: FSHADOWS[gi],
-      });
-      hubEdges.push({
-        d: mkBez(hub.x, hub.y, fx, fy, fi * 7 + hash(fk), 0.22),
-        stroke: meta.color,
-        op: 0.4,
-        w: 1.3,
-      });
-      const n = fmembers.length,
-        RFI = n > 3 ? 130 : 92;
-      fmembers.forEach((p, i) => {
-        const fang = ang + (-0.9 + (i / Math.max(n - 1, 1)) * 1.8);
-        const w = 96,
-          h = Math.round((p.h * w) / p.w);
-        let px = fx + Math.cos(fang) * RFI,
-          py = fy + Math.sin(fang) * RFI;
-        if (OV.file[p.id]) {
-          px = OV.file[p.id].x;
-          py = OV.file[p.id].y;
-        }
-        pos[p.id] = { x: px - w / 2, y: py - h / 2, w, h, cx: px, cy: py };
-        folderEdges.push({
-          d: mkBez(fx, fy, px, py, hash(p.id), 0.18),
-          stroke: "rgba(236,238,232,.4)",
-          op: 0.3,
-          w: 0.8,
-        });
-      });
-    });
-    if (loose.length) {
-      const ang0 = -Math.PI / 2 + (slot / Math.max(nSlots, 1)) * Math.PI * 2;
-      const n = loose.length,
-        RL = 230;
-      loose.forEach((p, i) => {
-        const ang = ang0 + (-0.5 + (i / Math.max(n - 1, 1)) * 1.0);
-        const w = 100,
-          h = Math.round((p.h * w) / p.w);
-        let px = hub.x + Math.cos(ang) * RL,
-          py = hub.y + Math.sin(ang) * RL;
-        if (OV.file[p.id]) {
-          px = OV.file[p.id].x;
-          py = OV.file[p.id].y;
-        }
-        pos[p.id] = { x: px - w / 2, y: py - h / 2, w, h, cx: px, cy: py };
-        looseEdges.push({
-          d: mkBez(hub.x, hub.y, px, py, hash(p.id), 0.16),
-          stroke: meta.color,
-          op: 0.28,
-          w: 0.9,
-        });
-      });
-    }
-  });
-  return { pos, overlay: { hubs, folders, hubEdges, folderEdges, looseEdges } };
-}
-
-// ── Fit-to-content (verbatim) ───────────────────────────────────────────────
-
-export interface Bounds {
-  xl: number;
-  yt: number;
-  xr: number;
-  yb: number;
-}
-
-export interface Transform {
-  scale: number;
-  tx: number;
-  ty: number;
-}
-
-export interface Rect {
-  width: number;
-  height: number;
-}
-
-const MONTH_COUNT = 6;
-
-export function viewBounds(
-  view: ViewMode,
-  photos: Photo[],
-  overrides: NodeOverrides = EMPTY_OVERRIDES,
-): Bounds {
-  if (view === "neural") {
-    const { pos } = layoutNeural(photos, overrides);
-    const ids = Object.keys(pos);
-    if (!ids.length) return { xl: 0, yt: 0, xr: 1000, yb: 700 };
-    return {
-      xl: Math.min(...ids.map((i) => pos[i].x), 400),
-      yt: Math.min(...ids.map((i) => pos[i].y), 400),
-      xr: Math.max(...ids.map((i) => pos[i].x + pos[i].w)),
-      yb: Math.max(...ids.map((i) => pos[i].y + pos[i].h)),
-    };
-  }
-  if (view === "timeline") return { xl: 0, yt: 0, xr: 60 + MONTH_COUNT * 380, yb: 900 };
-  if (view === "map") return { xl: 0, yt: 0, xr: 1200, yb: 700 };
-  if (view === "sense") return { xl: 0, yt: 0, xr: 1200, yb: 900 };
-  return { xl: 0, yt: 0, xr: 1000, yb: 700 };
-}
-
-export function fitView(
-  view: ViewMode,
-  photos: Photo[],
-  overrides: NodeOverrides,
-  rect: Rect,
-  sidebarExpanded: boolean,
-  chatOpen: boolean,
-): Transform {
-  const sbW = sidebarExpanded ? 220 : 52;
-  const chW = chatOpen ? 320 : 0;
-  const leftPad = sbW + chW;
   if (view === "timeline") {
-    return { scale: 1, tx: leftPad + 20, ty: 100 };
+    const sorted = [...photos].sort((a, b) => timeMin(a.time) - timeMin(b.time));
+    const tmin = Math.min(...sorted.map((p) => timeMin(p.time)));
+    const tmax = Math.max(...sorted.map((p) => timeMin(p.time)));
+    const X0 = 280,
+      X1 = 1520,
+      span = tmax - tmin || 1,
+      tw = 150;
+    const laneLast: number[] = [];
+    sorted.forEach((p) => {
+      const x = X0 + ((timeMin(p.time) - tmin) / span) * (X1 - X0);
+      let lane = 0;
+      while (laneLast[lane] !== undefined && laneLast[lane] > x - (tw + 18)) lane++;
+      laneLast[lane] = x;
+      const w = tw,
+        h = Math.round((p.h * w) / p.w);
+      pos[p.id] = { x, y: 350 + lane * 154, w, h };
+    });
+    const seen: Record<string, true> = {};
+    const ticks: TimelineTick[] = [];
+    sorted.forEach((p) => {
+      const da = p.day || "Jun 18";
+      if (seen[da] === undefined) {
+        seen[da] = true;
+        ticks.push({ x: X0 + ((timeMin(p.time) - tmin) / span) * (X1 - X0), label: da });
+      }
+    });
+    overlay = { isTimeline: true, tlTicks: ticks, axisX0: X0, axisW: X1 - X0 };
+  } else if (view === "map") {
+    const MX0 = 250,
+      MY0 = 150,
+      MW = 1140,
+      MH = 760;
+    const byC: Record<string, Photo[]> = {};
+    photos.forEach((p) => {
+      const c = COUNTRIES[p.country] ? p.country : "Ukraine";
+      (byC[c] = byC[c] || []).push(p);
+    });
+    const regions: MapRegion[] = [];
+    const edges: EdgePath[] = [];
+    const lands: MapLand[] = Object.keys(COUNTRIES).map((c) => ({
+      points: LANDS[c] || "",
+      fill: hexA(COUNTRIES[c].color, 0.1),
+      stroke: hexA(COUNTRIES[c].color, 0.5),
+    }));
+    Object.keys(COUNTRIES).forEach((c) => {
+      const meta = COUNTRIES[c];
+      const members = byC[c] || [];
+      const n = members.length;
+      const cx = MX0 + meta.cx * MW,
+        cy = MY0 + meta.cy * MH;
+      regions.push({ x: cx, y: cy, color: meta.color, glow: hexA(meta.color, 0.16), label: c, count: n });
+      members.forEach((p, i) => {
+        const ang = -Math.PI / 2 + (i / Math.max(n, 1)) * Math.PI * 2;
+        const R = n > 1 ? 74 : 0;
+        const w = 98,
+          h = Math.round((p.h * w) / p.w);
+        const px = cx + Math.cos(ang) * R,
+          py = cy + Math.sin(ang) * R - (n > 1 ? 0 : 48);
+        pos[p.id] = { x: px - w / 2, y: py - h / 2, w, h };
+        edges.push({ x1: cx, y1: cy, x2: px, y2: py, stroke: meta.color, op: 0.32, w: 1.2 });
+      });
+    });
+    overlay = { isMap: true, mapX: MX0 - 26, mapY: MY0 - 40, mapW: MW + 52, mapH: MH + 80, regions, edges, lands };
+  } else if (view === "smart") {
+    const groups: Record<string, Photo[]> = {};
+    photos.forEach((p) => {
+      const g = GROUPS[p.group] ? p.group : "street";
+      (groups[g] = groups[g] || []).push(p);
+    });
+    const hubs: SmartHub[] = [];
+    const centers: Record<string, { x: number; y: number }> = {};
+    Object.keys(GROUPS).forEach((g) => {
+      const meta = GROUPS[g as keyof typeof GROUPS];
+      const members = groups[g] || [];
+      centers[g] = { x: meta.hx, y: meta.hy };
+      hubs.push({ x: meta.hx, y: meta.hy, color: meta.color, glow: hexA(meta.color, 0.14), label: meta.label, count: members.length + " photos" });
+      const n = members.length,
+        R = n > 4 ? 215 : 175;
+      members.forEach((p, i) => {
+        const ang = -Math.PI / 2 + (i / Math.max(n, 1)) * Math.PI * 2;
+        const w = 112,
+          h = Math.round((p.h * w) / p.w);
+        pos[p.id] = { x: meta.hx + Math.cos(ang) * R - w / 2, y: meta.hy + Math.sin(ang) * R - h / 2, w, h };
+      });
+    });
+    const edges: EdgePath[] = [];
+    photos.forEach((p) => {
+      const g = GROUPS[p.group] ? p.group : "street";
+      const c = centers[g],
+        pp = pos[p.id];
+      if (c && pp) edges.push({ x1: c.x, y1: c.y, x2: pp.x + pp.w / 2, y2: pp.y + pp.h / 2, stroke: GROUPS[g as keyof typeof GROUPS].color, op: 0.32, w: 1.4 });
+    });
+    SMART_CROSS_LINKS.forEach(([aId, bId]) => {
+      const A = pos[aId],
+        B = pos[bId];
+      if (A && B)
+        edges.push({
+          x1: A.x + A.w / 2,
+          y1: A.y + A.h / 2,
+          x2: B.x + B.w / 2,
+          y2: B.y + B.h / 2,
+          stroke: "rgba(255,255,255,0.55)",
+          op: 0.18,
+          w: 1,
+          dash: "4 7",
+          anim: "amDash 1.8s linear infinite",
+        });
+    });
+    overlay = { isSmart: true, edges, hubs };
+  } else {
+    // canvas — raw photo.x/y/w/h, directly drag-repositionable
+    photos.forEach((p) => {
+      pos[p.id] = { x: p.x, y: p.y, w: p.w, h: p.h };
+    });
   }
-  const { xl, yt, xr, yb } = viewBounds(view, photos, overrides);
-  const pad = 60,
-    top = 70,
+
+  return { pos, overlay };
+}
+
+// ── fitView: on mount + on view switch ──────────────────────────────────────
+
+export function fitView(view: ViewMode, photos: Photo[], rect: Rect): Transform | null {
+  const { pos } = computeLayout(view, photos);
+  const ids = Object.keys(pos);
+  if (!ids.length) return null;
+  let xl = Math.min(...ids.map((i) => pos[i].x));
+  let yt = Math.min(...ids.map((i) => pos[i].y));
+  const xr = Math.max(...ids.map((i) => pos[i].x + pos[i].w));
+  const yb = Math.max(...ids.map((i) => pos[i].y + pos[i].h));
+  if (view === "smart") {
+    Object.values(GROUPS).forEach((g) => {
+      xl = Math.min(xl, g.hx - 130);
+      yt = Math.min(yt, g.hy - 130);
+    });
+  }
+  if (view === "timeline") yt = Math.min(yt, 110);
+  const pad = view === "canvas" ? 110 : 80,
+    top = 66,
     bottom = 104;
   const bw = Math.max(xr - xl, 1),
     bh = Math.max(yb - yt, 1);
-  const availW = rect.width - leftPad - pad * 2,
+  const availW = rect.width - pad * 2,
     availH = rect.height - top - bottom;
-  const sc = Math.min(availW / bw, availH / bh, 1.05);
-  return {
-    scale: sc,
-    tx: leftPad + pad + (availW - bw * sc) / 2 - xl * sc,
-    ty: top + (availH - bh * sc) / 2 - yt * sc,
-  };
+  const s = Math.min(availW / bw, availH / bh, view === "canvas" ? 2 : 1.12);
+  return { scale: s, tx: (rect.width - bw * s) / 2 - xl * s, ty: top + (availH - bh * s) / 2 - yt * s };
 }
 
-// ── Timeline view: month columns + deterministic scattered tiles ───────────
-
-export const MONTH_LIST = ["Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026", "Jul 2026"];
-
-const COL_W = 340;
-const COL_GAP = 40;
-const TILE_MIN = 64;
-const TILE_MAX = 96;
-const TOP_Y = 16;
-const MIN_CELL = 116;
-const PER_ROW = Math.floor(COL_W / MIN_CELL); // 2
-
-export function monthOf(photo: Photo): string {
-  return MONTH_LIST[hash(photo.id) % MONTH_LIST.length];
+/** Bottom-toolbar "Fit" button — raw bounding box of photo.x/y/w/h, ignores computeLayout. */
+export function onFitTransform(photos: Photo[], rect: Rect): Transform | null {
+  if (!photos.length) return null;
+  const xl = Math.min(...photos.map((p) => p.x)),
+    yt = Math.min(...photos.map((p) => p.y));
+  const xr = Math.max(...photos.map((p) => p.x + p.w)),
+    yb = Math.max(...photos.map((p) => p.y + p.h));
+  const pad = 120;
+  const s = Math.min((rect.width - pad * 2) / (xr - xl), (rect.height - pad * 2) / (yb - yt), 2);
+  return { scale: s, tx: (rect.width - (xr - xl) * s) / 2 - xl * s, ty: (rect.height - (yb - yt) * s) / 2 - yt * s + 10 };
 }
 
-export interface TimelineTilePos {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-export interface TimelineMonthColumn {
-  key: string;
-  x: number;
-  colH: number;
-  count: number;
-}
-
-export interface TimelineLayout {
-  months: TimelineMonthColumn[];
-  tiles: Record<string, TimelineTilePos>;
-  colWidth: number;
-  colGap: number;
-}
-
-export function timelineLayout(
-  photos: Photo[],
-  tlOverrides: Record<string, { x: number; y: number }>,
-  availableHeight: number,
-): TimelineLayout {
-  const byMonth: Record<string, Photo[]> = {};
-  MONTH_LIST.forEach((m) => (byMonth[m] = []));
-  photos.forEach((p) => byMonth[monthOf(p)].push(p));
-  MONTH_LIST.forEach((m) => byMonth[m].sort((a, b) => hash(a.id + m) - hash(b.id + m)));
-
-  const months: TimelineMonthColumn[] = [];
-  const tiles: Record<string, TimelineTilePos> = {};
-
-  MONTH_LIST.forEach((m, mi) => {
-    const items = byMonth[m];
-    const rows = Math.max(1, Math.ceil(items.length / PER_ROW));
-    const colH = Math.max(availableHeight - TOP_Y - 20, rows * MIN_CELL);
-    const colX = mi * (COL_W + COL_GAP);
-    months.push({ key: m, x: colX, colH, count: items.length });
-
-    const cellW = COL_W / PER_ROW;
-    const cellH = colH / rows;
-    const jitterX = Math.max(4, cellW * 0.14);
-    const jitterY = Math.max(4, cellH * 0.14);
-
-    items.forEach((p, i) => {
-      const col = i % PER_ROW;
-      const row = Math.floor(i / PER_ROW);
-      const cx = colX + col * cellW + cellW / 2;
-      const cy = TOP_Y + row * cellH + cellH / 2;
-      const h1 = hash(p.id);
-      const h2 = hash(p.id) >>> 4;
-      const jx = (h1 % Math.round(jitterX * 2)) - jitterX;
-      const jy = (h2 % Math.round(jitterY * 2)) - jitterY;
-      const w = TILE_MIN + (hash(p.id + "w") % (TILE_MAX - TILE_MIN));
-      const h = Math.round(w * (p.h / p.w));
-      let bx = cx + jx - w / 2;
-      let by = cy + jy - h / 2;
-      if (tlOverrides[p.id]) {
-        bx = tlOverrides[p.id].x;
-        by = tlOverrides[p.id].y;
-      }
-      tiles[p.id] = { x: bx, y: by, w, h };
-    });
-  });
-
-  return { months, tiles, colWidth: COL_W, colGap: COL_GAP };
-}
-
-// ── Sense view: circle-pack bubbles clustered by group ──────────────────────
-
-export interface SenseBubble {
-  key: PhotoGroup;
-  x: number;
-  y: number;
-  size: number;
-  color: string;
-  label: string;
-  count: number;
-  items: Photo[];
-}
-
-const GOLDEN_ANGLE = 2.39996;
-const PACK_ITERATIONS = 500;
-const PACK_CENTER_PULL = 0.012;
-
-/** Deterministic circle-packing relaxation — no Math.random anywhere. */
-export function packCircles(
-  items: { key: string; r: number }[],
-  cx: number,
-  cy: number,
-): Record<string, { x: number; y: number }> {
-  const nodes = items.map((it, i) => {
-    const angle = i * GOLDEN_ANGLE;
-    const radius = 40 + i * 6;
-    return { key: it.key, r: it.r, x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
-  });
-  for (let iter = 0; iter < PACK_ITERATIONS; iter++) {
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i],
-          b = nodes[j];
-        const dx = b.x - a.x,
-          dy = b.y - a.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const minDist = a.r + b.r;
-        if (dist < minDist) {
-          const overlap = (minDist - dist) / 2;
-          const ux = dx / dist,
-            uy = dy / dist;
-          a.x -= ux * overlap;
-          a.y -= uy * overlap;
-          b.x += ux * overlap;
-          b.y += uy * overlap;
-        }
-      }
-    }
-    nodes.forEach((n) => {
-      n.x += (cx - n.x) * PACK_CENTER_PULL;
-      n.y += (cy - n.y) * PACK_CENTER_PULL;
-    });
-  }
-  const result: Record<string, { x: number; y: number }> = {};
-  nodes.forEach((n) => (result[n.key] = { x: n.x, y: n.y }));
-  return result;
-}
-
-export function senseBubbles(photos: Photo[]): SenseBubble[] {
-  const byGroup: Partial<Record<PhotoGroup, Photo[]>> = {};
-  photos.forEach((p) => {
-    (byGroup[p.group] = byGroup[p.group] || []).push(p);
-  });
-  const groupKeys = Object.keys(byGroup) as PhotoGroup[];
-  const sized = groupKeys.map((g) => ({
-    key: g,
-    size: Math.min(190, Math.max(88, 70 + (byGroup[g]?.length ?? 0) * 16)),
-  }));
-  const positions = packCircles(
-    sized.map((s) => ({ key: s.key, r: s.size / 2 })),
-    620,
-    460,
-  );
-  return sized.map((s) => ({
-    key: s.key,
-    x: positions[s.key].x,
-    y: positions[s.key].y,
-    size: s.size,
-    color: GROUPS[s.key].color,
-    label: GROUPS[s.key].label,
-    count: byGroup[s.key]?.length ?? 0,
-    items: byGroup[s.key] ?? [],
-  }));
+/** Header/toolbar zoom-reset button — recenters at scale 1 around a fixed offset. */
+export function onZoomResetTransform(rect: Rect): Transform {
+  return { scale: 1, tx: rect.width / 2 - 740, ty: rect.height / 2 - 470 };
 }

@@ -27,7 +27,6 @@ export default function PanZoomCanvas({
         inset: 0,
         overflow: "hidden",
         cursor: canvasCursor,
-        zIndex: 1,
       }}
     >
       <div
@@ -35,21 +34,18 @@ export default function PanZoomCanvas({
           position: "absolute",
           left: 0,
           top: 0,
-          width: 1,
-          height: 1,
+          width: 6000,
+          height: 4000,
           transformOrigin: "0 0",
           transform: canvasTransform,
+          backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
         }}
       >
         {children}
       </div>
       {marquee.show && (
-        <MarqueeOverlay
-          left={marquee.left}
-          top={marquee.top}
-          width={marquee.width}
-          height={marquee.height}
-        />
+        <MarqueeOverlay left={marquee.left} top={marquee.top} width={marquee.width} height={marquee.height} />
       )}
     </div>
   );
