@@ -1,19 +1,20 @@
 import type { ViewMode } from "@/types";
-import { ViewCanvasIcon, ViewTimelineIcon, ViewMapIcon, ViewSmartIcon } from "@/components/icons/icons";
+import { ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
 
 interface ViewTabsProps {
+  show: boolean;
   view: ViewMode;
   onSelect: (v: ViewMode) => void;
 }
 
-const TABS: { key: ViewMode; label: string; Icon: typeof ViewCanvasIcon }[] = [
-  { key: "canvas", label: "Canvas", Icon: ViewCanvasIcon },
-  { key: "timeline", label: "Timeline", Icon: ViewTimelineIcon },
-  { key: "map", label: "Map", Icon: ViewMapIcon },
-  { key: "smart", label: "Smart", Icon: ViewSmartIcon },
+const TABS: { key: Extract<ViewMode, "timeline" | "map" | "sense">; label: string; Icon: typeof ViewTimelineIcon }[] = [
+  { key: "timeline", label: "TIMELINE", Icon: ViewTimelineIcon },
+  { key: "map", label: "MAP", Icon: ViewMapIcon },
+  { key: "sense", label: "TOPIC", Icon: ViewSenseIcon },
 ];
 
-export default function ViewTabs({ view, onSelect }: ViewTabsProps) {
+export default function ViewTabs({ show, view, onSelect }: ViewTabsProps) {
+  if (!show) return null;
   return (
     <div
       style={{
@@ -22,12 +23,11 @@ export default function ViewTabs({ view, onSelect }: ViewTabsProps) {
         top: "50%",
         transform: "translate(-50%,-50%)",
         display: "flex",
-        gap: 2,
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 999,
-        padding: 3,
-        zIndex: 2,
+        gap: 1,
+        background: "transparent",
+        border: "1px solid var(--bd)",
+        borderRadius: 2,
+        padding: 2,
       }}
     >
       {TABS.map(({ key, label, Icon }) => {
@@ -39,17 +39,18 @@ export default function ViewTabs({ view, onSelect }: ViewTabsProps) {
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 6,
+              gap: 5,
               height: 28,
-              padding: "0 12px",
+              padding: "0 13px",
               border: 0,
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 500,
+              borderRadius: 2,
+              fontSize: 10.5,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
               fontFamily: "inherit",
               cursor: "pointer",
-              background: active ? "var(--bg-elevated)" : "transparent",
-              color: active ? "#fff" : "var(--text-tertiary)",
+              background: active ? "var(--bg-el)" : "transparent",
+              color: active ? "var(--t1)" : "var(--t3)",
             }}
           >
             <Icon />

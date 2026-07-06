@@ -1,15 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CaptionStyle, Language, Photo, PhotoGroup, Tool, ViewMode } from "@/types";
+import type {
+  CaptionStyle,
+  ChatMessage,
+  Language,
+  Photo,
+  ProjectKey,
+  Tool,
+  ViewMode,
+} from "@/types";
 import {
-  computeLayout,
+  EMPTY_OVERRIDES,
   fitView,
-  onFitTransform,
-  onZoomResetTransform,
-  type Layout,
+  layoutNeural,
+  senseBubbles as computeSenseBubbles,
+  timelineLayout as computeTimelineLayout,
+  type NeuralLayout,
+  type NodeOverrides,
+  type SenseBubble,
+  type TimelineLayout,
 } from "@/lib/layout";
-import { EXIF_BLOCK, makeFilename } from "@/lib/mock-data";
+import { PROJECTS_META } from "@/lib/mock-data";
+import { CHAT_FALLBACK_REPLY, CHAT_GREETING, CHAT_REPLIES } from "@/lib/chat";
 
 interface Marquee {
   x0: number;
@@ -18,15 +31,26 @@ interface Marquee {
   y1: number;
 }
 
+interface PreviewItem {
+  src: string;
+  onClick: () => void;
+}
+
 interface ImpState {
   open: boolean;
   at: "rail" | "toolbar";
 }
 
+interface PreviewState {
+  open: boolean;
+  kind: "map" | "sense" | null;
+  key: string | null;
+  items: PreviewItem[];
+}
+
 interface BulkOps {
   captions: boolean;
   tags: boolean;
-  timeline: boolean;
   faces: boolean;
 }
 
@@ -42,38 +66,47 @@ interface WorkspaceState {
   ty: number;
   tool: Tool;
   view: ViewMode;
+  sidebarExpanded: boolean;
+  chatOpen: boolean;
+  chatMsgs: ChatMessage[];
+  chatInput: string;
+  acctOpen: boolean;
+  projOpen: boolean;
+  addProjOpen: boolean;
+  search: boolean;
+  helpOpen: boolean;
+  imp: ImpState;
+  preview: PreviewState;
+  projCurrent: ProjectKey | "all";
   photos: Photo[];
   selectedIds: string[];
   hoveredId: string | null;
-  bookmarks: string[];
   marquee: Marquee | null;
   drawerId: string | null;
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
+  nodeOverrides: NodeOverrides;
+  tlOverrides: Record<string, { x: number; y: number }>;
   bulkOps: BulkOps;
   bulkLangs: string[];
   bulkStyle: CaptionStyle;
   proc: ProcState;
   toast: { show: boolean; text: string };
-  imp: ImpState;
-  search: boolean;
   /** True while a canvas pan drag is active (drives the grabbing cursor). */
   panning: boolean;
-  /** True while a card drag is in progress (drives whether tile position transitions are disabled). */
-  cardDragging: boolean;
 }
 
-interface FullRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+interface TlBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
 type DragSession =
-  | { mode: "pan"; sx: number; sy: number; otx: number; oty: number }
+  | { mode: "pan"; sx: number; sy: number; otx: number; oty: number; lockY: boolean }
   | {
       mode: "marquee";
       startContent: { x: number; y: number };
@@ -84,26 +117,45 @@ type DragSession =
       moved: boolean;
     }
   | {
-      mode: "card";
+      mode: "node";
+      kind: "hub" | "folder" | "file";
+      key: string;
+      sx: number;
+      sy: number;
+      orig: { x: number; y: number };
+      moved: boolean;
+    }
+  | {
+      mode: "click";
       id: string;
-      dragIds: string[];
-      orig: Record<string, { x: number; y: number }>;
       sx: number;
       sy: number;
       moved: boolean;
       shift: boolean;
+      ctrl: boolean;
+      origFile?: { x: number; y: number };
+    }
+  | {
+      mode: "tl";
+      id: string;
+      sx: number;
+      sy: number;
+      orig: { x: number; y: number };
+      bounds: TlBounds;
+      moved: boolean;
     }
   | null;
 
-const DEFAULT_RECT: FullRect = { left: 0, top: 0, width: 1000, height: 700 };
-const UPLOAD_GROUPS: PhotoGroup[] = ["rescue", "aid", "urban", "street"];
-const UPLOAD_SEEDS = ["am-new1", "am-new2", "am-new3", "am-new4"];
-const UPLOAD_SIZES: [number, number][] = [
-  [236, 158],
-  [210, 260],
-  [252, 168],
-  [224, 150],
-];
+const DEFAULT_RECT = { left: 0, top: 0, width: 1000, height: 700 };
+const PROJECT_KEYS: ProjectKey[] = ["frontline", "travel", "client"];
+
+export interface ProjectListItem {
+  key: ProjectKey;
+  label: string;
+  color: string;
+  count: number;
+  active: boolean;
+}
 
 export interface Workspace {
   scale: number;
@@ -111,32 +163,42 @@ export interface Workspace {
   ty: number;
   tool: Tool;
   view: ViewMode;
+  sidebarExpanded: boolean;
+  projCurrent: ProjectKey | "all";
   photos: Photo[];
+  projectPhotos: Photo[];
   selectedIds: Set<string>;
-  bookmarks: Set<string>;
   hoveredId: string | null;
   drawerId: string | null;
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
   toast: { show: boolean; text: string };
-  layout: Layout;
+  neuralLayout: NeuralLayout;
+  gridSize: number;
+  gridPos: string;
+  gridOpacity: number;
   zoomPct: string;
   canvasTransform: string;
   canvasCursor: string;
   marquee: { show: boolean; left: number; top: number; width: number; height: number };
   drawerPhoto: Photo | null;
-  /** CSS transition shorthand for tile position/size — disabled while actively dragging in canvas view. */
-  tileTransition: string;
-  isCanvas: boolean;
+  isNeural: boolean;
   isTimelineView: boolean;
   isMapView: boolean;
-  isSmartView: boolean;
+  isSenseView: boolean;
+  showViewTabs: boolean;
+  showAddToProject: boolean;
   setCanvasRef: (el: HTMLDivElement | null) => void;
   onCanvasDown: (e: React.PointerEvent) => void;
   onCardDown: (e: React.PointerEvent, id: string) => void;
+  onNodeDown: (
+    e: React.PointerEvent,
+    kind: "hub" | "folder",
+    key: string,
+    origCenter: { x: number; y: number },
+  ) => void;
   setHover: (id: string | null) => void;
-  toggleBookmark: (id: string) => void;
   openDrawer: (id: string) => void;
   closeDrawer: () => void;
   navDrawer: (dir: number) => void;
@@ -150,21 +212,66 @@ export interface Workspace {
   toolHand: () => void;
   onFit: () => void;
   onZoomReset: () => void;
+  toggleSidebar: () => void;
   setView: (v: ViewMode) => void;
-  runAINav: () => void;
+
+  // Chat
+  chatOpen: boolean;
+  chatMsgs: ChatMessage[];
+  chatInput: string;
+  toggleChat: () => void;
+  closeChat: () => void;
+  sendChat: (text?: string) => void;
+  onChatInput: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+  onChatKey: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+
+  // Project / account dropdowns
+  acctOpen: boolean;
+  projOpen: boolean;
+  projLabel: string;
+  projectList: ProjectListItem[];
+  openAcct: () => void;
+  closeAcct: () => void;
+  openProj: () => void;
+  closeProj: () => void;
+  selectProject: (k: ProjectKey | "all") => void;
+
+  // Add to project
+  addProjOpen: boolean;
+  toggleAddProj: () => void;
+  closeAddProj: () => void;
+  addToProject: (key: ProjectKey) => void;
+  createNewProject: () => void;
 
   // Search
   search: boolean;
   openSearch: () => void;
   closeSearch: () => void;
 
+  // Help
+  helpOpen: boolean;
+  openHelp: () => void;
+  closeHelp: () => void;
+
   // Import
   impOpen: boolean;
-  impAt: "rail" | "toolbar";
-  railAdd: () => void;
   addToolbar: () => void;
   doUpload: () => void;
   closeImport: () => void;
+
+  // Preview modal
+  previewOpen: boolean;
+  previewTitle: string;
+  previewItems: PreviewItem[];
+  openPreview: (kind: "map" | "sense", key: string, items: PreviewItem[]) => void;
+  closePreview: () => void;
+
+  // Timeline
+  timelineLayout: TimelineLayout;
+  onTlDown: (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => void;
+
+  // Sense
+  senseBubbles: SenseBubble[];
 
   // Bulk AI
   bulkShow: boolean;
@@ -175,7 +282,9 @@ export interface Workspace {
   bulkLangs: string[];
   bulkStyle: CaptionStyle;
   proc: ProcState;
-  toggleOp: (k: keyof BulkOps) => void;
+  toggleBulkCaptions: () => void;
+  toggleBulkTags: () => void;
+  toggleBulkFaces: () => void;
   toggleBulkLang: (l: string) => void;
   setBulkStyle: (s: CaptionStyle) => void;
   clearSelection: () => void;
@@ -190,26 +299,35 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     tx: 200,
     ty: 120,
     tool: "select",
-    view: "canvas",
+    view: "neural",
+    sidebarExpanded: false,
+    chatOpen: false,
+    chatMsgs: [{ role: "assistant", text: CHAT_GREETING }],
+    chatInput: "",
+    acctOpen: false,
+    projOpen: false,
+    addProjOpen: false,
+    search: false,
+    helpOpen: false,
+    imp: { open: false, at: "rail" },
+    preview: { open: false, kind: null, key: null, items: [] },
+    projCurrent: "all",
     photos: initialPhotos,
-    // Intentional non-empty demo default — matches the source mockup exactly.
-    selectedIds: ["e", "g", "j"],
+    selectedIds: [],
     hoveredId: null,
-    bookmarks: [],
     marquee: null,
     drawerId: null,
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
-    bulkOps: { captions: true, tags: true, timeline: false, faces: false },
+    nodeOverrides: EMPTY_OVERRIDES,
+    tlOverrides: {},
+    bulkOps: { captions: true, tags: true, faces: false },
     bulkLangs: ["EN"],
     bulkStyle: "Agency",
     proc: { active: false, label: "", pct: 0 },
     toast: { show: false, text: "" },
-    imp: { open: false, at: "rail" },
-    search: false,
     panning: false,
-    cardDragging: false,
   });
 
   // Mirror of committed state, kept current for window-level event handlers.
@@ -221,6 +339,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const bulkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const bulkTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Patch helper that also advances stateRef so sequential reads see fresh data.
   const setState = useCallback((patch: Partial<WorkspaceState>) => {
     setStateRaw((prev) => {
       const next = { ...prev, ...patch };
@@ -229,8 +348,10 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     });
   }, []);
 
-  const rect = useCallback((): FullRect => {
-    return canvasElRef.current ? canvasElRef.current.getBoundingClientRect() : DEFAULT_RECT;
+  const rect = useCallback(() => {
+    return canvasElRef.current
+      ? canvasElRef.current.getBoundingClientRect()
+      : DEFAULT_RECT;
   }, []);
 
   const toContent = useCallback(
@@ -254,15 +375,23 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [setState],
   );
 
+  const filteredPhotos = useCallback((photos: Photo[], proj: ProjectKey | "all") => {
+    return proj === "all" ? photos : photos.filter((p) => p.project === proj);
+  }, []);
+
   // ── Pan / zoom ────────────────────────────────────────────────────────────
 
   const wheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
-      const r = rect();
-      const cx = e.clientX - r.left,
-        cy = e.clientY - r.top;
       const s = stateRef.current;
+      if (s.view === "timeline") {
+        setState({ tx: s.tx - e.deltaY - e.deltaX });
+        return;
+      }
+      const r = rect(),
+        cx = e.clientX - r.left,
+        cy = e.clientY - r.top;
       const factor = Math.exp(-e.deltaY * 0.0015);
       const ns = Math.min(4, Math.max(0.2, s.scale * factor));
       const px = (cx - s.tx) / s.scale,
@@ -276,21 +405,35 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       const s = stateRef.current;
-      if (s.imp.open) setState({ imp: { ...s.imp, open: false } });
+      const patch: Partial<WorkspaceState> = {};
+      if (s.imp.open) patch.imp = { ...s.imp, open: false };
+      if (s.acctOpen) patch.acctOpen = false;
+      if (s.projOpen) patch.projOpen = false;
+      if (Object.keys(patch).length) setState(patch);
       const r = rect();
-      if (s.view !== "canvas") {
-        dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, otx: s.tx, oty: s.ty };
-        setState({ panning: true });
-        return;
-      }
-      if (s.tool === "hand") {
-        dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, otx: s.tx, oty: s.ty };
+      if (s.tool === "hand" || s.view !== "neural") {
+        dragRef.current = {
+          mode: "pan",
+          sx: e.clientX,
+          sy: e.clientY,
+          otx: s.tx,
+          oty: s.ty,
+          lockY: s.view === "timeline",
+        };
         setState({ panning: true });
       } else {
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
           dy0 = e.clientY - r.top;
-        dragRef.current = { mode: "marquee", startContent: c, dx0, dy0, x1: dx0, y1: dy0, moved: false };
+        dragRef.current = {
+          mode: "marquee",
+          startContent: c,
+          dx0,
+          dy0,
+          x1: dx0,
+          y1: dy0,
+          moved: false,
+        };
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
@@ -300,31 +443,50 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const onCardDown = useCallback(
     (e: React.PointerEvent, id: string) => {
       e.stopPropagation();
-      const s = stateRef.current;
-      if (s.imp.open) setState({ imp: { ...s.imp, open: false } });
-      const sel = s.selectedIds;
-      const dragIds = sel.includes(id) ? sel.slice() : [id];
-      const orig: Record<string, { x: number; y: number }> = {};
-      s.photos.forEach((p) => {
-        if (dragIds.includes(p.id)) orig[p.id] = { x: p.x, y: p.y };
-      });
-      dragRef.current = { mode: "card", id, dragIds, orig, sx: e.clientX, sy: e.clientY, moved: false, shift: e.shiftKey };
-      setState({ cardDragging: true });
+      if (stateRef.current.imp.open) {
+        setState({ imp: { ...stateRef.current.imp, open: false } });
+      }
+      dragRef.current = {
+        mode: "click",
+        id,
+        sx: e.clientX,
+        sy: e.clientY,
+        moved: false,
+        shift: e.shiftKey,
+        ctrl: e.ctrlKey || e.metaKey,
+      };
     },
     [setState],
   );
 
-  const openDrawer = useCallback(
-    (id: string) => {
-      const s = stateRef.current;
-      setState({
-        drawerId: id,
-        drawerLang: "EN",
-        drawerStyle: s.photos.find((p) => p.id === id)?.captionStyle || "Agency",
-        copyLabel: "Copy",
-      });
+  const onNodeDown = useCallback(
+    (
+      e: React.PointerEvent,
+      kind: "hub" | "folder",
+      key: string,
+      origCenter: { x: number; y: number },
+    ) => {
+      e.stopPropagation();
+      e.preventDefault();
+      dragRef.current = {
+        mode: "node",
+        kind,
+        key,
+        sx: e.clientX,
+        sy: e.clientY,
+        orig: origCenter,
+        moved: false,
+      };
     },
-    [setState],
+    [],
+  );
+
+  const onTlDown = useCallback(
+    (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => {
+      e.stopPropagation();
+      dragRef.current = { mode: "tl", id, sx: e.clientX, sy: e.clientY, orig, bounds, moved: false };
+    },
+    [],
   );
 
   const move = useCallback(
@@ -333,16 +495,51 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       if (!d) return;
       const s = stateRef.current;
       if (d.mode === "pan") {
-        setState({ tx: d.otx + (e.clientX - d.sx), ty: d.oty + (e.clientY - d.sy) });
-      } else if (d.mode === "card") {
+        setState({
+          tx: d.otx + (e.clientX - d.sx),
+          ty: d.lockY ? d.oty : d.oty + (e.clientY - d.sy),
+        });
+      } else if (d.mode === "node") {
+        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        const dx = (e.clientX - d.sx) / s.scale,
+          dy = (e.clientY - d.sy) / s.scale;
+        const nx = d.orig.x + dx,
+          ny = d.orig.y + dy;
+        const ov: NodeOverrides = {
+          hub: { ...s.nodeOverrides.hub },
+          folder: { ...s.nodeOverrides.folder },
+          file: { ...s.nodeOverrides.file },
+        };
+        ov[d.kind][d.key] = { x: nx, y: ny };
+        setState({ nodeOverrides: ov });
+      } else if (d.mode === "tl") {
+        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        const dx = (e.clientX - d.sx) / s.scale,
+          dy = (e.clientY - d.sy) / s.scale;
+        let nx = d.orig.x + dx,
+          ny = d.orig.y + dy;
+        nx = Math.min(d.bounds.maxX, Math.max(d.bounds.minX, nx));
+        ny = Math.min(d.bounds.maxY, Math.max(d.bounds.minY, ny));
+        setState({ tlOverrides: { ...s.tlOverrides, [d.id]: { x: nx, y: ny } } });
+      } else if (d.mode === "click") {
         if (Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3) d.moved = true;
-        if (s.view === "canvas") {
+        if (d.moved && s.view === "neural") {
           const dx = (e.clientX - d.sx) / s.scale,
             dy = (e.clientY - d.sy) / s.scale;
-          const photos = s.photos.map((p): Photo =>
-            d.dragIds.includes(p.id) ? { ...p, x: d.orig[p.id].x + dx, y: d.orig[p.id].y + dy, anim: "none" } : p,
-          );
-          setState({ photos });
+          if (!d.origFile) {
+            const { pos } = layoutNeural(s.photos, s.nodeOverrides);
+            const pp = pos[d.id];
+            if (pp) d.origFile = { x: pp.cx, y: pp.cy };
+          }
+          if (d.origFile) {
+            const ov: NodeOverrides = {
+              hub: { ...s.nodeOverrides.hub },
+              folder: { ...s.nodeOverrides.folder },
+              file: { ...s.nodeOverrides.file },
+            };
+            ov.file[d.id] = { x: d.origFile.x + dx, y: d.origFile.y + dy };
+            setState({ nodeOverrides: ov });
+          }
         }
       } else if (d.mode === "marquee") {
         const r = rect();
@@ -356,13 +553,30 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
           xr = Math.max(a.x, b.x),
           yt = Math.min(a.y, b.y),
           yb = Math.max(a.y, b.y);
-        // Hit-tests against each photo's own base x/y/w/h (matches source exactly —
-        // marquee selection is a canvas-view concept, not layout-aware).
-        const hit = s.photos.filter((p) => p.x < xr && p.x + p.w > xl && p.y < yb && p.y + p.h > yt).map((p) => p.id);
+        const { pos } = layoutNeural(s.photos, s.nodeOverrides);
+        const hit = s.photos
+          .filter((p) => {
+            const pp = pos[p.id];
+            return pp && pp.x < xr && pp.x + pp.w > xl && pp.y < yb && pp.y + pp.h > yt;
+          })
+          .map((p) => p.id);
         setState({ marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 }, selectedIds: hit });
       }
     },
     [rect, toContent, setState],
+  );
+
+  const openDrawer = useCallback(
+    (id: string) => {
+      const s = stateRef.current;
+      setState({
+        drawerId: id,
+        drawerLang: "EN",
+        drawerStyle: (s.photos.find((p) => p.id === id)?.captionStyle as CaptionStyle) || "Agency",
+        copyLabel: "Copy",
+      });
+    },
+    [setState],
   );
 
   const up = useCallback(() => {
@@ -371,11 +585,19 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     dragRef.current = null;
     if (d.mode === "pan") {
       setState({ panning: false });
-    } else if (d.mode === "card") {
-      setState({ cardDragging: false });
+    } else if (d.mode === "tl") {
       if (!d.moved) {
         const s = stateRef.current;
-        if (d.shift) {
+        const sel = s.selectedIds.slice();
+        const i = sel.indexOf(d.id);
+        if (i >= 0) sel.splice(i, 1);
+        else sel.push(d.id);
+        setState({ selectedIds: sel });
+      }
+    } else if (d.mode === "click") {
+      if (!d.moved) {
+        const s = stateRef.current;
+        if (d.shift || d.ctrl) {
           const sel = s.selectedIds.slice();
           const i = sel.indexOf(d.id);
           if (i >= 0) sel.splice(i, 1);
@@ -399,19 +621,11 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const setStyle = useCallback((st: CaptionStyle) => setState({ drawerStyle: st }), [setState]);
   const toolSelect = useCallback(() => setState({ tool: "select" }), [setState]);
   const toolHand = useCallback(() => setState({ tool: "hand" }), [setState]);
-  const clearSelection = useCallback(() => setState({ selectedIds: [], marquee: null }), [setState]);
-
-  const toggleBookmark = useCallback(
-    (id: string) => {
-      const s = stateRef.current;
-      const b = s.bookmarks.slice();
-      const i = b.indexOf(id);
-      if (i >= 0) b.splice(i, 1);
-      else b.push(id);
-      setState({ bookmarks: b });
-    },
+  const toggleSidebar = useCallback(
+    () => setState({ sidebarExpanded: !stateRef.current.sidebarExpanded }),
     [setState],
   );
+  const clearSelection = useCallback(() => setState({ selectedIds: [] }), [setState]);
 
   const navDrawer = useCallback(
     (dir: number) => {
@@ -455,7 +669,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
               status: "Likely",
               captionKey: "gen",
               captionStyle: "Agency",
-              chip: "Scene from the Kyiv frontline archive documenting civilian life…",
+              chip: "Scene from the Kyiv frontline archive…",
               tags: ["kyiv", "documentary", "street", "2026"],
               facts: [
                 { text: "Location: confirmed via GPS", status: "confirmed" },
@@ -470,30 +684,24 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [setState, flashToast],
   );
 
-  // ── Fit / view switching ─────────────────────────────────────────────────
-
   const doFit = useCallback(() => {
     const s = stateRef.current;
-    const fit = fitView(s.view, s.photos, rect());
-    if (fit) setState(fit);
-  }, [rect, setState]);
-
-  const onFit = useCallback(() => {
-    const t = onFitTransform(stateRef.current.photos, rect());
-    if (t) setState(t);
-  }, [rect, setState]);
-
-  const onZoomReset = useCallback(() => {
-    setState(onZoomResetTransform(rect()));
-  }, [rect, setState]);
+    const photosForFit = filteredPhotos(s.photos, s.projCurrent);
+    const fit = fitView(s.view, photosForFit, s.nodeOverrides, rect(), s.sidebarExpanded, s.chatOpen);
+    setState(fit);
+  }, [rect, setState, filteredPhotos]);
 
   const setView = useCallback(
     (v: ViewMode) => {
-      const s = stateRef.current;
-      const fit = fitView(v, s.photos, rect()) || {};
-      setState({ view: v, marquee: null, selectedIds: v === "canvas" ? s.selectedIds : [], ...fit });
+      setState({ view: v, marquee: null, selectedIds: [] });
+      setTimeout(() => {
+        const s = stateRef.current;
+        const photosForFit = filteredPhotos(s.photos, s.projCurrent);
+        const fit = fitView(v, photosForFit, s.nodeOverrides, rect(), s.sidebarExpanded, s.chatOpen);
+        setState(fit);
+      }, 0);
     },
-    [setState, rect],
+    [setState, rect, filteredPhotos],
   );
 
   // Fit once on first mount, but only after the canvas has a real size — a
@@ -510,73 +718,146 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     return false;
   }, [rect, doFit]);
 
-  // ── Search ───────────────────────────────────────────────────────────────
+  // ── Chat ─────────────────────────────────────────────────────────────────
+
+  const sendChat = useCallback(
+    (text?: string) => {
+      const s = stateRef.current;
+      const t = (typeof text === "string" ? text : s.chatInput || "").trim();
+      if (!t) return;
+      const reply = CHAT_REPLIES[t] || CHAT_FALLBACK_REPLY;
+      setState({
+        chatMsgs: [...s.chatMsgs, { role: "user", text: t }, { role: "assistant", text: reply }],
+        chatInput: "",
+      });
+    },
+    [setState],
+  );
+
+  const onChatInput = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => setState({ chatInput: e.target.value }),
+    [setState],
+  );
+
+  const onChatKey = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChat();
+      }
+    },
+    [sendChat],
+  );
+
+  const toggleChat = useCallback(
+    () => setState({ chatOpen: !stateRef.current.chatOpen, acctOpen: false, projOpen: false }),
+    [setState],
+  );
+  const closeChat = useCallback(() => setState({ chatOpen: false }), [setState]);
+
+  // ── Account / project dropdowns ─────────────────────────────────────────
+
+  const openAcct = useCallback(
+    () => setState({ acctOpen: !stateRef.current.acctOpen, projOpen: false }),
+    [setState],
+  );
+  const closeAcct = useCallback(() => setState({ acctOpen: false }), [setState]);
+  const openProj = useCallback(
+    () => setState({ projOpen: !stateRef.current.projOpen, acctOpen: false }),
+    [setState],
+  );
+  const closeProj = useCallback(() => setState({ projOpen: false }), [setState]);
+
+  const selectProject = useCallback(
+    (k: ProjectKey | "all") => {
+      const view: ViewMode = k === "all" ? "neural" : "timeline";
+      setState({ projCurrent: k, projOpen: false, view, selectedIds: [] });
+      setTimeout(() => {
+        const s = stateRef.current;
+        const photosForFit = filteredPhotos(s.photos, k);
+        const fit = fitView(view, photosForFit, s.nodeOverrides, rect(), s.sidebarExpanded, s.chatOpen);
+        setState(fit);
+      }, 0);
+    },
+    [setState, rect, filteredPhotos],
+  );
+
+  // ── Add to project ───────────────────────────────────────────────────────
+
+  const toggleAddProj = useCallback(
+    () => setState({ addProjOpen: !stateRef.current.addProjOpen }),
+    [setState],
+  );
+  const closeAddProj = useCallback(() => setState({ addProjOpen: false }), [setState]);
+
+  const addToProject = useCallback(
+    (key: ProjectKey) => {
+      const s = stateRef.current;
+      const n = s.selectedIds.length;
+      const label = PROJECTS_META[key].label;
+      const selectedSet = new Set(s.selectedIds);
+      const photos = s.photos.map((p) => (selectedSet.has(p.id) ? { ...p, project: key } : p));
+      setState({ photos, addProjOpen: false, selectedIds: [] });
+      flashToast(`${n} file${n === 1 ? "" : "s"} added to ${label}`);
+    },
+    [setState, flashToast],
+  );
+
+  const createNewProject = useCallback(() => {
+    const s = stateRef.current;
+    const n = s.selectedIds.length;
+    setState({ addProjOpen: false, selectedIds: [] });
+    flashToast(`${n} file${n === 1 ? "" : "s"} added to new project`);
+  }, [setState, flashToast]);
+
+  // ── Search / Help ────────────────────────────────────────────────────────
 
   const openSearch = useCallback(() => setState({ search: true }), [setState]);
   const closeSearch = useCallback(() => setState({ search: false }), [setState]);
+  const openHelp = useCallback(() => setState({ helpOpen: true }), [setState]);
+  const closeHelp = useCallback(() => setState({ helpOpen: false }), [setState]);
 
   // ── Import ───────────────────────────────────────────────────────────────
-
-  const railAdd = useCallback(() => {
-    const s = stateRef.current;
-    setState({ imp: { open: !(s.imp.open && s.imp.at === "rail"), at: "rail" } });
-  }, [setState]);
 
   const addToolbar = useCallback(() => {
     const s = stateRef.current;
     setState({ imp: { open: !(s.imp.open && s.imp.at === "toolbar"), at: "toolbar" } });
   }, [setState]);
-
+  const doUpload = useCallback(() => {
+    setState({ imp: { ...stateRef.current.imp, open: false } });
+    flashToast("4 files imported");
+  }, [setState, flashToast]);
   const closeImport = useCallback(
     () => setState({ imp: { ...stateRef.current.imp, open: false } }),
     [setState],
   );
 
-  const doUpload = useCallback(() => {
-    const s = stateRef.current;
-    const r = rect();
-    const c0 = toContent(r.left + r.width * 0.5, r.top + r.height * 0.42);
-    const news: Photo[] = UPLOAD_SEEDS.map((seed, i) => {
-      const id = "n" + Date.now() + i;
-      return {
-        id,
-        seed,
-        w: UPLOAD_SIZES[i][0],
-        h: UPLOAD_SIZES[i][1],
-        x: c0.x + (i % 2) * 260 - 130 + i * 14,
-        y: c0.y + Math.floor(i / 2) * 240 - 100,
-        filename: makeFilename(id),
-        processed: false,
-        status: "Needs check",
-        captionKey: null,
-        captionStyle: "Agency",
-        chip: null,
-        tags: null,
-        facts: [{ text: "Analyze to extract facts", status: "unknown" }],
-        time: "06-19 " + (9 + i) + ":30",
-        day: "Jun 19",
-        group: UPLOAD_GROUPS[i % UPLOAD_GROUPS.length],
-        // Source never sets a country for uploaded photos — the Map view's
-        // fallback-to-Ukraine grouping covers this, preserved verbatim.
-        country: "",
-        exif: { ...EXIF_BLOCK },
-        anim: "amFadeScale .4s cubic-bezier(.22,1,.36,1) both",
-      };
-    });
-    setState({ photos: [...s.photos, ...news], imp: { ...s.imp, open: false } });
-    flashToast(UPLOAD_SEEDS.length + " photos imported");
-  }, [rect, toContent, setState, flashToast]);
+  // ── Preview modal ────────────────────────────────────────────────────────
 
-  // ── Bulk AI ──────────────────────────────────────────────────────────────
-
-  const toggleOp = useCallback(
-    (k: keyof BulkOps) => {
-      const s = stateRef.current;
-      setState({ bulkOps: { ...s.bulkOps, [k]: !s.bulkOps[k] } });
-    },
+  const openPreview = useCallback(
+    (kind: "map" | "sense", key: string, items: PreviewItem[]) =>
+      setState({ preview: { open: true, kind, key, items } }),
+    [setState],
+  );
+  const closePreview = useCallback(
+    () => setState({ preview: { open: false, kind: null, key: null, items: [] } }),
     [setState],
   );
 
+  // ── Bulk AI ──────────────────────────────────────────────────────────────
+
+  const toggleBulkCaptions = useCallback(
+    () => setState({ bulkOps: { ...stateRef.current.bulkOps, captions: !stateRef.current.bulkOps.captions } }),
+    [setState],
+  );
+  const toggleBulkTags = useCallback(
+    () => setState({ bulkOps: { ...stateRef.current.bulkOps, tags: !stateRef.current.bulkOps.tags } }),
+    [setState],
+  );
+  const toggleBulkFaces = useCallback(
+    () => setState({ bulkOps: { ...stateRef.current.bulkOps, faces: !stateRef.current.bulkOps.faces } }),
+    [setState],
+  );
   const toggleBulkLang = useCallback(
     (l: string) => {
       const s = stateRef.current;
@@ -592,44 +873,38 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     (ids: string[]) => {
       const s = stateRef.current;
       const idSet = new Set(ids);
-      let tagCount = 0;
+      let updated = 0;
       const photos = s.photos.map((p): Photo => {
-        if (!idSet.has(p.id) || p.processed) return p;
-        tagCount += 4;
-        return {
-          ...p,
-          processed: true,
-          status: "Likely",
-          captionKey: "gen",
-          captionStyle: "Agency",
-          chip: "Scene from the Kyiv frontline archive documenting civilian life…",
-          tags: ["kyiv", "documentary", "street", "2026"],
-          facts: [
-            { text: "Location: confirmed via GPS", status: "confirmed" },
-            { text: "Date: confirmed via EXIF", status: "confirmed" },
-            { text: "People: verification pending", status: "pending" },
-          ],
-        };
+        if (idSet.has(p.id) && !p.processed) {
+          updated++;
+          return {
+            ...p,
+            processed: true,
+            status: "Likely",
+            captionKey: "gen",
+            tags: ["kyiv", "documentary", "street", "2026"],
+            facts: [
+              { text: "Location: confirmed via GPS", status: "confirmed" },
+              { text: "Date: confirmed via EXIF", status: "confirmed" },
+              { text: "People: verification pending", status: "pending" },
+            ],
+          };
+        }
+        return p;
       });
       setState({ photos, proc: { active: false, label: "", pct: 0 } });
-      flashToast(`${ids.length} photos captioned · ${tagCount} tags added`);
+      flashToast(`${ids.length} photos captioned · ${updated * 4} tags added`);
     },
     [setState, flashToast],
   );
 
   const runBulk = useCallback(() => {
     const s = stateRef.current;
-    if (s.proc.active) return;
-    const O = s.bulkOps;
-    if (!O.captions && !O.tags && !O.timeline && !O.faces) {
-      flashToast("Select an operation to run");
-      return;
-    }
     const ids = s.selectedIds.slice();
-    if (!ids.length) return;
     const total = ids.length;
-    setState({ proc: { active: true, label: `Captioning 1 of ${total}…`, pct: 6 }, drawerId: null });
-    let i = 1;
+    if (!total) return;
+    let i = 0;
+    setState({ proc: { active: true, label: `Captioning 1 of ${total}…`, pct: 6 } });
     if (bulkTimer.current) clearInterval(bulkTimer.current);
     const tickMs = Math.max(180, 1700 / total);
     bulkTimer.current = setInterval(() => {
@@ -645,14 +920,11 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         proc: { active: true, label: `Captioning ${i} of ${total}…`, pct: Math.round(6 + (i / total) * 80) },
       });
     }, tickMs);
-  }, [setState, finishBulk, flashToast]);
-
-  const runAINav = useCallback(() => {
-    if (stateRef.current.selectedIds.length) runBulk();
-    else flashToast("Select photos to analyze");
-  }, [runBulk, flashToast]);
+  }, [setState, finishBulk]);
 
   // ── Lifecycle: listeners + initial fit ────────────────────────────────────
+
+  const [canvasHeight, setCanvasHeight] = useState(700);
 
   const setCanvasRef = useCallback((el: HTMLDivElement | null) => {
     canvasElRef.current = el;
@@ -666,8 +938,12 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     let ro: ResizeObserver | undefined;
     const raf = requestAnimationFrame(() => {
       tryFit();
+      if (el) setCanvasHeight(el.getBoundingClientRect().height || 700);
       if (el && typeof ResizeObserver !== "undefined") {
-        ro = new ResizeObserver(() => tryFit());
+        ro = new ResizeObserver(() => {
+          tryFit();
+          setCanvasHeight(el.getBoundingClientRect().height || 700);
+        });
         ro.observe(el);
       }
     });
@@ -683,6 +959,20 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   }, []);
 
   useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const s = stateRef.current;
+      if (s.drawerId) closeDrawer();
+      else if (s.search) closeSearch();
+      else if (s.helpOpen) closeHelp();
+      else if (s.preview.open) closePreview();
+      else if (s.chatOpen) closeChat();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeDrawer, closeSearch, closeHelp, closePreview, closeChat]);
+
+  useEffect(() => {
     return () => {
       if (bulkTimer.current) clearInterval(bulkTimer.current);
       if (bulkTimeout.current) clearTimeout(bulkTimeout.current);
@@ -693,10 +983,12 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const layout = useMemo(() => computeLayout(state.view, state.photos), [state.view, state.photos]);
+  const neuralLayout = useMemo(
+    () => layoutNeural(state.photos, state.nodeOverrides),
+    [state.photos, state.nodeOverrides],
+  );
 
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
-  const bookmarks = useMemo(() => new Set(state.bookmarks), [state.bookmarks]);
 
   const marquee = state.marquee
     ? {
@@ -712,19 +1004,44 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     ? state.photos.find((p) => p.id === state.drawerId) ?? null
     : null;
 
-  const isCanvas = state.view === "canvas";
-  const isTimelineView = state.view === "timeline";
-  const isMapView = state.view === "map";
-  const isSmartView = state.view === "smart";
+  const isNeural = state.view === "neural";
+  const isTimelineView = state.view === "timeline" && state.projCurrent !== "all";
+  const isMapView = state.view === "map" && state.projCurrent !== "all";
+  const isSenseView = state.view === "sense" && state.projCurrent !== "all";
+  const showViewTabs = state.projCurrent !== "all";
+  const showAddToProject = isNeural && selectedIds.size > 0;
 
-  const tileTransition =
-    state.cardDragging && isCanvas
-      ? "none"
-      : "left .55s cubic-bezier(.22,1,.36,1), top .55s cubic-bezier(.22,1,.36,1), width .55s cubic-bezier(.22,1,.36,1)";
+  const projectPhotos = useMemo(
+    () => filteredPhotos(state.photos, state.projCurrent),
+    [state.photos, state.projCurrent, filteredPhotos],
+  );
 
-  const bulkShow = selectedIds.size > 0 && !state.search;
+  const projectList: ProjectListItem[] = useMemo(
+    () =>
+      PROJECT_KEYS.map((k) => ({
+        key: k,
+        label: PROJECTS_META[k].label,
+        color: PROJECTS_META[k].color,
+        count: state.photos.filter((p) => p.project === k).length,
+        active: state.projCurrent === k,
+      })),
+    [state.photos, state.projCurrent],
+  );
+
+  const projLabel =
+    state.projCurrent === "all" ? "All my files" : PROJECTS_META[state.projCurrent].label;
+
+  const timelineLayoutResult = useMemo(
+    () => computeTimelineLayout(projectPhotos, state.tlOverrides, canvasHeight),
+    [projectPhotos, state.tlOverrides, canvasHeight],
+  );
+
+  const senseBubblesResult = useMemo(() => computeSenseBubbles(projectPhotos), [projectPhotos]);
+
+  const bulkShow = isTimelineView && selectedIds.size > 0;
   const bulkThumbs = useMemo(() => {
-    const sel = state.photos.filter((p) => selectedIds.has(p.id)).slice(0, 4);
+    const set = selectedIds;
+    const sel = state.photos.filter((p) => set.has(p.id)).slice(0, 4);
     return sel.map((p, i) => ({ src: `https://picsum.photos/seed/${p.seed}/60/60`, ml: i === 0 ? 0 : -9 }));
   }, [state.photos, selectedIds]);
 
@@ -734,31 +1051,41 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     ty: state.ty,
     tool: state.tool,
     view: state.view,
+    sidebarExpanded: state.sidebarExpanded,
+    projCurrent: state.projCurrent,
     photos: state.photos,
+    projectPhotos,
     selectedIds,
-    bookmarks,
     hoveredId: state.hoveredId,
     drawerId: state.drawerId,
     drawerLang: state.drawerLang,
     drawerStyle: state.drawerStyle,
     copyLabel: state.copyLabel,
     toast: state.toast,
-    layout,
+    neuralLayout,
+    gridSize: Math.max(4, 40 * state.scale),
+    gridPos: `${state.tx}px ${state.ty}px`,
+    gridOpacity: isMapView ? 0 : 1,
     zoomPct: Math.round(state.scale * 100) + "%",
     canvasTransform: `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
-    canvasCursor: state.panning ? "grabbing" : state.tool === "hand" || state.view !== "canvas" ? "grab" : "default",
+    canvasCursor: state.panning
+      ? "grabbing"
+      : state.tool === "hand"
+        ? "grab"
+        : "default",
     marquee,
     drawerPhoto,
-    tileTransition,
-    isCanvas,
+    isNeural,
     isTimelineView,
     isMapView,
-    isSmartView,
+    isSenseView,
+    showViewTabs,
+    showAddToProject,
     setCanvasRef,
     onCanvasDown,
     onCardDown,
+    onNodeDown,
     setHover,
-    toggleBookmark,
     openDrawer,
     closeDrawer,
     navDrawer,
@@ -770,21 +1097,59 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     genSingle,
     toolSelect,
     toolHand,
-    onFit,
-    onZoomReset,
+    onFit: doFit,
+    onZoomReset: doFit,
+    toggleSidebar,
     setView,
-    runAINav,
+
+    chatOpen: state.chatOpen,
+    chatMsgs: state.chatMsgs,
+    chatInput: state.chatInput,
+    toggleChat,
+    closeChat,
+    sendChat,
+    onChatInput,
+    onChatKey,
+
+    acctOpen: state.acctOpen,
+    projOpen: state.projOpen,
+    projLabel,
+    projectList,
+    openAcct,
+    closeAcct,
+    openProj,
+    closeProj,
+    selectProject,
+
+    addProjOpen: state.addProjOpen,
+    toggleAddProj,
+    closeAddProj,
+    addToProject,
+    createNewProject,
 
     search: state.search,
     openSearch,
     closeSearch,
 
+    helpOpen: state.helpOpen,
+    openHelp,
+    closeHelp,
+
     impOpen: state.imp.open,
-    impAt: state.imp.at,
-    railAdd,
     addToolbar,
     doUpload,
     closeImport,
+
+    previewOpen: state.preview.open,
+    previewTitle: state.preview.key ?? "",
+    previewItems: state.preview.items,
+    openPreview,
+    closePreview,
+
+    timelineLayout: timelineLayoutResult,
+    onTlDown,
+
+    senseBubbles: senseBubblesResult,
 
     bulkShow,
     bulkIdle: !state.proc.active,
@@ -794,7 +1159,9 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     bulkLangs: state.bulkLangs,
     bulkStyle: state.bulkStyle,
     proc: state.proc,
-    toggleOp,
+    toggleBulkCaptions,
+    toggleBulkTags,
+    toggleBulkFaces,
     toggleBulkLang,
     setBulkStyle: setBulkStyleAction,
     clearSelection,

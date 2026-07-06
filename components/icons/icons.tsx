@@ -29,11 +29,41 @@ export function SearchIcon({ width = 16, height = 16, ...props }: IconProps) {
   );
 }
 
+export function ChatIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z" />
+      <path d="M12 8v4" />
+      <path d="M12 15h.01" />
+    </svg>
+  );
+}
+
+export function ExifIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx={12} cy={13} r={4} />
+    </svg>
+  );
+}
+
 export function TagIcon({ width = 16, height = 16, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M3 11.5V4a1 1 0 0 1 1-1h7.5L21 12.5 12.5 21z" />
       <circle cx={7.5} cy={7.5} r={1.3} />
+    </svg>
+  );
+}
+
+export function LogsIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+      <rect x={9} y={3} width={6} height={4} rx={2} />
+      <path d="M9 12h6" />
+      <path d="M9 16h4" />
     </svg>
   );
 }
@@ -44,6 +74,22 @@ export function HelpIcon({ width = 14, height = 14, ...props }: IconProps) {
       <circle cx={12} cy={12} r={9} />
       <path d="M9.5 9.5a2.5 2.5 0 0 1 4.5 1.5c0 1.5-2 2-2 3" />
       <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
+export function PrivacyIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3l9 4.5v4.5a12 12 0 0 1-9 11.6A12 12 0 0 1 3 12V7.5z" />
+    </svg>
+  );
+}
+
+export function SidebarToggleIcon({ expanded, width = 15, height = 15, ...props }: IconProps & { expanded: boolean }) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      {expanded ? <path d="M15 6l-6 6 6 6" /> : <path d="M9 6l6 6-6 6" />}
     </svg>
   );
 }
@@ -147,6 +193,43 @@ export function CheckIcon({ width = 10, height = 10, stroke = "#fff", ...props }
   );
 }
 
+export function SettingsIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx={12} cy={12} r={3} />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+export function BillingIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x={1} y={4} width={22} height={16} rx={2} />
+      <path d="M1 10h22" />
+    </svg>
+  );
+}
+
+export function UsageIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+      <path d="M22 12A10 10 0 0 0 12 2v10z" />
+    </svg>
+  );
+}
+
+export function SignOutIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
+  );
+}
+
 export function ViewTimelineIcon({ width = 14, height = 14, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -159,90 +242,18 @@ export function ViewTimelineIcon({ width = 14, height = 14, ...props }: IconProp
 export function ViewMapIcon({ width = 14, height = 14, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" />
-      <circle cx={12} cy={10} r={2.5} />
+      <path d="M9 20l-6-3V4l6 3 6-3 6 3v13l-6-3-6 3z" />
+      <path d="M9 7v13" />
+      <path d="M15 4v13" />
     </svg>
   );
 }
 
-export function ViewSmartIcon({ width = 14, height = 14, ...props }: IconProps) {
+export function ViewSenseIcon({ width = 14, height = 14, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx={6} cy={7} r={2.4} />
-      <circle cx={18} cy={6} r={2.4} />
-      <circle cx={17} cy={18} r={2.4} />
-      <circle cx={7} cy={17} r={2.4} />
-      <path d="M8 8l8 8M8 8l8-1M8 16l9 1.5" />
-    </svg>
-  );
-}
-
-export function ViewCanvasIcon({ width = 15, height = 15, ...props }: IconProps) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <rect x={3} y={3} width={7} height={7} rx={1.5} />
-      <rect x={14} y={3} width={7} height={7} rx={1.5} />
-      <rect x={3} y={14} width={7} height={7} rx={1.5} />
-      <rect x={14} y={14} width={7} height={7} rx={1.5} />
-    </svg>
-  );
-}
-
-export function LibraryIcon({ width = 20, height = 20, ...props }: IconProps) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-    </svg>
-  );
-}
-
-export function HashIcon({ width = 20, height = 20, ...props }: IconProps) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M9 4L7 20" />
-      <path d="M17 4l-2 16" />
-      <path d="M5 9h15" />
-      <path d="M4 15h15" />
-    </svg>
-  );
-}
-
-export function HistoryIcon({ width = 20, height = 20, ...props }: IconProps) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-      <path d="M3 4v4h4" />
-    </svg>
-  );
-}
-
-export function MessageIcon({ width = 20, height = 20, ...props }: IconProps) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z" />
-    </svg>
-  );
-}
-
-export function FrameIcon({ width = 20, height = 20, ...props }: IconProps) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M5 3H3v2" />
-      <path d="M19 3h2v2" />
-      <path d="M21 19v2h-2" />
-      <path d="M5 21H3v-2" />
-      <path d="M3 11v2" />
-      <path d="M21 11v2" />
-      <path d="M11 3h2" />
-      <path d="M11 21h2" />
-    </svg>
-  );
-}
-
-export function BookmarkIcon({ width = 13, height = 13, filled = false, ...props }: IconProps & { filled?: boolean }) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill={filled ? "#fff" : "none"} stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M6 4h12v16l-6-4-6 4z" />
+      <circle cx={8} cy={9} r={4} />
+      <circle cx={16} cy={15} r={5} />
     </svg>
   );
 }

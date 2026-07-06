@@ -1,4 +1,16 @@
-export type PhotoGroup = "rescue" | "aid" | "urban" | "street";
+export type PhotoSource = "gdrive" | "icloud" | "dropbox";
+
+export type PhotoGroup =
+  | "rescue"
+  | "aid"
+  | "urban"
+  | "street"
+  | "portraits"
+  | "aerial"
+  | "night"
+  | "archive";
+
+export type ProjectKey = "frontline" | "travel" | "client";
 
 export type PhotoStatus = "Verified" | "Likely" | "Needs check";
 
@@ -32,29 +44,13 @@ export interface ExifData {
   shutter: string;
 }
 
-/** A photo-group's smart-view hub metadata: label, color, and fixed hub center. */
-export interface GroupMeta {
-  key: PhotoGroup;
-  label: string;
-  color: string;
-  hx: number;
-  hy: number;
-}
-
-/** A country's map-view metadata: fractional center (0-1) within the map bounds, plus color. */
-export interface CountryMeta {
-  cx: number;
-  cy: number;
-  color: string;
-}
-
 export interface Photo {
   id: string;
   seed: string;
   /** Native aspect-ratio basis (mock "megapixel" dimensions). */
   w: number;
   h: number;
-  /** Hand-authored seed coords — canvas view's default position; also mutated by canvas drag. */
+  /** Hand-authored seed coords — retained for data fidelity; neural layout does not read them. */
   x: number;
   y: number;
   /** Precomputed display filename, e.g. "DSC_04812.jpg". */
@@ -63,17 +59,17 @@ export interface Photo {
   status: PhotoStatus;
   captionKey: CaptionKey | null;
   captionStyle: CaptionStyle;
-  /** Authored short-caption teaser, shown as the bottom pill chip on processed tiles. */
+  /** Authored short-caption teaser; not surfaced in the current UI. */
   chip: string | null;
   tags: string[] | null;
   facts: Fact[];
-  /** Display-only 'MM-DD HH:mm'; parsed by the timeline layout's time sort. */
+  /** Display-only 'MM-DD HH:mm'. Not used for timeline bucketing. */
   time: string;
-  /** Display-only 'Mon DD'; used for timeline tick labels. */
+  /** Display-only 'Mon DD'. */
   day: string;
   group: PhotoGroup;
   country: string;
+  source: PhotoSource;
+  project: ProjectKey;
   exif: ExifData;
-  /** CSS animation shorthand for entrance ("none" normally; a fade-in for freshly-uploaded photos). */
-  anim: string;
 }

@@ -14,8 +14,8 @@ export default function MarqueeOverlay({ left, top, width, height }: MarqueeOver
         top,
         width,
         height,
-        background: "rgba(91,106,240,0.15)",
-        border: "1px solid var(--accent-indigo)",
+        background: "rgba(57,255,106,.08)",
+        border: "1px solid var(--ac2)",
         borderRadius: 2,
         pointerEvents: "none",
       }}

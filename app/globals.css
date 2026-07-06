@@ -1,22 +1,25 @@
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
 
 :root {
-  --bg-canvas: #0a0a0a;
-  --bg-sidebar: #111111;
-  --bg-navbar: #0d0d0d;
-  --bg-surface: #1a1a1a;
-  --bg-card: #1c1c1c;
-  --bg-inner: #141414;
-  --bg-elevated: #242424;
-  --border-subtle: rgba(255, 255, 255, 0.1);
-  --border-hover: rgba(255, 255, 255, 0.2);
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.7);
-  --text-tertiary: rgba(255, 255, 255, 0.5);
-  --text-muted: rgba(255, 255, 255, 0.25);
-  --accent-green: #7c5cff;
-  --accent-indigo: #5b6af0;
-  --danger: #e05a3a;
+  --bg: #080808;
+  --bg-s: #0b0b0b;
+  --bg-nb: #090909;
+  --bg-sf: #101010;
+  --bg-in: #0d0d0d;
+  --bg-el: #171717;
+  --bd: rgba(255, 255, 255, 0.07);
+  --bdh: rgba(255, 255, 255, 0.14);
+  --t1: #eceee8;
+  --t2: rgba(236, 238, 232, 0.62);
+  --t3: rgba(236, 238, 232, 0.36);
+  --tm: rgba(236, 238, 232, 0.2);
+  /* Accessible icon color: --t3 (2.96:1) and --tm (1.68:1) both fail WCAG 1.4.11
+     against --bg-s. --t2b clears 3:1 (4.72:1) for icon-only/label UI. */
+  --t2b: rgba(236, 238, 232, 0.5);
+  --ac: #39ff6a;
+  --ac2: #22dd52;
+  --red: #ff4444;
 }
 
 * {
@@ -30,81 +33,12 @@ body {
 }
 
 body {
-  background: var(--bg-canvas);
-  color: var(--text-primary);
-  font-family: var(--font-inter), system-ui, sans-serif;
-  letter-spacing: -0.02em;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: var(--font-space-mono), monospace;
+  letter-spacing: 0em;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
-}
-
-@keyframes amFadeScale {
-  from {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-@keyframes amPop {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-@keyframes amToast {
-  from {
-    opacity: 0;
-    transform: transl(0, -8px);
-  }
-  to {
-    opacity: 1;
-  }
-}
-@keyframes amDash {
-  to {
-    stroke-dashoffset: -22;
-  }
-}
-
-.am-rail-item {
-  position: relative;
-}
-.am-tip {
-  position: absolute;
-  left: 46px;
-  top: 50%;
-  transform: translateY(-50%) translateX(-6px);
-  opacity: 0;
-  pointer-events: none;
-  white-space: nowrap;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-  z-index: 50;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-}
-.am-rail-item:hover .am-tip {
-  opacity: 1;
-  transform: translateY(-50%) translateX(0);
-}
-
-.am-tb {
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
 }
 
 textarea {
@@ -113,10 +47,102 @@ textarea {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.tw {
+  position: relative;
+}
+.tw .tip {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  background: var(--bg-el);
+  color: var(--t1);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 2px;
+  border: 1px solid var(--bdh);
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
+  z-index: 70;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.8);
+}
+.tw:hover .tip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.am-tb {
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.am-hscroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.am-bubble {
+  transition: transform 0.15s;
+}
+.am-bubble:hover {
+  transform: scale(1.06);
+}
+
+@keyframes amFadeScale {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes amDash {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+@keyframes amPulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.leaflet-tile-pane {
+  filter: invert(1) grayscale(1) brightness(0.95) contrast(1.08);
+}
+.leaflet-control-attribution {
+  background: rgba(10, 10, 10, 0.7) !important;
+  color: var(--tm) !important;
+  font-size: 9px !important;
+}
+.leaflet-control-attribution a {
+  color: var(--t3) !important;
+}
+.leaflet-control-zoom a {
+  background: var(--bg-el) !important;
+  color: var(--t1) !important;
+  border-color: var(--bd) !important;
+}
+.am-marker {
+  background: transparent;
+  border: 0;
 }

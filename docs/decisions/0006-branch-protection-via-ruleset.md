@@ -1,4 +1,4 @@
-# 0007. Protect main with a repo ruleset, not classic branch protection
+# 0006. Protect main with a repo ruleset, not classic branch protection
 
 Date: 2026-07-06
 

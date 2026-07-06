@@ -2,7 +2,7 @@
 
 Date: 2026-07-02
 
-Status: Superseded by 0006 (v2 redesign has no project concept at all)
+Status: Accepted
 
 ## Context
 

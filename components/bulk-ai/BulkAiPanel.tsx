@@ -1,24 +1,19 @@
-import { CheckIcon, CloseIcon, SparkleIcon, TagIcon, HistoryIcon } from "@/components/icons/icons";
+import { CheckIcon, CloseIcon, SparkleIcon, TagIcon } from "@/components/icons/icons";
 import type { CaptionStyle } from "@/types";
-
-interface BulkOps {
-  captions: boolean;
-  tags: boolean;
-  timeline: boolean;
-  faces: boolean;
-}
 
 interface BulkAiPanelProps {
   show: boolean;
   idle: boolean;
   count: number;
   thumbs: { src: string; ml: number }[];
-  bulkOps: BulkOps;
+  bulkOps: { captions: boolean; tags: boolean; faces: boolean };
   bulkLangs: string[];
   bulkStyle: CaptionStyle;
   proc: { active: boolean; label: string; pct: number };
   onClear: () => void;
-  onToggleOp: (k: keyof BulkOps) => void;
+  onToggleCaptions: () => void;
+  onToggleTags: () => void;
+  onToggleFaces: () => void;
   onToggleLang: (l: string) => void;
   onSetStyle: (s: CaptionStyle) => void;
   onRun: () => void;
@@ -27,7 +22,7 @@ interface BulkAiPanelProps {
 const LANGS = ["EN", "UK", "RU"];
 const STYLES: CaptionStyle[] = ["Agency", "Archival"];
 
-function FaceIcon({ width = 16, height = 16 }: { width?: number; height?: number }) {
+function FaceIcon({ width = 15, height = 15 }: { width?: number; height?: number }) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 20a5 5 0 0 0-10 0" />
@@ -38,7 +33,7 @@ function FaceIcon({ width = 16, height = 16 }: { width?: number; height?: number
 
 function ConsentIcon() {
   return (
-    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 4l9 16H3z" />
       <path d="M12 10v4" />
       <path d="M12 17h.01" />
@@ -56,29 +51,29 @@ interface OpCardProps {
 }
 
 function OpCard({ icon, title, subtitle, checked, onToggle, children }: OpCardProps) {
-  const cardBd = checked ? "color-mix(in srgb,var(--accent-green) 42%,transparent)" : "var(--border-subtle)";
-  const cardBg = checked ? "color-mix(in srgb,var(--accent-green) 9%,var(--bg-inner))" : "var(--bg-inner)";
-  const iconBg = checked ? "color-mix(in srgb,var(--accent-green) 20%,transparent)" : "var(--bg-elevated)";
-  const iconColor = checked ? "var(--accent-green)" : "var(--text-tertiary)";
-  const titleColor = checked ? "var(--text-primary)" : "var(--text-secondary)";
-  const checkBg = checked ? "var(--accent-green)" : "transparent";
-  const checkBd = checked ? "var(--accent-green)" : "var(--border-hover)";
+  const cardBd = checked ? "color-mix(in srgb,var(--ac) 35%,transparent)" : "var(--bd)";
+  const cardBg = checked ? "color-mix(in srgb,var(--ac) 6%,transparent)" : "transparent";
+  const iconBg = checked ? "color-mix(in srgb,var(--ac) 18%,transparent)" : "var(--bg-el)";
+  const iconColor = checked ? "var(--ac)" : "var(--t2)";
+  const titleColor = checked ? "var(--t1)" : "var(--t2)";
+  const checkBg = checked ? "var(--ac)" : "transparent";
+  const checkBd = checked ? "var(--ac)" : "var(--bdh)";
 
   return (
-    <div style={{ border: `1px solid ${cardBd}`, borderRadius: 11, padding: "12px 13px", background: cardBg, transition: "background .15s ease,border-color .15s ease" }}>
+    <div style={{ border: `1px solid ${cardBd}`, borderRadius: 2, padding: "11px 12px", background: cardBg, transition: "all .15s" }}>
       <button
         onClick={onToggle}
-        style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", background: "transparent", border: 0, cursor: "pointer", fontFamily: "inherit", padding: 0, textAlign: "left" }}
+        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "transparent", border: 0, cursor: "pointer", fontFamily: "inherit", padding: 0, textAlign: "left" }}
       >
         <span
           style={{
             display: "flex",
-            width: 32,
-            height: 32,
+            width: 30,
+            height: 30,
             flex: "0 0 auto",
             alignItems: "center",
             justifyContent: "center",
-            borderRadius: 9,
+            borderRadius: 2,
             background: iconBg,
             color: iconColor,
             transition: "background .15s,color .15s",
@@ -87,24 +82,23 @@ function OpCard({ icon, title, subtitle, checked, onToggle, children }: OpCardPr
           {icon}
         </span>
         <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 500, color: titleColor }}>{title}</span>
-          <span style={{ fontSize: 11, color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: 5 }}>{subtitle}</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: titleColor }}>{title}</span>
+          <span style={{ fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 4 }}>{subtitle}</span>
         </span>
         <span
           style={{
             display: "flex",
-            width: 19,
-            height: 19,
+            width: 18,
+            height: 18,
             alignItems: "center",
             justifyContent: "center",
-            borderRadius: 6,
-            flex: "0 0 auto",
+            borderRadius: 2,
             background: checkBg,
             border: `1.5px solid ${checkBd}`,
             transition: "background .12s",
           }}
         >
-          {checked && <CheckIcon width={11} height={11} strokeWidth={2.7} />}
+          {checked && <CheckIcon />}
         </span>
       </button>
       {children}
@@ -122,100 +116,92 @@ export default function BulkAiPanel({
   bulkStyle,
   proc,
   onClear,
-  onToggleOp,
+  onToggleCaptions,
+  onToggleTags,
+  onToggleFaces,
   onToggleLang,
   onSetStyle,
   onRun,
 }: BulkAiPanelProps) {
   if (!show) return null;
 
-  const summaryParts = [
-    bulkOps.captions && "Captions",
-    bulkOps.tags && "Tags",
-    bulkOps.timeline && "Timeline",
-    bulkOps.faces && "Faces",
-  ].filter(Boolean);
-
   return (
     <div
       style={{
         position: "absolute",
-        bottom: 84,
+        bottom: 78,
         left: "50%",
         transform: "translateX(-50%)",
-        width: 440,
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 14,
+        width: 430,
+        background: "var(--bg-sf)",
+        border: "1px solid var(--bd)",
+        borderRadius: 2,
         boxShadow: "0 16px 48px rgba(0,0,0,.6)",
         zIndex: 36,
         overflowY: "auto",
-        overflowX: "hidden",
-        maxHeight: "calc(100vh - 122px)",
+        maxHeight: "calc(100vh - 112px)",
       }}
     >
       {proc.active && (
-        <div style={{ padding: "20px 18px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <SparkleIcon width={16} height={16} />
-            <span style={{ fontSize: 13, color: "var(--text-primary)" }}>{proc.label}</span>
+        <div style={{ padding: "18px 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11 }}>
+            <SparkleIcon width={15} height={15} />
+            <span style={{ fontSize: 13, color: "var(--t1)" }}>{proc.label}</span>
           </div>
-          <div style={{ height: 6, borderRadius: 999, background: "var(--bg-inner)", overflow: "hidden" }}>
-            <div style={{ height: "100%", borderRadius: 999, background: "var(--accent-green)", width: `${proc.pct}%`, transition: "width .25s ease" }} />
+          <div style={{ height: 5, borderRadius: 2, background: "var(--bg-in)", overflow: "hidden" }}>
+            <div style={{ height: "100%", borderRadius: 2, background: "var(--ac)", width: `${proc.pct}%`, transition: "width .25s ease" }} />
           </div>
         </div>
       )}
 
       {idle && (
-        <div style={{ padding: "15px 16px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+        <div style={{ padding: "14px 15px 15px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 13 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ display: "flex" }}>
                 {thumbs.map((t, i) => (
                   <div
                     key={i}
                     style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 6,
+                      width: 27,
+                      height: 27,
+                      borderRadius: 2,
                       backgroundImage: `url(${t.src})`,
                       backgroundSize: "cover",
-                      backgroundPosition: "center",
-                      border: "1.5px solid var(--bg-surface)",
+                      border: "1.5px solid var(--bg-sf)",
                       marginLeft: t.ml,
                     }}
                   />
                 ))}
               </div>
-              <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }}>{count} photos selected</span>
+              <span style={{ fontSize: 14, fontWeight: 500, color: "var(--t1)" }}>{count} photos selected</span>
             </div>
             <button
               onClick={onClear}
-              title="Deselect"
               aria-label="Clear selection"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, border: 0, background: "var(--bg-elevated)", borderRadius: 7, color: "var(--text-tertiary)", cursor: "pointer" }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t3)", cursor: "pointer" }}
             >
-              <CloseIcon width={13} height={13} strokeWidth={1.9} />
+              <CloseIcon />
             </button>
           </div>
 
-          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 9 }}>
+          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--tm)", marginBottom: 8 }}>
             AI operations
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
             <OpCard
-              icon={<SparkleIcon width={16} height={16} />}
+              icon={<SparkleIcon width={15} height={15} />}
               title="Generate captions"
-              subtitle="Multilingual · choose a caption style"
+              subtitle="Multilingual · choose a style"
               checked={bulkOps.captions}
-              onToggle={() => onToggleOp("captions")}
+              onToggle={onToggleCaptions}
             >
               {bulkOps.captions && (
-                <div style={{ marginTop: 12, paddingLeft: 43, display: "flex", flexDirection: "column", gap: 9, transition: "opacity .15s ease" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <span style={{ fontSize: 10.5, color: "var(--text-muted)", width: 50, flex: "0 0 auto" }}>Language</span>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <div style={{ marginTop: 11, paddingLeft: 40, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 10, color: "var(--tm)", width: 48, flex: "0 0 auto" }}>Language</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                       {LANGS.map((l) => {
                         const active = bulkLangs.includes(l);
                         return (
@@ -223,16 +209,16 @@ export default function BulkAiPanel({
                             key={l}
                             onClick={() => onToggleLang(l)}
                             style={{
-                              height: 25,
-                              padding: "0 12px",
-                              borderRadius: 999,
+                              height: 24,
+                              padding: "0 11px",
+                              borderRadius: 2,
                               fontSize: 11,
                               fontWeight: 500,
                               fontFamily: "inherit",
                               cursor: "pointer",
-                              background: active ? "var(--accent-green)" : "transparent",
-                              color: active ? "#ffffff" : "var(--text-secondary)",
-                              border: `1px solid ${active ? "var(--accent-green)" : "var(--border-hover)"}`,
+                              background: active ? "color-mix(in srgb,var(--ac) 16%,transparent)" : "transparent",
+                              color: active ? "var(--ac)" : "var(--t2)",
+                              border: `1px solid ${active ? "color-mix(in srgb,var(--ac) 40%,transparent)" : "var(--bd)"}`,
                             }}
                           >
                             {l}
@@ -241,24 +227,24 @@ export default function BulkAiPanel({
                       })}
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <span style={{ fontSize: 10.5, color: "var(--text-muted)", width: 50, flex: "0 0 auto" }}>Style</span>
-                    <div style={{ display: "inline-flex", gap: 3, background: "var(--bg-canvas)", borderRadius: 999, padding: 3 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 10, color: "var(--tm)", width: 48, flex: "0 0 auto" }}>Style</span>
+                    <div style={{ display: "inline-flex", gap: 3, background: "var(--bg)", borderRadius: 2, padding: 2 }}>
                       {STYLES.map((st) => (
                         <button
                           key={st}
                           onClick={() => onSetStyle(st)}
                           style={{
-                            height: 24,
-                            padding: "0 13px",
-                            borderRadius: 999,
+                            height: 23,
+                            padding: "0 12px",
+                            borderRadius: 2,
                             fontSize: 11,
                             fontWeight: 500,
                             fontFamily: "inherit",
                             cursor: "pointer",
                             border: 0,
-                            background: bulkStyle === st ? "var(--bg-elevated)" : "transparent",
-                            color: bulkStyle === st ? "#ffffff" : "var(--text-tertiary)",
+                            background: bulkStyle === st ? "var(--bg-el)" : "transparent",
+                            color: bulkStyle === st ? "#fff" : "var(--t3)",
                           }}
                         >
                           {st}
@@ -271,19 +257,11 @@ export default function BulkAiPanel({
             </OpCard>
 
             <OpCard
-              icon={<TagIcon width={16} height={16} />}
+              icon={<TagIcon width={15} height={15} />}
               title="Detect tags"
               subtitle="People · objects · scene · place"
               checked={bulkOps.tags}
-              onToggle={() => onToggleOp("tags")}
-            />
-
-            <OpCard
-              icon={<HistoryIcon width={16} height={16} />}
-              title="Build timeline"
-              subtitle="Order by capture date"
-              checked={bulkOps.timeline}
-              onToggle={() => onToggleOp("timeline")}
+              onToggle={onToggleTags}
             />
 
             <OpCard
@@ -292,11 +270,11 @@ export default function BulkAiPanel({
               subtitle={
                 <>
                   <ConsentIcon />
-                  Consent required — opt-in
+                  Consent required
                 </>
               }
               checked={bulkOps.faces}
-              onToggle={() => onToggleOp("faces")}
+              onToggle={onToggleFaces}
             />
           </div>
 
@@ -306,26 +284,29 @@ export default function BulkAiPanel({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              gap: 8,
+              gap: 7,
               width: "100%",
-              height: 42,
-              marginTop: 14,
-              background: "var(--accent-green)",
+              height: 40,
+              marginTop: 13,
+              background: "var(--ac)",
               border: 0,
-              borderRadius: 999,
-              color: "#ffffff",
-              fontSize: 14,
-              fontWeight: 500,
+              borderRadius: 2,
+              color: "#050505",
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.07em",
               fontFamily: "inherit",
               cursor: "pointer",
             }}
           >
-            <SparkleIcon width={16} height={16} />
+            <SparkleIcon width={15} height={15} />
             Analyze {count} photos
           </button>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10, fontSize: 11, color: "var(--text-muted)", whiteSpace: "nowrap", flexWrap: "nowrap" }}>
-            <span>{summaryParts.length ? summaryParts.join(" · ") : "Select an operation"}</span>
-            <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--text-muted)" }} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 9, fontSize: 10.5, color: "var(--tm)" }}>
+            <span>
+              {[bulkOps.captions && "Captions", bulkOps.tags && "Tags", bulkOps.faces && "Faces"].filter(Boolean).join(" · ") || "No operations selected"}
+            </span>
+            <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--tm)" }} />
             <span>~$0.01 · Gemini Flash-Lite</span>
           </div>
         </div>
