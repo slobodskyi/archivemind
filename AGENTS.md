@@ -11,11 +11,22 @@ Currently a **frontend-only mockup**: Next.js (App Router) + TypeScript + Tailwi
 ported pixel-for-pixel from a Claude Design `.dc.html` prototype. All data is mock
 data behind a thin API layer (see below). No backend exists yet.
 
-Planned, not yet built: Supabase (Postgres + Auth + Storage), Cloudflare R2 for
-large media, Gemini 2.5 Flash-Lite for AI features (captions/tags/chat — the UI
-already brands the currently-fake chat/bulk-AI panels as "Gemini," so that's the
-target provider, not an open question). Don't write code against any of this until
-the migration actually starts — see @ARCHITECTURE.md.
+The backend build is **planned and issue-tracked** but not yet started — `main`
+still ships only the mockup. Target stack: Supabase (Postgres + Auth + pgvector),
+Cloudflare R2 (all binaries), and a **worker on Railway** for heavy jobs
+(ingest/analyze/caption/export). AI = `gemini-3.1-flash-lite` via the
+`GEMINI_ANALYZE_MODEL` env var for captions/analysis/search + `gemini-embedding-2`
+for embeddings (never hardcode a model generation — see `docs/decisions/0010`).
+
+**Before writing any backend code, read the canonical docs — do not infer the
+design from this file:**
+- `docs/TECH_SPEC.md` (v1.2) — canonical for the domain model (**Asset ≠ File**),
+  architecture, schema, models, and security. Single source of truth.
+- `docs/PLAN.md` — the phase-by-phase build order (Phase 0–7).
+- `docs/decisions/` — the "why" behind each call (ADRs 0001–0011).
+
+Work the tracked GitHub issues in phase order; don't jump ahead of the current
+phase. Until a phase touches it, keep new work behind `lib/api.ts` (below).
 
 ## Commands
 - `npm run dev` — start dev server (localhost:3000)
@@ -25,9 +36,13 @@ the migration actually starts — see @ARCHITECTURE.md.
 
 ## Conventions
 - TypeScript strict, no `any`.
-- ALL mock/demo data lives in `lib/mock-data.ts`; components and hooks only ever
-  call `lib/api.ts` (async functions). Never import `mock-data.ts` directly from a
-  component — this is the seam a real backend swaps into later without touching UI.
+- Mock/demo data lives in `lib/mock-data.ts` (plus the canned chat/search surface
+  in `lib/chat.ts`). Components and hooks should reach data only through
+  `lib/api.ts` (async functions) — that's the seam a real backend swaps into
+  without touching UI. **Known debt:** a few modules still import `lib/mock-data.ts`
+  directly (`lib/format.ts`, `lib/layout.ts`, `hooks/useWorkspace.ts`,
+  `components/map/MapCanvas.tsx`, `components/toolbar/AddToProjectPopover.tsx`);
+  PLAN Phase 1 cleans these as features go live — don't add new direct imports.
 - Shared domain types live in `types/`; reuse them, don't redefine inline shapes.
 - Styling: ported elements intentionally use inline `style={{}}` objects, not
   Tailwind utility classes, to guarantee pixel fidelity to the source design — see
@@ -48,10 +63,12 @@ the migration actually starts — see @ARCHITECTURE.md.
 
 ## Risk zones
 - No secrets exist in this repo yet (no backend). Once backend work starts: never
-  commit `.env` files or API keys; only one person runs database migrations at a
-  time — see @CONTRIBUTING.md.
+  commit `.env` files or API keys; a single assigned migrations owner runs schema
+  changes, PR-only — see @CONTRIBUTING.md.
 
 ## See also
-- @ARCHITECTURE.md — system overview, current vs. planned stack, domain glossary
+- `docs/TECH_SPEC.md` — **canonical** design/architecture/schema (v1.2)
+- `docs/PLAN.md` — the Phase 0–7 build order
+- @ARCHITECTURE.md — the *current mockup's* data flow + domain glossary
 - @CONTRIBUTING.md — git workflow, PR process, review checklist
 - `docs/decisions/` — architecture decision records; read before assuming "why"

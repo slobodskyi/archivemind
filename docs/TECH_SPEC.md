@@ -20,7 +20,7 @@ AI archive workspace for documentary photographers / photojournalists whose file
 5. Run AI actions on selection or project: **Smart analyze** (tags + embeddings + draft facts), **Generate captions** (EN/UK/RU × Social/Agency/Archival, promptable), **Smart search** (NL → metadata filters + semantic).
 6. Review in drawer (captions, tags, EXIF, facts) → confirm facts → export selection (ZIP + CSV sidecar).
 
-**Import model:** snapshot import (no live sync). Cloud originals stay in the source; we store only derivatives (previews, EXIF, tags, captions, embeddings). Local uploads are stored fully in R2. "Add more files" = re-open picker.
+**Import model:** snapshot import (no live sync). Google Drive originals stay in the source (worker streams the bytes at processing time); Dropbox originals and local uploads are stored in full in R2 (Dropbox direct links can't be re-fetched — ADR 0008). We always keep derivatives (previews, EXIF, tags, captions, embeddings). "Add more files" = re-open picker.
 
 ---
 
@@ -36,12 +36,12 @@ Supabase Postgres (+ Auth, + pgvector, + Realtime)
   │  session-pooler connection (service role)
 Worker (Node/TS on Railway, persistent container)
   ── claims ai_jobs (FOR UPDATE SKIP LOCKED)
-  ── fetches bytes: R2 / Drive API / Dropbox API (streaming)
+  ── fetches bytes: R2 / Drive API / Dropbox direct links (streaming)
   ── previews (sharp), EXIF (exifr / exiftool-vendored), HEIC decode, PDF text
   ── Gemini: analyze (gemini-3.1-flash-lite via generateContent), captions, embeddings
   ── writes results → Postgres; progress → ai_jobs row (Realtime picks it up)
 Cloudflare R2 (S3-compatible)
-  ── originals (uploads only), previews (all files), exports
+  ── originals (uploads + Dropbox), previews (all assets), exports
 ```
 
 **Decision log (ADR-lite):**
@@ -51,7 +51,7 @@ Cloudflare R2 (S3-compatible)
 | 1 | Monorepo (pnpm + turborepo): `apps/web`, `apps/worker`, `packages/shared` | 2 devs, shared TS types, no API drift. Existing mockup repo moves to `apps/web`. |
 | 2 | Web on Vercel, worker on Railway | Serverless can't do long batch jobs (sharp, streaming, retries); persistent container can. |
 | 3 | Queue = `ai_jobs` table + `FOR UPDATE SKIP LOCKED` (no pgmq, no Redis) | One table = queue + history + Realtime progress source; trivially inspectable; enough for thousands of files. |
-| 4 | Storage = Cloudflare R2 | Zero egress (media app serves lots of previews); S3-compatible presigned URLs. Supabase Storage kept only for nothing — all binaries in R2. |
+| 4 | Storage = Cloudflare R2 | Zero egress (media app serves lots of previews); S3-compatible presigned URLs. Supabase Storage unused — all binaries live in R2. |
 | 5 | Embeddings = **gemini-embedding-2** (multimodal, GA — not the deprecated `-preview` id) @ **768 dims** (auto-normalized). **No fallback** — `gemini-embedding-001` shuts down 2026-07-14 and its vector space is incompatible. | Killer feature is visual attribute search → embed the image itself, same space as text queries and PDF chunks. Spaces between models are incompatible → decide at build start, no mid-flight switch. |
 | 6 | Captions/analysis = **`gemini-3.1-flash-lite`** via `GEMINI_ANALYZE_MODEL` env (structured output) | ~$0.31–0.35 / 1000 images ($0.25/M in, $1.50/M out), multilingual EN/UK/RU, JSON schema support. `media_resolution` exposed per call (medium for tags, high when OCR matters). Re-verify model at Phase 2. See ADR 0010. |
 | 7 | Drive via Google Picker + `drive.file` (**multi-file select**; folders = navigation only); Dropbox via Chooser **direct links, zero OAuth** (originals streamed once → stored in R2) | Avoids CASA verification (~$800–1500/yr + weeks). Access limited to user-picked items. Drive folder sync / full-Dropbox OAuth → post-MVP. See ADR 0008. |
@@ -435,7 +435,7 @@ Per file: stream bytes → sha256 (dedup check) → EXIF (`exifr`; for RAW use `
 Write `files.content_hash`; on a hash conflict attach the file to the existing asset (no new asset). Write `asset_exif`, `asset_previews`. Auto-enqueue `analyze` for the batch (MVP default: analyze-on-ingest; per-user config flag later).
 
 ### 8.2 Analyze (`type='analyze'`)
-Per photo: medium preview → **`GEMINI_ANALYZE_MODEL`** (default `gemini-3.1-flash-lite`) via **`generateContent` + `responseSchema`** (strict JSON; not the Interactions API — ADR 0007), `media_resolution` per call (medium for tags, high when OCR matters):
+Per asset: medium preview → **`GEMINI_ANALYZE_MODEL`** (default `gemini-3.1-flash-lite`) via **`generateContent` + `responseSchema`** (strict JSON; not the Interactions API — ADR 0007), `media_resolution` per call (medium for tags, high when OCR matters):
 ```json
 { "description": "dense factual EN description, 2-4 sentences",
   "tags": [{ "name": "mustache", "category": "attribute", "confidence": 0.93 }],
@@ -444,10 +444,10 @@ Per photo: medium preview → **`GEMINI_ANALYZE_MODEL`** (default `gemini-3.1-fl
 ```
 Person-related output restricted to **attributes** (never identity). Store tags (upsert into `tags` + `asset_tags`), facts (`status='needs_check'`, except GPS/EXIF-derived → `'likely'`).
 **Embedding:** `gemini-embedding-2` (GA), input = the image itself, `output_dimensionality=768` (auto-normalized) → `embeddings(kind='image')`. **One `Content` object per image** — multiple `Part`s in one `Content` collapse to a single aggregated vector (silent index corruption); no `task_type` param on embedding-2, frame the task via a text instruction. **No fallback** (`gemini-embedding-001` retires 2026-07-14, incompatible space). Same for PDF: chunk text ~1500 tokens, one `Content` per chunk → `kind='doc_chunk'`.
-Per photo: 1 usage_event `image_analyzed` + 1 `embedding`. Set `files.ai_processed_at`.
+Per asset: 1 usage_event `image_analyzed` + 1 `embedding`. Set `assets.ai_processed_at`.
 
 ### 8.3 Captions (`type='caption'`, payload: asset_ids, langs[], style)
-Per file × lang: prompt = base template (in `packages/shared/prompts.ts`, per style) + `projects.caption_prompt` (if run in project context) + known metadata (date, GPS label, confirmed facts) + medium preview → text → upsert `captions`. Editing a caption in UI sets `is_edited=true`; regenerate never silently overwrites edited captions (UI confirms).
+Per asset × lang: prompt = base template (in `packages/shared/prompts.ts`, per style) + `projects.caption_prompt` (if run in project context) + known metadata (date, GPS label, confirmed facts) + medium preview → text → upsert `captions`. Editing a caption in UI sets `is_edited=true`; regenerate never silently overwrites edited captions (UI confirms).
 
 ### 8.4 Search (route handler, not a job)
 1. `GEMINI_ANALYZE_MODEL` parses the query (structured output via `generateContent`) → `{semantic_text, date_from?, date_to?, place_terms[], tag_terms[], kinds[]}`.
@@ -482,7 +482,7 @@ All routes authed (Supabase session); workspace derived from membership.
 | `GET  /api/assets` | list (workspace or `?projectId=`), cursor-paginated, incl. preview URLs |
 | `GET  /api/assets/:id` | asset + files + exif + tags + captions + facts |
 | `PATCH /api/assets/:id` | rename (title), status |
-| `GET  /api/canvas` | aggregates for neural view: sources → folders → counts + first-K tile previews (lazy-load the rest) |
+| `GET  /api/canvas?projectId=` | aggregates for neural view (workspace-wide, or scoped to a project — matches the `canvas_layouts.scope` = `'all'` \| project uuid): sources → folders → counts + first-K tile previews (lazy-load the rest) |
 | `PUT  /api/canvas/layout` | persist `canvas_layouts` (scope, overrides, organize_mode) |
 | `GET/POST /api/sources/:provider/oauth` | OAuth start + callback; store encrypted tokens |
 | `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `assets` + `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
@@ -580,11 +580,13 @@ Live Drive/Dropbox sync (broad scopes + CASA) · **Drive folder sync** (`drive.r
 
 ## 15. Build order (proposed)
 
-1. Monorepo restructure (mockup → `apps/web`) + Supabase project + migration 0001 (full §4 schema) + RLS + auth flow. Deploy checkpoint (web on Vercel talking to Supabase).
-2. Upload path end-to-end: presign → R2 → complete → ingest job → worker skeleton on Railway → previews + EXIF visible in UI. Deploy checkpoint.
-3. Analyze pipeline: `gemini-3.1-flash-lite` + embeddings + tags/facts → drawer shows real data; Realtime progress.
-4. Captions (langs × styles, project prompt) + editing.
-5. Search (parse + vector + filters) wired into the search/chat UI.
-6. Projects M:N + canvas aggregates endpoint + layout persistence.
-7. Drive/Dropbox OAuth + Picker/Chooser import (spike §14.1 first).
-8. Export job. QA pass on dirty real archives (per TEST scope: no-EXIF, HEIC/RAW, large batches).
+Steps map 1:1 to `PLAN.md` Phase 0–7 (canonical sequencer). This is the summary; `PLAN.md` §2 carries the detailed per-phase checklists.
+
+- **Phase 0** — Monorepo restructure (mockup → `apps/web`) + Supabase project + migration 0001 (full §4 schema) + RLS + auth flow. Deploy checkpoint (web on Vercel talking to Supabase).
+- **Phase 1** — Upload path end-to-end: presign → R2 → complete → ingest job → worker skeleton on Railway → previews + EXIF visible in UI. Deploy checkpoint.
+- **Phase 2** — Analyze pipeline: `gemini-3.1-flash-lite` + embeddings + tags/facts → drawer shows real data; Realtime progress.
+- **Phase 3** — Captions (langs × styles, project prompt) + editing.
+- **Phase 4** — Search (parse + vector + filters) wired into the search/chat UI.
+- **Phase 5** — Projects M:N + canvas aggregates endpoint + layout persistence.
+- **Phase 6** — Cloud imports: Drive (OAuth `drive.file` + Picker) and Dropbox (Chooser direct links, zero OAuth — ADR 0008).
+- **Phase 7** — Export job. QA pass on dirty real archives (dirty samples: no-EXIF, HEIC/RAW, large batches).

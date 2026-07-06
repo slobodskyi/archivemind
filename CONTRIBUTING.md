@@ -16,10 +16,16 @@ can't infer on its own.
 ## Branch protection
 `main` is protected by a GitHub repository ruleset (not classic branch
 protection): CI (`checks` — lint, typecheck, build) must pass, and force-pushes
-and branch deletion are blocked. Both maintainers are on the ruleset's bypass
-list, so either can push to `main` directly — but treat that as an escape hatch.
-The default stays: branch → PR → green CI → review → squash-merge. See
+and branch deletion are blocked. The ruleset's **bypass list** lets listed
+maintainers push to `main` directly — treat that as an escape hatch, not the
+norm. The default stays: branch → PR → green CI → review → squash-merge. See
 `docs/decisions/0006-branch-protection-via-ruleset.md`.
+
+> ⚠️ **Bypass list is currently one person.** The live ruleset names only
+> `slobodskyi`; ADR 0006's intent is for *both* maintainers to have equal push
+> rights. Until `gangsta-george` is added to the ruleset bypass list (repo
+> Settings → Rules → `main`), they can only land changes via PR. Reconcile this
+> before both devs are active.
 
 ## Parallel work with git worktrees
 Claude Code supports isolated sessions via worktrees, so two Claude sessions
@@ -49,11 +55,12 @@ branch is merged.
   modes (scope creep, hallucinated APIs, weakened checks), not generic style
   nits.
 
-## When we add a database (Phase 2)
-Only one of us runs migrations against the shared/shared-preview database at a
-time — agree in a quick daily check-in who's touching schema that day. Update
-this section with the actual rule once Supabase is wired up (link to the
-relevant ADR once one exists).
+## Database migrations
+The database schema arrives in **Phase 0** (`docs/PLAN.md`), not later. One dev is
+the **migrations owner** for the build: all schema changes go through them and land
+**PR-only** — never applied ad hoc against the shared database. (This supersedes the
+earlier "daily check-in rotation" idea; TECH_SPEC §11 pins a single owner to avoid
+two people racing migrations on one database.) Assign the owner when Phase 0 starts.
 
 ## Documenting decisions
 Non-obvious architectural choices go in `docs/decisions/` as a short ADR

@@ -2,7 +2,14 @@
 
 Date: 2026-07-06
 
-Status: Accepted
+Status: Accepted — but see the drift note below.
+
+> ⚠️ **Live-state drift (2026-07-06):** the decision below calls for *both*
+> maintainers on the bypass list, but the live `main` ruleset currently names only
+> `slobodskyi`. Until `gangsta-george` is re-added to the bypass list, they can push
+> to `main` only via PR (CI-gated). Reconcile before both devs are active — either
+> add them back (restores this decision) or amend this ADR to accept a one-person
+> bypass.
 
 ## Context
 
@@ -28,8 +35,9 @@ Replaced classic branch protection on `main` with a repository **ruleset**
 - blocks force-pushes (`non_fast_forward`) and branch deletion (`deletion`),
 
 with a **bypass list** naming both maintainers individually
-(`actor_type: "User"`, `bypass_mode: always`) — currently `slobodskyi` and
-`gangsta-george`.
+(`actor_type: "User"`, `bypass_mode: always`) — intended to be `slobodskyi` and
+`gangsta-george`. (As of 2026-07-06 the live list has only `slobodskyi` — see the
+drift note at the top.)
 
 Classic branch protection was deleted only after the ruleset was created and
 verified, so `main` was never left unprotected during the switch.
