@@ -583,3 +583,35 @@ export function senseExpandLayout(
   const ey = node.y + Math.sin(ang) * (node.size / 2);
   return fanOut(node.items, node.x, node.y, ang, R, ex, ey, 96, node.color, 0.35, overrides);
 }
+
+/**
+ * Map marker drill-down. `cp` is the clicked marker's container point and
+ * `otherCps` the other markers' — files fan away from their centroid (toward
+ * free space). Screen space, so the caller recomputes on map pan/zoom.
+ */
+export function mapExpandLayout(
+  items: Photo[],
+  cp: { x: number; y: number },
+  otherCps: { x: number; y: number }[],
+  markerSize: number,
+  overrides: Record<string, { x: number; y: number }>,
+): ExpandOverlay {
+  let cxAll = 0;
+  let cyAll = 0;
+  otherCps.forEach((o) => {
+    cxAll += o.x;
+    cyAll += o.y;
+  });
+  const cnt = otherCps.length;
+  if (cnt) {
+    cxAll /= cnt;
+    cyAll /= cnt;
+  }
+  const dx0 = cp.x - cxAll;
+  const dy0 = cp.y - cyAll;
+  const ang = !cnt || (Math.abs(dx0) < 0.01 && Math.abs(dy0) < 0.01) ? -Math.PI / 2 : Math.atan2(dy0, dx0);
+  const R = 118;
+  const ex = cp.x + Math.cos(ang) * (markerSize / 2);
+  const ey = cp.y + Math.sin(ang) * (markerSize / 2);
+  return fanOut(items, cp.x, cp.y, ang, R, ex, ey, 88, "#39ff6a", 0.4, overrides);
+}

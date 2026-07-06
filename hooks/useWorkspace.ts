@@ -281,8 +281,10 @@ export interface Workspace {
 
   // Expand overlays (sense / map marker drill-down)
   expanded: { kind: "sense" | "map" | null; key: string | null };
+  expandOverrides: Record<string, { x: number; y: number }>;
   senseExpand: ExpandOverlay | null;
   toggleSenseExpand: (key: string) => void;
+  toggleMapExpand: (key: string) => void;
   closeExpand: () => void;
   onExpandFileDown: (e: React.PointerEvent, id: string, x: number, y: number, space: "canvas" | "map") => void;
 
@@ -662,6 +664,14 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       const s = stateRef.current;
       if (s.expanded.kind === "sense" && s.expanded.key === key) closeExpand();
       else setState({ expanded: { kind: "sense", key }, expandOverrides: {} });
+    },
+    [setState, closeExpand],
+  );
+  const toggleMapExpand = useCallback(
+    (key: string) => {
+      const s = stateRef.current;
+      if (s.expanded.kind === "map" && s.expanded.key === key) closeExpand();
+      else setState({ expanded: { kind: "map", key }, expandOverrides: {} });
     },
     [setState, closeExpand],
   );
@@ -1209,7 +1219,9 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     senseBubbles: senseBubblesResult,
     senseExpand,
     expanded: state.expanded,
+    expandOverrides: state.expandOverrides,
     toggleSenseExpand,
+    toggleMapExpand,
     closeExpand,
     onExpandFileDown,
 

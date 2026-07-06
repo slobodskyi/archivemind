@@ -102,9 +102,15 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         <MapView
           photos={ws.projectPhotos}
           contentLeft={contentLeft}
-          onOpenPreview={ws.openPreview}
-          onClosePreview={ws.closePreview}
-          onOpenDrawer={ws.openDrawer}
+          expanded={ws.expanded}
+          expandOverrides={ws.expandOverrides}
+          hoveredId={ws.hoveredId}
+          onToggleMapExpand={ws.toggleMapExpand}
+          onCloseExpand={ws.closeExpand}
+          onExpandFileDown={ws.onExpandFileDown}
+          setHover={ws.setHover}
+          openDrawer={ws.openDrawer}
+          deletePhoto={ws.deletePhoto}
         />
       )}
 

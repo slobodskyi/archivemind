@@ -30,7 +30,7 @@ export default function ExpandFileTile({
       onPointerDown={onDown}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      style={{ position: "absolute", left: file.x, top: file.y, width: file.w, zIndex: hovered ? 30 : 22, cursor: "grab" }}
+      style={{ position: "absolute", left: file.x, top: file.y, width: file.w, zIndex: hovered ? 30 : 22, cursor: "grab", pointerEvents: "auto" }}
     >
       <div
         style={{
