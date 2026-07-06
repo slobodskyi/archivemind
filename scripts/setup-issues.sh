@@ -37,8 +37,11 @@ LABELS=(
   "fast-follow|ededed|Post-MVP fast-follow (not an MVP gate)"
 )
 ensure_label() {
-  local name="$1" color="$2" desc="$3"
-  if gh label list --repo "$REPO" --limit 300 --json name --jq '.[].name' | grep -Fxq "$name"; then
+  local name="$1" color="$2" desc="$3" existing
+  # Capture then grep (not `gh | grep -q`): grep -q closes the pipe on first
+  # match → SIGPIPE on gh → pipefail flags the `if` non-zero → false negative.
+  existing=$(gh label list --repo "$REPO" --limit 300 --json name --jq '.[].name')
+  if grep -Fxq "$name" <<<"$existing"; then
     echo "  = label exists: $name"
   else
     gh label create "$name" --repo "$REPO" --color "$color" --description "$desc" >/dev/null && echo "  + label:  $name"
@@ -49,8 +52,9 @@ for l in "${LABELS[@]}"; do IFS='|' read -r n c d <<<"$l"; ensure_label "$n" "$c
 
 # ── Milestones (deploy gates) ────────────────────────────────────────────────
 ensure_milestone() {
-  local title="$1" desc="$2"
-  if gh api "repos/$REPO/milestones?state=all" --jq '.[].title' | grep -Fxq "$title"; then
+  local title="$1" desc="$2" existing
+  existing=$(gh api "repos/$REPO/milestones?state=all" --jq '.[].title')
+  if grep -Fxq "$title" <<<"$existing"; then
     echo "  = milestone exists: $title"
   else
     gh api "repos/$REPO/milestones" -f title="$title" -f description="$desc" >/dev/null && echo "  + milestone: $title"
@@ -63,8 +67,9 @@ ensure_milestone "$M3" "Phase 6 green: full journey — connect Drive, pick file
 
 # ── Issues ──────────────────────────────────────────────────────────────────
 create_issue() {
-  local title="$1" body="$2" labels="$3" milestone="${4:-}"
-  if gh issue list --repo "$REPO" --state all --search "in:title \"$title\"" --json title --jq '.[].title' | grep -Fxq "$title"; then
+  local title="$1" body="$2" labels="$3" milestone="${4:-}" existing
+  existing=$(gh issue list --repo "$REPO" --state all --search "in:title \"$title\"" --json title --jq '.[].title')
+  if grep -Fxq "$title" <<<"$existing"; then
     echo "  = issue exists: $title"; return
   fi
   local args=(--repo "$REPO" --title "$title" --body "$body" --label "$labels")
