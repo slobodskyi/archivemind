@@ -49,8 +49,8 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 
 ### Phase 1 — Upload → ingest end-to-end (~weeks 2–3)
 
-- **Lane W:** upload UI (drag-drop + file picker) → `POST /api/uploads/presign` (single PUT <100 MiB; fixed-size multipart above) → `POST /api/files/complete`; files list via `GET /api/files` replacing `getPhotos()` in `lib/api.ts`; `useJobProgress` hook on the Broadcast channel.
-- **Lane K:** worker skeleton on Railway (`node:22-slim`, session-pooler pg Pool max 2–5): claim loop (`FOR UPDATE SKIP LOCKED`), heartbeat, retry/backoff, reaper, graceful shutdown (spec §7 verbatim). Ingest handler: sha256 dedup → EXIF (`exifr` / `exiftool-vendored` v36) → previews via sharp (+ `heic-decode` path, RAW cascade per A9/A10) → R2 previews → `file_exif`/`file_previews` rows → auto-enqueue `analyze`.
+- **Lane W:** upload UI (drag-drop + file picker) → `POST /api/uploads/presign` (single PUT <100 MiB; fixed-size multipart above) → `POST /api/uploads/complete` (creates asset + file); assets list via `GET /api/assets` replacing `getPhotos()`→`getAssets()` in `lib/api.ts`; `useJobProgress` hook on the Broadcast channel.
+- **Lane K:** worker skeleton on Railway (`node:22-slim`, session-pooler pg Pool max 2–5): claim loop (`FOR UPDATE SKIP LOCKED`), heartbeat, retry/backoff, reaper, graceful shutdown (spec §7 verbatim). Ingest handler: sha256 dedup → EXIF (`exifr` / `exiftool-vendored` v36) → previews via sharp (+ `heic-decode` path, RAW cascade per A9/A10) → R2 previews → `asset_exif`/`asset_previews` rows (dedup attaches file to existing asset) → auto-enqueue `analyze`.
 - QA with dirty samples: HEIC from real iPhones, NEF/CR2/ARW, no-EXIF files (closes §14.4–14.5).
 
 **✅ Deploy checkpoint 2:** upload 500+ real mixed files → previews & EXIF appear in the deployed UI with live progress.
@@ -58,7 +58,7 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 ### Phase 2 — Analyze pipeline (~week 4)
 
 - **Lane K:** analyze handler: medium preview → `gemini-3.1-flash-lite` via `generateContent` + `responseSchema` structured output (zod schema from `packages/shared`) → tags/facts upserts; embeddings via `gemini-embedding-2` (one `Content` per image, 768 dims) → `embeddings`; `usage_events` on every call; concurrency cap 5 + 429 backoff.
-- **Lane W:** drawer shows real tags/captions/facts/EXIF (`GET /api/files/:id`); bulk-AI panel → real `POST /api/jobs` + Realtime progress (replaces fake `setInterval`); manual tag add/remove; fact confirm (`PATCH /api/facts/:id`).
+- **Lane W:** drawer shows real tags/captions/facts/EXIF (`GET /api/assets/:id`); bulk-AI panel → real `POST /api/jobs` + Realtime progress (replaces fake `setInterval`); manual tag add/remove; fact confirm (`PATCH /api/facts/:id`).
 
 ### Phase 3 — Captions (~week 5, can overlap Phase 4)
 
@@ -66,7 +66,7 @@ Caption handler (langs × styles, prompt templates in `packages/shared/prompts.t
 
 ### Phase 4 — Search (~week 5–6)
 
-`GET /api/search`: `gemini-3.1-flash-lite` query parse (structured output via `generateContent`) → embed query text into the same space → pgvector cosine (HNSW) scoped to workspace/project + metadata joins (dates from `file_exif.taken_at`, places via `gps_label`/place-tags with the no-GPS fallback, tag boost) → top-N with matched-filter explanation. Wire into the chat panel (canned replies → search results; `lib/chat.ts` retires). Log `search_query` usage.
+`GET /api/search`: `gemini-3.1-flash-lite` query parse (structured output via `generateContent`) → embed query text into the same space → pgvector cosine (HNSW) scoped to workspace/project + metadata joins (dates from `asset_exif.taken_at`, places via `gps_label`/place-tags with the no-GPS fallback, tag boost) → top-N with matched-filter explanation. Wire into the chat panel (canned replies → search results; `lib/chat.ts` retires). Log `search_query` usage.
 
 ### Phase 5 — Projects + canvas at scale (~weeks 6–7)
 

@@ -1,8 +1,9 @@
 # ArchiveMind — MVP Technical Specification
 
-Version: 1.1 · Date: 2026-07-06 · Status: approved for build
+Version: 1.2 · Date: 2026-07-06 · Status: approved for build
 Team: 2 developers (AI-assisted). Source doc for `CLAUDE.md`, kickoff prompts, and `docs/`.
 
+**v1.2 (2026-07-06):** Asset ≠ File domain model — the canonical entity is `assets`; `files` are physical representations (FK → asset). Previews, EXIF, tags, captions, facts, embeddings, and project membership all reference `asset_id`. Ripples through §5–§10. See ADR 0011.
 **v1.1 (2026-07-06):** folds the 2026-07-03 pre-build verification amendments (A1–A14, formerly `PLAN.md` §0) directly into the sections below, plus the `generateContent`-over-Interactions correction (§2 row 12, §8, ADR 0007). No superseded model ids / libraries / spikes remain.
 
 ---
@@ -147,47 +148,61 @@ create table source_connections (
   updated_at timestamptz default now()
 );
 
--- ============ files ============
-create type file_origin as enum ('upload','gdrive','dropbox');
-create type file_kind   as enum ('photo','pdf','document','other');
-create type file_status as enum ('active','source_missing','deleted');
+-- ============ assets & files ============
+create type asset_kind   as enum ('photo','pdf','document','other');
+create type asset_status as enum ('active','source_missing','deleted');
+create type file_origin  as enum ('upload','gdrive','dropbox');
 
-create table files (
+-- Canonical entity: one shot / document. Everything AI/curation references the ASSET.
+create table assets (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
   added_by uuid references profiles(id),
-  origin file_origin not null,
-  source_connection_id uuid references source_connections(id),
-  source_file_id text,               -- Drive/Dropbox file id
-  source_path text,                  -- folder path at import time (display/clustering)
-  kind file_kind not null,
-  filename text not null,
-  mime_type text,
-  byte_size bigint,
-  content_hash text,                 -- sha256 (computed during ingest)
-  r2_original_key text,              -- set for uploads AND Dropbox; null only for Drive-linked files
-  status file_status not null default 'active',
+  kind asset_kind not null,
+  title text,                        -- display name (set from the first file at ingest)
+  status asset_status not null default 'active',
   ai_processed_at timestamptz,       -- last successful analyze
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
-create index files_ws_kind_idx    on files (workspace_id, kind);
-create index files_ws_created_idx on files (workspace_id, created_at desc);
-create unique index files_dedup_idx on files (workspace_id, content_hash)
-  where content_hash is not null and status <> 'deleted';
--- Dedup policy: on hash conflict at ingest, do NOT create a duplicate row;
--- link the existing file into the target project instead.
+create index assets_ws_kind_idx    on assets (workspace_id, kind);
+create index assets_ws_created_idx on assets (workspace_id, created_at desc);
 
-create table file_previews (
-  file_id uuid not null references files(id) on delete cascade,
+-- Physical representations of an asset (original, alt formats, cloud-linked bytes).
+-- One asset → many files; one file → one asset.
+create table files (
+  id uuid primary key default gen_random_uuid(),
+  asset_id uuid not null references assets(id) on delete cascade,
+  workspace_id uuid not null references workspaces(id) on delete cascade,  -- denormalized: RLS + dedup index
+  origin file_origin not null,
+  source_connection_id uuid references source_connections(id),
+  source_file_id text,               -- Drive/Dropbox file id
+  source_path text,                  -- folder path at import time (display/clustering)
+  r2_key text,                       -- set for uploads AND Dropbox; null only for Drive-linked files
+  mime_type text,
+  byte_size bigint,
+  content_hash text,                 -- sha256 (computed during ingest)
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index files_asset_idx on files (asset_id);
+create unique index files_dedup_idx on files (workspace_id, content_hash)
+  where content_hash is not null;
+-- Dedup: sha256 per file at ingest. On hash conflict do NOT create a new asset —
+-- attach the incoming file as another representation of the existing asset (or just
+-- link that asset into the target project).
+
+-- Previews + EXIF describe the SHOT, so they hang off the ASSET, not a byte blob.
+create table asset_previews (
+  asset_id uuid not null references assets(id) on delete cascade,
   size text not null,                -- 'thumb'(256) | 'medium'(1024)
   r2_key text not null,
   width int, height int,
-  primary key (file_id, size)
+  primary key (asset_id, size)
 );
 
-create table file_exif (
-  file_id uuid primary key references files(id) on delete cascade,
+create table asset_exif (
+  asset_id uuid primary key references assets(id) on delete cascade,
   taken_at timestamptz,
   camera_make text, camera_model text, lens text,
   gps_lat double precision, gps_lon double precision,
@@ -196,7 +211,7 @@ create table file_exif (
   iso int, aperture text, shutter text, focal_length text,
   raw jsonb                          -- full EXIF dump
 );
-create index file_exif_taken_idx on file_exif (taken_at);
+create index asset_exif_taken_idx on asset_exif (taken_at);
 
 -- ============ projects ============
 create table projects (
@@ -210,12 +225,12 @@ create table projects (
   updated_at timestamptz default now()
 );
 
-create table project_files (
+create table project_assets (
   project_id uuid not null references projects(id) on delete cascade,
-  file_id uuid not null references files(id) on delete cascade,
+  asset_id uuid not null references assets(id) on delete cascade,
   added_by uuid references profiles(id),
   added_at timestamptz default now(),
-  primary key (project_id, file_id)
+  primary key (project_id, asset_id)
 );
 
 -- ============ AI outputs ============
@@ -230,12 +245,12 @@ create table tags (
   unique (workspace_id, name, category)
 );
 
-create table file_tags (
-  file_id uuid not null references files(id) on delete cascade,
-  tag_id  uuid not null references tags(id)  on delete cascade,
+create table asset_tags (
+  asset_id uuid not null references assets(id) on delete cascade,
+  tag_id   uuid not null references tags(id)  on delete cascade,
   source tag_source not null default 'ai',
   confidence real,
-  primary key (file_id, tag_id)
+  primary key (asset_id, tag_id)
 );
 
 create type caption_lang  as enum ('en','uk','ru');
@@ -243,7 +258,7 @@ create type caption_style as enum ('social','agency','archival');
 
 create table captions (
   id uuid primary key default gen_random_uuid(),
-  file_id uuid not null references files(id) on delete cascade,
+  asset_id uuid not null references assets(id) on delete cascade,
   lang caption_lang not null,
   style caption_style not null,
   text text not null,
@@ -251,13 +266,13 @@ create table captions (
   generated_by text,                 -- model id
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
-  unique (file_id, lang, style)
+  unique (asset_id, lang, style)
 );
 
 create type fact_status as enum ('confirmed','likely','needs_check');
 create table facts (
   id uuid primary key default gen_random_uuid(),
-  file_id uuid not null references files(id) on delete cascade,
+  asset_id uuid not null references assets(id) on delete cascade,
   text text not null,
   status fact_status not null default 'needs_check',
   source text,                       -- 'exif' | 'gps' | 'ai' | 'manual'
@@ -270,13 +285,13 @@ create table facts (
 create table embeddings (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,
-  file_id uuid not null references files(id) on delete cascade,
+  asset_id uuid not null references assets(id) on delete cascade,
   kind text not null,                -- 'image' | 'doc_chunk'
   chunk_index int not null default 0,
   content text,                      -- embedded text (doc chunks) or AI description (audit / re-embed / fallback)
   embedding vector(768) not null,
   created_at timestamptz default now(),
-  unique (file_id, kind, chunk_index)
+  unique (asset_id, kind, chunk_index)
 );
 create index embeddings_hnsw_idx on embeddings using hnsw (embedding vector_cosine_ops);
 create index embeddings_ws_idx   on embeddings (workspace_id);
@@ -294,7 +309,7 @@ create table ai_jobs (
   project_id uuid references projects(id),
   type job_type not null,
   status job_status not null default 'queued',
-  payload jsonb not null,            -- {file_ids:[], langs:[], style, options...}
+  payload jsonb not null,            -- {asset_ids:[], langs:[], style, options...}
   progress int not null default 0,   -- 0..100
   progress_label text,
   total_items int, done_items int,
@@ -329,7 +344,7 @@ create table canvas_layouts (
   workspace_id uuid not null references workspaces(id) on delete cascade,
   user_id uuid not null references profiles(id) on delete cascade,
   scope text not null,               -- 'all' or project uuid as text
-  overrides jsonb not null default '{}'::jsonb,  -- {hub:{...}, folder:{...}, file:{id:{x,y}}}
+  overrides jsonb not null default '{}'::jsonb,  -- {hub:{...}, folder:{...}, asset:{id:{x,y}}}
   organize_mode text,                -- 'source' | 'date' | 'place' | 'similarity'
   updated_at timestamptz default now(),
   primary key (workspace_id, user_id, scope)
@@ -350,11 +365,15 @@ language sql stable security definer set search_path = public as $$
                  where workspace_id = ws and user_id = auth.uid());
 $$;
 
--- pattern (repeat per table):
-alter table files enable row level security;
-create policy files_select on files for select using (is_member(workspace_id));
-create policy files_write  on files for all
+-- pattern for tables that carry workspace_id (assets, files, embeddings, tags, projects, ai_jobs, ...):
+alter table assets enable row level security;
+create policy assets_select on assets for select using (is_member(workspace_id));
+create policy assets_write  on assets for all
   using (is_member(workspace_id)) with check (is_member(workspace_id));
+-- asset-child tables (asset_previews, asset_exif, asset_tags, captions, facts,
+--   project_assets) have no workspace_id → authorize via their asset's workspace:
+--   using (is_member((select workspace_id from assets a where a.id = asset_id)))
+--   (wrap in a security-definer helper is_member_of_asset(asset_id) to keep policies terse).
 -- memberships table itself: select via is_member(workspace_id);
 -- insert/delete restricted to role 'owner' (second helper: is_owner(ws)).
 ```
@@ -370,13 +389,13 @@ create policy files_write  on files for all
 ## 6. Storage layout (R2)
 
 ```
-{workspace_id}/originals/{file_id}/{filename}     -- uploads AND Dropbox (Chooser direct links aren't re-fetchable)
-{workspace_id}/previews/{file_id}/thumb.webp      -- 256px long edge
-{workspace_id}/previews/{file_id}/medium.webp     -- 1024px long edge
+{workspace_id}/originals/{file_id}/{filename}     -- per FILE (physical); uploads AND Dropbox
+{workspace_id}/previews/{asset_id}/thumb.webp     -- per ASSET; 256px long edge
+{workspace_id}/previews/{asset_id}/medium.webp    -- per ASSET; 1024px long edge
 {workspace_id}/exports/{job_id}.zip               -- export bundles (presigned GET, cleanup later)
 ```
 
-- Uploads: browser → `POST /api/uploads/presign` → presigned PUT direct to R2 → `POST /api/files/complete`. Multipart (>100 MB) uses a **fixed chunk size (~50 MiB; all parts equal except the last)**; bucket CORS must set `ExposeHeaders: ["ETag"]` (else the browser can't complete multipart); no unsigned headers on part PUTs; no POST-policy uploads (unsupported on R2). Max presigned TTL 7 days.
+- Uploads: browser → `POST /api/uploads/presign` → presigned PUT direct to R2 → `POST /api/uploads/complete`. Multipart (>100 MB) uses a **fixed chunk size (~50 MiB; all parts equal except the last)**; bucket CORS must set `ExposeHeaders: ["ETag"]` (else the browser can't complete multipart); no unsigned headers on part PUTs; no POST-policy uploads (unsupported on R2). Max presigned TTL 7 days.
 - Cloud-linked files (**Drive only**): originals never copied; worker streams bytes at processing time (Drive `files.get?alt=media`), keeps only previews + derived data. **Dropbox** (Chooser direct links, 4 h TTL) is fetched once at ingest and its original is stored in R2 like an upload — the link can't be refreshed later (ADR 0008).
 - All preview serving via presigned GET or public bucket + Cloudflare CDN — zero egress cost either way.
 
@@ -399,7 +418,7 @@ returning *;
 - **Loop:** poll every 2s when idle; process; update `progress/progress_label/done_items` every N items (Realtime propagates to UI).
 - **Retry:** on error, if `attempts < 3` → `status='queued', run_after = now() + (attempts * interval '2 min')`, else `failed` + `error`.
 - **Reaper:** every 5 min, `running` jobs with `claimed_at < now() - interval '15 min'` → back to `queued` (crash recovery).
-- **Idempotency:** handlers upsert by natural keys (`file_previews` PK, `captions (file_id,lang,style)`, `embeddings (file_id,kind,chunk_index)`) — safe to re-run.
+- **Idempotency:** handlers upsert by natural keys (`asset_previews` PK, `captions (asset_id,lang,style)`, `embeddings (asset_id,kind,chunk_index)`) — safe to re-run.
 - **Rate limiting:** worker-side concurrency cap on Gemini calls (start: 5 parallel) + exponential backoff on 429.
 - Graceful shutdown: finish current item, release job back to `queued`.
 
@@ -407,13 +426,13 @@ returning *;
 
 ## 8. AI pipeline
 
-### 8.1 Ingest (`type='ingest'`, payload: file_ids)
+### 8.1 Ingest (`type='ingest'`, payload: asset_ids)
 Per file: stream bytes → sha256 (dedup check) → EXIF (`exifr`; for RAW use `exiftool-vendored`) → decode:
 - JPEG/PNG/TIFF/WebP → `sharp` previews (thumb 256 / medium 1024, webp).
 - **HEIC:** `sharp` prebuilt binaries exclude HEIC (patents) → decode via **`heic-decode`** (maintained) to raw RGBA → `sharp(buf, {raw})`. ~1–3 s / up to ~200 MB per iPhone HEIC → cap decode concurrency to 1–2. Native fallback if throughput hurts: `@myunisoft/heif-converter`.
 - **RAW (NEF/CR2/ARW):** extract embedded JPEG via `exiftool-vendored` cascade `extractJpgFromRaw → extractPreview → extractThumbnail` (no full RAW decode in MVP) → sharp. NEF/CR2 give full-res; **Sony ARW usually only ~1616×1080** (fine for grid, not full-res display). If extraction fails → mark file `kind='other'`, skip AI.
 - **PDF:** `pdf-parse` v2 (pure Node — text + tables + page screenshots; may remove the poppler system dep; `pdftoppm` kept only as a fallback for malformed PDFs; `mupdf` npm is AGPL — avoid). If empty text (scanned) → send first pages to the analyze model for extraction.
-Write `files.content_hash`, `file_exif`, `file_previews`. Auto-enqueue `analyze` for the batch (MVP default: analyze-on-ingest; per-user config flag later).
+Write `files.content_hash`; on a hash conflict attach the file to the existing asset (no new asset). Write `asset_exif`, `asset_previews`. Auto-enqueue `analyze` for the batch (MVP default: analyze-on-ingest; per-user config flag later).
 
 ### 8.2 Analyze (`type='analyze'`)
 Per photo: medium preview → **`GEMINI_ANALYZE_MODEL`** (default `gemini-3.1-flash-lite`) via **`generateContent` + `responseSchema`** (strict JSON; not the Interactions API — ADR 0007), `media_resolution` per call (medium for tags, high when OCR matters):
@@ -423,26 +442,26 @@ Per photo: medium preview → **`GEMINI_ANALYZE_MODEL`** (default `gemini-3.1-fl
   "ocr_text": "text visible in image, if any",
   "suggested_facts": [{ "text": "...", "basis": "visual|exif" }] }
 ```
-Person-related output restricted to **attributes** (never identity). Store tags (upsert into `tags` + `file_tags`), facts (`status='needs_check'`, except GPS/EXIF-derived → `'likely'`).
+Person-related output restricted to **attributes** (never identity). Store tags (upsert into `tags` + `asset_tags`), facts (`status='needs_check'`, except GPS/EXIF-derived → `'likely'`).
 **Embedding:** `gemini-embedding-2` (GA), input = the image itself, `output_dimensionality=768` (auto-normalized) → `embeddings(kind='image')`. **One `Content` object per image** — multiple `Part`s in one `Content` collapse to a single aggregated vector (silent index corruption); no `task_type` param on embedding-2, frame the task via a text instruction. **No fallback** (`gemini-embedding-001` retires 2026-07-14, incompatible space). Same for PDF: chunk text ~1500 tokens, one `Content` per chunk → `kind='doc_chunk'`.
 Per photo: 1 usage_event `image_analyzed` + 1 `embedding`. Set `files.ai_processed_at`.
 
-### 8.3 Captions (`type='caption'`, payload: file_ids, langs[], style)
+### 8.3 Captions (`type='caption'`, payload: asset_ids, langs[], style)
 Per file × lang: prompt = base template (in `packages/shared/prompts.ts`, per style) + `projects.caption_prompt` (if run in project context) + known metadata (date, GPS label, confirmed facts) + medium preview → text → upsert `captions`. Editing a caption in UI sets `is_edited=true`; regenerate never silently overwrites edited captions (UI confirms).
 
 ### 8.4 Search (route handler, not a job)
 1. `GEMINI_ANALYZE_MODEL` parses the query (structured output via `generateContent`) → `{semantic_text, date_from?, date_to?, place_terms[], tag_terms[], kinds[]}`.
 2. Embed `semantic_text` (same model/space as documents; Embedding 2 → embed query text into the multimodal space).
 3. SQL: cosine similarity over `embeddings` scoped to workspace (+ project filter), joined with metadata filters:
-   - dates → `file_exif.taken_at` range;
-   - places → match `gps_label ILIKE` any place_term OR file has a `place`-category tag matching;
-   - tags → boost/filter via `file_tags`.
-4. Return top-N files with similarity + matched-filter explanation (UI shows *why* it matched).
+   - dates → `asset_exif.taken_at` range;
+   - places → match `gps_label ILIKE` any place_term OR the asset has a `place`-category tag matching;
+   - tags → boost/filter via `asset_tags`.
+4. Return top-N assets with similarity + matched-filter explanation (UI shows *why* it matched).
 Graceful degradation: no GPS in archive (common for pro cameras) → place matching falls back to tags/caption text; note in UI ("location from tags").
 Log `search_query` usage_event. Latency budget: 1 analyze-model call + 1 embed + 1 SQL ≈ well under Vercel limits.
 
 ### 8.5 Export (`type='export'`)
-Payload: file_ids, langs, style. Worker builds ZIP (originals where owned, else medium previews + note) + `captions.csv` (filename, lang, style, text, tags, facts, EXIF) → R2 `exports/` → presigned GET (7 days) in `ai_jobs.payload.result_url`.
+Payload: asset_ids, langs, style. Worker builds ZIP (owned original files where present, else medium previews + note) + `captions.csv` (asset title, lang, style, text, tags, facts, EXIF) → R2 `exports/` → presigned GET (7 days) in `ai_jobs.payload.result_url`.
 
 ### Cost notes (recorded per event; re-verify current prices at Phase 2)
 - `gemini-3.1-flash-lite` analyze/caption: ≈ $0.31–0.35 per 1000 images ($0.25/M in, $1.50/M out; ~half at `media_resolution=medium`, ~half again via Batch API).
@@ -459,21 +478,21 @@ All routes authed (Supabase session); workspace derived from membership.
 | Method & path | Purpose |
 |---|---|
 | `POST /api/uploads/presign` | `{filename,mime,size}` → `{uploadUrl, r2Key}` (fixed-size multipart >100 MB; server orchestrates Create/Complete; CORS `ExposeHeaders:[ETag]`) |
-| `POST /api/files/complete` | after PUT: create `files` row(s) → enqueue `ingest` |
-| `GET  /api/files` | list (workspace or `?projectId=`), cursor-paginated, incl. preview URLs |
-| `GET  /api/files/:id` | file + exif + tags + captions + facts |
-| `PATCH /api/files/:id` | rename, status |
+| `POST /api/uploads/complete` | after PUT: create `assets` + `files` row(s) → enqueue `ingest` |
+| `GET  /api/assets` | list (workspace or `?projectId=`), cursor-paginated, incl. preview URLs |
+| `GET  /api/assets/:id` | asset + files + exif + tags + captions + facts |
+| `PATCH /api/assets/:id` | rename (title), status |
 | `GET  /api/canvas` | aggregates for neural view: sources → folders → counts + first-K tile previews (lazy-load the rest) |
 | `PUT  /api/canvas/layout` | persist `canvas_layouts` (scope, overrides, organize_mode) |
 | `GET/POST /api/sources/:provider/oauth` | OAuth start + callback; store encrypted tokens |
-| `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
+| `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `assets` + `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
 | `POST /api/projects` · `GET /api/projects` · `PATCH /api/projects/:id` | CRUD incl. `caption_prompt` |
-| `POST /api/projects/:id/files` · `DELETE .../files/:fileId` | M:N add/remove |
-| `POST /api/jobs` | `{type:'analyze'|'caption'|'export', fileIds|projectId, options}` → insert `ai_jobs` |
+| `POST /api/projects/:id/assets` · `DELETE .../assets/:assetId` | M:N add/remove |
+| `POST /api/jobs` | `{type:'analyze'|'caption'|'export', assetIds|projectId, options}` → insert `ai_jobs` |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |
 | `GET  /api/search?q=&projectId=` | §8.4 |
 | `PATCH /api/captions/:id` | edit text (`is_edited=true`) |
-| `POST /api/files/:id/tags` · `DELETE` | manual tags (`source='manual'`) |
+| `POST /api/assets/:id/tags` · `DELETE` | manual tags (`source='manual'`) |
 | `PATCH /api/facts/:id` | confirm / set status |
 
 Contracts as zod schemas in `packages/shared` (single source for web + worker). `docs/openapi.yaml` generated later — not an MVP gate.
@@ -486,8 +505,8 @@ The ported mockup's `lib/api.ts` is the swap point. Mapping:
 
 | Mock fn | Real implementation |
 |---|---|
-| `getPhotos()` | `GET /api/files` (paginated) |
-| `getPhoto(id)` | `GET /api/files/:id` |
+| `getPhotos()` → **`getAssets()`** | `GET /api/assets` (paginated) |
+| `getPhoto(id)` → **`getAsset(id)`** | `GET /api/assets/:id` |
 | `getProjects()` | `GET /api/projects` |
 | `getGroups()/getSources()` | derived from `GET /api/canvas` aggregates |
 | bulk-AI fake progress | `POST /api/jobs` + Realtime **Broadcast** subscription (private `ai_jobs` channel per workspace) |
@@ -497,7 +516,7 @@ New pieces: Supabase auth screens/guard; upload flow (presign → PUT → comple
 
 **Canvas at scale (mandatory):** the mockup renders 235 nodes; real archives are 10k–30k. Neural view must consume `GET /api/canvas` aggregates — render hubs/folders with counts, materialize individual tiles only for expanded folders / current viewport, cap simultaneously-mounted tiles (~300) and virtualize. "Organize" modes (`source|date|place|similarity`) recluster client-side from aggregate data; `similarity` uses server-provided cluster ids (post-MVP: k-means over embeddings; MVP may ship `source|date|place` only).
 
-**Mockup quirks to replace with real data:** timeline bucketing by `hash(id)%6` → real `file_exif.taken_at`; identical EXIF block → real per-file EXIF; cosmetic bulk toggles → real job options; no-op Regenerate → real caption job.
+**Mockup quirks to replace with real data:** timeline bucketing by `hash(id)%6` → real `asset_exif.taken_at`; identical EXIF block → real per-asset EXIF; cosmetic bulk toggles → real job options; no-op Regenerate → real caption job. The mockup `Photo` type becomes `Asset`.
 
 ---
 
@@ -544,6 +563,8 @@ TOKEN_ENC_KEY · WORKER_ID · GEMINI_CONCURRENCY=5
 ## 13. Out of MVP (explicit)
 
 Live Drive/Dropbox sync (broad scopes + CASA) · **Drive folder sync** (`drive.readonly` + CASA) · **Dropbox folder import / full-Dropbox OAuth** (production-review clock) · video/audio + transcription · smart event clustering (timeline = chronological by `taken_at`) · face identification / person naming · billing & credit enforcement (tracking only) · public sharing links · NAS/iCloud/Lightroom connectors · similarity organize-mode server clustering (may slip to fast-follow) · OpenAPI doc generation.
+
+**Multi-representation assets** (e.g. RAW + PSD + exports grouped as one asset) are supported by the schema (asset → many files) but the MVP UI treats most assets as single-representation; the multi-rep management UI is post-MVP.
 
 ---
 
