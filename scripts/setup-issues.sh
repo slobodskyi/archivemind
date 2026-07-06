@@ -190,4 +190,25 @@ create_issue "Minimal workspace invite (owner adds member by email)" \
 $'Teams are in the schema (memberships) but the MVP has no invite UI. Minimal path (spec §4/§5).\n\n- [ ] owner adds an existing user to the workspace by email → `memberships` row (role editor)\n- [ ] invitee sees the shared workspace (RLS already scopes by membership)\n- [ ] full invite/email flow is post-MVP' \
   "area:data,size:S,fast-follow"
 
+# ═══ Setup-audit gaps (2026-07-06) — see PLAN §4 ═══
+create_issue "Test strategy + CI wiring" \
+$'CI today is lint + typecheck + build only (spec §11) — no automated tests. Decide the approach and wire it in before shipping upload → ingest → RLS (PLAN §4).\n\n- [ ] decide test layers: worker handler unit tests, RLS policy tests, API contract tests (zod from `packages/shared`)\n- [ ] add to the CI `checks` job (`turbo run test`)\n- [ ] this is a decision to make, not a default — capture the choice in an ADR' \
+  "phase:0,area:infra,size:M" "$M1"
+
+create_issue "Decide dev vs prod environments" \
+$'Spec §11 leaves local-vs-separate-project as an open "or"; issue #4 provisions one instance of each service. Decide and provision explicitly (PLAN §4).\n\n- [ ] pick dev DB story (local Supabase vs a separate `dev` project) + a `prod` project\n- [ ] mirror R2 buckets / Railway envs per environment\n- [ ] document the split so migrations owner knows where each lands' \
+  "phase:0,area:infra,size:S" "$M1"
+
+create_issue "Source real sample corpora for QA" \
+$'M2 and the Phase-1/Phase-7 QA issues all gate on real dirty files, but gathering them is unowned (PLAN §4). Blocks a milestone if left late.\n\n- [ ] 500+ mixed real files; real-iPhone HEIC batches; NEF/CR2/ARW from target cameras; no-EXIF samples\n- [ ] store somewhere both devs can reach (not in git)\n- [ ] feeds #9 (HEIC/RAW QA) and #28 (final dirty-archive QA)' \
+  "phase:1,area:worker,size:S" "$M2"
+
+create_issue "Clean the lib/api.ts seam-leak sites" \
+$'Five modules import `lib/mock-data.ts` directly, bypassing the `lib/api.ts` seam (ADR 0002 known-debt; PLAN §4). Clean as their features go real in Phase 1.\n\n- [ ] `lib/format.ts`, `lib/layout.ts`, `hooks/useWorkspace.ts`, `components/map/MapCanvas.tsx`, `components/toolbar/AddToProjectPopover.tsx`\n- [ ] route their lookups through `lib/api.ts`\n- [ ] add a lint guard against new direct `mock-data` imports outside `lib/api.ts`' \
+  "phase:1,area:ui,size:S" "$M2"
+
+create_issue "Phase-2 analyze-model re-verify" \
+$'Spec §14 item 3 / PLAN §3+§4. Gemini surface moves fast; confirm before building the analyze handler. Issue #9 covers only HEIC/RAW QA, so this had no home.\n\n- [ ] confirm `gemini-3.1-flash-lite` id + price + `generateContent`/`responseSchema` shape against pinned `@google/genai`\n- [ ] evaluate `gemini-3.5-flash` as the newer candidate\n- [ ] update `GEMINI_ANALYZE_MODEL` default + ADR 0010 with the decision' \
+  "phase:2,area:ai,size:S" "$M3"
+
 echo "✓ Done."

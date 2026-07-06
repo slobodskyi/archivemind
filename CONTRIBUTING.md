@@ -16,16 +16,11 @@ can't infer on its own.
 ## Branch protection
 `main` is protected by a GitHub repository ruleset (not classic branch
 protection): CI (`checks` — lint, typecheck, build) must pass, and force-pushes
-and branch deletion are blocked. The ruleset's **bypass list** lets listed
-maintainers push to `main` directly — treat that as an escape hatch, not the
-norm. The default stays: branch → PR → green CI → review → squash-merge. See
-`docs/decisions/0006-branch-protection-via-ruleset.md`.
-
-> ⚠️ **Bypass list is currently one person.** The live ruleset names only
-> `slobodskyi`; ADR 0006's intent is for *both* maintainers to have equal push
-> rights. Until `gangsta-george` is added to the ruleset bypass list (repo
-> Settings → Rules → `main`), they can only land changes via PR. Reconcile this
-> before both devs are active.
+and branch deletion are blocked. Only the repo admin (`slobodskyi`) is on the
+ruleset's **bypass list**, as a break-glass escape hatch — everyone else,
+including `gangsta-george`, lands changes through the default flow: branch → PR →
+green CI → review → squash-merge. That's by design (nobody bypasses CI as a
+matter of routine). See `docs/decisions/0006-branch-protection-via-ruleset.md`.
 
 ## Parallel work with git worktrees
 Claude Code supports isolated sessions via worktrees, so two Claude sessions
