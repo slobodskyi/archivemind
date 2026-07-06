@@ -48,4 +48,5 @@ next-env.d.ts
 # per-developer Claude Code state — see AGENTS.md / CONTRIBUTING.md
 .claude/worktrees/
 .claude/settings.local.json
+.claude/launch.json
 CLAUDE.local.md
