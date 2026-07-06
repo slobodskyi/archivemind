@@ -503,3 +503,83 @@ export function senseBubbles(photos: Photo[]): SenseBubble[] {
     items: byGroup[s.key] ?? [],
   }));
 }
+
+// ── Expand overlays (Sense topic / Map marker drill-down) ────────────────────
+// Files fan out from a bubble/marker toward free space, connected by thin
+// Bezier edges. Shared shape so Sense (canvas space) and Map (screen space)
+// render identically. Deterministic: no Math.random — curve seeded on id hash.
+
+export interface ExpandFile {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  src: string;
+}
+
+export interface ExpandOverlay {
+  edges: EdgePath[];
+  files: ExpandFile[];
+}
+
+/**
+ * Fan `items` out from an origin, spread ±0.9rad around `ang`, at radius `R`.
+ * `ex,ey` is the edge origin on the bubble/marker surface. `overrides` lets a
+ * dragged file pin to an absolute position. Pure — same inputs, same output.
+ */
+export function fanOut(
+  items: Photo[],
+  originX: number,
+  originY: number,
+  ang: number,
+  R: number,
+  ex: number,
+  ey: number,
+  fileW: number,
+  stroke: string,
+  op: number,
+  overrides: Record<string, { x: number; y: number }>,
+): ExpandOverlay {
+  const n = items.length;
+  const edges: EdgePath[] = [];
+  const files: ExpandFile[] = [];
+  items.forEach((p, i) => {
+    const fang = ang + (n > 1 ? -0.9 + (i / (n - 1)) * 1.8 : 0);
+    const w = fileW;
+    const h = Math.round((p.h * w) / p.w);
+    const fx0 = originX + Math.cos(fang) * R;
+    const fy0 = originY + Math.sin(fang) * R;
+    const ov = overrides[p.id];
+    const fx = ov ? ov.x + w / 2 : fx0;
+    const fy = ov ? ov.y + h / 2 : fy0;
+    files.push({ id: p.id, x: fx - w / 2, y: fy - h / 2, w, h, src: `https://picsum.photos/seed/${p.seed}/200/200` });
+    edges.push({ d: mkBez(ex, ey, fx, fy, hash(p.id), 0.18), stroke, op, w: 1 });
+  });
+  return { edges, files };
+}
+
+/** Sense topic drill-down: files fan out from a bubble, away from the pack centroid. */
+export function senseExpandLayout(
+  bubbles: SenseBubble[],
+  key: string,
+  overrides: Record<string, { x: number; y: number }>,
+): ExpandOverlay | null {
+  const node = bubbles.find((b) => b.key === key);
+  if (!node || bubbles.length === 0) return null;
+  let cxAll = 0;
+  let cyAll = 0;
+  bubbles.forEach((b) => {
+    cxAll += b.x;
+    cyAll += b.y;
+  });
+  cxAll /= bubbles.length;
+  cyAll /= bubbles.length;
+  const dx0 = node.x - cxAll;
+  const dy0 = node.y - cyAll;
+  const ang = Math.abs(dx0) < 0.01 && Math.abs(dy0) < 0.01 ? -Math.PI / 2 : Math.atan2(dy0, dx0);
+  const R = node.size / 2 + 92;
+  const ex = node.x + Math.cos(ang) * (node.size / 2);
+  const ey = node.y + Math.sin(ang) * (node.size / 2);
+  return fanOut(node.items, node.x, node.y, ang, R, ex, ey, 96, node.color, 0.35, overrides);
+}

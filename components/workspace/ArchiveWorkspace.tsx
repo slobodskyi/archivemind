@@ -84,19 +84,14 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         {ws.isSenseView && (
           <SenseView
             bubbles={ws.senseBubbles}
-            onOpenBubble={(sb) =>
-              ws.openPreview(
-                "sense",
-                sb.label,
-                sb.items.map((p) => ({
-                  src: `https://picsum.photos/seed/${p.seed}/200/200`,
-                  onClick: () => {
-                    ws.closePreview();
-                    ws.openDrawer(p.id);
-                  },
-                })),
-              )
-            }
+            expandedKey={ws.expanded.kind === "sense" ? ws.expanded.key : null}
+            expand={ws.senseExpand}
+            hoveredId={ws.hoveredId}
+            onToggle={ws.toggleSenseExpand}
+            onExpandFileDown={ws.onExpandFileDown}
+            setHover={ws.setHover}
+            openDrawer={ws.openDrawer}
+            deletePhoto={ws.deletePhoto}
           />
         )}
       </PanZoomCanvas>

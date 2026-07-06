@@ -15,7 +15,9 @@ import {
   fitView,
   layoutNeural,
   senseBubbles as computeSenseBubbles,
+  senseExpandLayout as computeSenseExpand,
   timelineLayout as computeTimelineLayout,
+  type ExpandOverlay,
   type NeuralLayout,
   type NodeOverrides,
   type SenseBubble,
@@ -77,6 +79,8 @@ interface WorkspaceState {
   helpOpen: boolean;
   imp: ImpState;
   preview: PreviewState;
+  expanded: { kind: "sense" | "map" | null; key: string | null };
+  expandOverrides: Record<string, { x: number; y: number }>;
   projCurrent: ProjectKey | "all";
   photos: Photo[];
   selectedIds: string[];
@@ -142,6 +146,15 @@ type DragSession =
       sy: number;
       orig: { x: number; y: number };
       bounds: TlBounds;
+      moved: boolean;
+    }
+  | {
+      mode: "expandFile";
+      id: string;
+      sx: number;
+      sy: number;
+      orig: { x: number; y: number };
+      space: "canvas" | "map";
       moved: boolean;
     }
   | null;
@@ -266,6 +279,13 @@ export interface Workspace {
   openPreview: (kind: "map" | "sense", key: string, items: PreviewItem[]) => void;
   closePreview: () => void;
 
+  // Expand overlays (sense / map marker drill-down)
+  expanded: { kind: "sense" | "map" | null; key: string | null };
+  senseExpand: ExpandOverlay | null;
+  toggleSenseExpand: (key: string) => void;
+  closeExpand: () => void;
+  onExpandFileDown: (e: React.PointerEvent, id: string, x: number, y: number, space: "canvas" | "map") => void;
+
   // Timeline
   timelineLayout: TimelineLayout;
   onTlDown: (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => void;
@@ -311,6 +331,8 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     helpOpen: false,
     imp: { open: false, at: "rail" },
     preview: { open: false, kind: null, key: null, items: [] },
+    expanded: { kind: null, key: null },
+    expandOverrides: {},
     projCurrent: "all",
     photos: initialPhotos,
     selectedIds: [],
@@ -489,6 +511,15 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [],
   );
 
+  const onExpandFileDown = useCallback(
+    (e: React.PointerEvent, id: string, x: number, y: number, space: "canvas" | "map") => {
+      e.stopPropagation();
+      e.preventDefault();
+      dragRef.current = { mode: "expandFile", id, sx: e.clientX, sy: e.clientY, orig: { x, y }, space, moved: false };
+    },
+    [],
+  );
+
   const move = useCallback(
     (e: PointerEvent) => {
       const d = dragRef.current;
@@ -521,6 +552,12 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         nx = Math.min(d.bounds.maxX, Math.max(d.bounds.minX, nx));
         ny = Math.min(d.bounds.maxY, Math.max(d.bounds.minY, ny));
         setState({ tlOverrides: { ...s.tlOverrides, [d.id]: { x: nx, y: ny } } });
+      } else if (d.mode === "expandFile") {
+        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        const div = d.space === "canvas" ? s.scale : 1;
+        const dx = (e.clientX - d.sx) / div,
+          dy = (e.clientY - d.sy) / div;
+        setState({ expandOverrides: { ...s.expandOverrides, [d.id]: { x: d.orig.x + dx, y: d.orig.y + dy } } });
       } else if (d.mode === "click") {
         if (Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3) d.moved = true;
         if (d.moved && s.view === "neural") {
@@ -616,6 +653,18 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   // ── Simple actions ──────────────────────────────────────────────────────
 
   const setHover = useCallback((id: string | null) => setState({ hoveredId: id }), [setState]);
+  const closeExpand = useCallback(
+    () => setState({ expanded: { kind: null, key: null }, expandOverrides: {} }),
+    [setState],
+  );
+  const toggleSenseExpand = useCallback(
+    (key: string) => {
+      const s = stateRef.current;
+      if (s.expanded.kind === "sense" && s.expanded.key === key) closeExpand();
+      else setState({ expanded: { kind: "sense", key }, expandOverrides: {} });
+    },
+    [setState, closeExpand],
+  );
   const closeDrawer = useCallback(() => setState({ drawerId: null }), [setState]);
   const setLang = useCallback((l: Language) => setState({ drawerLang: l }), [setState]);
   const setStyle = useCallback((st: CaptionStyle) => setState({ drawerStyle: st }), [setState]);
@@ -693,7 +742,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   const setView = useCallback(
     (v: ViewMode) => {
-      setState({ view: v, marquee: null, selectedIds: [] });
+      setState({ view: v, marquee: null, selectedIds: [], expanded: { kind: null, key: null }, expandOverrides: {} });
       setTimeout(() => {
         const s = stateRef.current;
         const photosForFit = filteredPhotos(s.photos, s.projCurrent);
@@ -771,7 +820,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const selectProject = useCallback(
     (k: ProjectKey | "all") => {
       const view: ViewMode = k === "all" ? "neural" : "timeline";
-      setState({ projCurrent: k, projOpen: false, view, selectedIds: [] });
+      setState({ projCurrent: k, projOpen: false, view, selectedIds: [], expanded: { kind: null, key: null }, expandOverrides: {} });
       setTimeout(() => {
         const s = stateRef.current;
         const photosForFit = filteredPhotos(s.photos, k);
@@ -966,11 +1015,12 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();
       else if (s.preview.open) closePreview();
+      else if (s.expanded.kind) closeExpand();
       else if (s.chatOpen) closeChat();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closePreview, closeChat]);
+  }, [closeDrawer, closeSearch, closeHelp, closePreview, closeExpand, closeChat]);
 
   useEffect(() => {
     return () => {
@@ -1037,6 +1087,13 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   );
 
   const senseBubblesResult = useMemo(() => computeSenseBubbles(projectPhotos), [projectPhotos]);
+  const senseExpand = useMemo(
+    () =>
+      state.expanded.kind === "sense" && state.expanded.key
+        ? computeSenseExpand(senseBubblesResult, state.expanded.key, state.expandOverrides)
+        : null,
+    [state.expanded, state.expandOverrides, senseBubblesResult],
+  );
 
   const bulkShow = isTimelineView && selectedIds.size > 0;
   const bulkThumbs = useMemo(() => {
@@ -1150,6 +1207,11 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     onTlDown,
 
     senseBubbles: senseBubblesResult,
+    senseExpand,
+    expanded: state.expanded,
+    toggleSenseExpand,
+    closeExpand,
+    onExpandFileDown,
 
     bulkShow,
     bulkIdle: !state.proc.active,
