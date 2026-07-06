@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Space_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const spaceMono = Space_Mono({
-  variable: "--font-space-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "700"],
+  weight: ["300", "400", "500"],
   display: "swap",
 });
 
@@ -20,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={spaceMono.variable}>
+    <html lang="en" className={inter.variable}>
       <body>{children}</body>
     </html>
   );

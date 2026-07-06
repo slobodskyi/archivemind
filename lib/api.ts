@@ -1,5 +1,5 @@
-import type { GroupMeta, Photo, Project, SourceMeta } from "@/types";
-import { GROUP_LIST, PHOTOS, PROJECTS, SOURCE_LIST } from "./mock-data";
+import type { GroupMeta, Photo } from "@/types";
+import { GROUP_LIST, PHOTOS } from "./mock-data";
 
 /**
  * The single data-access layer. Every component/hook reads domain records
@@ -16,14 +16,6 @@ export async function getPhoto(id: string): Promise<Photo | null> {
   return PHOTOS.find((p) => p.id === id) ?? null;
 }
 
-export async function getProjects(): Promise<Project[]> {
-  return PROJECTS;
-}
-
 export async function getGroups(): Promise<GroupMeta[]> {
   return GROUP_LIST;
-}
-
-export async function getSources(): Promise<SourceMeta[]> {
-  return SOURCE_LIST;
 }
