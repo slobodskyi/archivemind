@@ -22,7 +22,6 @@ import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import SearchModal from "@/components/modals/SearchModal";
 import HelpModal from "@/components/modals/HelpModal";
 import ImportDropdown from "@/components/modals/ImportDropdown";
-import PreviewModal from "@/components/modals/PreviewModal";
 import Toast from "@/components/modals/Toast";
 
 interface ArchiveWorkspaceProps {
@@ -84,19 +83,14 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         {ws.isSenseView && (
           <SenseView
             bubbles={ws.senseBubbles}
-            onOpenBubble={(sb) =>
-              ws.openPreview(
-                "sense",
-                sb.label,
-                sb.items.map((p) => ({
-                  src: `https://picsum.photos/seed/${p.seed}/200/200`,
-                  onClick: () => {
-                    ws.closePreview();
-                    ws.openDrawer(p.id);
-                  },
-                })),
-              )
-            }
+            expandedKey={ws.expanded.kind === "sense" ? ws.expanded.key : null}
+            expand={ws.senseExpand}
+            hoveredId={ws.hoveredId}
+            onToggle={ws.toggleSenseExpand}
+            onExpandFileDown={ws.onExpandFileDown}
+            setHover={ws.setHover}
+            openDrawer={ws.openDrawer}
+            deletePhoto={ws.deletePhoto}
           />
         )}
       </PanZoomCanvas>
@@ -107,13 +101,17 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         <MapView
           photos={ws.projectPhotos}
           contentLeft={contentLeft}
-          onOpenPreview={ws.openPreview}
-          onClosePreview={ws.closePreview}
-          onOpenDrawer={ws.openDrawer}
+          expanded={ws.expanded}
+          expandOverrides={ws.expandOverrides}
+          hoveredId={ws.hoveredId}
+          onToggleMapExpand={ws.toggleMapExpand}
+          onCloseExpand={ws.closeExpand}
+          onExpandFileDown={ws.onExpandFileDown}
+          setHover={ws.setHover}
+          openDrawer={ws.openDrawer}
+          deletePhoto={ws.deletePhoto}
         />
       )}
-
-      <PreviewModal open={ws.previewOpen} title={ws.previewTitle} items={ws.previewItems} onClose={ws.closePreview} />
 
       <AppHeader
         projLabel={ws.projLabel}
