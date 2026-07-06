@@ -19,7 +19,7 @@ protection): CI (`checks` — lint, typecheck, build) must pass, and force-pushe
 and branch deletion are blocked. Both maintainers are on the ruleset's bypass
 list, so either can push to `main` directly — but treat that as an escape hatch.
 The default stays: branch → PR → green CI → review → squash-merge. See
-`docs/decisions/0006-branch-protection-via-ruleset.md`.
+`docs/decisions/0007-branch-protection-via-ruleset.md`.
 
 ## Parallel work with git worktrees
 Claude Code supports isolated sessions via worktrees, so two Claude sessions

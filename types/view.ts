@@ -1,3 +1,3 @@
-export type ViewMode = "neural" | "timeline" | "map" | "sense";
+export type ViewMode = "canvas" | "timeline" | "map" | "smart";
 
 export type Tool = "select" | "hand";
