@@ -19,9 +19,8 @@ export default function AddToProjectPopover({ open, onClose, onSelect, onCreateN
       <div
         style={{
           position: "absolute",
-          bottom: 74,
-          left: "50%",
-          transform: "translateX(-50%)",
+          left: 76,
+          bottom: 20,
           width: 260,
           background: "rgba(18,18,18,.97)",
           border: "1px solid var(--bdh)",

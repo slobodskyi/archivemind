@@ -41,9 +41,9 @@ export default function ImportDropdown({ open, onUpload }: ImportDropdownProps) 
     <div
       style={{
         position: "absolute",
-        left: "50%",
-        bottom: 140,
-        transform: "translateX(-50%)",
+        left: 76,
+        top: "50%",
+        transform: "translateY(-50%)",
         width: 260,
         background: "rgba(20,20,20,.94)",
         border: "1px solid var(--bd)",
