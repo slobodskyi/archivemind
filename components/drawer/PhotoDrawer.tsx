@@ -14,6 +14,8 @@ interface PhotoDrawerProps {
   lang: Language;
   style: CaptionStyle;
   copyLabel: string;
+  /** Shifts the drawer left so it sits beside (not under) an open chat panel. */
+  right?: number;
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
@@ -32,6 +34,7 @@ export default function PhotoDrawer({
   lang,
   style,
   copyLabel,
+  right = 0,
   onPrev,
   onNext,
   onClose,
@@ -50,7 +53,7 @@ export default function PhotoDrawer({
       style={{
         position: "absolute",
         top: 52,
-        right: 0,
+        right,
         bottom: 0,
         width: 410,
         background: "var(--bg-sf)",
@@ -58,7 +61,7 @@ export default function PhotoDrawer({
         boxShadow: "-16px 0 48px rgba(0,0,0,.5)",
         zIndex: 45,
         transform: sheet,
-        transition: "transform .25s cubic-bezier(.22,1,.36,1)",
+        transition: "transform .25s cubic-bezier(.22,1,.36,1), right .22s cubic-bezier(.22,1,.36,1)",
         overflowY: "auto",
       }}
     >

@@ -4,6 +4,7 @@ import type { Photo } from "@/types";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
+import FrameOverlay from "@/components/canvas/FrameOverlay";
 import NeuralView from "@/components/canvas/NeuralView";
 import TimelineView from "@/components/canvas/TimelineView";
 import TimelineHeader from "@/components/canvas/TimelineHeader";
@@ -12,10 +13,11 @@ import MapView from "@/components/map/MapView";
 import AppHeader from "@/components/header/AppHeader";
 import ViewTabs from "@/components/header/ViewTabs";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
+import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
-import LeftSidebar from "@/components/sidebar/LeftSidebar";
 import ChatPanel from "@/components/chat/ChatPanel";
 import BottomToolbar from "@/components/toolbar/BottomToolbar";
+import Minimap from "@/components/toolbar/Minimap";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
@@ -30,10 +32,6 @@ interface ArchiveWorkspaceProps {
 
 export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProps) {
   const ws = useWorkspace(initialPhotos);
-
-  const showCanvasTools = ws.view !== "map" && ws.view !== "timeline";
-  const sidebarW = ws.sidebarExpanded ? 220 : 52;
-  const contentLeft = sidebarW + (ws.chatOpen ? 320 : 0);
 
   const sendHelpTicket = () => {
     ws.closeHelp();
@@ -59,6 +57,9 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         canvasTransform={ws.canvasTransform}
         marquee={ws.marquee}
       >
+        {!ws.isMapView && (
+          <FrameOverlay frames={ws.frames} draft={ws.frameDraft} onDeleteFrame={ws.deleteFrame} />
+        )}
         {ws.isNeural && (
           <NeuralView
             layout={ws.neuralLayout}
@@ -100,7 +101,8 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
       {ws.isMapView && (
         <MapView
           photos={ws.projectPhotos}
-          contentLeft={contentLeft}
+          contentLeft={ws.contentLeft}
+          drawerRight={ws.drawerRight}
           expanded={ws.expanded}
           expandOverrides={ws.expandOverrides}
           hoveredId={ws.hoveredId}
@@ -110,16 +112,35 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
           setHover={ws.setHover}
           openDrawer={ws.openDrawer}
           deletePhoto={ws.deletePhoto}
+          onMapReady={ws.registerMapApi}
+          onZoomChange={ws.onMapZoomChange}
         />
       )}
 
       <AppHeader
+        isAll={ws.projCurrent === "all"}
         projLabel={ws.projLabel}
-        zoomPct={ws.zoomPct}
-        onZoomReset={ws.onZoomReset}
+        onRootClick={ws.projCurrent === "all" ? ws.openProj : () => ws.selectProject("all")}
         onOpenProj={ws.openProj}
+        showZoomControl={!ws.isTimelineView}
+        zoomPct={ws.zoomPct}
+        onToggleZoomMenu={ws.toggleZoomMenu}
+        canUndo={ws.canUndo}
+        canRedo={ws.canRedo}
+        onUndo={ws.undo}
+        onRedo={ws.redo}
+        onOpenHelp={ws.openHelp}
+        onFlashToast={ws.flashToast}
         onOpenAcct={ws.openAcct}
         viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
+      />
+
+      <ZoomDropdown
+        open={ws.zoomMenuOpen}
+        zoomPct={ws.zoomPct}
+        onClose={ws.closeZoomMenu}
+        onSelectPct={ws.setZoomPct}
+        onFit={ws.onFit}
       />
 
       <ProjectDropdown
@@ -133,21 +154,8 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
 
       <AccountDropdown open={ws.acctOpen} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />
 
-      <LeftSidebar
-        expanded={ws.sidebarExpanded}
-        onToggle={ws.toggleSidebar}
-        chatOpen={ws.chatOpen}
-        searchOpen={ws.search}
-        onOpenSearch={ws.openSearch}
-        onToggleChat={ws.toggleChat}
-        onOpenHelp={ws.openHelp}
-        photoCount={ws.photos.length}
-        onFlashToast={ws.flashToast}
-      />
-
       <ChatPanel
         open={ws.chatOpen}
-        sidebarW={sidebarW}
         msgs={ws.chatMsgs}
         input={ws.chatInput}
         onClose={ws.closeChat}
@@ -158,17 +166,26 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
 
       <BottomToolbar
         tool={ws.tool}
-        showCanvasTools={showCanvasTools}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
+        searchOpen={ws.search}
+        chatOpen={ws.chatOpen}
+        bulkPanelOpen={ws.bulkPanelOpen}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
+        onFrameTool={ws.toolFrame}
+        onOpenSearch={ws.openSearch}
+        onToggleChat={ws.toggleChat}
+        onToggleBulkPanel={ws.toggleBulkPanel}
+        onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
       />
+
+      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />
 
       <AddToProjectPopover
         open={ws.addProjOpen}
@@ -206,6 +223,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         lang={ws.drawerLang}
         style={ws.drawerStyle}
         copyLabel={ws.copyLabel}
+        right={ws.drawerRight}
         onPrev={() => ws.navDrawer(-1)}
         onNext={() => ws.navDrawer(1)}
         onClose={ws.closeDrawer}

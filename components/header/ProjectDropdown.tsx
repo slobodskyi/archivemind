@@ -28,7 +28,7 @@ export default function ProjectDropdown({ open, isAll, list, onClose, onSelectAl
         style={{
           position: "absolute",
           top: 58,
-          left: 66,
+          left: 14,
           width: 290,
           background: "rgba(18,18,18,.97)",
           border: "1px solid var(--bd)",

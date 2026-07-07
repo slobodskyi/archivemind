@@ -86,14 +86,6 @@ export function PrivacyIcon({ width = 14, height = 14, ...props }: IconProps) {
   );
 }
 
-export function SidebarToggleIcon({ expanded, width = 15, height = 15, ...props }: IconProps & { expanded: boolean }) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      {expanded ? <path d="M15 6l-6 6 6 6" /> : <path d="M9 6l6 6-6 6" />}
-    </svg>
-  );
-}
-
 export function SelectToolIcon({ width = 16, height = 16, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="currentColor" stroke="none" {...props}>
@@ -109,6 +101,35 @@ export function HandToolIcon({ width = 17, height = 17, ...props }: IconProps) {
       <path d="M11 10V4.5a1.5 1.5 0 0 1 3 0V10" />
       <path d="M14 10V5.5a1.5 1.5 0 0 1 3 0V12" />
       <path d="M17 11a1.5 1.5 0 0 1 3 0v3c0 3.5-2.5 6-6.5 6S8 18.5 6.5 16l-1.7-3a1.5 1.5 0 0 1 2.6-1.5L8 13" />
+    </svg>
+  );
+}
+
+export function FrameToolIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 2v20" />
+      <path d="M20 2v20" />
+      <path d="M2 4h20" />
+      <path d="M2 20h20" />
+    </svg>
+  );
+}
+
+export function UndoIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h11a5 5 0 0 1 0 10h-1" />
+    </svg>
+  );
+}
+
+export function RedoIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M15 14l5-5-5-5" />
+      <path d="M20 9H9a5 5 0 0 0 0 10h1" />
     </svg>
   );
 }

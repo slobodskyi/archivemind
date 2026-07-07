@@ -3,7 +3,6 @@ import { SparkleIcon, CloseIcon } from "@/components/icons/icons";
 
 interface ChatPanelProps {
   open: boolean;
-  sidebarW: number;
   msgs: ChatMessage[];
   input: string;
   onClose: () => void;
@@ -36,7 +35,7 @@ function ChevronRight() {
   );
 }
 
-export default function ChatPanel({ open, sidebarW, msgs, input, onClose, onInput, onKey, onSend }: ChatPanelProps) {
+export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, onSend }: ChatPanelProps) {
   if (!open) return null;
   const showSug = msgs.length <= 1;
 
@@ -45,15 +44,15 @@ export default function ChatPanel({ open, sidebarW, msgs, input, onClose, onInpu
       style={{
         position: "absolute",
         top: 52,
-        left: sidebarW,
+        right: 0,
         bottom: 0,
         width: 320,
         background: "var(--bg-sf)",
-        borderRight: "1px solid var(--bd)",
+        borderLeft: "1px solid var(--bd)",
         display: "flex",
         flexDirection: "column",
         zIndex: 37,
-        boxShadow: "8px 0 32px rgba(0,0,0,.35)",
+        boxShadow: "-8px 0 32px rgba(0,0,0,.35)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 13px 11px", borderBottom: "1px solid var(--bd)" }}>
