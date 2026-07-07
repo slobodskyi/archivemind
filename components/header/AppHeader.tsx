@@ -1,20 +1,71 @@
 import type { ReactNode } from "react";
-import { ChevronDownIcon, ShareIcon } from "@/components/icons/icons";
+import {
+  ChevronDownIcon,
+  ShareIcon,
+  UndoIcon,
+  RedoIcon,
+  LogsIcon,
+  HelpIcon,
+  PrivacyIcon,
+} from "@/components/icons/icons";
 
 interface AppHeaderProps {
-  projLabel?: string;
+  isAll: boolean;
+  projLabel: string;
+  onRootClick: () => void;
+  onOpenProj: () => void;
+  showZoomControl?: boolean;
   zoomPct?: string;
-  onZoomReset?: () => void;
-  onOpenProj?: () => void;
+  onToggleZoomMenu?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onOpenHelp?: () => void;
+  onFlashToast?: (text: string) => void;
   onOpenAcct?: () => void;
   viewTabs?: ReactNode;
 }
 
+function UtilButton({ label, icon, onClick }: { label: string; icon: ReactNode; onClick?: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className="tw"
+      style={{
+        display: "flex",
+        width: 30,
+        height: 30,
+        alignItems: "center",
+        justifyContent: "center",
+        border: 0,
+        borderRadius: 2,
+        background: "transparent",
+        color: "var(--t2)",
+        cursor: "pointer",
+      }}
+    >
+      {icon}
+      <span className="tip">{label}</span>
+    </button>
+  );
+}
+
 export default function AppHeader({
-  projLabel = "All my files",
-  zoomPct = "100%",
-  onZoomReset,
+  isAll,
+  projLabel,
+  onRootClick,
   onOpenProj,
+  showZoomControl = true,
+  zoomPct = "100%",
+  onToggleZoomMenu,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
+  onOpenHelp,
+  onFlashToast,
   onOpenAcct,
   viewTabs,
 }: AppHeaderProps) {
@@ -31,82 +82,139 @@ export default function AppHeader({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "0 14px 0 66px",
+        padding: "0 14px",
         zIndex: 40,
       }}
     >
-      <button
-        onClick={onOpenProj}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          height: 34,
-          padding: "0 11px",
-          background: "var(--bg-sf)",
-          border: "1px solid var(--bd)",
-          borderRadius: 2,
-          color: "var(--t1)",
-          fontSize: 13,
-          fontWeight: 500,
-          fontFamily: "inherit",
-          cursor: "pointer",
-          maxWidth: 250,
-        }}
-      >
-        <div
+      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 340, minWidth: 0 }}>
+        <button
+          onClick={onRootClick}
           style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 2,
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            height: 30,
+            padding: "0 9px",
+            background: isAll ? "var(--bg-sf)" : "transparent",
+            border: 0,
+            borderRadius: 2,
+            color: isAll ? "var(--t1)" : "var(--t2)",
+            fontSize: 13,
+            fontWeight: 500,
+            fontFamily: "inherit",
+            cursor: "pointer",
             flex: "0 0 auto",
           }}
         >
-          {Array.from({ length: 4 }).map((_, i) => (
-            <span
-              key={i}
-              style={{ width: 5, height: 5, borderRadius: 1, background: "var(--t2)" }}
-            />
-          ))}
-        </div>
-        <span
-          style={{
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            textAlign: "left",
-          }}
-        >
-          {projLabel}
-        </span>
-        <ChevronDownIcon />
-      </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, flex: "0 0 auto" }}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <span key={i} style={{ width: 5, height: 5, borderRadius: 1, background: "currentColor", opacity: 0.7 }} />
+            ))}
+          </div>
+          <span style={{ whiteSpace: "nowrap" }}>All my files</span>
+          {isAll && <ChevronDownIcon width={10} height={10} stroke="currentColor" style={{ flex: "0 0 auto", opacity: 0.6 }} />}
+        </button>
+        {!isAll && (
+          <>
+            <span style={{ color: "var(--tm)", fontSize: 13, flex: "0 0 auto" }}>/</span>
+            <button
+              onClick={onOpenProj}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                height: 30,
+                padding: "0 9px",
+                background: "var(--bg-sf)",
+                border: "1px solid var(--bd)",
+                borderRadius: 2,
+                color: "var(--t1)",
+                fontSize: 13,
+                fontWeight: 500,
+                fontFamily: "inherit",
+                cursor: "pointer",
+                minWidth: 0,
+                maxWidth: 220,
+              }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
+              <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />
+            </button>
+          </>
+        )}
+      </div>
 
       {viewTabs}
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button
-          onClick={onZoomReset}
-          aria-label="Reset zoom to fit"
+          onClick={onUndo}
+          title="Undo"
+          aria-label="Undo"
+          disabled={!canUndo}
           style={{
             display: "flex",
-            alignItems: "center",
-            gap: 4,
+            width: 30,
             height: 30,
-            padding: "0 10px",
-            background: "var(--bg-sf)",
-            border: "1px solid var(--bd)",
+            alignItems: "center",
+            justifyContent: "center",
+            border: 0,
             borderRadius: 2,
-            color: "var(--t2)",
-            fontSize: 12,
-            fontFamily: "inherit",
-            cursor: "pointer",
+            background: "transparent",
+            color: canUndo ? "var(--t2)" : "var(--tm)",
+            cursor: canUndo ? "pointer" : "default",
           }}
         >
-          {zoomPct}
-          <ChevronDownIcon width={10} height={10} stroke="currentColor" />
+          <UndoIcon />
         </button>
+        <button
+          onClick={onRedo}
+          title="Redo"
+          aria-label="Redo"
+          disabled={!canRedo}
+          style={{
+            display: "flex",
+            width: 30,
+            height: 30,
+            alignItems: "center",
+            justifyContent: "center",
+            border: 0,
+            borderRadius: 2,
+            background: "transparent",
+            color: canRedo ? "var(--t2)" : "var(--tm)",
+            cursor: canRedo ? "pointer" : "default",
+          }}
+        >
+          <RedoIcon />
+        </button>
+        <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
+        {showZoomControl && (
+          <button
+            onClick={onToggleZoomMenu}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              height: 30,
+              padding: "0 10px",
+              background: "var(--bg-sf)",
+              border: "1px solid var(--bd)",
+              borderRadius: 2,
+              color: "var(--t2)",
+              fontSize: 12,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            {zoomPct}
+            <ChevronDownIcon width={10} height={10} stroke="currentColor" />
+          </button>
+        )}
+        <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
+        <UtilButton label="Logs" icon={<LogsIcon />} onClick={() => onFlashToast?.("Activity log coming soon")} />
+        <UtilButton label="Help" icon={<HelpIcon />} onClick={onOpenHelp} />
+        <UtilButton label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => onFlashToast?.("Privacy Policy coming soon")} />
+        <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
         <button
           style={{
             display: "flex",

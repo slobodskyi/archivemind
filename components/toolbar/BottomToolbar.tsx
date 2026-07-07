@@ -1,13 +1,31 @@
-import { SelectToolIcon, HandToolIcon, AddIcon, FitIcon } from "@/components/icons/icons";
+import type { Tool } from "@/types";
+import {
+  SelectToolIcon,
+  HandToolIcon,
+  FrameToolIcon,
+  SearchIcon,
+  ChatIcon,
+  TagIcon,
+  ExifIcon,
+  AddIcon,
+  FitIcon,
+} from "@/components/icons/icons";
 
 interface BottomToolbarProps {
-  tool?: "select" | "hand";
-  showCanvasTools?: boolean;
+  tool?: Tool;
   showAddToProject?: boolean;
   selCount?: number;
   zoomPct?: string;
+  searchOpen?: boolean;
+  chatOpen?: boolean;
+  bulkPanelOpen?: boolean;
   onSelectTool?: () => void;
   onHandTool?: () => void;
+  onFrameTool?: () => void;
+  onOpenSearch?: () => void;
+  onToggleChat?: () => void;
+  onToggleBulkPanel?: () => void;
+  onExtractExif?: () => void;
   onAdd?: () => void;
   onFit?: () => void;
   onZoomReset?: () => void;
@@ -18,14 +36,54 @@ function Divider() {
   return <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />;
 }
 
+interface TbButtonProps {
+  onClick?: () => void;
+  title: string;
+  active?: boolean;
+  children: React.ReactNode;
+}
+
+function TbButton({ onClick, title, active, children }: TbButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className="am-tb tw"
+      title={title}
+      aria-label={title}
+      style={{
+        display: "flex",
+        width: 34,
+        height: 34,
+        alignItems: "center",
+        justifyContent: "center",
+        border: 0,
+        borderRadius: 2,
+        cursor: "pointer",
+        background: active ? "color-mix(in srgb,var(--ac) 12%,transparent)" : "transparent",
+        color: active ? "var(--ac)" : "var(--t2)",
+      }}
+    >
+      {children}
+      <span className="tip">{title}</span>
+    </button>
+  );
+}
+
 export default function BottomToolbar({
   tool = "select",
-  showCanvasTools = true,
   showAddToProject = false,
   selCount = 0,
   zoomPct = "100%",
+  searchOpen = false,
+  chatOpen = false,
+  bulkPanelOpen = false,
   onSelectTool,
   onHandTool,
+  onFrameTool,
+  onOpenSearch,
+  onToggleChat,
+  onToggleBulkPanel,
+  onExtractExif,
   onAdd,
   onFit,
   onZoomReset,
@@ -35,6 +93,8 @@ export default function BottomToolbar({
   const selColor = tool === "select" ? "#000" : "var(--t2)";
   const handBg = tool === "hand" ? "#fff" : "transparent";
   const handColor = tool === "hand" ? "#000" : "var(--t2)";
+  const frameBg = tool === "frame" ? "#fff" : "transparent";
+  const frameColor = tool === "frame" ? "#000" : "var(--t2)";
 
   return (
     <div
@@ -56,56 +116,92 @@ export default function BottomToolbar({
         zIndex: 35,
       }}
     >
-      {showCanvasTools && (
-        <>
-          <button
-            onClick={onSelectTool}
-            className="am-tb"
-            title="Select"
-            aria-label="Select tool"
-            style={{
-              display: "flex",
-              width: 34,
-              height: 34,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              borderRadius: 2,
-              cursor: "pointer",
-              background: selBg,
-              color: selColor,
-            }}
-          >
-            <SelectToolIcon />
-          </button>
-          <button
-            onClick={onHandTool}
-            className="am-tb"
-            title="Pan"
-            aria-label="Pan tool"
-            style={{
-              display: "flex",
-              width: 34,
-              height: 34,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              borderRadius: 2,
-              cursor: "pointer",
-              background: handBg,
-              color: handColor,
-            }}
-          >
-            <HandToolIcon />
-          </button>
-          <Divider />
-        </>
-      )}
+      <button
+        onClick={onSelectTool}
+        className="am-tb tw"
+        title="Select"
+        aria-label="Select tool"
+        style={{
+          display: "flex",
+          width: 34,
+          height: 34,
+          alignItems: "center",
+          justifyContent: "center",
+          border: 0,
+          borderRadius: 2,
+          cursor: "pointer",
+          background: selBg,
+          color: selColor,
+        }}
+      >
+        <SelectToolIcon />
+        <span className="tip">Select</span>
+      </button>
+      <button
+        onClick={onHandTool}
+        className="am-tb tw"
+        title="Pan"
+        aria-label="Pan tool"
+        style={{
+          display: "flex",
+          width: 34,
+          height: 34,
+          alignItems: "center",
+          justifyContent: "center",
+          border: 0,
+          borderRadius: 2,
+          cursor: "pointer",
+          background: handBg,
+          color: handColor,
+        }}
+      >
+        <HandToolIcon />
+        <span className="tip">Pan</span>
+      </button>
+      <button
+        onClick={onFrameTool}
+        className="am-tb tw"
+        title="Frame"
+        aria-label="Frame tool"
+        style={{
+          display: "flex",
+          width: 34,
+          height: 34,
+          alignItems: "center",
+          justifyContent: "center",
+          border: 0,
+          borderRadius: 2,
+          cursor: "pointer",
+          background: frameBg,
+          color: frameColor,
+        }}
+      >
+        <FrameToolIcon />
+        <span className="tip">Frame</span>
+      </button>
+
+      <Divider />
+
+      <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
+        <SearchIcon />
+      </TbButton>
+      <TbButton onClick={onToggleChat} title="AI Assistant" active={chatOpen}>
+        <ChatIcon />
+      </TbButton>
+      <TbButton onClick={onToggleBulkPanel} title="Generate Captions" active={bulkPanelOpen}>
+        <TagIcon />
+      </TbButton>
+      <TbButton onClick={onExtractExif} title="Extract EXIF">
+        <ExifIcon />
+      </TbButton>
+
+      <Divider />
 
       <button
         onClick={onAdd}
         title="Add"
         aria-label="Add"
+        className="tw"
         style={{
           display: "flex",
           width: 34,
@@ -120,51 +216,51 @@ export default function BottomToolbar({
         }}
       >
         <AddIcon />
+        <span className="tip">Add</span>
       </button>
 
-      {showCanvasTools && (
-        <>
-          <Divider />
-          <button
-            onClick={onFit}
-            title="Fit"
-            aria-label="Fit to content"
-            style={{
-              display: "flex",
-              width: 34,
-              height: 34,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              borderRadius: 2,
-              cursor: "pointer",
-              background: "transparent",
-              color: "var(--t2)",
-            }}
-          >
-            <FitIcon />
-          </button>
-          <button
-            onClick={onZoomReset}
-            style={{
-              display: "flex",
-              height: 34,
-              padding: "0 9px",
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              borderRadius: 2,
-              cursor: "pointer",
-              background: "transparent",
-              color: "var(--t3)",
-              fontSize: 12,
-              fontFamily: "inherit",
-            }}
-          >
-            {zoomPct}
-          </button>
-        </>
-      )}
+      <Divider />
+
+      <button
+        onClick={onFit}
+        title="Fit"
+        aria-label="Fit to content"
+        className="tw"
+        style={{
+          display: "flex",
+          width: 34,
+          height: 34,
+          alignItems: "center",
+          justifyContent: "center",
+          border: 0,
+          borderRadius: 2,
+          cursor: "pointer",
+          background: "transparent",
+          color: "var(--t2)",
+        }}
+      >
+        <FitIcon />
+        <span className="tip">Fit</span>
+      </button>
+      <button
+        onClick={onZoomReset}
+        style={{
+          display: "flex",
+          height: 34,
+          padding: "0 9px",
+          alignItems: "center",
+          justifyContent: "center",
+          border: 0,
+          borderRadius: 2,
+          cursor: "pointer",
+          background: "transparent",
+          color: "var(--t3)",
+          fontSize: 12,
+          fontFamily: "inherit",
+        }}
+      >
+        {zoomPct}
+      </button>
 
       {showAddToProject && (
         <>
@@ -173,23 +269,27 @@ export default function BottomToolbar({
             onClick={onAddToProject}
             style={{
               display: "flex",
+              flexDirection: "column",
               alignItems: "center",
-              gap: 7,
-              height: 34,
-              padding: "0 14px",
+              justifyContent: "center",
+              gap: 2,
+              width: 34,
+              padding: "8px 2px",
               border: 0,
               borderRadius: 2,
               cursor: "pointer",
               background: "var(--ac)",
               color: "#050505",
-              fontSize: 10.5,
+              fontSize: 8.5,
               fontWeight: 700,
-              letterSpacing: "0.06em",
+              letterSpacing: "0.02em",
               fontFamily: "inherit",
+              lineHeight: 1.25,
+              textAlign: "center",
             }}
           >
             <AddIcon width={14} height={14} />
-            ADD {selCount} TO PROJECT
+            ADD {selCount}
           </button>
         </>
       )}

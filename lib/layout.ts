@@ -16,6 +16,15 @@ export interface NodeOverrides {
 
 export const EMPTY_OVERRIDES: NodeOverrides = { hub: {}, folder: {}, file: {} };
 
+export interface Frame {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+}
+
 export interface TilePos {
   x: number;
   y: number;
@@ -308,12 +317,8 @@ export function fitView(
   photos: Photo[],
   overrides: NodeOverrides,
   rect: Rect,
-  sidebarExpanded: boolean,
-  chatOpen: boolean,
 ): Transform {
-  const sbW = sidebarExpanded ? 220 : 52;
-  const chW = chatOpen ? 320 : 0;
-  const leftPad = sbW + chW;
+  const leftPad = 24;
   if (view === "timeline") {
     return { scale: 1, tx: leftPad + 20, ty: 100 };
   }
@@ -614,4 +619,72 @@ export function mapExpandLayout(
   const ex = cp.x + Math.cos(ang) * (markerSize / 2);
   const ey = cp.y + Math.sin(ang) * (markerSize / 2);
   return fanOut(items, cp.x, cp.y, ang, R, ex, ey, 88, "#39ff6a", 0.4, overrides);
+}
+
+// ── Minimap: orientation aid for pannable canvas views (not Map, which has
+// its own navigation) ────────────────────────────────────────────────────
+
+const MB_W = 180;
+const MB_H = 120;
+const MB_PAD = 8;
+
+export interface MinimapLayout {
+  show: boolean;
+  dots: { x: number; y: number }[];
+  vp: { x: number; y: number; w: number; h: number };
+  /** Inverse-mapping params so a minimap click can be converted back to content coords. */
+  originX: number;
+  originY: number;
+  mscale: number;
+  offX: number;
+  offY: number;
+}
+
+const EMPTY_MINIMAP: MinimapLayout = {
+  show: false,
+  dots: [],
+  vp: { x: 0, y: 0, w: 0, h: 0 },
+  originX: 0,
+  originY: 0,
+  mscale: 1,
+  offX: 0,
+  offY: 0,
+};
+
+export function minimapLayout(
+  points: { x: number; y: number }[],
+  scale: number,
+  tx: number,
+  ty: number,
+  rect: Rect,
+): MinimapLayout {
+  if (!points.length) return EMPTY_MINIMAP;
+  const xl = Math.min(...points.map((p) => p.x)),
+    xr = Math.max(...points.map((p) => p.x));
+  const yt = Math.min(...points.map((p) => p.y)),
+    yb = Math.max(...points.map((p) => p.y));
+  const bw = Math.max(xr - xl, 1),
+    bh = Math.max(yb - yt, 1);
+  const innerW = MB_W - MB_PAD * 2,
+    innerH = MB_H - MB_PAD * 2;
+  const mscale = Math.min(innerW / bw, innerH / bh);
+  const offX = MB_PAD + (innerW - bw * mscale) / 2,
+    offY = MB_PAD + (innerH - bh * mscale) / 2;
+  const toMini = (cx: number, cy: number) => ({
+    x: offX + (cx - xl) * mscale,
+    y: offY + (cy - yt) * mscale,
+  });
+  const dots = points.map((p) => toMini(p.x, p.y));
+  const vpX0 = -tx / scale,
+    vpY0 = -ty / scale;
+  const vpX1 = (rect.width - tx) / scale,
+    vpY1 = (rect.height - ty) / scale;
+  const tl = toMini(vpX0, vpY0),
+    br = toMini(vpX1, vpY1);
+  const cx0 = Math.max(0, Math.min(MB_W, tl.x)),
+    cy0 = Math.max(0, Math.min(MB_H, tl.y));
+  const cx1 = Math.max(0, Math.min(MB_W, br.x)),
+    cy1 = Math.max(0, Math.min(MB_H, br.y));
+  const vp = { x: cx0, y: cy0, w: Math.max(2, cx1 - cx0), h: Math.max(2, cy1 - cy0) };
+  return { show: true, dots, vp, originX: xl, originY: yt, mscale, offX, offY };
 }

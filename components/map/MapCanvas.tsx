@@ -7,9 +7,16 @@ import { COUNTRY_LATLON } from "@/lib/mock-data";
 import { mapExpandLayout, type ExpandOverlay } from "@/lib/layout";
 import ExpandFileTile from "@/components/canvas/ExpandFileTile";
 
+export interface MapApi {
+  fitWorld: () => void;
+  setZoomPct: (pct: number) => void;
+  getZoomPct: () => number;
+}
+
 interface MapCanvasProps {
   photos: Photo[];
   contentLeft: number;
+  drawerRight?: number;
   expanded: { kind: "sense" | "map" | null; key: string | null };
   expandOverrides: Record<string, { x: number; y: number }>;
   hoveredId: string | null;
@@ -19,6 +26,8 @@ interface MapCanvasProps {
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
   deletePhoto: (id: string) => void;
+  onMapReady?: (api: MapApi | null) => void;
+  onZoomChange?: (pct: number) => void;
 }
 
 function markerSizeFor(count: number): number {
@@ -28,6 +37,7 @@ function markerSizeFor(count: number): number {
 export default function MapCanvas({
   photos,
   contentLeft,
+  drawerRight = 0,
   expanded,
   expandOverrides,
   hoveredId,
@@ -37,6 +47,8 @@ export default function MapCanvas({
   setHover,
   openDrawer,
   deletePhoto,
+  onMapReady,
+  onZoomChange,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
@@ -45,9 +57,10 @@ export default function MapCanvas({
   const [map, setMap] = useState<L.Map | null>(null);
   // Bump on every pan/zoom to force the overlay to recompute with fresh coords.
   const [, setMapTick] = useState(0);
-  const propsRef = useRef({ onToggleMapExpand, onCloseExpand });
+  const worldFitZoomRef = useRef<number | null>(null);
+  const propsRef = useRef({ onToggleMapExpand, onCloseExpand, onZoomChange });
   useEffect(() => {
-    propsRef.current = { onToggleMapExpand, onCloseExpand };
+    propsRef.current = { onToggleMapExpand, onCloseExpand, onZoomChange };
   });
 
   const byCountry = useMemo(() => {
@@ -73,14 +86,24 @@ export default function MapCanvas({
       noWrap: true,
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(m);
-    m.on("zoomend move", () => setMapTick((t) => t + 1));
+
+    const getZoomPct = () =>
+      Math.round(100 * Math.pow(2, m.getZoom() - (worldFitZoomRef.current ?? m.getZoom())));
+
+    m.on("zoomend move", () => {
+      setMapTick((t) => t + 1);
+      propsRef.current.onZoomChange?.(getZoomPct());
+    });
     m.on("click", () => propsRef.current.onCloseExpand());
     setMap(m);
 
     const fitWorldNoGap = () => {
       const bounds = L.latLngBounds([-85, -180], [85, 180]);
       const z = m.getBoundsZoom(bounds, true);
+      worldFitZoomRef.current = z;
       m.setMinZoom(z);
+      if (m.getZoom() < z) m.setView(m.getCenter(), z, { animate: false });
+      propsRef.current.onZoomChange?.(getZoomPct());
     };
     const onResize = () => {
       m.invalidateSize();
@@ -92,12 +115,25 @@ export default function MapCanvas({
       fitWorldNoGap();
     }, 60);
 
+    onMapReady?.({
+      fitWorld: fitWorldNoGap,
+      setZoomPct: (pct: number) => {
+        const base = worldFitZoomRef.current ?? m.getZoom();
+        m.setZoom(base + Math.log2(pct / 100));
+      },
+      getZoomPct,
+    });
+
     return () => {
       window.removeEventListener("resize", onResize);
       clearTimeout(t);
+      onMapReady?.(null);
       m.remove();
       setMap(null);
     };
+    // onMapReady is passed once at mount time by design (mirrors the single
+    // setMapRef/canvasRef pattern used elsewhere in the workspace).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -143,7 +179,7 @@ export default function MapCanvas({
   }
 
   return (
-    <div style={{ position: "absolute", left: contentLeft, top: 52, right: 0, bottom: 0, zIndex: 2, background: "var(--bg)" }}>
+    <div style={{ position: "absolute", left: contentLeft, top: 52, right: drawerRight, bottom: 0, zIndex: 2, background: "var(--bg)" }}>
       <div ref={containerRef} style={{ position: "absolute", inset: 0, zIndex: 1 }} />
       {overlay && (
         <div style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none" }}>

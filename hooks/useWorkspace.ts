@@ -14,10 +14,13 @@ import {
   EMPTY_OVERRIDES,
   fitView,
   layoutNeural,
+  minimapLayout as computeMinimapLayout,
   senseBubbles as computeSenseBubbles,
   senseExpandLayout as computeSenseExpand,
   timelineLayout as computeTimelineLayout,
   type ExpandOverlay,
+  type Frame,
+  type MinimapLayout,
   type NeuralLayout,
   type NodeOverrides,
   type SenseBubble,
@@ -25,6 +28,7 @@ import {
 } from "@/lib/layout";
 import { PROJECTS_META } from "@/lib/mock-data";
 import { CHAT_FALLBACK_REPLY, CHAT_GREETING, CHAT_REPLIES } from "@/lib/chat";
+import type { MapApi } from "@/components/map/MapCanvas";
 
 interface Marquee {
   x0: number;
@@ -35,7 +39,6 @@ interface Marquee {
 
 interface ImpState {
   open: boolean;
-  at: "rail" | "toolbar";
 }
 
 interface BulkOps {
@@ -50,13 +53,23 @@ interface ProcState {
   pct: number;
 }
 
+/** Undo/redo checkpoint — everything the frame tool, node drags, timeline
+ * drags, and expand-file drags can mutate. */
+interface Snapshot {
+  frames: Frame[];
+  nodeOverrides: NodeOverrides;
+  tlOverrides: Record<string, { x: number; y: number }>;
+  expandOverrides: Record<string, { x: number; y: number }>;
+  photos: Photo[];
+}
+
+
 interface WorkspaceState {
   scale: number;
   tx: number;
   ty: number;
   tool: Tool;
   view: ViewMode;
-  sidebarExpanded: boolean;
   chatOpen: boolean;
   chatMsgs: ChatMessage[];
   chatInput: string;
@@ -82,10 +95,19 @@ interface WorkspaceState {
   bulkOps: BulkOps;
   bulkLangs: string[];
   bulkStyle: CaptionStyle;
+  bulkPanelOpen: boolean;
   proc: ProcState;
   toast: { show: boolean; text: string };
   /** True while a canvas pan drag is active (drives the grabbing cursor). */
   panning: boolean;
+  frames: Frame[];
+  /** Content-space preview rect while the frame tool is actively drawing. */
+  frameDraftRect: { x: number; y: number; w: number; h: number } | null;
+  history: Snapshot[];
+  future: Snapshot[];
+  zoomMenuOpen: boolean;
+  /** Real Leaflet zoom %, kept in sync via MapCanvas's onZoomChange while view === "map". */
+  mapZoomPct: number;
 }
 
 interface TlBounds {
@@ -144,6 +166,16 @@ type DragSession =
       space: "canvas" | "map";
       moved: boolean;
     }
+  | {
+      mode: "frameDraw";
+      startContent: { x: number; y: number };
+      endContent: { x: number; y: number };
+      dx0: number;
+      dy0: number;
+      x1: number;
+      y1: number;
+      moved: boolean;
+    }
   | null;
 
 const DEFAULT_RECT = { left: 0, top: 0, width: 1000, height: 700 };
@@ -163,7 +195,6 @@ export interface Workspace {
   ty: number;
   tool: Tool;
   view: ViewMode;
-  sidebarExpanded: boolean;
   projCurrent: ProjectKey | "all";
   photos: Photo[];
   projectPhotos: Photo[];
@@ -210,10 +241,41 @@ export interface Workspace {
   genSingle: (id: string) => void;
   toolSelect: () => void;
   toolHand: () => void;
+  toolFrame: () => void;
   onFit: () => void;
   onZoomReset: () => void;
-  toggleSidebar: () => void;
   setView: (v: ViewMode) => void;
+
+  // Frames (Figma-style canvas regions)
+  frames: Frame[];
+  frameDraft: { x: number; y: number; w: number; h: number } | null;
+  deleteFrame: (id: string) => void;
+
+  // Undo / redo
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
+
+  // Zoom dropdown
+  zoomMenuOpen: boolean;
+  toggleZoomMenu: () => void;
+  closeZoomMenu: () => void;
+  setZoomPct: (pct: number) => void;
+
+  // Minimap
+  minimap: MinimapLayout;
+  onMinimapDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+
+  // Map (Leaflet) imperative bridge for Fit/Zoom
+  registerMapApi: (api: MapApi | null) => void;
+  onMapZoomChange: (pct: number) => void;
+
+  // Layout constants (no left sidebar anymore)
+  contentLeft: number;
+  drawerRight: number;
+
+  extractExif: () => void;
 
   // Chat
   chatOpen: boolean;
@@ -276,6 +338,8 @@ export interface Workspace {
   senseBubbles: SenseBubble[];
 
   // Bulk AI
+  bulkPanelOpen: boolean;
+  toggleBulkPanel: () => void;
   bulkShow: boolean;
   bulkIdle: boolean;
   bulkCount: number;
@@ -302,7 +366,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     ty: 120,
     tool: "select",
     view: "neural",
-    sidebarExpanded: false,
     chatOpen: false,
     chatMsgs: [{ role: "assistant", text: CHAT_GREETING }],
     chatInput: "",
@@ -311,7 +374,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     addProjOpen: false,
     search: false,
     helpOpen: false,
-    imp: { open: false, at: "rail" },
+    imp: { open: false },
     expanded: { kind: null, key: null },
     expandOverrides: {},
     projCurrent: "all",
@@ -328,9 +391,16 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     bulkOps: { captions: true, tags: true, faces: false },
     bulkLangs: ["EN"],
     bulkStyle: "Agency",
+    bulkPanelOpen: false,
     proc: { active: false, label: "", pct: 0 },
     toast: { show: false, text: "" },
     panning: false,
+    frames: [],
+    frameDraftRect: null,
+    history: [],
+    future: [],
+    zoomMenuOpen: false,
+    mapZoomPct: 100,
   });
 
   // Mirror of committed state, kept current for window-level event handlers.
@@ -341,6 +411,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bulkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const bulkTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mapApiRef = useRef<MapApi | null>(null);
 
   // Patch helper that also advances stateRef so sequential reads see fresh data.
   const setState = useCallback((patch: Partial<WorkspaceState>) => {
@@ -382,6 +453,48 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     return proj === "all" ? photos : photos.filter((p) => p.project === proj);
   }, []);
 
+  // ── Undo / redo ──────────────────────────────────────────────────────────
+
+  const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
+    frames: s.frames,
+    nodeOverrides: s.nodeOverrides,
+    tlOverrides: s.tlOverrides,
+    expandOverrides: s.expandOverrides,
+    photos: s.photos,
+  }), []);
+
+  const pushHistory = useCallback(() => {
+    const s = stateRef.current;
+    const hist = s.history.slice(-49);
+    hist.push(snapshot(s));
+    setState({ history: hist, future: [] });
+  }, [setState, snapshot]);
+
+  const undo = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.history.length) return;
+    const hist = s.history.slice();
+    const prev = hist.pop() as Snapshot;
+    const future = s.future.slice();
+    future.push(snapshot(s));
+    setState({ ...prev, history: hist, future });
+  }, [setState, snapshot]);
+
+  const redo = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.future.length) return;
+    const future = s.future.slice();
+    const next = future.pop() as Snapshot;
+    const hist = s.history.slice();
+    hist.push(snapshot(s));
+    setState({ ...next, history: hist, future });
+  }, [setState, snapshot]);
+
+  const registerMapApi = useCallback((api: MapApi | null) => {
+    mapApiRef.current = api;
+  }, []);
+  const onMapZoomChange = useCallback((pct: number) => setState({ mapZoomPct: pct }), [setState]);
+
   // ── Pan / zoom ────────────────────────────────────────────────────────────
 
   const wheel = useCallback(
@@ -409,12 +522,30 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       if (e.button !== 0) return;
       const s = stateRef.current;
       const patch: Partial<WorkspaceState> = {};
-      if (s.imp.open) patch.imp = { ...s.imp, open: false };
+      if (s.imp.open) patch.imp = { open: false };
       if (s.acctOpen) patch.acctOpen = false;
       if (s.projOpen) patch.projOpen = false;
       if (Object.keys(patch).length) setState(patch);
       const r = rect();
-      if (s.tool === "hand" || s.view !== "neural") {
+      if (s.tool === "frame" && s.view !== "map") {
+        const c = toContent(e.clientX, e.clientY);
+        const dx0 = e.clientX - r.left,
+          dy0 = e.clientY - r.top;
+        dragRef.current = {
+          mode: "frameDraw",
+          startContent: c,
+          endContent: c,
+          dx0,
+          dy0,
+          x1: dx0,
+          y1: dy0,
+          moved: false,
+        };
+        setState({
+          marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 },
+          frameDraftRect: { x: c.x, y: c.y, w: 0, h: 0 },
+        });
+      } else if (s.tool === "hand" || s.view !== "neural") {
         dragRef.current = {
           mode: "pan",
           sx: e.clientX,
@@ -447,7 +578,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     (e: React.PointerEvent, id: string) => {
       e.stopPropagation();
       if (stateRef.current.imp.open) {
-        setState({ imp: { ...stateRef.current.imp, open: false } });
+        setState({ imp: { open: false } });
       }
       dragRef.current = {
         mode: "click",
@@ -471,6 +602,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     ) => {
       e.stopPropagation();
       e.preventDefault();
+      pushHistory();
       dragRef.current = {
         mode: "node",
         kind,
@@ -481,24 +613,26 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         moved: false,
       };
     },
-    [],
+    [pushHistory],
   );
 
   const onTlDown = useCallback(
     (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => {
       e.stopPropagation();
+      pushHistory();
       dragRef.current = { mode: "tl", id, sx: e.clientX, sy: e.clientY, orig, bounds, moved: false };
     },
-    [],
+    [pushHistory],
   );
 
   const onExpandFileDown = useCallback(
     (e: React.PointerEvent, id: string, x: number, y: number, space: "canvas" | "map") => {
       e.stopPropagation();
       e.preventDefault();
+      pushHistory();
       dragRef.current = { mode: "expandFile", id, sx: e.clientX, sy: e.clientY, orig: { x, y }, space, moved: false };
     },
-    [],
+    [pushHistory],
   );
 
   const move = useCallback(
@@ -579,6 +713,20 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
           })
           .map((p) => p.id);
         setState({ marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 }, selectedIds: hit });
+      } else if (d.mode === "frameDraw") {
+        const r = rect();
+        d.x1 = e.clientX - r.left;
+        d.y1 = e.clientY - r.top;
+        if (Math.abs(d.x1 - d.dx0) > 4 || Math.abs(d.y1 - d.dy0) > 4) d.moved = true;
+        d.endContent = toContent(e.clientX, e.clientY);
+        const xl = Math.min(d.startContent.x, d.endContent.x),
+          yt = Math.min(d.startContent.y, d.endContent.y);
+        const w = Math.abs(d.endContent.x - d.startContent.x),
+          h = Math.abs(d.endContent.y - d.startContent.y);
+        setState({
+          marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 },
+          frameDraftRect: { x: xl, y: yt, w, h },
+        });
       }
     },
     [rect, toContent, setState],
@@ -628,8 +776,37 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     } else if (d.mode === "marquee") {
       if (!d.moved) setState({ selectedIds: [], drawerId: null });
       setState({ marquee: null });
+    } else if (d.mode === "frameDraw") {
+      setState({ marquee: null, frameDraftRect: null });
+      if (d.moved) {
+        const s = stateRef.current;
+        const startC = d.startContent;
+        const endC = d.endContent ?? startC;
+        const xl = Math.min(startC.x, endC.x),
+          xr = Math.max(startC.x, endC.x);
+        const yt = Math.min(startC.y, endC.y),
+          yb = Math.max(startC.y, endC.y);
+        pushHistory();
+        const n = s.frames.length + 1;
+        setState({
+          frames: [
+            ...s.frames,
+            {
+              id: "frame" + Date.now(),
+              x: xl,
+              y: yt,
+              w: Math.max(40, xr - xl),
+              h: Math.max(40, yb - yt),
+              label: "Frame " + n,
+            },
+          ],
+          tool: "select",
+        });
+      } else {
+        setState({ tool: "select" });
+      }
     }
-  }, [setState, openDrawer]);
+  }, [setState, openDrawer, pushHistory]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 
@@ -659,9 +836,16 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const setStyle = useCallback((st: CaptionStyle) => setState({ drawerStyle: st }), [setState]);
   const toolSelect = useCallback(() => setState({ tool: "select" }), [setState]);
   const toolHand = useCallback(() => setState({ tool: "hand" }), [setState]);
-  const toggleSidebar = useCallback(
-    () => setState({ sidebarExpanded: !stateRef.current.sidebarExpanded }),
+  const toolFrame = useCallback(
+    () => setState({ tool: stateRef.current.tool === "frame" ? "select" : "frame" }),
     [setState],
+  );
+  const deleteFrame = useCallback(
+    (id: string) => {
+      pushHistory();
+      setState({ frames: stateRef.current.frames.filter((f) => f.id !== id) });
+    },
+    [pushHistory, setState],
   );
   const clearSelection = useCallback(() => setState({ selectedIds: [] }), [setState]);
 
@@ -724,18 +908,49 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   const doFit = useCallback(() => {
     const s = stateRef.current;
+    if (s.view === "map" && mapApiRef.current) {
+      mapApiRef.current.fitWorld();
+      return;
+    }
     const photosForFit = filteredPhotos(s.photos, s.projCurrent);
-    const fit = fitView(s.view, photosForFit, s.nodeOverrides, rect(), s.sidebarExpanded, s.chatOpen);
+    const fit = fitView(s.view, photosForFit, s.nodeOverrides, rect());
     setState(fit);
   }, [rect, setState, filteredPhotos]);
 
+  const setZoomPct = useCallback(
+    (pct: number) => {
+      const s = stateRef.current;
+      if (s.view === "map" && mapApiRef.current) {
+        mapApiRef.current.setZoomPct(pct);
+      } else {
+        const r = rect(),
+          cx = r.width / 2,
+          cy = r.height / 2,
+          ns = pct / 100;
+        const px = (cx - s.tx) / s.scale,
+          py = (cy - s.ty) / s.scale;
+        setState({ scale: ns, tx: cx - px * ns, ty: cy - py * ns });
+      }
+      setState({ zoomMenuOpen: false });
+    },
+    [rect, setState],
+  );
+
   const setView = useCallback(
     (v: ViewMode) => {
-      setState({ view: v, marquee: null, selectedIds: [], expanded: { kind: null, key: null }, expandOverrides: {} });
+      setState({
+        view: v,
+        marquee: null,
+        selectedIds: [],
+        expanded: { kind: null, key: null },
+        expandOverrides: {},
+        bulkPanelOpen: false,
+      });
       setTimeout(() => {
+        if (v === "map" && mapApiRef.current) return;
         const s = stateRef.current;
         const photosForFit = filteredPhotos(s.photos, s.projCurrent);
-        const fit = fitView(v, photosForFit, s.nodeOverrides, rect(), s.sidebarExpanded, s.chatOpen);
+        const fit = fitView(v, photosForFit, s.nodeOverrides, rect());
         setState(fit);
       }, 0);
     },
@@ -793,15 +1008,23 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   );
   const closeChat = useCallback(() => setState({ chatOpen: false }), [setState]);
 
+  // ── Zoom dropdown ────────────────────────────────────────────────────────
+
+  const toggleZoomMenu = useCallback(
+    () => setState({ zoomMenuOpen: !stateRef.current.zoomMenuOpen, acctOpen: false, projOpen: false }),
+    [setState],
+  );
+  const closeZoomMenu = useCallback(() => setState({ zoomMenuOpen: false }), [setState]);
+
   // ── Account / project dropdowns ─────────────────────────────────────────
 
   const openAcct = useCallback(
-    () => setState({ acctOpen: !stateRef.current.acctOpen, projOpen: false }),
+    () => setState({ acctOpen: !stateRef.current.acctOpen, projOpen: false, zoomMenuOpen: false }),
     [setState],
   );
   const closeAcct = useCallback(() => setState({ acctOpen: false }), [setState]);
   const openProj = useCallback(
-    () => setState({ projOpen: !stateRef.current.projOpen, acctOpen: false }),
+    () => setState({ projOpen: !stateRef.current.projOpen, acctOpen: false, zoomMenuOpen: false }),
     [setState],
   );
   const closeProj = useCallback(() => setState({ projOpen: false }), [setState]);
@@ -809,11 +1032,19 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const selectProject = useCallback(
     (k: ProjectKey | "all") => {
       const view: ViewMode = k === "all" ? "neural" : "timeline";
-      setState({ projCurrent: k, projOpen: false, view, selectedIds: [], expanded: { kind: null, key: null }, expandOverrides: {} });
+      setState({
+        projCurrent: k,
+        projOpen: false,
+        view,
+        selectedIds: [],
+        expanded: { kind: null, key: null },
+        expandOverrides: {},
+        bulkPanelOpen: false,
+      });
       setTimeout(() => {
         const s = stateRef.current;
         const photosForFit = filteredPhotos(s.photos, k);
-        const fit = fitView(view, photosForFit, s.nodeOverrides, rect(), s.sidebarExpanded, s.chatOpen);
+        const fit = fitView(view, photosForFit, s.nodeOverrides, rect());
         setState(fit);
       }, 0);
     },
@@ -858,16 +1089,19 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   // ── Import ───────────────────────────────────────────────────────────────
 
   const addToolbar = useCallback(() => {
-    const s = stateRef.current;
-    setState({ imp: { open: !(s.imp.open && s.imp.at === "toolbar"), at: "toolbar" } });
+    setState({ imp: { open: !stateRef.current.imp.open } });
   }, [setState]);
   const doUpload = useCallback(() => {
-    setState({ imp: { ...stateRef.current.imp, open: false } });
+    setState({ imp: { open: false } });
     flashToast("4 files imported");
   }, [setState, flashToast]);
-  const closeImport = useCallback(
-    () => setState({ imp: { ...stateRef.current.imp, open: false } }),
-    [setState],
+  const closeImport = useCallback(() => setState({ imp: { open: false } }), [setState]);
+
+  // ── Misc toolbar actions ────────────────────────────────────────────────
+
+  const extractExif = useCallback(
+    () => flashToast(`EXIF extracted for ${stateRef.current.photos.length} files`),
+    [flashToast],
   );
 
   // ── Bulk AI ──────────────────────────────────────────────────────────────
@@ -894,6 +1128,15 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [setState],
   );
   const setBulkStyleAction = useCallback((st: CaptionStyle) => setState({ bulkStyle: st }), [setState]);
+
+  const toggleBulkPanel = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.selectedIds.length) {
+      flashToast("Select files first");
+      return;
+    }
+    setState({ bulkPanelOpen: !s.bulkPanelOpen });
+  }, [setState, flashToast]);
 
   const finishBulk = useCallback(
     (ids: string[]) => {
@@ -951,6 +1194,10 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   // ── Lifecycle: listeners + initial fit ────────────────────────────────────
 
   const [canvasHeight, setCanvasHeight] = useState(700);
+  // Mirrors DEFAULT_RECT.width — read during render (e.g. the minimap) instead
+  // of calling rect()/canvasElRef.current directly, which the refs lint rule
+  // forbids outside event handlers and effects.
+  const [canvasWidth, setCanvasWidth] = useState(DEFAULT_RECT.width);
 
   const setCanvasRef = useCallback((el: HTMLDivElement | null) => {
     canvasElRef.current = el;
@@ -962,13 +1209,19 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     const el = canvasElRef.current;
     if (el) el.addEventListener("wheel", wheel, { passive: false });
     let ro: ResizeObserver | undefined;
+    const syncSize = () => {
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setCanvasHeight(r.height || 700);
+      setCanvasWidth(r.width || DEFAULT_RECT.width);
+    };
     const raf = requestAnimationFrame(() => {
       tryFit();
-      if (el) setCanvasHeight(el.getBoundingClientRect().height || 700);
+      syncSize();
       if (el && typeof ResizeObserver !== "undefined") {
         ro = new ResizeObserver(() => {
           tryFit();
-          setCanvasHeight(el.getBoundingClientRect().height || 700);
+          syncSize();
         });
         ro.observe(el);
       }
@@ -1071,12 +1324,56 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [state.expanded, state.expandOverrides, senseBubblesResult],
   );
 
-  const bulkShow = isTimelineView && selectedIds.size > 0;
+  const bulkShow = state.bulkPanelOpen && selectedIds.size > 0;
   const bulkThumbs = useMemo(() => {
     const set = selectedIds;
     const sel = state.photos.filter((p) => set.has(p.id)).slice(0, 4);
     return sel.map((p, i) => ({ src: `https://picsum.photos/seed/${p.seed}/60/60`, ml: i === 0 ? 0 : -9 }));
   }, [state.photos, selectedIds]);
+
+  const frameDraft = state.frameDraftRect;
+
+  const canUndo = state.history.length > 0;
+  const canRedo = state.future.length > 0;
+
+  const contentLeft = 20;
+  const drawerRight = state.chatOpen ? 320 : 0;
+
+  const minimapPoints = useMemo(() => {
+    if (isMapView) return [];
+    if (isNeural) return Object.values(neuralLayout.pos).map((p) => ({ x: p.cx, y: p.cy }));
+    if (isTimelineView) {
+      return Object.values(timelineLayoutResult.tiles).map((t) => ({ x: t.x + t.w / 2, y: t.y + t.h / 2 }));
+    }
+    if (isSenseView) return senseBubblesResult.map((b) => ({ x: b.x, y: b.y }));
+    return [];
+  }, [isMapView, isNeural, isTimelineView, isSenseView, neuralLayout, timelineLayoutResult, senseBubblesResult]);
+
+  const minimap = useMemo(
+    () =>
+      computeMinimapLayout(minimapPoints, state.scale, state.tx, state.ty, {
+        width: canvasWidth,
+        height: canvasHeight,
+      }),
+    [minimapPoints, state.scale, state.tx, state.ty, canvasWidth, canvasHeight],
+  );
+
+  const onMinimapDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!minimap.show) return;
+      const s = stateRef.current;
+      const rectEl = e.currentTarget.getBoundingClientRect();
+      const mx = e.clientX - rectEl.left,
+        my = e.clientY - rectEl.top;
+      const cx = minimap.originX + (mx - minimap.offX) / minimap.mscale;
+      const cy = minimap.originY + (my - minimap.offY) / minimap.mscale;
+      const rr = rect();
+      setState({ tx: rr.width / 2 - cx * s.scale, ty: rr.height / 2 - cy * s.scale });
+    },
+    [minimap, rect, setState],
+  );
+
+  const zoomPct = isMapView ? Math.round(state.mapZoomPct) + "%" : Math.round(state.scale * 100) + "%";
 
   return {
     scale: state.scale,
@@ -1084,7 +1381,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     ty: state.ty,
     tool: state.tool,
     view: state.view,
-    sidebarExpanded: state.sidebarExpanded,
     projCurrent: state.projCurrent,
     photos: state.photos,
     projectPhotos,
@@ -1099,7 +1395,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     gridSize: Math.max(4, 40 * state.scale),
     gridPos: `${state.tx}px ${state.ty}px`,
     gridOpacity: isMapView ? 0 : 1,
-    zoomPct: Math.round(state.scale * 100) + "%",
+    zoomPct,
     canvasTransform: `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
     canvasCursor: state.panning
       ? "grabbing"
@@ -1130,10 +1426,35 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     genSingle,
     toolSelect,
     toolHand,
+    toolFrame,
     onFit: doFit,
     onZoomReset: doFit,
-    toggleSidebar,
     setView,
+
+    frames: state.frames,
+    frameDraft,
+    deleteFrame,
+
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+
+    zoomMenuOpen: state.zoomMenuOpen,
+    toggleZoomMenu,
+    closeZoomMenu,
+    setZoomPct,
+
+    minimap,
+    onMinimapDown,
+
+    registerMapApi,
+    onMapZoomChange,
+
+    contentLeft,
+    drawerRight,
+
+    extractExif,
 
     chatOpen: state.chatOpen,
     chatMsgs: state.chatMsgs,
@@ -1185,6 +1506,8 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     closeExpand,
     onExpandFileDown,
 
+    bulkPanelOpen: state.bulkPanelOpen,
+    toggleBulkPanel,
     bulkShow,
     bulkIdle: !state.proc.active,
     bulkCount: selectedIds.size,
