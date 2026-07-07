@@ -16,7 +16,7 @@ import ProjectDropdown from "@/components/header/ProjectDropdown";
 import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
 import ChatPanel from "@/components/chat/ChatPanel";
-import BottomToolbar from "@/components/toolbar/BottomToolbar";
+import LeftToolbar from "@/components/toolbar/LeftToolbar";
 import Minimap from "@/components/toolbar/Minimap";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
@@ -164,7 +164,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         onSend={ws.sendChat}
       />
 
-      <BottomToolbar
+      <LeftToolbar
         tool={ws.tool}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}

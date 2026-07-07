@@ -11,7 +11,7 @@ import {
   FitIcon,
 } from "@/components/icons/icons";
 
-interface BottomToolbarProps {
+interface LeftToolbarProps {
   tool?: Tool;
   showAddToProject?: boolean;
   selCount?: number;
@@ -33,7 +33,7 @@ interface BottomToolbarProps {
 }
 
 function Divider() {
-  return <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />;
+  return <span style={{ width: 20, height: 1, background: "var(--bd)", margin: "3px 0" }} />;
 }
 
 interface TbButtonProps {
@@ -69,7 +69,7 @@ function TbButton({ onClick, title, active, children }: TbButtonProps) {
   );
 }
 
-export default function BottomToolbar({
+export default function LeftToolbar({
   tool = "select",
   showAddToProject = false,
   selCount = 0,
@@ -88,7 +88,7 @@ export default function BottomToolbar({
   onFit,
   onZoomReset,
   onAddToProject,
-}: BottomToolbarProps) {
+}: LeftToolbarProps) {
   const selBg = tool === "select" ? "#fff" : "transparent";
   const selColor = tool === "select" ? "#000" : "var(--t2)";
   const handBg = tool === "hand" ? "#fff" : "transparent";
@@ -100,14 +100,15 @@ export default function BottomToolbar({
     <div
       style={{
         position: "absolute",
-        bottom: 20,
-        left: "50%",
-        transform: "translateX(-50%)",
+        left: 20,
+        top: "50%",
+        transform: "translateY(-50%)",
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
         gap: 4,
-        height: 46,
-        padding: "0 7px",
+        width: 46,
+        padding: "7px 0",
         background: "rgba(20,20,20,.92)",
         border: "1px solid var(--bd)",
         borderRadius: 2,
@@ -246,8 +247,8 @@ export default function BottomToolbar({
         onClick={onZoomReset}
         style={{
           display: "flex",
-          height: 34,
-          padding: "0 9px",
+          width: 34,
+          height: 28,
           alignItems: "center",
           justifyContent: "center",
           border: 0,
@@ -255,7 +256,7 @@ export default function BottomToolbar({
           cursor: "pointer",
           background: "transparent",
           color: "var(--t3)",
-          fontSize: 12,
+          fontSize: 11,
           fontFamily: "inherit",
         }}
       >
