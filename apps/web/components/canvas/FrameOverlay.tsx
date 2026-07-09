@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Frame } from "@/lib/layout";
 import { CloseIcon } from "@/components/icons/icons";
 
@@ -5,9 +6,21 @@ interface FrameOverlayProps {
   frames: Frame[];
   draft: { x: number; y: number; w: number; h: number } | null;
   onDeleteFrame: (id: string) => void;
+  onRenameFrame: (id: string, label: string) => void;
 }
 
-export default function FrameOverlay({ frames, draft, onDeleteFrame }: FrameOverlayProps) {
+export default function FrameOverlay({ frames, draft, onDeleteFrame, onRenameFrame }: FrameOverlayProps) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftLabel, setDraftLabel] = useState("");
+
+  const commitRename = () => {
+    if (editingId) {
+      const trimmed = draftLabel.trim();
+      if (trimmed) onRenameFrame(editingId, trimmed);
+    }
+    setEditingId(null);
+  };
+
   return (
     <>
       {frames.map((fr) => (
@@ -36,9 +49,51 @@ export default function FrameOverlay({ frames, draft, onDeleteFrame }: FrameOver
               pointerEvents: "auto",
             }}
           >
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--t3)", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>
-              {fr.label}
-            </span>
+            {editingId === fr.id ? (
+              <input
+                autoFocus
+                value={draftLabel}
+                onChange={(e) => setDraftLabel(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  else if (e.key === "Escape") setEditingId(null);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--t1)",
+                  letterSpacing: "0.02em",
+                  background: "var(--bg-el)",
+                  border: "1px solid var(--ac)",
+                  borderRadius: 2,
+                  padding: "1px 4px",
+                  width: Math.max(60, draftLabel.length * 7),
+                  fontFamily: "inherit",
+                  outline: "none",
+                }}
+              />
+            ) : (
+              <span
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingId(fr.id);
+                  setDraftLabel(fr.label);
+                }}
+                title="Double-click to rename"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--t3)",
+                  letterSpacing: "0.02em",
+                  whiteSpace: "nowrap",
+                  cursor: "text",
+                }}
+              >
+                {fr.label}
+              </span>
+            )}
             <button
               onClick={() => onDeleteFrame(fr.id)}
               title="Delete frame"

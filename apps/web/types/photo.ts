@@ -10,7 +10,10 @@ export type PhotoGroup =
   | "night"
   | "archive";
 
-export type ProjectKey = "frontline" | "travel" | "client";
+/** The 3 seed projects are still valid values, but any string is a valid
+ * project key — user-created projects (from the sidebar "new project" flow)
+ * get a generated key at runtime. */
+export type ProjectKey = string;
 
 export type PhotoStatus = "Verified" | "Likely" | "Needs check";
 
@@ -70,6 +73,8 @@ export interface Photo {
   group: PhotoGroup;
   country: string;
   source: PhotoSource;
+  /** Folder name within `source`'s own filesystem — real per-source browsing hierarchy. */
+  folder: string;
   project: ProjectKey;
   exif: ExifData;
 }

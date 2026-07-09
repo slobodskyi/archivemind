@@ -101,8 +101,13 @@ export default function MapCanvas({
       const bounds = L.latLngBounds([-85, -180], [85, 180]);
       const z = m.getBoundsZoom(bounds, true);
       worldFitZoomRef.current = z;
+      // Keep the zoom range pinned to 100%–200% (world-fit up to 2x): the
+      // dropdown/scroll wheel shouldn't be able to go further in either
+      // direction than that.
       m.setMinZoom(z);
+      m.setMaxZoom(z + 1);
       if (m.getZoom() < z) m.setView(m.getCenter(), z, { animate: false });
+      else if (m.getZoom() > z + 1) m.setView(m.getCenter(), z + 1, { animate: false });
       propsRef.current.onZoomChange?.(getZoomPct());
     };
     const onResize = () => {

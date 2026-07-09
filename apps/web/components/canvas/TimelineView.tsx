@@ -24,21 +24,6 @@ export default function TimelineView({ layout, photos, selectedIds, onTlDown }: 
 
   return (
     <>
-      {months.map((mo) => (
-        <div
-          key={mo.key}
-          style={{
-            position: "absolute",
-            left: mo.x,
-            top: 0,
-            width: colWidth,
-            height: mo.colH,
-            background: "rgba(255,255,255,0.012)",
-            borderLeft: "1px solid var(--bd)",
-            borderRight: "1px solid var(--bd)",
-          }}
-        />
-      ))}
       {photos.map((p, i) => {
         const tp = tiles[p.id];
         if (!tp) return null;

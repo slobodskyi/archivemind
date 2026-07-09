@@ -3,9 +3,11 @@ import type { MinimapLayout } from "@/lib/layout";
 interface MinimapProps {
   minimap: MinimapLayout;
   onDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+  /** Extra right offset (px) so the chat panel never covers the minimap. */
+  right?: number;
 }
 
-export default function Minimap({ minimap, onDown }: MinimapProps) {
+export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
   if (!minimap.show) return null;
   return (
     <div
@@ -13,7 +15,7 @@ export default function Minimap({ minimap, onDown }: MinimapProps) {
       style={{
         position: "absolute",
         bottom: 20,
-        right: 20,
+        right: 20 + right,
         width: 180,
         height: 120,
         background: "rgba(14,14,14,.92)",
@@ -24,6 +26,7 @@ export default function Minimap({ minimap, onDown }: MinimapProps) {
         zIndex: 35,
         overflow: "hidden",
         cursor: "pointer",
+        transition: "right .2s cubic-bezier(.22,1,.36,1)",
       }}
     >
       {minimap.dots.map((d, i) => (
