@@ -6,29 +6,49 @@ import type {
   ChatMessage,
   Language,
   Photo,
+  PhotoSource,
+  Project,
   ProjectKey,
   Tool,
   ViewMode,
 } from "@/types";
 import {
-  EMPTY_OVERRIDES,
+  centerAtScale,
+  EMPTY_GALLERY_OVERRIDES,
   fitView,
-  layoutNeural,
   minimapLayout as computeMinimapLayout,
   senseBubbles as computeSenseBubbles,
   senseExpandLayout as computeSenseExpand,
+  sourcesGallery,
+  STICKY_NOTE_COLORS,
   timelineLayout as computeTimelineLayout,
+  type Bounds,
   type ExpandOverlay,
   type Frame,
+  type GalleryOverrides,
   type MinimapLayout,
-  type NeuralLayout,
-  type NodeOverrides,
   type SenseBubble,
+  type StickyNote,
+  type TilePos,
   type TimelineLayout,
 } from "@/lib/layout";
 import { PROJECTS_META } from "@/lib/mock-data";
 import { CHAT_FALLBACK_REPLY, CHAT_GREETING, CHAT_REPLIES } from "@/lib/chat";
 import type { MapApi } from "@/components/map/MapCanvas";
+
+const DEFAULT_ZOOM = 0.75;
+const NEW_PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166"];
+
+/** Looks up a project's label/color across both the 3 seed projects and any
+ * user-created ones (created at runtime, so they can't live in the static
+ * PROJECTS_META table). */
+function resolveProjectMeta(key: string, custom: Project[]): { label: string; color: string } {
+  const seed = PROJECTS_META[key];
+  if (seed) return seed;
+  const found = custom.find((p) => p.key === key);
+  if (found) return { label: found.label, color: found.color };
+  return { label: key, color: "var(--t3)" };
+}
 
 interface Marquee {
   x0: number;
@@ -57,9 +77,10 @@ interface ProcState {
  * drags, and expand-file drags can mutate. */
 interface Snapshot {
   frames: Frame[];
-  nodeOverrides: NodeOverrides;
+  stickyNotes: StickyNote[];
   tlOverrides: Record<string, { x: number; y: number }>;
   expandOverrides: Record<string, { x: number; y: number }>;
+  galleryOverrides: GalleryOverrides;
   photos: Photo[];
 }
 
@@ -81,6 +102,15 @@ interface WorkspaceState {
   imp: ImpState;
   expanded: { kind: "sense" | "map" | null; key: string | null };
   expandOverrides: Record<string, { x: number; y: number }>;
+  galleryOverrides: GalleryOverrides;
+  /** Projects created at runtime via the source browser sidebar's "New project" flow. */
+  customProjects: Project[];
+  /** Source browser sidebar (Finder-style, opened by double-clicking a source tile in Neural view). */
+  sidebarTabs: PhotoSource[];
+  sidebarActiveTab: PhotoSource | null;
+  sidebarSelectedIds: string[];
+  sidebarSearchText: string;
+  sidebarAddOpen: boolean;
   projCurrent: ProjectKey | "all";
   photos: Photo[];
   selectedIds: string[];
@@ -90,7 +120,6 @@ interface WorkspaceState {
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
-  nodeOverrides: NodeOverrides;
   tlOverrides: Record<string, { x: number; y: number }>;
   bulkOps: BulkOps;
   bulkLangs: string[];
@@ -101,6 +130,7 @@ interface WorkspaceState {
   /** True while a canvas pan drag is active (drives the grabbing cursor). */
   panning: boolean;
   frames: Frame[];
+  stickyNotes: StickyNote[];
   /** Content-space preview rect while the frame tool is actively drawing. */
   frameDraftRect: { x: number; y: number; w: number; h: number } | null;
   history: Snapshot[];
@@ -119,7 +149,7 @@ interface TlBounds {
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
 type DragSession =
-  | { mode: "pan"; sx: number; sy: number; otx: number; oty: number; lockY: boolean }
+  | { mode: "pan"; sx: number; sy: number; otx: number; oty: number }
   | {
       mode: "marquee";
       startContent: { x: number; y: number };
@@ -130,8 +160,8 @@ type DragSession =
       moved: boolean;
     }
   | {
-      mode: "node";
-      kind: "hub" | "folder" | "file";
+      mode: "gallery";
+      kind: "source";
       key: string;
       sx: number;
       sy: number;
@@ -139,14 +169,12 @@ type DragSession =
       moved: boolean;
     }
   | {
-      mode: "click";
+      mode: "sticky";
       id: string;
       sx: number;
       sy: number;
+      orig: { x: number; y: number };
       moved: boolean;
-      shift: boolean;
-      ctrl: boolean;
-      origFile?: { x: number; y: number };
     }
   | {
       mode: "tl";
@@ -205,7 +233,8 @@ export interface Workspace {
   drawerStyle: CaptionStyle;
   copyLabel: string;
   toast: { show: boolean; text: string };
-  neuralLayout: NeuralLayout;
+  canvasWidth: number;
+  galleryOverrides: GalleryOverrides;
   gridSize: number;
   gridPos: string;
   gridOpacity: number;
@@ -220,12 +249,13 @@ export interface Workspace {
   isSenseView: boolean;
   showViewTabs: boolean;
   showAddToProject: boolean;
+  /** "All my files" root — drives the trimmed toolbar and enables source double-click browsing. */
+  allFilesMode: boolean;
   setCanvasRef: (el: HTMLDivElement | null) => void;
   onCanvasDown: (e: React.PointerEvent) => void;
-  onCardDown: (e: React.PointerEvent, id: string) => void;
-  onNodeDown: (
+  onGalleryNodeDown: (
     e: React.PointerEvent,
-    kind: "hub" | "folder",
+    kind: "source",
     key: string,
     origCenter: { x: number; y: number },
   ) => void;
@@ -250,6 +280,14 @@ export interface Workspace {
   frames: Frame[];
   frameDraft: { x: number; y: number; w: number; h: number } | null;
   deleteFrame: (id: string) => void;
+  renameFrame: (id: string, label: string) => void;
+
+  // Sticky notes
+  stickyNotes: StickyNote[];
+  addStickyNote: () => void;
+  onStickyDown: (e: React.PointerEvent, id: string, orig: { x: number; y: number }) => void;
+  updateStickyText: (id: string, text: string) => void;
+  deleteStickyNote: (id: string) => void;
 
   // Undo / redo
   canUndo: boolean;
@@ -304,6 +342,25 @@ export interface Workspace {
   closeAddProj: () => void;
   addToProject: (key: ProjectKey) => void;
   createNewProject: () => void;
+
+  // Source browser sidebar (Finder-style, All My Files)
+  sidebarOpen: boolean;
+  sidebarTabs: PhotoSource[];
+  sidebarActiveTab: PhotoSource | null;
+  sidebarSelectedIds: Set<string>;
+  sidebarSearchText: string;
+  sidebarAddOpen: boolean;
+  openSourceTab: (source: PhotoSource) => void;
+  closeSourceTab: (source: PhotoSource) => void;
+  setSidebarActiveTab: (source: PhotoSource) => void;
+  closeSidebar: () => void;
+  toggleSidebarFile: (id: string) => void;
+  toggleSidebarGroup: (ids: string[]) => void;
+  setSidebarSearch: (text: string) => void;
+  toggleSidebarAddOpen: () => void;
+  closeSidebarAddOpen: () => void;
+  sidebarAddToProject: (key: string) => void;
+  sidebarCreateProject: () => void;
 
   // Search
   search: boolean;
@@ -377,6 +434,13 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     imp: { open: false },
     expanded: { kind: null, key: null },
     expandOverrides: {},
+    galleryOverrides: EMPTY_GALLERY_OVERRIDES,
+    customProjects: [],
+    sidebarTabs: [],
+    sidebarActiveTab: null,
+    sidebarSelectedIds: [],
+    sidebarSearchText: "",
+    sidebarAddOpen: false,
     projCurrent: "all",
     photos: initialPhotos,
     selectedIds: [],
@@ -386,7 +450,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
-    nodeOverrides: EMPTY_OVERRIDES,
     tlOverrides: {},
     bulkOps: { captions: true, tags: true, faces: false },
     bulkLangs: ["EN"],
@@ -396,6 +459,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     toast: { show: false, text: "" },
     panning: false,
     frames: [],
+    stickyNotes: [],
     frameDraftRect: null,
     history: [],
     future: [],
@@ -457,9 +521,10 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
     frames: s.frames,
-    nodeOverrides: s.nodeOverrides,
+    stickyNotes: s.stickyNotes,
     tlOverrides: s.tlOverrides,
     expandOverrides: s.expandOverrides,
+    galleryOverrides: s.galleryOverrides,
     photos: s.photos,
   }), []);
 
@@ -502,7 +567,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       e.preventDefault();
       const s = stateRef.current;
       if (s.view === "timeline") {
-        setState({ tx: s.tx - e.deltaY - e.deltaX });
+        setState({ tx: s.tx - e.deltaX, ty: s.ty - e.deltaY });
         return;
       }
       const r = rect(),
@@ -552,7 +617,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
           sy: e.clientY,
           otx: s.tx,
           oty: s.ty,
-          lockY: s.view === "timeline",
         };
         setState({ panning: true });
       } else {
@@ -574,46 +638,57 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [rect, toContent, setState],
   );
 
-  const onCardDown = useCallback(
-    (e: React.PointerEvent, id: string) => {
+  const onGalleryNodeDown = useCallback(
+    (e: React.PointerEvent, kind: "source", key: string, origCenter: { x: number; y: number }) => {
       e.stopPropagation();
-      if (stateRef.current.imp.open) {
-        setState({ imp: { open: false } });
-      }
-      dragRef.current = {
-        mode: "click",
-        id,
-        sx: e.clientX,
-        sy: e.clientY,
-        moved: false,
-        shift: e.shiftKey,
-        ctrl: e.ctrlKey || e.metaKey,
-      };
+      pushHistory();
+      dragRef.current = { mode: "gallery", kind, key, sx: e.clientX, sy: e.clientY, orig: origCenter, moved: false };
+    },
+    [pushHistory],
+  );
+
+  const onStickyDown = useCallback(
+    (e: React.PointerEvent, id: string, orig: { x: number; y: number }) => {
+      e.stopPropagation();
+      pushHistory();
+      dragRef.current = { mode: "sticky", id, sx: e.clientX, sy: e.clientY, orig, moved: false };
+    },
+    [pushHistory],
+  );
+
+  const addStickyNote = useCallback(() => {
+    const s = stateRef.current;
+    const r = rect();
+    const cx = (r.width / 2 - s.tx) / s.scale;
+    const cy = (r.height / 2 - s.ty) / s.scale;
+    const w = 180,
+      h = 160;
+    const note: StickyNote = {
+      id: "note" + Date.now(),
+      x: cx - w / 2,
+      y: cy - h / 2,
+      w,
+      h,
+      text: "",
+      color: STICKY_NOTE_COLORS[s.stickyNotes.length % STICKY_NOTE_COLORS.length],
+    };
+    pushHistory();
+    setState({ stickyNotes: [...s.stickyNotes, note] });
+  }, [rect, pushHistory, setState]);
+
+  const updateStickyText = useCallback(
+    (id: string, text: string) => {
+      setState({ stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === id ? { ...n, text } : n)) });
     },
     [setState],
   );
 
-  const onNodeDown = useCallback(
-    (
-      e: React.PointerEvent,
-      kind: "hub" | "folder",
-      key: string,
-      origCenter: { x: number; y: number },
-    ) => {
-      e.stopPropagation();
-      e.preventDefault();
+  const deleteStickyNote = useCallback(
+    (id: string) => {
       pushHistory();
-      dragRef.current = {
-        mode: "node",
-        kind,
-        key,
-        sx: e.clientX,
-        sy: e.clientY,
-        orig: origCenter,
-        moved: false,
-      };
+      setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== id) });
     },
-    [pushHistory],
+    [pushHistory, setState],
   );
 
   const onTlDown = useCallback(
@@ -643,21 +718,8 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       if (d.mode === "pan") {
         setState({
           tx: d.otx + (e.clientX - d.sx),
-          ty: d.lockY ? d.oty : d.oty + (e.clientY - d.sy),
+          ty: d.oty + (e.clientY - d.sy),
         });
-      } else if (d.mode === "node") {
-        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
-        const dx = (e.clientX - d.sx) / s.scale,
-          dy = (e.clientY - d.sy) / s.scale;
-        const nx = d.orig.x + dx,
-          ny = d.orig.y + dy;
-        const ov: NodeOverrides = {
-          hub: { ...s.nodeOverrides.hub },
-          folder: { ...s.nodeOverrides.folder },
-          file: { ...s.nodeOverrides.file },
-        };
-        ov[d.kind][d.key] = { x: nx, y: ny };
-        setState({ nodeOverrides: ov });
       } else if (d.mode === "tl") {
         if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
         const dx = (e.clientX - d.sx) / s.scale,
@@ -673,46 +735,34 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         const dx = (e.clientX - d.sx) / div,
           dy = (e.clientY - d.sy) / div;
         setState({ expandOverrides: { ...s.expandOverrides, [d.id]: { x: d.orig.x + dx, y: d.orig.y + dy } } });
-      } else if (d.mode === "click") {
-        if (Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3) d.moved = true;
-        if (d.moved && s.view === "neural") {
-          const dx = (e.clientX - d.sx) / s.scale,
-            dy = (e.clientY - d.sy) / s.scale;
-          if (!d.origFile) {
-            const { pos } = layoutNeural(s.photos, s.nodeOverrides);
-            const pp = pos[d.id];
-            if (pp) d.origFile = { x: pp.cx, y: pp.cy };
-          }
-          if (d.origFile) {
-            const ov: NodeOverrides = {
-              hub: { ...s.nodeOverrides.hub },
-              folder: { ...s.nodeOverrides.folder },
-              file: { ...s.nodeOverrides.file },
-            };
-            ov.file[d.id] = { x: d.origFile.x + dx, y: d.origFile.y + dy };
-            setState({ nodeOverrides: ov });
-          }
-        }
+      } else if (d.mode === "gallery") {
+        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        const dx = (e.clientX - d.sx) / s.scale,
+          dy = (e.clientY - d.sy) / s.scale;
+        setState({
+          galleryOverrides: {
+            ...s.galleryOverrides,
+            [d.kind]: { ...s.galleryOverrides[d.kind], [d.key]: { x: d.orig.x + dx, y: d.orig.y + dy } },
+          },
+        });
+      } else if (d.mode === "sticky") {
+        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        const dx = (e.clientX - d.sx) / s.scale,
+          dy = (e.clientY - d.sy) / s.scale;
+        setState({
+          stickyNotes: s.stickyNotes.map((n) =>
+            n.id === d.id ? { ...n, x: d.orig.x + dx, y: d.orig.y + dy } : n,
+          ),
+        });
       } else if (d.mode === "marquee") {
         const r = rect();
         d.x1 = e.clientX - r.left;
         d.y1 = e.clientY - r.top;
         if (Math.abs(d.x1 - d.dx0) > 4 || Math.abs(d.y1 - d.dy0) > 4) d.moved = true;
-        const c1 = toContent(e.clientX, e.clientY);
-        const a = d.startContent,
-          b = c1;
-        const xl = Math.min(a.x, b.x),
-          xr = Math.max(a.x, b.x),
-          yt = Math.min(a.y, b.y),
-          yb = Math.max(a.y, b.y);
-        const { pos } = layoutNeural(s.photos, s.nodeOverrides);
-        const hit = s.photos
-          .filter((p) => {
-            const pp = pos[p.id];
-            return pp && pp.x < xr && pp.x + pp.w > xl && pp.y < yb && pp.y + pp.h > yt;
-          })
-          .map((p) => p.id);
-        setState({ marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 }, selectedIds: hit });
+        // Neural view no longer has individually selectable file tiles on
+        // canvas (browsing/selection now happens in the source browser
+        // sidebar), so there's nothing left to marquee-hit-test here.
+        setState({ marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 }, selectedIds: [] });
       } else if (d.mode === "frameDraw") {
         const r = rect();
         d.x1 = e.clientX - r.left;
@@ -740,6 +790,11 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         drawerLang: "EN",
         drawerStyle: (s.photos.find((p) => p.id === id)?.captionStyle as CaptionStyle) || "Agency",
         copyLabel: "Copy",
+        // The photo drawer and the source browser sidebar are both right-side
+        // panels — never show both at once.
+        sidebarTabs: [],
+        sidebarActiveTab: null,
+        sidebarAddOpen: false,
       });
     },
     [setState],
@@ -759,19 +814,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         if (i >= 0) sel.splice(i, 1);
         else sel.push(d.id);
         setState({ selectedIds: sel });
-      }
-    } else if (d.mode === "click") {
-      if (!d.moved) {
-        const s = stateRef.current;
-        if (d.shift || d.ctrl) {
-          const sel = s.selectedIds.slice();
-          const i = sel.indexOf(d.id);
-          if (i >= 0) sel.splice(i, 1);
-          else sel.push(d.id);
-          setState({ selectedIds: sel });
-        } else {
-          openDrawer(d.id);
-        }
       }
     } else if (d.mode === "marquee") {
       if (!d.moved) setState({ selectedIds: [], drawerId: null });
@@ -806,7 +848,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
         setState({ tool: "select" });
       }
     }
-  }, [setState, openDrawer, pushHistory]);
+  }, [setState, pushHistory]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 
@@ -846,6 +888,12 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       setState({ frames: stateRef.current.frames.filter((f) => f.id !== id) });
     },
     [pushHistory, setState],
+  );
+  const renameFrame = useCallback(
+    (id: string, label: string) => {
+      setState({ frames: stateRef.current.frames.map((f) => (f.id === id ? { ...f, label } : f)) });
+    },
+    [setState],
   );
   const clearSelection = useCallback(() => setState({ selectedIds: [] }), [setState]);
 
@@ -906,16 +954,34 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [setState, flashToast],
   );
 
+  const neuralGalleryFor = useCallback(
+    (photos: Photo[], overrides: GalleryOverrides): { pos: Record<string, TilePos>; bounds: Bounds } =>
+      sourcesGallery(photos, overrides.source),
+    [],
+  );
+
+  const computeFit = useCallback(
+    (view: ViewMode, allPhotos: Photo[], overrides: GalleryOverrides) => {
+      const r = rect();
+      if (view === "neural") {
+        // Always center at the fixed default zoom rather than solving for a
+        // best-fit scale — Fit/Zoom-reset should land on the same 75% as the
+        // initial view, not a computed (and often near-105%) fit-to-content.
+        return centerAtScale(neuralGalleryFor(allPhotos, overrides).bounds, r, DEFAULT_ZOOM);
+      }
+      return fitView(view, r);
+    },
+    [rect, neuralGalleryFor],
+  );
+
   const doFit = useCallback(() => {
     const s = stateRef.current;
     if (s.view === "map" && mapApiRef.current) {
       mapApiRef.current.fitWorld();
       return;
     }
-    const photosForFit = filteredPhotos(s.photos, s.projCurrent);
-    const fit = fitView(s.view, photosForFit, s.nodeOverrides, rect());
-    setState(fit);
-  }, [rect, setState, filteredPhotos]);
+    setState(computeFit(s.view, s.photos, s.galleryOverrides));
+  }, [setState, computeFit]);
 
   const setZoomPct = useCallback(
     (pct: number) => {
@@ -949,27 +1015,29 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       setTimeout(() => {
         if (v === "map" && mapApiRef.current) return;
         const s = stateRef.current;
-        const photosForFit = filteredPhotos(s.photos, s.projCurrent);
-        const fit = fitView(v, photosForFit, s.nodeOverrides, rect());
-        setState(fit);
+        setState(computeFit(v, s.photos, s.galleryOverrides));
       }, 0);
     },
-    [setState, rect, filteredPhotos],
+    [setState, computeFit],
   );
 
   // Fit once on first mount, but only after the canvas has a real size — a
   // zero-size rect (background tab / not-yet-painted) would produce a bad fit.
+  // The initial view defaults to a fixed 70% zoom rather than a computed
+  // best-fit scale; subsequent viewand navigation still fit-to-content.
   const didFitRef = useRef(false);
   const tryFit = useCallback(() => {
     if (didFitRef.current) return true;
     const r = rect();
     if (r.width > 0 && r.height > 0) {
-      doFit();
+      const s = stateRef.current;
+      const bounds = neuralGalleryFor(s.photos, s.galleryOverrides).bounds;
+      setState(centerAtScale(bounds, r, DEFAULT_ZOOM));
       didFitRef.current = true;
       return true;
     }
     return false;
-  }, [rect, doFit]);
+  }, [rect, setState, neuralGalleryFor]);
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 
@@ -1043,12 +1111,10 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       });
       setTimeout(() => {
         const s = stateRef.current;
-        const photosForFit = filteredPhotos(s.photos, k);
-        const fit = fitView(view, photosForFit, s.nodeOverrides, rect());
-        setState(fit);
+        setState(computeFit(view, s.photos, s.galleryOverrides));
       }, 0);
     },
-    [setState, rect, filteredPhotos],
+    [setState, computeFit],
   );
 
   // ── Add to project ───────────────────────────────────────────────────────
@@ -1059,25 +1125,158 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   );
   const closeAddProj = useCallback(() => setState({ addProjOpen: false }), [setState]);
 
-  const addToProject = useCallback(
-    (key: ProjectKey) => {
+  /** Stamps `project: key` onto the given photo ids. Shared by the canvas
+   * selection's "ADD" button and the source browser sidebar's own button. */
+  const commitAddToProject = useCallback(
+    (key: string, ids: string[]) => {
       const s = stateRef.current;
-      const n = s.selectedIds.length;
-      const label = PROJECTS_META[key].label;
-      const selectedSet = new Set(s.selectedIds);
-      const photos = s.photos.map((p) => (selectedSet.has(p.id) ? { ...p, project: key } : p));
-      setState({ photos, addProjOpen: false, selectedIds: [] });
+      const n = ids.length;
+      if (!n) return;
+      const label = resolveProjectMeta(key, s.customProjects).label;
+      const idSet = new Set(ids);
+      const photos = s.photos.map((p) => (idSet.has(p.id) ? { ...p, project: key } : p));
+      setState({ photos });
       flashToast(`${n} file${n === 1 ? "" : "s"} added to ${label}`);
     },
     [setState, flashToast],
   );
 
+  /** Creates a brand-new project from the given photo ids and returns its
+   * generated key (or null if there was nothing to add). */
+  const commitCreateProject = useCallback(
+    (ids: string[]) => {
+      const s = stateRef.current;
+      const n = ids.length;
+      if (!n) return null;
+      const key = `proj_${Date.now()}`;
+      const label = `Untitled project ${s.customProjects.length + 1}`;
+      const color = NEW_PROJECT_COLORS[s.customProjects.length % NEW_PROJECT_COLORS.length];
+      const project: Project = { key, label, color, count: n };
+      const idSet = new Set(ids);
+      const photos = s.photos.map((p) => (idSet.has(p.id) ? { ...p, project: key } : p));
+      setState({ photos, customProjects: [...s.customProjects, project] });
+      flashToast(`${n} file${n === 1 ? "" : "s"} added to ${label}`);
+      return key;
+    },
+    [setState, flashToast],
+  );
+
+  const addToProject = useCallback(
+    (key: ProjectKey) => {
+      const s = stateRef.current;
+      commitAddToProject(key, s.selectedIds);
+      setState({ addProjOpen: false, selectedIds: [] });
+    },
+    [commitAddToProject, setState],
+  );
+
   const createNewProject = useCallback(() => {
     const s = stateRef.current;
-    const n = s.selectedIds.length;
+    const ids = s.selectedIds;
     setState({ addProjOpen: false, selectedIds: [] });
-    flashToast(`${n} file${n === 1 ? "" : "s"} added to new project`);
-  }, [setState, flashToast]);
+    const key = commitCreateProject(ids);
+    if (key) selectProject(key);
+  }, [commitCreateProject, setState, selectProject]);
+
+  // ── Source browser sidebar (Finder-style, All My Files) ─────────────────
+
+  const openSourceTab = useCallback(
+    (source: PhotoSource) => {
+      const s = stateRef.current;
+      const tabs = s.sidebarTabs.includes(source) ? s.sidebarTabs : [...s.sidebarTabs, source];
+      setState({ sidebarTabs: tabs, sidebarActiveTab: source, drawerId: null });
+    },
+    [setState],
+  );
+
+  const closeSourceTab = useCallback(
+    (source: PhotoSource) => {
+      const s = stateRef.current;
+      const tabs = s.sidebarTabs.filter((t) => t !== source);
+      const active = s.sidebarActiveTab === source ? (tabs[tabs.length - 1] ?? null) : s.sidebarActiveTab;
+      setState({ sidebarTabs: tabs, sidebarActiveTab: active });
+    },
+    [setState],
+  );
+
+  const setSidebarActiveTab = useCallback(
+    (source: PhotoSource) => setState({ sidebarActiveTab: source }),
+    [setState],
+  );
+
+  const closeSidebar = useCallback(
+    () =>
+      setState({
+        sidebarTabs: [],
+        sidebarActiveTab: null,
+        sidebarSelectedIds: [],
+        sidebarSearchText: "",
+        sidebarAddOpen: false,
+      }),
+    [setState],
+  );
+
+  const toggleSidebarFile = useCallback(
+    (id: string) => {
+      const s = stateRef.current;
+      const sel = s.sidebarSelectedIds.slice();
+      const i = sel.indexOf(id);
+      if (i >= 0) sel.splice(i, 1);
+      else sel.push(id);
+      setState({ sidebarSelectedIds: sel });
+    },
+    [setState],
+  );
+
+  const toggleSidebarGroup = useCallback(
+    (ids: string[]) => {
+      const s = stateRef.current;
+      const selSet = new Set(s.sidebarSelectedIds);
+      const allSelected = ids.length > 0 && ids.every((id) => selSet.has(id));
+      if (allSelected) ids.forEach((id) => selSet.delete(id));
+      else ids.forEach((id) => selSet.add(id));
+      setState({ sidebarSelectedIds: Array.from(selSet) });
+    },
+    [setState],
+  );
+
+  const setSidebarSearch = useCallback((text: string) => setState({ sidebarSearchText: text }), [setState]);
+
+  const toggleSidebarAddOpen = useCallback(
+    () => setState({ sidebarAddOpen: !stateRef.current.sidebarAddOpen }),
+    [setState],
+  );
+  const closeSidebarAddOpen = useCallback(() => setState({ sidebarAddOpen: false }), [setState]);
+
+  const sidebarAddToProject = useCallback(
+    (key: string) => {
+      const s = stateRef.current;
+      commitAddToProject(key, s.sidebarSelectedIds);
+      setState({
+        sidebarAddOpen: false,
+        sidebarSelectedIds: [],
+        sidebarTabs: [],
+        sidebarActiveTab: null,
+        sidebarSearchText: "",
+      });
+      selectProject(key);
+    },
+    [commitAddToProject, setState, selectProject],
+  );
+
+  const sidebarCreateProject = useCallback(() => {
+    const s = stateRef.current;
+    const ids = s.sidebarSelectedIds;
+    setState({
+      sidebarAddOpen: false,
+      sidebarSelectedIds: [],
+      sidebarTabs: [],
+      sidebarActiveTab: null,
+      sidebarSearchText: "",
+    });
+    const key = commitCreateProject(ids);
+    if (key) selectProject(key);
+  }, [commitCreateProject, setState, selectProject]);
 
   // ── Search / Help ────────────────────────────────────────────────────────
 
@@ -1246,10 +1445,11 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
       else if (s.helpOpen) closeHelp();
       else if (s.expanded.kind) closeExpand();
       else if (s.chatOpen) closeChat();
+      else if (s.sidebarTabs.length) closeSidebar();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closeExpand, closeChat]);
+  }, [closeDrawer, closeSearch, closeHelp, closeExpand, closeChat, closeSidebar]);
 
   useEffect(() => {
     return () => {
@@ -1262,9 +1462,9 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const neuralLayout = useMemo(
-    () => layoutNeural(state.photos, state.nodeOverrides),
-    [state.photos, state.nodeOverrides],
+  const neuralGalleryPos = useMemo(
+    () => neuralGalleryFor(state.photos, state.galleryOverrides).pos,
+    [state.photos, state.galleryOverrides, neuralGalleryFor],
   );
 
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
@@ -1288,6 +1488,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const isMapView = state.view === "map" && state.projCurrent !== "all";
   const isSenseView = state.view === "sense" && state.projCurrent !== "all";
   const showViewTabs = state.projCurrent !== "all";
+  const allFilesMode = state.projCurrent === "all";
   const showAddToProject = isNeural && selectedIds.size > 0;
 
   const projectPhotos = useMemo(
@@ -1295,24 +1496,33 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [state.photos, state.projCurrent, filteredPhotos],
   );
 
-  const projectList: ProjectListItem[] = useMemo(
-    () =>
-      PROJECT_KEYS.map((k) => ({
-        key: k,
-        label: PROJECTS_META[k].label,
-        color: PROJECTS_META[k].color,
-        count: state.photos.filter((p) => p.project === k).length,
-        active: state.projCurrent === k,
-      })),
-    [state.photos, state.projCurrent],
-  );
+  const projectList: ProjectListItem[] = useMemo(() => {
+    const seeded = PROJECT_KEYS.map((k) => ({
+      key: k,
+      label: PROJECTS_META[k].label,
+      color: PROJECTS_META[k].color,
+      count: state.photos.filter((p) => p.project === k).length,
+      active: state.projCurrent === k,
+    }));
+    const custom = state.customProjects.map((p) => ({
+      key: p.key,
+      label: p.label,
+      color: p.color,
+      count: state.photos.filter((ph) => ph.project === p.key).length,
+      active: state.projCurrent === p.key,
+    }));
+    return [...seeded, ...custom];
+  }, [state.photos, state.projCurrent, state.customProjects]);
 
   const projLabel =
-    state.projCurrent === "all" ? "All my files" : PROJECTS_META[state.projCurrent].label;
+    state.projCurrent === "all" ? "All my files" : resolveProjectMeta(state.projCurrent, state.customProjects).label;
+
+  const sidebarOpen = state.sidebarTabs.length > 0;
+  const sidebarSelectedIds = useMemo(() => new Set(state.sidebarSelectedIds), [state.sidebarSelectedIds]);
 
   const timelineLayoutResult = useMemo(
-    () => computeTimelineLayout(projectPhotos, state.tlOverrides, canvasHeight),
-    [projectPhotos, state.tlOverrides, canvasHeight],
+    () => computeTimelineLayout(projectPhotos, state.tlOverrides),
+    [projectPhotos, state.tlOverrides],
   );
 
   const senseBubblesResult = useMemo(() => computeSenseBubbles(projectPhotos), [projectPhotos]);
@@ -1341,13 +1551,13 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   const minimapPoints = useMemo(() => {
     if (isMapView) return [];
-    if (isNeural) return Object.values(neuralLayout.pos).map((p) => ({ x: p.cx, y: p.cy }));
+    if (isNeural) return Object.values(neuralGalleryPos).map((p) => ({ x: p.cx, y: p.cy }));
     if (isTimelineView) {
       return Object.values(timelineLayoutResult.tiles).map((t) => ({ x: t.x + t.w / 2, y: t.y + t.h / 2 }));
     }
     if (isSenseView) return senseBubblesResult.map((b) => ({ x: b.x, y: b.y }));
     return [];
-  }, [isMapView, isNeural, isTimelineView, isSenseView, neuralLayout, timelineLayoutResult, senseBubblesResult]);
+  }, [isMapView, isNeural, isTimelineView, isSenseView, neuralGalleryPos, timelineLayoutResult, senseBubblesResult]);
 
   const minimap = useMemo(
     () =>
@@ -1391,7 +1601,8 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     drawerStyle: state.drawerStyle,
     copyLabel: state.copyLabel,
     toast: state.toast,
-    neuralLayout,
+    canvasWidth,
+    galleryOverrides: state.galleryOverrides,
     gridSize: Math.max(4, 40 * state.scale),
     gridPos: `${state.tx}px ${state.ty}px`,
     gridOpacity: isMapView ? 0 : 1,
@@ -1410,10 +1621,10 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     isSenseView,
     showViewTabs,
     showAddToProject,
+    allFilesMode,
     setCanvasRef,
     onCanvasDown,
-    onCardDown,
-    onNodeDown,
+    onGalleryNodeDown,
     setHover,
     openDrawer,
     closeDrawer,
@@ -1434,6 +1645,13 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     frames: state.frames,
     frameDraft,
     deleteFrame,
+    renameFrame,
+
+    stickyNotes: state.stickyNotes,
+    addStickyNote,
+    onStickyDown,
+    updateStickyText,
+    deleteStickyNote,
 
     canUndo,
     canRedo,
@@ -1480,6 +1698,24 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     closeAddProj,
     addToProject,
     createNewProject,
+
+    sidebarOpen,
+    sidebarTabs: state.sidebarTabs,
+    sidebarActiveTab: state.sidebarActiveTab,
+    sidebarSelectedIds,
+    sidebarSearchText: state.sidebarSearchText,
+    sidebarAddOpen: state.sidebarAddOpen,
+    openSourceTab,
+    closeSourceTab,
+    setSidebarActiveTab,
+    closeSidebar,
+    toggleSidebarFile,
+    toggleSidebarGroup,
+    setSidebarSearch,
+    toggleSidebarAddOpen,
+    closeSidebarAddOpen,
+    sidebarAddToProject,
+    sidebarCreateProject,
 
     search: state.search,
     openSearch,

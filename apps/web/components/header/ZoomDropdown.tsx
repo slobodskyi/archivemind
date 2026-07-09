@@ -1,6 +1,8 @@
 import { CheckIcon, FitIcon } from "@/components/icons/icons";
 
-const PRESETS = [50, 75, 100, 125, 150, 200];
+const DEFAULT_PRESETS = [50, 75, 100, 125, 150, 200];
+/** Map view's Leaflet zoom is pinned to 100%–200% (world-fit up to 2x). */
+export const MAP_ZOOM_PRESETS = [100, 125, 150, 175, 200];
 
 interface ZoomDropdownProps {
   open: boolean;
@@ -8,9 +10,17 @@ interface ZoomDropdownProps {
   onClose: () => void;
   onSelectPct: (pct: number) => void;
   onFit: () => void;
+  presets?: number[];
 }
 
-export default function ZoomDropdown({ open, zoomPct, onClose, onSelectPct, onFit }: ZoomDropdownProps) {
+export default function ZoomDropdown({
+  open,
+  zoomPct,
+  onClose,
+  onSelectPct,
+  onFit,
+  presets = DEFAULT_PRESETS,
+}: ZoomDropdownProps) {
   if (!open) return null;
   const curPct = parseInt(zoomPct, 10);
   return (
@@ -31,7 +41,7 @@ export default function ZoomDropdown({ open, zoomPct, onClose, onSelectPct, onFi
           padding: 6,
         }}
       >
-        {PRESETS.map((pct) => (
+        {presets.map((pct) => (
           <button
             key={pct}
             onClick={() => onSelectPct(pct)}

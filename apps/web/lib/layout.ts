@@ -1,5 +1,5 @@
 import type { Photo, PhotoGroup, PhotoSource } from "@/types";
-import { GROUPS, PROJECTS_META, SOURCES } from "./mock-data";
+import { GROUPS, SOURCES } from "./mock-data";
 import type { ViewMode } from "@/types";
 
 /**
@@ -7,14 +7,6 @@ import type { ViewMode } from "@/types";
  * No randomness anywhere — every position is a function of the fixed mock data
  * plus user drag overrides.
  */
-
-export interface NodeOverrides {
-  hub: Record<string, { x: number; y: number }>;
-  folder: Record<string, { x: number; y: number }>;
-  file: Record<string, { x: number; y: number }>;
-}
-
-export const EMPTY_OVERRIDES: NodeOverrides = { hub: {}, folder: {}, file: {} };
 
 export interface Frame {
   id: string;
@@ -25,6 +17,18 @@ export interface Frame {
   label: string;
 }
 
+export interface StickyNote {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  color: string;
+}
+
+export const STICKY_NOTE_COLORS = ["#ffe066", "#ff9eb8", "#8ecdf7", "#a8e6a1"];
+
 export interface TilePos {
   x: number;
   y: number;
@@ -34,47 +38,11 @@ export interface TilePos {
   cy: number;
 }
 
-export interface HubNode {
-  key: string;
-  x: number;
-  y: number;
-  color: string;
-  glow: string;
-  label: string;
-  abbr: string;
-  count: number;
-}
-
-export interface FolderNode {
-  key: string;
-  x: number;
-  y: number;
-  count: number;
-  label: string;
-  source: string;
-  bg: string;
-  tabBg: string;
-  shadow: string;
-}
-
 export interface EdgePath {
   d: string;
   stroke: string;
   op: number;
   w: number;
-}
-
-export interface NeuralOverlay {
-  hubs: HubNode[];
-  folders: FolderNode[];
-  hubEdges: EdgePath[];
-  folderEdges: EdgePath[];
-  looseEdges: EdgePath[];
-}
-
-export interface NeuralLayout {
-  pos: Record<string, TilePos>;
-  overlay: NeuralOverlay;
 }
 
 // ── Helpers (verbatim) ──────────────────────────────────────────────────────
@@ -88,10 +56,6 @@ export function hash(id: string): number {
   let h = 5381;
   for (let i = 0; i < id.length; i++) h = ((h * 33) ^ id.charCodeAt(i)) >>> 0;
   return h;
-}
-
-export function folderKey(p: Photo): string | null {
-  return hash(p.id) % 3 === 0 ? null : p.source + "_" + p.project;
 }
 
 export function mkBez(
@@ -115,160 +79,121 @@ export function mkBez(
   );
 }
 
-const FGRADS = [
-  "linear-gradient(140deg,#7bc4ff,#3a6fff)",
-  "linear-gradient(140deg,#ff9a7c,#ff4a3c)",
-  "linear-gradient(140deg,#7ee8df,#22b8c8)",
-  "linear-gradient(140deg,#d4a4ff,#8840e0)",
-  "linear-gradient(140deg,#ffe08a,#ffb400)",
-  "linear-gradient(140deg,#7ee8c8,#5be0a0)",
-];
-const FTABS = [
-  "rgba(44,90,220,.8)",
-  "rgba(220,58,44,.8)",
-  "rgba(28,164,180,.8)",
-  "rgba(128,72,210,.8)",
-  "rgba(200,148,0,.8)",
-  "rgba(44,180,128,.8)",
-];
-const FSHADOWS = [
-  "rgba(58,111,255,.35)",
-  "rgba(255,74,60,.35)",
-  "rgba(42,179,192,.35)",
-  "rgba(144,96,224,.35)",
-  "rgba(255,180,0,.35)",
-  "rgba(91,224,160,.35)",
-];
+// ── Neural view: source gallery ─────────────────────────────────────────────
+// One tile per connected source — the persistent "All my files" canvas
+// content. No connecting lines. Tiles start scattered (deterministic
+// golden-angle spiral, no Math.random) and can be dragged anywhere — a
+// per-key override then wins over the scattered default. Folders/files within
+// a source are no longer drilled into on canvas — double-clicking a source
+// tile opens the Finder-style browser sidebar instead (see
+// components/sidebar/SourceBrowserSidebar.tsx and groupBySourceFolder below).
 
-const HUBPOS: Record<PhotoSource, { x: number; y: number }> = {
-  gdrive: { x: 700, y: 720 },
-  icloud: { x: 1750, y: 260 },
-  dropbox: { x: 2650, y: 760 },
-};
-
-// ── Neural layout (verbatim algorithm) ──────────────────────────────────────
-
-export function layoutNeural(
-  photos: Photo[],
-  overrides: NodeOverrides = EMPTY_OVERRIDES,
-): NeuralLayout {
-  const pos: Record<string, TilePos> = {};
-  const hubEdges: EdgePath[] = [];
-  const folderEdges: EdgePath[] = [];
-  const looseEdges: EdgePath[] = [];
-  const hubs: HubNode[] = [];
-  const folders: FolderNode[] = [];
-  const OV = overrides || EMPTY_OVERRIDES;
-
-  const bySrc: Record<string, Photo[]> = {};
-  photos.forEach((p) => {
-    (bySrc[p.source] = bySrc[p.source] || []).push(p);
-  });
-
-  (Object.keys(SOURCES) as PhotoSource[]).forEach((src) => {
-    let hub = HUBPOS[src];
-    if (OV.hub[src]) hub = OV.hub[src];
-    const meta = SOURCES[src];
-    const members = bySrc[src] || [];
-    hubs.push({
-      key: src,
-      x: hub.x,
-      y: hub.y,
-      color: meta.color,
-      glow: hexA(meta.color, 0.12),
-      label: meta.label,
-      abbr: meta.abbr,
-      count: members.length,
-    });
-    const byFolder: Record<string, Photo[]> = {};
-    const loose: Photo[] = [];
-    members.forEach((p) => {
-      const fk = folderKey(p);
-      if (fk) (byFolder[fk] = byFolder[fk] || []).push(p);
-      else loose.push(p);
-    });
-    const folderKeys = Object.keys(byFolder);
-    const nSlots = folderKeys.length + (loose.length ? 1 : 0);
-    let slot = 0;
-    const RF = 300;
-    folderKeys.forEach((fk, fi) => {
-      const ang = -Math.PI / 2 + (slot / Math.max(nSlots, 1)) * Math.PI * 2;
-      slot++;
-      let fx = hub.x + Math.cos(ang) * RF,
-        fy = hub.y + Math.sin(ang) * RF;
-      if (OV.folder[fk]) {
-        fx = OV.folder[fk].x;
-        fy = OV.folder[fk].y;
-      }
-      const fmembers = byFolder[fk];
-      const proj = fmembers[0].project;
-      const gi = hash(fk) % FGRADS.length;
-      folders.push({
-        key: fk,
-        x: fx - 54,
-        y: fy - 40,
-        count: fmembers.length,
-        label: PROJECTS_META[proj] ? PROJECTS_META[proj].label.split(" ")[0] : "Files",
-        source: meta.abbr,
-        bg: FGRADS[gi],
-        tabBg: FTABS[gi],
-        shadow: FSHADOWS[gi],
-      });
-      hubEdges.push({
-        d: mkBez(hub.x, hub.y, fx, fy, fi * 7 + hash(fk), 0.22),
-        stroke: meta.color,
-        op: 0.4,
-        w: 1.3,
-      });
-      const n = fmembers.length,
-        RFI = n > 3 ? 130 : 92;
-      fmembers.forEach((p, i) => {
-        const fang = ang + (-0.9 + (i / Math.max(n - 1, 1)) * 1.8);
-        const w = 96,
-          h = Math.round((p.h * w) / p.w);
-        let px = fx + Math.cos(fang) * RFI,
-          py = fy + Math.sin(fang) * RFI;
-        if (OV.file[p.id]) {
-          px = OV.file[p.id].x;
-          py = OV.file[p.id].y;
-        }
-        pos[p.id] = { x: px - w / 2, y: py - h / 2, w, h, cx: px, cy: py };
-        folderEdges.push({
-          d: mkBez(fx, fy, px, py, hash(p.id), 0.18),
-          stroke: "rgba(236,238,232,.4)",
-          op: 0.3,
-          w: 0.8,
-        });
-      });
-    });
-    if (loose.length) {
-      const ang0 = -Math.PI / 2 + (slot / Math.max(nSlots, 1)) * Math.PI * 2;
-      const n = loose.length,
-        RL = 230;
-      loose.forEach((p, i) => {
-        const ang = ang0 + (-0.5 + (i / Math.max(n - 1, 1)) * 1.0);
-        const w = 100,
-          h = Math.round((p.h * w) / p.w);
-        let px = hub.x + Math.cos(ang) * RL,
-          py = hub.y + Math.sin(ang) * RL;
-        if (OV.file[p.id]) {
-          px = OV.file[p.id].x;
-          py = OV.file[p.id].y;
-        }
-        pos[p.id] = { x: px - w / 2, y: py - h / 2, w, h, cx: px, cy: py };
-        looseEdges.push({
-          d: mkBez(hub.x, hub.y, px, py, hash(p.id), 0.16),
-          stroke: meta.color,
-          op: 0.28,
-          w: 0.9,
-        });
-      });
-    }
-  });
-  return { pos, overlay: { hubs, folders, hubEdges, folderEdges, looseEdges } };
+export interface GalleryOverrides {
+  source: Record<string, { x: number; y: number }>;
 }
 
-// ── Fit-to-content (verbatim) ───────────────────────────────────────────────
+export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {} };
+
+export interface GalleryTile {
+  key: string;
+  label: string;
+  count: number;
+  pos: TilePos;
+}
+
+export interface SourceGalleryTile extends GalleryTile {
+  key: PhotoSource;
+  abbr: string;
+  color: string;
+}
+
+export interface SourceFolderGroup {
+  key: string;
+  label: string;
+  photos: Photo[];
+}
+
+/** Groups one source's photos by their real `folder` field, for the Finder-style
+ * source browser sidebar (one entry per folder, sorted alphabetically). */
+export function groupBySourceFolder(photos: Photo[], source: PhotoSource): SourceFolderGroup[] {
+  const byFolder: Record<string, Photo[]> = {};
+  photos.forEach((p) => {
+    if (p.source !== source) return;
+    (byFolder[p.folder] = byFolder[p.folder] || []).push(p);
+  });
+  return Object.keys(byFolder)
+    .sort()
+    .map((k) => ({ key: k, label: k, photos: byFolder[k] }));
+}
+
+const SCATTER_GOLDEN_ANGLE = 2.39996;
+const SCATTER_CX = 500;
+const SCATTER_CY = 380;
+
+/** Deterministic golden-angle spiral scatter, overridable per key by drag. */
+function scatterLayout(
+  items: { key: string; w: number; h: number }[],
+  overrides: Record<string, { x: number; y: number }>,
+): { pos: Record<string, TilePos>; bounds: Bounds } {
+  const pos: Record<string, TilePos> = {};
+  items.forEach(({ key, w, h }, i) => {
+    const ov = overrides[key];
+    let x: number, y: number;
+    if (ov) {
+      // Overrides store the dragged tile's center (matches onGalleryNodeDown/onCardDown's origCenter).
+      x = ov.x - w / 2;
+      y = ov.y - h / 2;
+    } else {
+      const angle = i * SCATTER_GOLDEN_ANGLE;
+      const radius = 70 + i * 62 + (hash(key) % 50);
+      const jx = (hash(key + "jx") % 60) - 30;
+      const jy = (hash(key + "jy") % 60) - 30;
+      x = SCATTER_CX + Math.cos(angle) * radius + jx - w / 2;
+      y = SCATTER_CY + Math.sin(angle) * radius + jy - h / 2;
+    }
+    pos[key] = { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+  });
+  const vals = Object.values(pos);
+  const bounds: Bounds = vals.length
+    ? {
+        xl: Math.min(...vals.map((p) => p.x)),
+        yt: Math.min(...vals.map((p) => p.y)),
+        xr: Math.max(...vals.map((p) => p.x + p.w)),
+        yb: Math.max(...vals.map((p) => p.y + p.h)),
+      }
+    : { xl: 0, yt: 0, xr: 1000, yb: 700 };
+  return { pos, bounds };
+}
+
+const SOURCE_TILE_W = 140;
+const SOURCE_TILE_H = 110;
+
+/** One tile per connected source. */
+export function sourcesGallery(
+  photos: Photo[],
+  overrides: Record<string, { x: number; y: number }>,
+): { tiles: SourceGalleryTile[]; pos: Record<string, TilePos>; bounds: Bounds } {
+  const bySrc: Partial<Record<PhotoSource, number>> = {};
+  photos.forEach((p) => {
+    bySrc[p.source] = (bySrc[p.source] ?? 0) + 1;
+  });
+  const keys = Object.keys(SOURCES) as PhotoSource[];
+  const { pos, bounds } = scatterLayout(
+    keys.map((k) => ({ key: k, w: SOURCE_TILE_W, h: SOURCE_TILE_H })),
+    overrides,
+  );
+  const tiles: SourceGalleryTile[] = keys.map((k) => ({
+    key: k,
+    label: SOURCES[k].label,
+    abbr: SOURCES[k].abbr,
+    color: SOURCES[k].color,
+    count: bySrc[k] ?? 0,
+    pos: pos[k],
+  }));
+  return { tiles, pos, bounds };
+}
+
+// ── Fit-to-content ───────────────────────────────────────────────────────────
 
 export interface Bounds {
   xl: number;
@@ -290,52 +215,47 @@ export interface Rect {
 
 const MONTH_COUNT = 6;
 
-export function viewBounds(
-  view: ViewMode,
-  photos: Photo[],
-  overrides: NodeOverrides = EMPTY_OVERRIDES,
-): Bounds {
-  if (view === "neural") {
-    const { pos } = layoutNeural(photos, overrides);
-    const ids = Object.keys(pos);
-    if (!ids.length) return { xl: 0, yt: 0, xr: 1000, yb: 700 };
-    return {
-      xl: Math.min(...ids.map((i) => pos[i].x), 400),
-      yt: Math.min(...ids.map((i) => pos[i].y), 400),
-      xr: Math.max(...ids.map((i) => pos[i].x + pos[i].w)),
-      yb: Math.max(...ids.map((i) => pos[i].y + pos[i].h)),
-    };
-  }
+export function viewBounds(view: ViewMode): Bounds {
   if (view === "timeline") return { xl: 0, yt: 0, xr: 60 + MONTH_COUNT * 380, yb: 900 };
   if (view === "map") return { xl: 0, yt: 0, xr: 1200, yb: 700 };
   if (view === "sense") return { xl: 0, yt: 0, xr: 1200, yb: 900 };
   return { xl: 0, yt: 0, xr: 1000, yb: 700 };
 }
 
-export function fitView(
-  view: ViewMode,
-  photos: Photo[],
-  overrides: NodeOverrides,
-  rect: Rect,
-): Transform {
-  const leftPad = 24;
-  if (view === "timeline") {
-    return { scale: 1, tx: leftPad + 20, ty: 100 };
-  }
-  const { xl, yt, xr, yb } = viewBounds(view, photos, overrides);
-  const pad = 60,
+/** Shared scale/pan solve — same math the neural gallery, timeline, map, and sense fits all use. */
+export function fitBounds(bounds: Bounds, rect: Rect): Transform {
+  const leftPad = 24,
+    pad = 60,
     top = 70,
     bottom = 104;
-  const bw = Math.max(xr - xl, 1),
-    bh = Math.max(yb - yt, 1);
+  const bw = Math.max(bounds.xr - bounds.xl, 1),
+    bh = Math.max(bounds.yb - bounds.yt, 1);
   const availW = rect.width - leftPad - pad * 2,
     availH = rect.height - top - bottom;
   const sc = Math.min(availW / bw, availH / bh, 1.05);
   return {
     scale: sc,
-    tx: leftPad + pad + (availW - bw * sc) / 2 - xl * sc,
-    ty: top + (availH - bh * sc) / 2 - yt * sc,
+    tx: leftPad + pad + (availW - bw * sc) / 2 - bounds.xl * sc,
+    ty: top + (availH - bh * sc) / 2 - bounds.yt * sc,
   };
+}
+
+/** Centers `bounds` in `rect` at a fixed scale, instead of solving for a best-fit scale. */
+export function centerAtScale(bounds: Bounds, rect: Rect, scale: number): Transform {
+  const bw = bounds.xr - bounds.xl,
+    bh = bounds.yb - bounds.yt;
+  return {
+    scale,
+    tx: (rect.width - bw * scale) / 2 - bounds.xl * scale,
+    ty: (rect.height - bh * scale) / 2 - bounds.yt * scale,
+  };
+}
+
+export function fitView(view: ViewMode, rect: Rect): Transform {
+  if (view === "timeline") {
+    return { scale: 1, tx: 24 + 20, ty: 100 };
+  }
+  return fitBounds(viewBounds(view), rect);
 }
 
 // ── Timeline view: month columns + deterministic scattered tiles ───────────
@@ -346,7 +266,7 @@ const COL_W = 340;
 const COL_GAP = 40;
 const TILE_MIN = 64;
 const TILE_MAX = 96;
-const TOP_Y = 16;
+const TOP_Y = 8;
 const MIN_CELL = 116;
 const PER_ROW = Math.floor(COL_W / MIN_CELL); // 2
 
@@ -378,7 +298,6 @@ export interface TimelineLayout {
 export function timelineLayout(
   photos: Photo[],
   tlOverrides: Record<string, { x: number; y: number }>,
-  availableHeight: number,
 ): TimelineLayout {
   const byMonth: Record<string, Photo[]> = {};
   MONTH_LIST.forEach((m) => (byMonth[m] = []));
@@ -391,7 +310,10 @@ export function timelineLayout(
   MONTH_LIST.forEach((m, mi) => {
     const items = byMonth[m];
     const rows = Math.max(1, Math.ceil(items.length / PER_ROW));
-    const colH = Math.max(availableHeight - TOP_Y - 20, rows * MIN_CELL);
+    // Pack rows tightly against the header instead of stretching to fill the
+    // viewport — months with few photos used to leave a big gap up top;
+    // vertical scroll (not viewport-stretching) now handles tall columns.
+    const colH = rows * MIN_CELL;
     const colX = mi * (COL_W + COL_GAP);
     months.push({ key: m, x: colX, colH, count: items.length });
 
@@ -681,10 +603,14 @@ export function minimapLayout(
     vpY1 = (rect.height - ty) / scale;
   const tl = toMini(vpX0, vpY0),
     br = toMini(vpX1, vpY1);
-  const cx0 = Math.max(0, Math.min(MB_W, tl.x)),
-    cy0 = Math.max(0, Math.min(MB_H, tl.y));
-  const cx1 = Math.max(0, Math.min(MB_W, br.x)),
-    cy1 = Math.max(0, Math.min(MB_H, br.y));
+  // Inset by the viewport box's own border width so it never sits flush against
+  // the minimap's overflow:hidden edge — otherwise the border's outer half-pixel
+  // gets clipped and the right/bottom edge appears to vanish.
+  const VP_BORDER = 1.5;
+  const cx0 = Math.max(VP_BORDER, Math.min(MB_W - VP_BORDER, tl.x)),
+    cy0 = Math.max(VP_BORDER, Math.min(MB_H - VP_BORDER, tl.y));
+  const cx1 = Math.max(VP_BORDER, Math.min(MB_W - VP_BORDER, br.x)),
+    cy1 = Math.max(VP_BORDER, Math.min(MB_H - VP_BORDER, br.y));
   const vp = { x: cx0, y: cy0, w: Math.max(2, cx1 - cx0), h: Math.max(2, cy1 - cy0) };
   return { show: true, dots, vp, originX: xl, originY: yt, mscale, offX, offY };
 }
