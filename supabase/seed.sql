@@ -1,0 +1,2 @@
+-- Local-dev seed. Intentionally empty in Phase 0.
+-- The demo-archive seed (sample assets for fresh workspaces) is issue #42 (Phase 1).
