@@ -96,6 +96,7 @@ async function main(): Promise<void> {
     await releaseJob(pool, currentJob.id);
     log(`released in-flight job ${currentJob.id} back to queue`);
   }
+  await import("./services/raw").then((m) => m.closeExifTool()).catch(() => {});
   await pool.end();
   log("stopped");
 }

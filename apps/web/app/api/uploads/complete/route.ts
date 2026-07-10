@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   assetKindFromMime,
   completeUploadRequestSchema,
+  ingestJobPayloadSchema,
   type CompleteUploadResponse,
 } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
       workspace_id: workspaceId,
       user_id: user.id,
       type: "ingest",
-      payload: { asset_ids: assetIds },
+      payload: ingestJobPayloadSchema.parse({ asset_ids: assetIds }),
       total_items: assetIds.length,
       done_items: 0,
     })

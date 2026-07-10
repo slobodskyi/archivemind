@@ -46,6 +46,16 @@ describe("job queue contracts", () => {
   });
 });
 
+describe("uuidSchema", () => {
+  it("accepts any Postgres uuid text, not only strict RFC v4", async () => {
+    const { uuidSchema, ingestJobPayloadSchema } = await import("./index");
+    expect(uuidSchema.parse("00000000-0000-0000-0000-00000000ab01")).toBeTruthy(); // fixture-style
+    expect(uuidSchema.parse("4df136fe-a1a4-49c1-ab22-1f1713a1c53c")).toBeTruthy(); // gen_random_uuid
+    expect(uuidSchema.safeParse("not-a-uuid").success).toBe(false);
+    expect(ingestJobPayloadSchema.safeParse({ asset_ids: [] }).success).toBe(false);
+  });
+});
+
 describe("upload contracts", () => {
   it("accepts a valid presign request up to the single-PUT cap", () => {
     expect(
