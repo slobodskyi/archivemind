@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  # Native postinstall scripts vetted 2026-07-10: sharp is Next's image
+  # optimizer (and the worker's preview pipeline later); unrs-resolver backs
+  # eslint-config-next's import resolution.
+  sharp: true
+  unrs-resolver: true

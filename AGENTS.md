@@ -1,18 +1,20 @@
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `apps/web/node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
 # ArchiveMind
 
 AI-powered creator archive workspace — infinite-canvas photo archive UI.
-Currently a **frontend-only mockup**: Next.js (App Router) + TypeScript + Tailwind,
-ported pixel-for-pixel from a Claude Design `.dc.html` prototype. All data is mock
-data behind a thin API layer (see below). No backend exists yet.
+A **pnpm + turborepo monorepo** (backend build Phase 0 in progress):
+- `apps/web` — the Next.js (App Router) + TypeScript + Tailwind mockup, ported
+  pixel-for-pixel from a Claude Design `.dc.html` prototype; all data is mock data
+  behind a thin API layer (see below).
+- `apps/worker` — Railway job worker (scaffold only; skeleton lands in Phase 1).
+- `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
-The backend build is **planned and issue-tracked** but not yet started — `main`
-still ships only the mockup. Target stack: Supabase (Postgres + Auth + pgvector),
+Target stack: Supabase (Postgres + Auth + pgvector),
 Cloudflare R2 (all binaries), and a **worker on Railway** for heavy jobs
 (ingest/analyze/caption/export). AI = `gemini-3.1-flash-lite` via the
 `GEMINI_ANALYZE_MODEL` env var for captions/analysis/search + `gemini-embedding-2`
@@ -28,14 +30,17 @@ design from this file:**
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase. Until a phase touches it, keep new work behind `lib/api.ts` (below).
 
-## Commands
-- `npm run dev` — start dev server (localhost:3000)
-- `npm run build` — production build — MUST pass before merging
-- `npm run lint` — ESLint — MUST pass before merging
-- `npx tsc --noEmit` — typecheck (strict mode) — MUST pass before merging
+## Commands (run from the repo root)
+- `pnpm dev` — start dev server (localhost:3000)
+- `pnpm build` — production build — MUST pass before merging
+- `pnpm lint` — ESLint — MUST pass before merging
+- `pnpm typecheck` — typecheck (strict mode) — MUST pass before merging
+
+All four fan out through turborepo to every workspace package.
 
 ## Conventions
 - TypeScript strict, no `any`.
+- Mockup paths below are relative to **`apps/web/`**.
 - Mock/demo data lives in `lib/mock-data.ts` (plus the canned chat/search surface
   in `lib/chat.ts`). Components and hooks should reach data only through
   `lib/api.ts` (async functions) — that's the seam a real backend swaps into
@@ -43,7 +48,9 @@ phase. Until a phase touches it, keep new work behind `lib/api.ts` (below).
   directly (`lib/format.ts`, `lib/layout.ts`, `hooks/useWorkspace.ts`,
   `components/map/MapCanvas.tsx`, `components/toolbar/AddToProjectPopover.tsx`);
   PLAN Phase 1 cleans these as features go live — don't add new direct imports.
-- Shared domain types live in `types/`; reuse them, don't redefine inline shapes.
+- Shared domain types for the mockup live in `apps/web/types/`; reuse them, don't
+  redefine inline shapes. Cross-package contracts (web ↔ worker) live in
+  `packages/shared` as zod schemas.
 - Styling: ported elements intentionally use inline `style={{}}` objects, not
   Tailwind utility classes, to guarantee pixel fidelity to the source design — see
   `docs/decisions/0001-inline-styles-over-tailwind.md`. Tailwind is fine for new,

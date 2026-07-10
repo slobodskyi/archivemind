@@ -9,25 +9,26 @@ with AI content understanding (what) — e.g. *"mustached men I shot in Odesa."*
 
 ## Status
 
-**Frontend-only mockup.** `main` today is a Next.js (App Router) + TypeScript +
-Tailwind port of a Claude Design prototype, running entirely on mock data behind a
-thin `lib/api.ts` seam — no backend, auth, or database yet. The backend build
-(Supabase + Cloudflare R2 + a Railway worker + Gemini) is fully specced and
-issue-tracked but not yet started.
+**Backend build: Phase 0.** The repo is a pnpm + turborepo monorepo:
+[`apps/web`](apps/web) (the Next.js App Router mockup, running on mock data behind
+a thin `lib/api.ts` seam), [`apps/worker`](apps/worker) (Railway job worker —
+scaffold, lands in Phase 1), [`packages/shared`](packages/shared) (zod domain
+contracts). The target backend (Supabase + Cloudflare R2 + Railway worker +
+Gemini) is fully specced and issue-tracked; work proceeds in phase order.
 
 ## Getting started
 
 ```bash
-npm install
-npm run dev        # http://localhost:3000
+pnpm install
+pnpm dev           # http://localhost:3000 (turbo run dev)
 ```
 
 Other commands (all must pass before merging):
 
 ```bash
-npm run build      # production build
-npm run lint       # ESLint
-npx tsc --noEmit   # typecheck (strict mode)
+pnpm build         # production build (turbo run build)
+pnpm lint          # ESLint (turbo run lint)
+pnpm typecheck     # tsc --noEmit, strict (turbo run typecheck)
 ```
 
 ## Documentation

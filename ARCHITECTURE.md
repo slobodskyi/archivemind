@@ -6,13 +6,15 @@ For the **target backend** (schema, worker, AI pipeline, security), `docs/TECH_S
 duplicate those here.
 
 ## What this is (today)
-A frontend-only Next.js (App Router) + TypeScript port of a Claude Design mockup:
-an infinite-canvas photo-archive workspace with four views (Neural graph, Timeline,
-Map, Sense/circle-pack), a photo detail drawer, an AI chat panel (canned responses,
+A pnpm + turborepo monorepo. The app in `apps/web` is a frontend-only Next.js
+(App Router) + TypeScript port of a Claude Design mockup: an infinite-canvas
+photo-archive workspace with four views (Neural graph, Timeline, Map,
+Sense/circle-pack), a photo detail drawer, an AI chat panel (canned responses,
 no real LLM), and project switching. No backend, no auth, no database — purely a
-client-side demo running on mock data.
+client-side demo running on mock data. `apps/worker` and `packages/shared` are
+Phase-0 scaffolds the backend build fills in.
 
-## Data flow (today)
+## Data flow (today — paths relative to `apps/web/`)
 
 ```
 lib/mock-data.ts            raw mock records + generators
@@ -55,12 +57,13 @@ These are the mockup's shapes. The **target** model differs — see the note bel
 > Google Drive / Dropbox integrations (no iCloud in MVP). The rename lands during the
 > build phases — see the spec, don't reshape the mockup ahead of it.
 
-## Target stack (not yet built)
+## Target stack (Phase 0 in progress)
 See `docs/TECH_SPEC.md` §2–§3. In brief: monorepo `apps/web` (Vercel) +
 `apps/worker` (Railway) + `packages/shared` + `supabase/`; Supabase Postgres
 (+ Auth, pgvector, Realtime); Cloudflare R2 for all binaries; Gemini
-(`gemini-3.1-flash-lite` + `gemini-embedding-2`) for AI. Until a build phase starts,
-don't add real network calls, auth, or a database client to the mockup — keep
+(`gemini-3.1-flash-lite` + `gemini-embedding-2`) for AI. The monorepo shell exists;
+the worker and shared contracts are still scaffolds. Until a build phase touches
+it, don't add real network calls, auth, or a database client to the mockup — keep
 everything behind `lib/api.ts` so the swap stays contained.
 
 ## Key implementation notes (read before "fixing" something)
