@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { photoSrc } from "@/lib/img";
 import type {
   CaptionStyle,
   ChatMessage,
@@ -1538,7 +1539,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const bulkThumbs = useMemo(() => {
     const set = selectedIds;
     const sel = state.photos.filter((p) => set.has(p.id)).slice(0, 4);
-    return sel.map((p, i) => ({ src: p.src ?? `https://picsum.photos/seed/${p.seed}/60/60`, ml: i === 0 ? 0 : -9 }));
+    return sel.map((p, i) => ({ src: photoSrc(p, 60, 60), ml: i === 0 ? 0 : -9 }));
   }, [state.photos, selectedIds]);
 
   const frameDraft = state.frameDraftRect;

@@ -1,4 +1,5 @@
 import type { Photo } from "@/types";
+import { photoSrc } from "@/lib/img";
 import { monthOf, type TimelineLayout } from "@/lib/layout";
 
 interface TimelineViewProps {
@@ -50,7 +51,7 @@ export default function TimelineView({ layout, photos, selectedIds, onTlDown }: 
               overflow: "hidden",
               border: "1px solid var(--bd)",
               cursor: "grab",
-              backgroundImage: `url(${p.src ?? `https://picsum.photos/seed/${p.seed}/${p.w}/${p.h}`})`,
+              backgroundImage: `url(${photoSrc(p, p.w, p.h)})`,
               backgroundSize: "cover",
               backgroundPosition: "center",
               zIndex: selected ? 10 : i,

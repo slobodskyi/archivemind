@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { Photo, PhotoSource } from "@/types";
+import { photoSrc } from "@/lib/img";
 import type { ProjectListItem } from "@/hooks/useWorkspace";
 import { SOURCES } from "@/lib/mock-data";
 import { groupBySourceFolder } from "@/lib/layout";
@@ -198,7 +199,7 @@ export default function SourceBrowserSidebar({
                       height: 28,
                       borderRadius: 2,
                       flex: "0 0 auto",
-                      backgroundImage: `url(${p.src ?? `https://picsum.photos/seed/${p.seed}/60/60`})`,
+                      backgroundImage: `url(${photoSrc(p, 60, 60)})`,
                       backgroundSize: "cover",
                       backgroundPosition: "center",
                     }}
