@@ -148,8 +148,13 @@ function scatterLayout(
       const radius = 70 + i * 62 + (hash(key) % 50);
       const jx = (hash(key + "jx") % 60) - 30;
       const jy = (hash(key + "jy") % 60) - 30;
-      x = SCATTER_CX + Math.cos(angle) * radius + jx - w / 2;
-      y = SCATTER_CY + Math.sin(angle) * radius + jy - h / 2;
+      // Math.cos/sin aren't required to be correctly rounded, so Node (SSR)
+      // and the browser can differ by 1 ULP — enough to change the serialized
+      // inline-style string and trip React's hydration diff. Snap to 0.01px so
+      // both engines agree exactly; everything downstream (tile centers,
+      // bounds, minimap dots) is exact IEEE arithmetic on these values.
+      x = Math.round((SCATTER_CX + Math.cos(angle) * radius + jx - w / 2) * 100) / 100;
+      y = Math.round((SCATTER_CY + Math.sin(angle) * radius + jy - h / 2) * 100) / 100;
     }
     pos[key] = { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
   });
