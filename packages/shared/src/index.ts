@@ -11,3 +11,11 @@ import { z } from "zod";
 // the web app (membership UI) and the worker (nothing yet).
 export const memberRoleSchema = z.enum(["owner", "editor", "viewer"]);
 export type MemberRole = z.infer<typeof memberRoleSchema>;
+
+// Job queue contracts per TECH_SPEC §4 `job_type` / `job_status` — the wire
+// format between web (enqueue via POST /api/jobs) and the worker (claim loop).
+export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export"]);
+export type JobType = z.infer<typeof jobTypeSchema>;
+
+export const jobStatusSchema = z.enum(["queued", "running", "done", "failed", "canceled"]);
+export type JobStatus = z.infer<typeof jobStatusSchema>;
