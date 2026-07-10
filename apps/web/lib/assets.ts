@@ -28,6 +28,15 @@ interface ExifRow {
   shutter: string | null;
 }
 
+interface TagRow {
+  tags: { name: string } | null;
+}
+
+interface FactRow {
+  text: string;
+  status: "confirmed" | "likely" | "needs_check";
+}
+
 interface AssetRow {
   id: string;
   title: string | null;
@@ -36,7 +45,12 @@ interface AssetRow {
   created_at: string;
   asset_previews: PreviewRow[];
   asset_exif: ExifRow | null;
+  asset_tags: TagRow[];
+  facts: FactRow[];
 }
+
+/** DB fact_status → the mockup's 3-dot FactStatus. */
+const FACT_STATUS_MAP = { confirmed: "confirmed", likely: "pending", needs_check: "unknown" } as const;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -73,6 +87,15 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
   const created = new Date(a.created_at);
   const takenAt = a.asset_exif?.taken_at ? new Date(a.asset_exif.taken_at) : created;
 
+  const processed = a.ai_processed_at != null;
+  const tagNames = a.asset_tags.map((t) => t.tags?.name).filter((n): n is string => Boolean(n));
+  const facts =
+    a.facts.length > 0
+      ? a.facts.map((f) => ({ text: f.text, status: FACT_STATUS_MAP[f.status] }))
+      : processed
+        ? []
+        : [{ text: "Analyze to extract facts", status: "unknown" as const }];
+
   return {
     id: a.id,
     seed: a.id,
@@ -83,13 +106,13 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     x: 0,
     y: 0,
     filename: a.title ?? "untitled",
-    processed: a.ai_processed_at != null,
-    status: "Needs check",
+    processed,
+    status: processed ? "Likely" : "Needs check",
     captionKey: null,
     captionStyle: "Agency",
     chip: null,
-    tags: null,
-    facts: [{ text: "Analyze to extract facts", status: "unknown" }],
+    tags: tagNames.length > 0 ? tagNames : null,
+    facts,
     time: `${pad(takenAt.getMonth() + 1)}-${pad(takenAt.getDate())} ${pad(takenAt.getHours())}:${pad(takenAt.getMinutes())}`,
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
     group: "archive",
@@ -107,7 +130,9 @@ export async function getRealPhotos(supabase: SupabaseClient): Promise<Photo[]> 
     .select(
       `id, title, status, ai_processed_at, created_at,
        asset_previews ( size, r2_key, width, height ),
-       asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter )`,
+       asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
+       asset_tags ( tags ( name ) ),
+       facts ( text, status )`,
     )
     .eq("status", "active")
     .order("created_at", { ascending: false })
