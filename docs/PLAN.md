@@ -40,16 +40,18 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 - Scaffold `packages/shared` (zod + domain types seeded from `types/` inventory) and empty `apps/worker`.
 - Next-16 notes for all future work: `proxy.ts` (NOT `middleware.ts`); async-only `cookies()/headers()/params`.
 
-**0.2 Accounts & infra** (other dev, parallel): Supabase project (EU region) + enable pgvector; Cloudflare R2 bucket + CORS (incl. `ExposeHeaders: ETag`); Railway project; Google Cloud project (OAuth client, Picker API key — note project *number* for `setAppId`); Dropbox app key + Chooser domain registration; Gemini **service-account AUTH key** (not a standard API key) with billing enabled (Tier 1+) — see spec §11; Vercel + Railway env vars per spec §11 (with `GEMINI_ANALYZE_MODEL` added).
+**0.2 Accounts & infra** (other dev, parallel): Supabase project (EU region) + enable pgvector; Cloudflare R2 bucket + CORS (incl. `ExposeHeaders: ETag`); Railway project; Google Cloud project (OAuth client, Picker API key — note project *number* for `setAppId`); Dropbox app key + Chooser domain registration; Gemini **service-account AUTH key** (not a standard API key) with billing enabled (Tier 1+) — see spec §11; Vercel + Railway env vars per spec §11 (with `GEMINI_ANALYZE_MODEL` added); **Resend** account + verified sending domain, plugged into Supabase Auth as custom SMTP (the built-in mailer is dev-only, ~2 emails/h) — carries signup/reset emails now, invites/billing later; **Sentry** org with two projects (`archivemind-web`, `archivemind-worker`) → DSN env vars. Click-through checklist: issue #4 comment (2026-07-10).
 
-**0.3 Migration 0001 + RLS + auth**: full spec §4 schema (Broadcast trigger on `ai_jobs` per §5; `source_connections` effectively Drive-only per ADR 0008). RLS helpers `is_member/is_owner/is_editor` + policies on every table. Supabase Auth (email + Google), `apps/web` auth screens + `proxy.ts` guard + first-login bootstrap (profile → workspace → owner membership, in app code).
+**Environments (decided, issue #32):** dev = **local Supabase** (CLI + Docker; `supabase db reset` replays migrations), prod = the one EU cloud project, which doubles as shared testing until first external users (no real user data during the build); add a true staging project at Phase 7's security pass. R2: `-dev` and `-prod` buckets.
+
+**0.3 Migration 0001 + RLS + auth**: full spec §4 schema (Broadcast trigger on `ai_jobs` per §5; `source_connections` effectively Drive-only per ADR 0008). RLS helpers `is_member/is_owner/is_editor` + policies on every table. Supabase Auth — **email+password at launch; Google login is a fast-follow toggle** (same Google Cloud OAuth client as the Picker, provisioned in 0.2) — with auth emails through Resend SMTP; `apps/web` auth screens + `proxy.ts` guard + first-login bootstrap (profile → workspace → owner membership, in app code). Wire `@sentry/nextjs` here, env-gated (no DSN = disabled locally).
 
 **✅ Deploy checkpoint 1:** deployed web app on Vercel, sign-up → empty authed workspace, schema live, CI green.
 
 ### Phase 1 — Upload → ingest end-to-end (~weeks 2–3)
 
 - **Lane W:** upload UI (drag-drop + file picker) → `POST /api/uploads/presign` (single PUT <100 MiB; fixed-size multipart above) → `POST /api/uploads/complete` (creates asset + file); assets list via `GET /api/assets` replacing `getPhotos()`→`getAssets()` in `lib/api.ts`; `useJobProgress` hook on the Broadcast channel.
-- **Lane K:** worker skeleton on Railway (`node:22-slim`, session-pooler pg Pool max 2–5): claim loop (`FOR UPDATE SKIP LOCKED`), heartbeat, retry/backoff, reaper, graceful shutdown (spec §7 verbatim). Ingest handler: sha256 dedup → EXIF (`exifr` / `exiftool-vendored` v36) → previews via sharp (+ `heic-decode` path, RAW cascade per §8.1) → R2 previews → `asset_exif`/`asset_previews` rows (dedup attaches file to existing asset) → auto-enqueue `analyze`.
+- **Lane K:** worker skeleton on Railway (`node:22-slim`, session-pooler pg Pool max 2–5): claim loop (`FOR UPDATE SKIP LOCKED`), heartbeat, retry/backoff, reaper, graceful shutdown (spec §7 verbatim); `@sentry/node` capture around job execution. Ingest handler: sha256 dedup → EXIF (`exifr` / `exiftool-vendored` v36) → previews via sharp (+ `heic-decode` path, RAW cascade per §8.1) → R2 previews → `asset_exif`/`asset_previews` rows (dedup attaches file to existing asset) → auto-enqueue `analyze`.
 - QA with dirty samples: HEIC from real iPhones, NEF/CR2/ARW, no-EXIF files (closes §14 items 1–2: HEIC throughput, RAW coverage).
 
 **✅ Deploy checkpoint 2:** upload 500+ real mixed files → previews & EXIF appear in the deployed UI with live progress.
@@ -103,10 +105,12 @@ Export handler (ZIP: owned originals else medium previews + note; `captions.csv`
 Gaps surfaced in the 2026-07-06 setup audit. Fold each into a GitHub issue (via
 `scripts/setup-issues.sh`) when its phase starts:
 
-- **Test strategy + CI wiring (Phase 0 decision).** CI today is lint + typecheck +
-  build only (spec §11) — no automated tests. Decide the approach (unit for
-  worker handlers / RLS policy tests / API contract tests) and wire it into CI
-  before shipping upload → ingest → RLS. This is a decision to make, not a default.
+- **Test strategy + CI wiring (decided 2026-07-10, issue #31).** Vitest workspace-wide;
+  layers in value order: `packages/shared` zod contract tests → worker pure-logic
+  unit tests (mocked services) → RLS policy suites via `supabase test db` (gate for
+  migration PRs) → API route contract tests from Phase 1. `turbo run test` joins the
+  CI `checks` job. No E2E/coverage gates in MVP (Playwright smoke ≈ Phase 2
+  fast-follow). ADR lands with the wiring PR.
 - **Source real sample corpora (Phase 1).** M2, and the Phase-1/Phase-7 QA issues,
   all gate on real dirty files (500+ mixed, real-iPhone HEIC, NEF/CR2/ARW, no-EXIF).
   Someone must actually gather these from target users — an unowned dependency that
@@ -116,6 +120,6 @@ Gaps surfaced in the 2026-07-06 setup audit. Fold each into a GitHub issue (via
 - **Phase-2 analyze-model re-verify (Phase 2).** Spec §14 item 3 / §3 above — confirm
   `gemini-3.1-flash-lite` id+price and the `generateContent` shape, evaluate
   `gemini-3.5-flash`. Currently in no issue (issue #9 covers only HEIC/RAW QA).
-- **dev vs prod environments (Phase 0).** Spec §11 leaves local-vs-separate-project
-  as an open "or"; decide and provision explicitly (issue #4 provisions one instance
-  of each service).
+- **dev vs prod environments (decided 2026-07-10, issue #32).** Local Supabase for
+  dev; one EU cloud project as prod (doubles as shared testing until first external
+  users); staging added at Phase 7. Provisioning itself stays issue #4.
