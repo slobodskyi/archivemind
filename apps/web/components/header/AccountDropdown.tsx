@@ -65,6 +65,12 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
               key={it.label}
               onClick={() => {
                 onClose();
+                if (it.label === "Sign out") {
+                  void fetch("/auth/signout", { method: "POST" }).then(() => {
+                    window.location.assign("/login");
+                  });
+                  return;
+                }
                 onFlashToast(it.toast);
               }}
               style={{
