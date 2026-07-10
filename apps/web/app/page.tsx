@@ -17,11 +17,13 @@ export default async function Home() {
 
   await ensureWorkspace(supabase, user);
 
-  // Canvas data stays mock until Phase 1 swaps the lib/api.ts seam (issue #6).
+  // Real assets (issue #6). Keyed by count: router.refresh() after an upload
+  // remounts the workspace so the new server-fetched photos replace the
+  // client copy useWorkspace keeps in state.
   const photos = await getPhotos();
   return (
     <>
-      <ArchiveWorkspace initialPhotos={photos} />
+      <ArchiveWorkspace key={`ws-${photos.length}`} initialPhotos={photos} />
       <UploadManager />
     </>
   );

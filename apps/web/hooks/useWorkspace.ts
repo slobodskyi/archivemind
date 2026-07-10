@@ -1538,7 +1538,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const bulkThumbs = useMemo(() => {
     const set = selectedIds;
     const sel = state.photos.filter((p) => set.has(p.id)).slice(0, 4);
-    return sel.map((p, i) => ({ src: `https://picsum.photos/seed/${p.seed}/60/60`, ml: i === 0 ? 0 : -9 }));
+    return sel.map((p, i) => ({ src: p.src ?? `https://picsum.photos/seed/${p.seed}/60/60`, ml: i === 0 ? 0 : -9 }));
   }, [state.photos, selectedIds]);
 
   const frameDraft = state.frameDraftRect;

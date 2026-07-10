@@ -198,7 +198,7 @@ export default function SourceBrowserSidebar({
                       height: 28,
                       borderRadius: 2,
                       flex: "0 0 auto",
-                      backgroundImage: `url(https://picsum.photos/seed/${p.seed}/60/60)`,
+                      backgroundImage: `url(${p.src ?? `https://picsum.photos/seed/${p.seed}/60/60`})`,
                       backgroundSize: "cover",
                       backgroundPosition: "center",
                     }}

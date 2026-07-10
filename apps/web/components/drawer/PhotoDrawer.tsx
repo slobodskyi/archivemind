@@ -75,7 +75,7 @@ export default function PhotoDrawer({
               style={{
                 width: "100%",
                 height: 220,
-                backgroundImage: `url(https://picsum.photos/seed/${photo.seed}/840/480)`,
+                backgroundImage: `url(${photo.srcMedium ?? photo.src ?? `https://picsum.photos/seed/${photo.seed}/840/480`})`,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
               }}
