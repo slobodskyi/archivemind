@@ -1,6 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useJobProgress } from "@/hooks/useJobProgress";
 import { photoSrc } from "@/lib/img";
 import type {
   CaptionStyle,
@@ -417,7 +419,8 @@ export interface Workspace {
   flashToast: (text: string) => void;
 }
 
-export function useWorkspace(initialPhotos: Photo[]): Workspace {
+export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Workspace {
+  const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
     scale: 1,
     tx: 200,
@@ -474,8 +477,7 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
   const canvasElRef = useRef<HTMLDivElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bulkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const bulkTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeJobId = useRef<string | null>(null);
   const mapApiRef = useRef<MapApi | null>(null);
 
   // Patch helper that also advances stateRef so sequential reads see fresh data.
@@ -1338,58 +1340,57 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     setState({ bulkPanelOpen: !s.bulkPanelOpen });
   }, [setState, flashToast]);
 
-  const finishBulk = useCallback(
-    (ids: string[]) => {
-      const s = stateRef.current;
-      const idSet = new Set(ids);
-      let updated = 0;
-      const photos = s.photos.map((p): Photo => {
-        if (idSet.has(p.id) && !p.processed) {
-          updated++;
-          return {
-            ...p,
-            processed: true,
-            status: "Likely",
-            captionKey: "gen",
-            tags: ["kyiv", "documentary", "street", "2026"],
-            facts: [
-              { text: "Location: confirmed via GPS", status: "confirmed" },
-              { text: "Date: confirmed via EXIF", status: "confirmed" },
-              { text: "People: verification pending", status: "pending" },
-            ],
-          };
-        }
-        return p;
-      });
-      setState({ photos, proc: { active: false, label: "", pct: 0 } });
-      flashToast(`${ids.length} photos captioned · ${updated * 4} tags added`);
-    },
-    [setState, flashToast],
-  );
-
-  const runBulk = useCallback(() => {
+  // Real analyze (spec §8.2, issue #12): enqueue via POST /api/jobs; the
+  // worker's progress streams back through the workspace Broadcast channel.
+  const runBulk = useCallback(async () => {
     const s = stateRef.current;
-    const ids = s.selectedIds.slice();
-    const total = ids.length;
-    if (!total) return;
-    let i = 0;
-    setState({ proc: { active: true, label: `Captioning 1 of ${total}…`, pct: 6 } });
-    if (bulkTimer.current) clearInterval(bulkTimer.current);
-    const tickMs = Math.max(180, 1700 / total);
-    bulkTimer.current = setInterval(() => {
-      i++;
-      if (i > total) {
-        if (bulkTimer.current) clearInterval(bulkTimer.current);
-        setState({ proc: { active: true, label: "Detecting tags…", pct: 92 } });
-        if (bulkTimeout.current) clearTimeout(bulkTimeout.current);
-        bulkTimeout.current = setTimeout(() => finishBulk(ids), 480);
-        return;
-      }
-      setState({
-        proc: { active: true, label: `Captioning ${i} of ${total}…`, pct: Math.round(6 + (i / total) * 80) },
+    // Canvas selection when present; otherwise the source-browser selection —
+    // with real data the sidebar is where multi-select lives (issue #12).
+    const ids = (s.selectedIds.length ? s.selectedIds : s.sidebarSelectedIds).slice();
+    if (!ids.length || activeJobId.current) return;
+    setState({ proc: { active: true, label: `Queueing ${ids.length} photo(s)…`, pct: 3 } });
+    try {
+      const resp = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "analyze", assetIds: ids }),
       });
-    }, tickMs);
-  }, [setState, finishBulk]);
+      if (!resp.ok) throw new Error(`jobs API ${resp.status}`);
+      const { jobId } = (await resp.json()) as { jobId: string };
+      activeJobId.current = jobId;
+      setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
+    } catch {
+      setState({ proc: { active: false, label: "", pct: 0 } });
+      flashToast("Analyze failed to start — try again");
+    }
+  }, [setState, flashToast]);
+
+  useJobProgress(workspaceId, (job) => {
+    if (job.id !== activeJobId.current) return;
+    if (job.status === "running" || job.status === "queued") {
+      setState({
+        proc: {
+          active: true,
+          label: job.progress_label ?? "Analyzing…",
+          pct: Math.max(5, job.progress),
+        },
+      });
+      return;
+    }
+    activeJobId.current = null;
+    setState({
+      proc: { active: false, label: "", pct: 0 },
+      selectedIds: [],
+      sidebarSelectedIds: [],
+      bulkPanelOpen: false,
+    });
+    if (job.status === "done") {
+      flashToast(`${job.total_items ?? 0} photo(s) analyzed`);
+      router.refresh(); // pulls fresh tags/facts into the server payload
+    } else {
+      flashToast(`Analyze ${job.status}${job.error ? ` — ${job.error}` : ""}`);
+    }
+  });
 
   // ── Lifecycle: listeners + initial fit ────────────────────────────────────
 
@@ -1454,8 +1455,6 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
 
   useEffect(() => {
     return () => {
-      if (bulkTimer.current) clearInterval(bulkTimer.current);
-      if (bulkTimeout.current) clearTimeout(bulkTimeout.current);
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (copyTimer.current) clearTimeout(copyTimer.current);
     };
@@ -1535,7 +1534,9 @@ export function useWorkspace(initialPhotos: Photo[]): Workspace {
     [state.expanded, state.expandOverrides, senseBubblesResult],
   );
 
-  const bulkShow = state.bulkPanelOpen && selectedIds.size > 0;
+  // Also surfaces while a job runs — with sidebar-triggered analyzes the
+  // panel is the progress indicator even without a canvas selection.
+  const bulkShow = (state.bulkPanelOpen && selectedIds.size > 0) || state.proc.active;
   const bulkThumbs = useMemo(() => {
     const set = selectedIds;
     const sel = state.photos.filter((p) => set.has(p.id)).slice(0, 4);
