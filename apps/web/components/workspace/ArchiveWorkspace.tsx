@@ -176,6 +176,7 @@ export default function ArchiveWorkspace({ initialPhotos, workspaceId }: Archive
         onSend={ws.sendChat}
       />
 
+      {!ws.isMapView && (
       <LeftToolbar
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
@@ -198,8 +199,9 @@ export default function ArchiveWorkspace({ initialPhotos, workspaceId }: Archive
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
       />
+      )}
 
-      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.drawerRight} />
+      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />
 
       <AddToProjectPopover
         open={ws.addProjOpen}
@@ -218,6 +220,7 @@ export default function ArchiveWorkspace({ initialPhotos, workspaceId }: Archive
         searchText={ws.sidebarSearchText}
         addOpen={ws.sidebarAddOpen}
         projectList={ws.projectList}
+        viewMode={ws.sidebarViewMode}
         right={ws.drawerRight}
         onSelectTab={ws.setSidebarActiveTab}
         onCloseTab={ws.closeSourceTab}
@@ -231,6 +234,7 @@ export default function ArchiveWorkspace({ initialPhotos, workspaceId }: Archive
         onCloseAddOpen={ws.closeSidebarAddOpen}
         onSelectProject={ws.sidebarAddToProject}
         onCreateProject={ws.sidebarCreateProject}
+        onSetViewMode={ws.setSidebarViewMode}
       />
 
       <BulkAiPanel
