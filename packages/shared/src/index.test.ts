@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { jobStatusSchema, jobTypeSchema, memberRoleSchema } from "./index";
+import {
+  SINGLE_PUT_MAX_BYTES,
+  assetKindFromMime,
+  completeUploadRequestSchema,
+  jobStatusSchema,
+  jobTypeSchema,
+  memberRoleSchema,
+  presignUploadRequestSchema,
+} from "./index";
 
 /**
  * Contract-test pattern (ADR 0013): every schema in @archivemind/shared gets
@@ -35,5 +43,36 @@ describe("job queue contracts", () => {
     expect(jobTypeSchema.safeParse("transcode").success).toBe(false);
     expect(jobStatusSchema.safeParse("cancelled").success).toBe(false); // US spelling only
     expect(jobTypeSchema.safeParse(undefined).success).toBe(false);
+  });
+});
+
+describe("upload contracts", () => {
+  it("accepts a valid presign request up to the single-PUT cap", () => {
+    expect(
+      presignUploadRequestSchema.parse({ filename: "DSC_0001.jpg", mime: "image/jpeg", size: SINGLE_PUT_MAX_BYTES }),
+    ).toBeTruthy();
+  });
+
+  it("rejects oversize, empty and malformed presign requests", () => {
+    expect(presignUploadRequestSchema.safeParse({ filename: "a.jpg", mime: "image/jpeg", size: SINGLE_PUT_MAX_BYTES + 1 }).success).toBe(false);
+    expect(presignUploadRequestSchema.safeParse({ filename: "", mime: "image/jpeg", size: 1 }).success).toBe(false);
+    expect(presignUploadRequestSchema.safeParse({ filename: "a.jpg", mime: "image/jpeg", size: -5 }).success).toBe(false);
+    expect(presignUploadRequestSchema.safeParse({ filename: "a.jpg", mime: "image/jpeg", size: 1.5 }).success).toBe(false);
+  });
+
+  it("caps complete batches at 500 and requires at least one upload", () => {
+    const one = { r2Key: "ws/originals/x/a.jpg", filename: "a.jpg", mime: "image/jpeg", size: 10 };
+    expect(completeUploadRequestSchema.parse({ uploads: [one] })).toBeTruthy();
+    expect(completeUploadRequestSchema.safeParse({ uploads: [] }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({ uploads: Array(501).fill(one) }).success).toBe(false);
+  });
+
+  it("classifies asset kind from MIME identically for web and worker", () => {
+    expect(assetKindFromMime("image/jpeg")).toBe("photo");
+    expect(assetKindFromMime("image/heic")).toBe("photo");
+    expect(assetKindFromMime("application/pdf")).toBe("pdf");
+    expect(assetKindFromMime("text/plain")).toBe("document");
+    expect(assetKindFromMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe("document");
+    expect(assetKindFromMime("video/mp4")).toBe("other");
   });
 });
