@@ -30,10 +30,11 @@ import Toast from "@/components/modals/Toast";
 
 interface ArchiveWorkspaceProps {
   initialPhotos: Photo[];
+  workspaceId: string;
 }
 
-export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProps) {
-  const ws = useWorkspace(initialPhotos);
+export default function ArchiveWorkspace({ initialPhotos, workspaceId }: ArchiveWorkspaceProps) {
+  const ws = useWorkspace(initialPhotos, workspaceId);
 
   const sendHelpTicket = () => {
     ws.closeHelp();
@@ -223,6 +224,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         onClose={ws.closeSidebar}
         onToggleFile={ws.toggleSidebarFile}
         onOpenFile={ws.openDrawer}
+        onAnalyze={ws.runBulk}
         onToggleGroup={ws.toggleSidebarGroup}
         onSearchChange={ws.setSidebarSearch}
         onToggleAddOpen={ws.toggleSidebarAddOpen}

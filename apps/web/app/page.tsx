@@ -15,15 +15,20 @@ export default async function Home() {
   // redirecting to /login directly would loop (proxy bounces authed → /).
   if (!user) redirect("/auth/reset");
 
-  await ensureWorkspace(supabase, user);
+  const workspaceId = await ensureWorkspace(supabase, user);
 
-  // Real assets (issue #6). Keyed by count: router.refresh() after an upload
-  // remounts the workspace so the new server-fetched photos replace the
-  // client copy useWorkspace keeps in state.
+  // Real assets (issue #6). Keyed by count + processed-count: router.refresh()
+  // after an upload OR a finished analyze remounts the workspace so fresh
+  // server data replaces the client copy useWorkspace keeps in state.
   const photos = await getPhotos();
+  const processedCount = photos.filter((p) => p.processed).length;
   return (
     <>
-      <ArchiveWorkspace key={`ws-${photos.length}`} initialPhotos={photos} />
+      <ArchiveWorkspace
+        key={`ws-${photos.length}-${processedCount}`}
+        initialPhotos={photos}
+        workspaceId={workspaceId}
+      />
       <UploadManager />
     </>
   );

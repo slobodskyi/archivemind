@@ -26,6 +26,8 @@ interface SourceBrowserSidebarProps {
   onToggleFile: (id: string) => void;
   /** Double-click a row → open the photo drawer (Finder-style inspect). */
   onOpenFile: (id: string) => void;
+  /** Run AI analyze on the sidebar selection (user-triggered — issue #12). */
+  onAnalyze: () => void;
   onToggleGroup: (ids: string[]) => void;
   onSearchChange: (text: string) => void;
   onToggleAddOpen: () => void;
@@ -78,6 +80,7 @@ export default function SourceBrowserSidebar({
   onClose,
   onToggleFile,
   onOpenFile,
+  onAnalyze,
   onToggleGroup,
   onSearchChange,
   onToggleAddOpen,
@@ -237,6 +240,29 @@ export default function SourceBrowserSidebar({
             </button>
           )}
         </div>
+
+        <button
+          onClick={onAnalyze}
+          disabled={selectedIds.size === 0}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 7,
+            height: 36,
+            border: "1px solid var(--bdh)",
+            borderRadius: 2,
+            cursor: selectedIds.size ? "pointer" : "default",
+            background: "var(--bg-el)",
+            color: selectedIds.size ? "var(--ac)" : "var(--tm)",
+            fontSize: 12.5,
+            fontWeight: 600,
+            fontFamily: "inherit",
+          }}
+        >
+          <SparkleIcon width={13} height={13} stroke="currentColor" strokeWidth={1.7} />
+          Analyze {selectedIds.size || ""} with AI
+        </button>
 
         <button
           onClick={onToggleAddOpen}
