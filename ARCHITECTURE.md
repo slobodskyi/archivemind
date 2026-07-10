@@ -6,38 +6,42 @@ For the **target backend** (schema, worker, AI pipeline, security), `docs/TECH_S
 duplicate those here.
 
 ## What this is (today)
-A pnpm + turborepo monorepo. The app in `apps/web` is a frontend-only Next.js
-(App Router) + TypeScript port of a Claude Design mockup: an infinite-canvas
-photo-archive workspace with four views (Neural graph, Timeline, Map,
-Sense/circle-pack), a photo detail drawer, an AI chat panel (canned responses,
-no real LLM), and project switching. No backend, no auth, no database — purely a
-client-side demo running on mock data. `apps/worker` and `packages/shared` are
-Phase-0 scaffolds the backend build fills in.
+A pnpm + turborepo monorepo, live in production (Phases 0–1 shipped, Phase 2 in
+progress). `apps/web` (Vercel) is the ported Claude Design canvas UI with real
+email+password auth, drag-and-drop upload to R2, and a canvas that renders the
+caller's own assets. `apps/worker` (Railway) processes `ai_jobs`: ingest
+(sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths) and
+analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only).
+`packages/shared` holds the zod contracts both sides parse. Map/Sense views,
+projects, chat/search and a few drawer surfaces still run on mock data until
+their phases.
 
 ## Data flow (today — paths relative to `apps/web/`)
 
 ```
-lib/mock-data.ts            raw mock records + generators
-        |
+Supabase Postgres (RLS)  ⇄  apps/worker (Railway): ai_jobs queue —
+        |                    ingest → previews/EXIF → R2 · analyze → tags/embeddings
         v
-lib/api.ts                  async functions: getPhotos, getPhoto, getProjects,
-        |                    getGroups, getSources
+lib/assets.ts               RLS-scoped select + presigned R2 preview URLs,
+        |                    mapped into the mockup's Photo shape
         v
-app/page.tsx                Server Component; awaits getPhotos() (the others
-        |                    exist on the seam but aren't consumed yet)
+lib/api.ts                  getPhotos()/getPhoto() = REAL · getProjects/
+        |                    getGroups/getSources = still mock (their phases)
         v
-components/workspace/ArchiveWorkspace.tsx
-                             Client Component, owns all interactive state
-                             via hooks/useWorkspace.ts
+app/page.tsx                Server Component; guards auth, bootstraps the
+        |                    workspace, awaits getPhotos()
+        v
+components/workspace/ArchiveWorkspace.tsx  (+ components/upload/UploadManager:
+                             window drag-drop → presign → R2 → complete → ingest job)
 ```
 
-`lib/api.ts` is the seam a real backend slots into later: swap the function bodies
-from "return the mock array" to "fetch from the real API," and UI code shouldn't
-change. Components and hooks are *supposed* to reach data only through `lib/api.ts`,
-but a few still import `lib/mock-data.ts` directly (`lib/format.ts`, `lib/layout.ts`,
-`hooks/useWorkspace.ts`, `components/map/MapCanvas.tsx`,
-`components/toolbar/AddToProjectPopover.tsx`) — known debt, cleaned in PLAN Phase 1.
-Don't add new direct imports.
+`lib/api.ts` remains the only UI→data seam. Real assets carry `src/srcMedium`
+(presigned previews, `lib/img.ts` falls back to a neutral tile while previews
+are pending — picsum only ever renders for mock rows). Some modules still
+import `lib/mock-data.ts` lookup tables directly (`lib/format.ts`,
+`lib/layout.ts`, `hooks/useWorkspace.ts`, `components/map/MapCanvas.tsx`,
+`components/toolbar/AddToProjectPopover.tsx`) — known debt, cleaned as their
+features go real. Don't add new direct imports.
 
 ## Domain glossary (mockup terms)
 These are the mockup's shapes. The **target** model differs — see the note below.

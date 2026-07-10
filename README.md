@@ -9,12 +9,13 @@ with AI content understanding (what) — e.g. *"mustached men I shot in Odesa."*
 
 ## Status
 
-**Backend build: Phase 0.** The repo is a pnpm + turborepo monorepo:
-[`apps/web`](apps/web) (the Next.js App Router mockup, running on mock data behind
-a thin `lib/api.ts` seam), [`apps/worker`](apps/worker) (Railway job worker —
-scaffold, lands in Phase 1), [`packages/shared`](packages/shared) (zod domain
-contracts). The target backend (Supabase + Cloudflare R2 + Railway worker +
-Gemini) is fully specced and issue-tracked; work proceeds in phase order.
+**Live in production** (Phases 0–1 shipped, Phase 2 in progress — see
+[`docs/PLAN.md`](docs/PLAN.md)): [`apps/web`](apps/web) on Vercel (real auth,
+drag-and-drop upload to R2, canvas renders your actual archive),
+[`apps/worker`](apps/worker) on Railway (ingest: dedup/EXIF/previews incl.
+HEIC/RAW; analyze: Gemini tags + embeddings, user-triggered),
+[`packages/shared`](packages/shared) (zod contracts). Map/Sense/projects/search
+still run on mock data until their phases.
 
 ## Getting started
 
