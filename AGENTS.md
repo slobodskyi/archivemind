@@ -7,11 +7,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 # ArchiveMind
 
 AI-powered creator archive workspace — infinite-canvas photo archive UI.
-A **pnpm + turborepo monorepo** (backend build Phase 0 in progress):
-- `apps/web` — the Next.js (App Router) + TypeScript + Tailwind mockup, ported
-  pixel-for-pixel from a Claude Design `.dc.html` prototype; all data is mock data
-  behind a thin API layer (see below).
-- `apps/worker` — Railway job worker (scaffold only; skeleton lands in Phase 1).
+A **pnpm + turborepo monorepo**, live in production (Phases 0–1 shipped
+2026-07-10; Phase 2 in progress):
+- `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
+  real auth (email+password), drag-and-drop upload to R2, canvas renders the
+  caller's real assets; Map/Sense/projects/chat still run on mock data behind
+  the API seam until their phases.
+- `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
+  HEIC + RAW paths) and analyze (Gemini tags/facts + embeddings; user-triggered
+  only — never automatic).
 - `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),

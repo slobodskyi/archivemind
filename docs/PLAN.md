@@ -15,7 +15,7 @@ The 2026-07-03 pre-build verification amendments (originally `PLAN.md` §0) and 
 
 ---
 
-## 1. Current state → target
+## 1. Current state → target (historical — written at build start; ARCHITECTURE.md tracks the live state)
 
 **Have:** polished frontend mockup (Next 16.2.10, React 19, Tailwind v4, npm, single app at repo root). Data seam `lib/api.ts` in place (5 fns; only `getPhotos` consumed today). 235 mock photos, deterministic layouts, no undo/redo yet (journey asks for it — new work, Phase 5). Known seam leaks to fix during integration: `lib/format.ts`, `lib/layout.ts`, `hooks/useWorkspace.ts`, `components/map/MapCanvas.tsx`, `components/toolbar/AddToProjectPopover.tsx` import `mock-data` lookup tables directly; `lib/chat.ts` is the canned-LLM surface search replaces.
 
@@ -27,7 +27,7 @@ The 2026-07-03 pre-build verification amendments (originally `PLAN.md` §0) and 
 
 Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — one dev each, swap as needed. **Migrations owner: assign ONE dev in Phase 0** (spec §3); schema changes PR-only.
 
-### Phase 0 — Foundations (both devs, ~week 1)
+### Phase 0 — Foundations — ✅ DONE 2026-07-10 (#38 #39 #43 #44 #46)
 
 **0.1 Monorepo restructure** (one PR, one dev, no functional changes). Checklist from repo analysis:
 - pnpm workspace + turborepo; root `package.json` (`packageManager` pin, engines), `pnpm-workspace.yaml`, `turbo.json`; delete `package-lock.json`.
@@ -46,17 +46,17 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 
 **0.3 Migration 0001 + RLS + auth**: full spec §4 schema (Broadcast trigger on `ai_jobs` per §5; `source_connections` effectively Drive-only per ADR 0008). RLS helpers `is_member/is_owner/is_editor` + policies on every table. Supabase Auth — **email+password at launch; Google login is a fast-follow toggle** (same Google Cloud OAuth client as the Picker, provisioned in 0.2) — with auth emails through Resend SMTP; `apps/web` auth screens + `proxy.ts` guard + first-login bootstrap (profile → workspace → owner membership, in app code). Wire `@sentry/nextjs` here, env-gated (no DSN = disabled locally).
 
-**✅ Deploy checkpoint 1:** deployed web app on Vercel, sign-up → empty authed workspace, schema live, CI green.
+**✅ Deploy checkpoint 1 — CLOSED 2026-07-10:** deployed web app on Vercel, sign-up → empty authed workspace, schema live, CI green.
 
-### Phase 1 — Upload → ingest end-to-end (~weeks 2–3)
+### Phase 1 — Upload → ingest end-to-end — ✅ DONE 2026-07-10 (#48 #49 #50 #51 #53 #56; multipart → #54, PDF/HEIC-RAW sample QA → #9)
 
 - **Lane W:** upload UI (drag-drop + file picker) → `POST /api/uploads/presign` (single PUT <100 MiB; fixed-size multipart above) → `POST /api/uploads/complete` (creates asset + file); assets list via `GET /api/assets` replacing `getPhotos()`→`getAssets()` in `lib/api.ts`; `useJobProgress` hook on the Broadcast channel.
 - **Lane K:** worker skeleton on Railway (`node:22-slim`, session-pooler pg Pool max 2–5): claim loop (`FOR UPDATE SKIP LOCKED`), heartbeat, retry/backoff, reaper, graceful shutdown (spec §7 verbatim); `@sentry/node` capture around job execution. Ingest handler: sha256 dedup → EXIF (`exifr` / `exiftool-vendored` v36) → previews via sharp (+ `heic-decode` path, RAW cascade per §8.1) → R2 previews → `asset_exif`/`asset_previews` rows (dedup attaches file to existing asset) → auto-enqueue `analyze`.
 - QA with dirty samples: HEIC from real iPhones, NEF/CR2/ARW, no-EXIF files (closes §14 items 1–2: HEIC throughput, RAW coverage).
 
-**✅ Deploy checkpoint 2:** upload 500+ real mixed files → previews & EXIF appear in the deployed UI with live progress.
+**✅ Deploy checkpoint 2 — CLOSED 2026-07-10:** cloud worker (Railway) processes prod uploads end-to-end — previews & EXIF appear in the deployed UI (large-batch soak → #9; Realtime progress → #12).
 
-### Phase 2 — Analyze pipeline (~week 4)
+### Phase 2 — Analyze pipeline — IN PROGRESS (worker core ✅ #55 + user-trigger route ✅; remaining: drawer #11, bulk-AI panel + Realtime progress #12)
 
 - **Lane K:** analyze handler: medium preview → `gemini-3.1-flash-lite` via `generateContent` + `responseSchema` structured output (zod schema from `packages/shared`) → tags/facts upserts; embeddings via `gemini-embedding-2` (one `Content` per image, 768 dims) → `embeddings`; `usage_events` on every call; concurrency cap 5 + 429 backoff.
 - **Lane W:** drawer shows real tags/captions/facts/EXIF (`GET /api/assets/:id`); bulk-AI panel → real `POST /api/jobs` + Realtime progress (replaces fake `setInterval`); manual tag add/remove; fact confirm (`PATCH /api/facts/:id`).
