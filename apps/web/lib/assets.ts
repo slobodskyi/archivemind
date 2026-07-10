@@ -37,6 +37,15 @@ interface FactRow {
   status: "confirmed" | "likely" | "needs_check";
 }
 
+interface CaptionRow {
+  lang: "en" | "uk" | "ru";
+  style: "social" | "agency" | "archival";
+  text: string;
+}
+
+const LANG_KEY = { en: "EN", uk: "UK", ru: "RU" } as const;
+const STYLE_KEY = { social: "Social", agency: "Agency", archival: "Archival" } as const;
+
 interface AssetRow {
   id: string;
   title: string | null;
@@ -47,6 +56,7 @@ interface AssetRow {
   asset_exif: ExifRow | null;
   asset_tags: TagRow[];
   facts: FactRow[];
+  captions: CaptionRow[];
 }
 
 /** DB fact_status → the mockup's 3-dot FactStatus. */
@@ -89,6 +99,9 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
 
   const processed = a.ai_processed_at != null;
   const tagNames = a.asset_tags.map((t) => t.tags?.name).filter((n): n is string => Boolean(n));
+  const captionTexts = Object.fromEntries(
+    a.captions.map((c) => [`${LANG_KEY[c.lang]}:${STYLE_KEY[c.style]}`, c.text]),
+  );
   const facts =
     a.facts.length > 0
       ? a.facts.map((f) => ({ text: f.text, status: FACT_STATUS_MAP[f.status] }))
@@ -113,6 +126,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     chip: null,
     tags: tagNames.length > 0 ? tagNames : null,
     facts,
+    captionTexts,
     time: `${pad(takenAt.getMonth() + 1)}-${pad(takenAt.getDate())} ${pad(takenAt.getHours())}:${pad(takenAt.getMinutes())}`,
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
     group: "archive",
@@ -132,7 +146,8 @@ export async function getRealPhotos(supabase: SupabaseClient): Promise<Photo[]> 
        asset_previews ( size, r2_key, width, height ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
        asset_tags ( tags ( name ) ),
-       facts ( text, status )`,
+       facts ( text, status ),
+       captions ( lang, style, text )`,
     )
     .eq("status", "active")
     .order("created_at", { ascending: false })

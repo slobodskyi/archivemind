@@ -54,6 +54,9 @@ export interface Photo {
    *  mock picsum source keyed by `seed`. */
   src?: string;
   srcMedium?: string;
+  /** Real generated captions keyed `${Language}:${CaptionStyle}` (e.g.
+   *  "EN:Agency"). When present, caption lookups skip the mock CAPTIONS map. */
+  captionTexts?: Record<string, string>;
   /** Native aspect-ratio basis (mock "megapixel" dimensions). */
   w: number;
   h: number;

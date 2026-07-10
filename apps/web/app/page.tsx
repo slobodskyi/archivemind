@@ -22,10 +22,11 @@ export default async function Home() {
   // server data replaces the client copy useWorkspace keeps in state.
   const photos = await getPhotos();
   const processedCount = photos.filter((p) => p.processed).length;
+  const captionCount = photos.reduce((n, p) => n + Object.keys(p.captionTexts ?? {}).length, 0);
   return (
     <>
       <ArchiveWorkspace
-        key={`ws-${photos.length}-${processedCount}`}
+        key={`ws-${photos.length}-${processedCount}-${captionCount}`}
         initialPhotos={photos}
         workspaceId={workspaceId}
       />

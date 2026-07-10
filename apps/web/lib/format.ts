@@ -14,7 +14,10 @@ export function getCaptionText(
   lang: Language,
   style: CaptionStyle,
 ): string {
-  if (!photo || !photo.captionKey) return "";
+  if (!photo) return "";
+  // Real generated captions win; the mock CAPTIONS path survives for mock rows.
+  if (photo.captionTexts) return photo.captionTexts[`${lang}:${style}`] ?? "";
+  if (!photo.captionKey) return "";
   const base = CAPTIONS[photo.captionKey][lang] || CAPTIONS[photo.captionKey].EN;
   if (style === "Social") {
     const first = base.split(". ")[0];

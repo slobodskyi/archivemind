@@ -99,10 +99,50 @@ export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
 export const analyzeJobPayloadSchema = ingestJobPayloadSchema;
 export type AnalyzeJobPayload = IngestJobPayload;
 
-export const createJobRequestSchema = z.object({
-  type: z.literal("analyze"),
-  assetIds: z.array(uuidSchema).min(1).max(500),
+// ── Captions (spec §8.3) ─────────────────────────────────────────────────────
+
+export const captionLangSchema = z.enum(["en", "uk", "ru"]);
+export type CaptionLang = z.infer<typeof captionLangSchema>;
+
+export const captionStyleSchema = z.enum(["social", "agency", "archival"]);
+export type CaptionStyleKey = z.infer<typeof captionStyleSchema>;
+
+export const captionJobPayloadSchema = z.object({
+  asset_ids: z.array(uuidSchema).min(1),
+  langs: z.array(captionLangSchema).min(1),
+  style: captionStyleSchema,
 });
+export type CaptionJobPayload = z.infer<typeof captionJobPayloadSchema>;
+
+/** Base prompt templates per style (spec §8.3; packages/shared so web and
+ *  worker never drift). `projects.caption_prompt` appends at Phase 5. */
+export const CAPTION_PROMPTS: Record<CaptionStyleKey, string> = {
+  social:
+    "Write a short, punchy social-media caption for this photo: 1-2 sentences, engaging but factual, then 2-4 relevant hashtags. No emoji spam (max 1).",
+  agency:
+    "Write a wire-agency photo caption: one dense factual paragraph in present tense — who/what/where/when as far as visible or provided. Neutral tone, no speculation, no opinions.",
+  archival:
+    "Write an archival catalog description: 2-3 objective sentences documenting subjects, setting, composition and any visible text. Dry, precise, suitable for a searchable archive record.",
+};
+
+export const CAPTION_LANG_NAMES: Record<CaptionLang, string> = {
+  en: "English",
+  uk: "Ukrainian",
+  ru: "Russian",
+};
+
+export const createJobRequestSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("analyze"),
+    assetIds: z.array(uuidSchema).min(1).max(500),
+  }),
+  z.object({
+    type: z.literal("caption"),
+    assetIds: z.array(uuidSchema).min(1).max(500),
+    langs: z.array(captionLangSchema).min(1),
+    style: captionStyleSchema,
+  }),
+]);
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
 
 export const tagCategorySchema = z.enum(["object", "scene", "place", "attribute", "event", "other"]);

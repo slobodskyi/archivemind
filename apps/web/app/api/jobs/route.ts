@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
-import { analyzeJobPayloadSchema, createJobRequestSchema } from "@archivemind/shared";
+import {
+  analyzeJobPayloadSchema,
+  captionJobPayloadSchema,
+  createJobRequestSchema,
+} from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
-/** POST /api/jobs (spec §9) — the user-triggered AI entry point. MVP accepts
- *  type='analyze'; caption/export join with their phases. RLS scopes the
- *  asset check and the insert to the caller's workspace. */
+/** POST /api/jobs (spec §9) — the user-triggered AI entry point: analyze and
+ *  caption (export joins with its phase). RLS scopes the asset check and the
+ *  insert to the caller's workspace. */
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -33,14 +37,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "no matching assets" }, { status: 404 });
   }
 
+  const req = parsed.data;
+  const payload =
+    req.type === "analyze"
+      ? analyzeJobPayloadSchema.parse({ asset_ids: assetIds })
+      : captionJobPayloadSchema.parse({ asset_ids: assetIds, langs: req.langs, style: req.style });
+  const totalItems = req.type === "caption" ? assetIds.length * req.langs.length : assetIds.length;
+
   const { data: jobRow, error: jobErr } = await supabase
     .from("ai_jobs")
     .insert({
       workspace_id: workspaceId,
       user_id: user.id,
-      type: "analyze",
-      payload: analyzeJobPayloadSchema.parse({ asset_ids: assetIds }),
-      total_items: assetIds.length,
+      type: req.type,
+      payload,
+      total_items: totalItems,
       done_items: 0,
     })
     .select("id")

@@ -930,29 +930,28 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
     [setState],
   );
 
+  // Drawer "Regenerate": real caption job (spec §8.3) for the open photo —
+  // active style, all three languages, so the EN/UK/RU tabs fill together.
   const genSingle = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const s = stateRef.current;
-      const photos = s.photos.map((p): Photo =>
-        p.id !== id
-          ? p
-          : {
-              ...p,
-              processed: true,
-              status: "Likely",
-              captionKey: "gen",
-              captionStyle: "Agency",
-              chip: "Scene from the Kyiv frontline archive…",
-              tags: ["kyiv", "documentary", "street", "2026"],
-              facts: [
-                { text: "Location: confirmed via GPS", status: "confirmed" },
-                { text: "Date: confirmed via EXIF", status: "confirmed" },
-                { text: "People: verification pending", status: "pending" },
-              ],
-            },
-      );
-      setState({ photos });
-      flashToast("1 photo captioned · 4 tags added");
+      if (activeJobId.current) return;
+      const style = s.drawerStyle.toLowerCase() as "social" | "agency" | "archival";
+      setState({ proc: { active: true, label: "Queueing captions…", pct: 3 } });
+      try {
+        const resp = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "caption", assetIds: [id], langs: ["en", "uk", "ru"], style }),
+        });
+        if (!resp.ok) throw new Error(`jobs API ${resp.status}`);
+        const { jobId } = (await resp.json()) as { jobId: string };
+        activeJobId.current = jobId;
+        setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
+      } catch {
+        setState({ proc: { active: false, label: "", pct: 0 } });
+        flashToast("Caption job failed to start — try again");
+      }
     },
     [setState, flashToast],
   );
@@ -1385,10 +1384,14 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
       bulkPanelOpen: false,
     });
     if (job.status === "done") {
-      flashToast(`${job.total_items ?? 0} photo(s) analyzed`);
-      router.refresh(); // pulls fresh tags/facts into the server payload
+      flashToast(
+        job.type === "caption"
+          ? `${job.total_items ?? 0} caption(s) generated`
+          : `${job.total_items ?? 0} photo(s) analyzed`,
+      );
+      router.refresh(); // pulls fresh tags/facts/captions into the server payload
     } else {
-      flashToast(`Analyze ${job.status}${job.error ? ` — ${job.error}` : ""}`);
+      flashToast(`AI job ${job.status}${job.error ? ` — ${job.error}` : ""}`);
     }
   });
 
