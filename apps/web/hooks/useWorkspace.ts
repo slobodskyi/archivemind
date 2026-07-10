@@ -42,6 +42,8 @@ import type { MapApi } from "@/components/map/MapCanvas";
 const DEFAULT_ZOOM = 0.75;
 const NEW_PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166"];
 
+export type SidebarViewMode = "pile" | "list" | "gallery";
+
 /** Looks up a project's label/color across both the 3 seed projects and any
  * user-created ones (created at runtime, so they can't live in the static
  * PROJECTS_META table). */
@@ -114,6 +116,7 @@ interface WorkspaceState {
   sidebarSelectedIds: string[];
   sidebarSearchText: string;
   sidebarAddOpen: boolean;
+  sidebarViewMode: SidebarViewMode;
   projCurrent: ProjectKey | "all";
   photos: Photo[];
   selectedIds: string[];
@@ -315,6 +318,9 @@ export interface Workspace {
   // Layout constants (no left sidebar anymore)
   contentLeft: number;
   drawerRight: number;
+  /** Combined right-panel offset for the minimap so it never sits under an
+   * open chat, source browser, or photo drawer. */
+  minimapRight: number;
 
   extractExif: () => void;
 
@@ -364,6 +370,8 @@ export interface Workspace {
   closeSidebarAddOpen: () => void;
   sidebarAddToProject: (key: string) => void;
   sidebarCreateProject: () => void;
+  sidebarViewMode: SidebarViewMode;
+  setSidebarViewMode: (mode: SidebarViewMode) => void;
 
   // Search
   search: boolean;
@@ -445,6 +453,7 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
     sidebarSelectedIds: [],
     sidebarSearchText: "",
     sidebarAddOpen: false,
+    sidebarViewMode: "list",
     projCurrent: "all",
     photos: initialPhotos,
     selectedIds: [],
@@ -570,7 +579,11 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
       e.preventDefault();
       const s = stateRef.current;
       if (s.view === "timeline") {
-        setState({ tx: s.tx - e.deltaX, ty: s.ty - e.deltaY });
+        // ty: 100 is the fit-to-header alignment fitView() computes (row 0
+        // sits right under the sticky month header). Clamp so scrolling up
+        // can't push content past that and open a gap above the first row —
+        // there's nothing above row 0 to reveal.
+        setState({ tx: s.tx - e.deltaX, ty: Math.min(100, s.ty - e.deltaY) });
         return;
       }
       const r = rect(),
@@ -1014,6 +1027,14 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
         expanded: { kind: null, key: null },
         expandOverrides: {},
         bulkPanelOpen: false,
+        // Source browser is an "All my files" concept — switching to a
+        // project-scoped view (timeline/map/sense) should retire the sidebar
+        // so it can't overlap the AI chat panel that lives in the same slot.
+        sidebarTabs: [],
+        sidebarActiveTab: null,
+        sidebarSelectedIds: [],
+        sidebarSearchText: "",
+        sidebarAddOpen: false,
       });
       setTimeout(() => {
         if (v === "map" && mapApiRef.current) return;
@@ -1111,6 +1132,11 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
         expanded: { kind: null, key: null },
         expandOverrides: {},
         bulkPanelOpen: false,
+        sidebarTabs: [],
+        sidebarActiveTab: null,
+        sidebarSelectedIds: [],
+        sidebarSearchText: "",
+        sidebarAddOpen: false,
       });
       setTimeout(() => {
         const s = stateRef.current;
@@ -1265,6 +1291,11 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
       selectProject(key);
     },
     [commitAddToProject, setState, selectProject],
+  );
+
+  const setSidebarViewMode = useCallback(
+    (mode: SidebarViewMode) => setState({ sidebarViewMode: mode }),
+    [setState],
   );
 
   const sidebarCreateProject = useCallback(() => {
@@ -1550,6 +1581,13 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
 
   const contentLeft = 20;
   const drawerRight = state.chatOpen ? 320 : 0;
+  // Minimap has to clear every right-side panel, not just the chat: source
+  // browser sidebar (380) and photo drawer (410) both live in the same slot.
+  const sidebarOpenForMinimap = state.sidebarTabs.length > 0;
+  const minimapRight =
+    drawerRight +
+    (sidebarOpenForMinimap ? 380 : 0) +
+    (state.drawerId ? 410 : 0);
 
   const minimapPoints = useMemo(() => {
     if (isMapView) return [];
@@ -1673,6 +1711,7 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
 
     contentLeft,
     drawerRight,
+    minimapRight,
 
     extractExif,
 
@@ -1718,6 +1757,8 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
     closeSidebarAddOpen,
     sidebarAddToProject,
     sidebarCreateProject,
+    sidebarViewMode: state.sidebarViewMode,
+    setSidebarViewMode,
 
     search: state.search,
     openSearch,

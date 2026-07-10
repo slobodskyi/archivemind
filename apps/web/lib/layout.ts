@@ -274,7 +274,7 @@ const COL_W = 340;
 const COL_GAP = 40;
 const TILE_MIN = 64;
 const TILE_MAX = 96;
-const TOP_Y = 8;
+const TOP_Y = 4;
 const MIN_CELL = 116;
 const PER_ROW = Math.floor(COL_W / MIN_CELL); // 2
 
@@ -334,15 +334,17 @@ export function timelineLayout(
       const col = i % PER_ROW;
       const row = Math.floor(i / PER_ROW);
       const cx = colX + col * cellW + cellW / 2;
-      const cy = TOP_Y + row * cellH + cellH / 2;
       const h1 = hash(p.id);
       const h2 = hash(p.id) >>> 4;
       const jx = (h1 % Math.round(jitterX * 2)) - jitterX;
-      const jy = (h2 % Math.round(jitterY * 2)) - jitterY;
+      // Top-anchor the tile within its row cell (small nonnegative jitter)
+      // so row 0 packs tightly against the sticky month header instead of
+      // being center-aligned inside a 116 px cell.
+      const jy = h2 % Math.round(jitterY);
       const w = TILE_MIN + (hash(p.id + "w") % (TILE_MAX - TILE_MIN));
       const h = Math.round(w * (p.h / p.w));
       let bx = cx + jx - w / 2;
-      let by = cy + jy - h / 2;
+      let by = TOP_Y + row * cellH + jy;
       if (tlOverrides[p.id]) {
         bx = tlOverrides[p.id].x;
         by = tlOverrides[p.id].y;

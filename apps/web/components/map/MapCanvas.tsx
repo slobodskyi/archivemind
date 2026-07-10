@@ -73,13 +73,29 @@ export default function MapCanvas({
   }, [photos]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    const m = L.map(containerRef.current, {
+    const containerEl = containerRef.current;
+    if (!containerEl) return;
+    const m = L.map(containerEl, {
       maxBounds: [
         [-85, -180],
         [85, 180],
       ],
       maxBoundsViscosity: 1.0,
+      // Use Leaflet's own animated scroll-wheel zoom rather than driving
+      // setZoomAround manually: a hand-rolled `{animate:false}` zoom forces
+      // Leaflet to swap the tile grid instantly, which flashes grey wherever
+      // the new zoom's tiles haven't loaded yet. Leaflet's built-in animation
+      // instead CSS-scales the *existing* tiles smoothly while new ones load
+      // in the background, so the screen is never blank — same visual
+      // mechanism every proper web map uses for smooth zoom. zoomSnap: 0 +
+      // a low wheelDebounceTime/wheelPxPerZoomLevel makes it feel as
+      // continuous and responsive as the canvas grid's zoom.
+      scrollWheelZoom: true,
+      zoomAnimation: true,
+      zoomSnap: 0,
+      zoomDelta: 0.25,
+      wheelPxPerZoomLevel: 70,
+      wheelDebounceTime: 20,
     });
     m.setView([30, 15], 2);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -101,13 +117,14 @@ export default function MapCanvas({
       const bounds = L.latLngBounds([-85, -180], [85, 180]);
       const z = m.getBoundsZoom(bounds, true);
       worldFitZoomRef.current = z;
-      // Keep the zoom range pinned to 100%–200% (world-fit up to 2x): the
+      // Keep the zoom range pinned to 100%–600% (world-fit up to 6x): the
       // dropdown/scroll wheel shouldn't be able to go further in either
-      // direction than that.
+      // direction than that. log2(6) ≈ 2.585.
+      const maxOffset = Math.log2(6);
       m.setMinZoom(z);
-      m.setMaxZoom(z + 1);
+      m.setMaxZoom(z + maxOffset);
       if (m.getZoom() < z) m.setView(m.getCenter(), z, { animate: false });
-      else if (m.getZoom() > z + 1) m.setView(m.getCenter(), z + 1, { animate: false });
+      else if (m.getZoom() > z + maxOffset) m.setView(m.getCenter(), z + maxOffset, { animate: false });
       propsRef.current.onZoomChange?.(getZoomPct());
     };
     const onResize = () => {

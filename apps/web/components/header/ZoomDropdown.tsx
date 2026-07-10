@@ -1,8 +1,8 @@
 import { CheckIcon, FitIcon } from "@/components/icons/icons";
 
 const DEFAULT_PRESETS = [50, 75, 100, 125, 150, 200];
-/** Map view's Leaflet zoom is pinned to 100%–200% (world-fit up to 2x). */
-export const MAP_ZOOM_PRESETS = [100, 125, 150, 175, 200];
+/** Map view's Leaflet zoom is pinned to 100%–600% (world-fit up to 6x). */
+export const MAP_ZOOM_PRESETS = [100, 200, 300, 400, 500, 600];
 
 interface ZoomDropdownProps {
   open: boolean;
