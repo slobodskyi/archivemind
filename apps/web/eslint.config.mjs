@@ -12,8 +12,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Original Claude Design mockup export — reference only, not part of the app.
-    "AI-powered creator archive tool/**",
   ]),
 ]);
 

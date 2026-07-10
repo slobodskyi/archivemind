@@ -37,7 +37,8 @@ worktrees with `git worktree list`, then `git worktree remove <path>` once a
 branch is merged.
 
 ## Before opening a PR
-- `npm run lint`, `npx tsc --noEmit`, and `npm run build` all pass.
+- `pnpm lint`, `pnpm typecheck`, and `pnpm build` all pass (from the repo root;
+  they fan out via turborepo).
 - The diff does only what the PR describes — no unrelated drive-by changes.
 - If an AI agent produced the diff, skim it yourself before pushing — see the
   review checklist in `.github/PULL_REQUEST_TEMPLATE.md`.
