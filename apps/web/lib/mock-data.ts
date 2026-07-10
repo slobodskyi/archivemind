@@ -68,10 +68,12 @@ export const SOURCES: Record<PhotoSource, SourceMeta> = {
   gdrive: { key: "gdrive", color: "#4285F4", label: "Google Drive", abbr: "GD" },
   icloud: { key: "icloud", color: "#39ff6a", label: "iCloud", abbr: "iC" },
   dropbox: { key: "dropbox", color: "#00C2FF", label: "Dropbox", abbr: "DB" },
+  upload: { key: "upload", color: "#b48cff", label: "Local", abbr: "LC" },
 };
 
 /** Each connected source's own real folder structure, browsed via the Neural drill-down. */
 export const SOURCE_FOLDERS: Record<PhotoSource, string[]> = {
+  upload: ["Uploads"],
   gdrive: ["2024 Shoots", "Raw Imports", "Client Deliverables", "Archive Backup"],
   icloud: ["Camera Roll", "Screenshots", "Shared Albums", "Recently Added"],
   dropbox: ["Client Proofs", "Team Shared", "Edits WIP", "Final Exports"],

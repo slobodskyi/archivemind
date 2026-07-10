@@ -182,7 +182,9 @@ export function sourcesGallery(
   photos.forEach((p) => {
     bySrc[p.source] = (bySrc[p.source] ?? 0) + 1;
   });
-  const keys = Object.keys(SOURCES) as PhotoSource[];
+  // Only sources that actually hold files become hubs — with real data the
+  // canvas shows the archive as it is, not the full connector catalog.
+  const keys = (Object.keys(SOURCES) as PhotoSource[]).filter((k) => (bySrc[k] ?? 0) > 0);
   const { pos, bounds } = scatterLayout(
     keys.map((k) => ({ key: k, w: SOURCE_TILE_W, h: SOURCE_TILE_H })),
     overrides,
@@ -485,7 +487,7 @@ export function fanOut(
     const ov = overrides[p.id];
     const fx = ov ? ov.x + w / 2 : fx0;
     const fy = ov ? ov.y + h / 2 : fy0;
-    files.push({ id: p.id, x: fx - w / 2, y: fy - h / 2, w, h, src: `https://picsum.photos/seed/${p.seed}/200/200` });
+    files.push({ id: p.id, x: fx - w / 2, y: fy - h / 2, w, h, src: p.src ?? `https://picsum.photos/seed/${p.seed}/200/200` });
     edges.push({ d: mkBez(ex, ey, fx, fy, hash(p.id), 0.18), stroke, op, w: 1 });
   });
   return { edges, files };

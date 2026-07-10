@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   SINGLE_PUT_MAX_BYTES,
@@ -51,6 +52,7 @@ function putWithProgress(url: string, file: File, onProgress: (sent: number) => 
 }
 
 export default function UploadManager() {
+  const router = useRouter();
   const [dragging, setDragging] = useState(false);
   const [state, setState] = useState<UploadState>(IDLE);
   const dragDepth = useRef(0);
@@ -130,6 +132,9 @@ export default function UploadManager() {
       if (completeResp.ok) {
         const { assetIds } = completeUploadResponseSchema.parse(await completeResp.json());
         queuedNote = `${assetIds.length} file(s) uploaded — queued for processing`;
+        // Pull the fresh asset list into the server component; page.tsx keys
+        // the workspace by count so the canvas actually remounts with it.
+        router.refresh();
       } else {
         errors.push(`complete failed (${completeResp.status})`);
       }

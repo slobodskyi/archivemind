@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /** R2 S3 client (server-only). Our buckets carry the EU jurisdiction, whose
@@ -40,6 +40,14 @@ export async function presignPut(key: string, mime: string): Promise<string> {
     ContentType: mime,
   });
   return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_PUT_TTL_SECONDS });
+}
+
+const PRESIGN_GET_TTL_SECONDS = 60 * 60; // spec §12: 1 h GET
+
+/** Presigned GET for serving previews to the browser (zero-egress R2). */
+export async function presignGet(key: string): Promise<string> {
+  const command = new GetObjectCommand({ Bucket: r2Bucket(), Key: key });
+  return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_GET_TTL_SECONDS });
 }
 
 /** Object key layout per spec §6: {workspace_id}/originals/{uuid}/{filename}.

@@ -1,19 +1,30 @@
 import type { GroupMeta, Photo, Project, SourceMeta } from "@/types";
-import { GROUP_LIST, PHOTOS, PROJECTS, SOURCE_LIST } from "./mock-data";
+import { GROUP_LIST, PROJECTS, SOURCE_LIST } from "./mock-data";
+import { getRealPhotos } from "./assets";
+import { createClient } from "./supabase/server";
 
 /**
  * The single data-access layer. Every component/hook reads domain records
- * through these functions — never from `lib/mock-data.ts` directly. They are
- * async (resolving synchronously today) so a real fetch-based implementation
- * is a drop-in swap later, and so Server Components can `await` them.
+ * through these functions — never from `lib/mock-data.ts` directly.
+ *
+ * getPhotos() is REAL as of Phase 1 (issue #6): the caller's own assets with
+ * presigned preview URLs, mapped into the mockup's Photo shape (server-only —
+ * it presigns R2 URLs). The remaining functions swap in with their phases
+ * (projects #17, canvas aggregates #18).
  */
 
 export async function getPhotos(): Promise<Photo[]> {
-  return PHOTOS;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+  return getRealPhotos(supabase);
 }
 
 export async function getPhoto(id: string): Promise<Photo | null> {
-  return PHOTOS.find((p) => p.id === id) ?? null;
+  const photos = await getPhotos();
+  return photos.find((p) => p.id === id) ?? null;
 }
 
 export async function getProjects(): Promise<Project[]> {

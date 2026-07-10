@@ -1,4 +1,4 @@
-export type PhotoSource = "gdrive" | "icloud" | "dropbox";
+export type PhotoSource = "gdrive" | "icloud" | "dropbox" | "upload";
 
 export type PhotoGroup =
   | "rescue"
@@ -50,6 +50,10 @@ export interface ExifData {
 export interface Photo {
   id: string;
   seed: string;
+  /** Real preview URLs (presigned R2). When absent, the UI falls back to the
+   *  mock picsum source keyed by `seed`. */
+  src?: string;
+  srcMedium?: string;
   /** Native aspect-ratio basis (mock "megapixel" dimensions). */
   w: number;
   h: number;
