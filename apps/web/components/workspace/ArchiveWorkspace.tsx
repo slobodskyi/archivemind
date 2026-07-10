@@ -222,6 +222,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         onCloseTab={ws.closeSourceTab}
         onClose={ws.closeSidebar}
         onToggleFile={ws.toggleSidebarFile}
+        onOpenFile={ws.openDrawer}
         onToggleGroup={ws.toggleSidebarGroup}
         onSearchChange={ws.setSidebarSearch}
         onToggleAddOpen={ws.toggleSidebarAddOpen}

@@ -24,6 +24,8 @@ interface SourceBrowserSidebarProps {
   onCloseTab: (source: PhotoSource) => void;
   onClose: () => void;
   onToggleFile: (id: string) => void;
+  /** Double-click a row → open the photo drawer (Finder-style inspect). */
+  onOpenFile: (id: string) => void;
   onToggleGroup: (ids: string[]) => void;
   onSearchChange: (text: string) => void;
   onToggleAddOpen: () => void;
@@ -75,6 +77,7 @@ export default function SourceBrowserSidebar({
   onCloseTab,
   onClose,
   onToggleFile,
+  onOpenFile,
   onToggleGroup,
   onSearchChange,
   onToggleAddOpen,
@@ -182,6 +185,7 @@ export default function SourceBrowserSidebar({
                 <div
                   key={p.id}
                   onClick={() => onToggleFile(p.id)}
+                  onDoubleClick={() => onOpenFile(p.id)}
                   style={{
                     display: "flex",
                     alignItems: "center",
