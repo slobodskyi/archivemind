@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import UploadManager from "@/components/upload/UploadManager";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotos } from "@/lib/api";
 import { ensureWorkspace } from "@/lib/bootstrap";
@@ -18,5 +19,10 @@ export default async function Home() {
 
   // Canvas data stays mock until Phase 1 swaps the lib/api.ts seam (issue #6).
   const photos = await getPhotos();
-  return <ArchiveWorkspace initialPhotos={photos} />;
+  return (
+    <>
+      <ArchiveWorkspace initialPhotos={photos} />
+      <UploadManager />
+    </>
+  );
 }
