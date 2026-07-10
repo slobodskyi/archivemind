@@ -7,6 +7,13 @@ import { z } from "zod";
  * contracts. Consumed as TypeScript source (apps/web has `transpilePackages`).
  */
 
+/** Any Postgres-valid uuid text. zod's .uuid() enforces RFC-4122
+ *  version/variant bits and rejects ids Postgres happily stores (fixtures,
+ *  imported data) — our contract is "what the uuid column holds". */
+export const uuidSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "invalid uuid");
+
 // Seed: workspace roles per TECH_SPEC §4 `member_role` — referenced by both
 // the web app (membership UI) and the worker (nothing yet).
 export const memberRoleSchema = z.enum(["owner", "editor", "viewer"]);
@@ -75,7 +82,14 @@ export const completeUploadRequestSchema = z.object({
 export type CompleteUploadRequest = z.infer<typeof completeUploadRequestSchema>;
 
 export const completeUploadResponseSchema = z.object({
-  assetIds: z.array(z.string().uuid()),
-  jobId: z.string().uuid(),
+  assetIds: z.array(uuidSchema),
+  jobId: uuidSchema,
 });
 export type CompleteUploadResponse = z.infer<typeof completeUploadResponseSchema>;
+
+/** ai_jobs.payload for type='ingest' (spec §8.1) — produced by the web
+ *  complete-route, consumed by the worker handler. */
+export const ingestJobPayloadSchema = z.object({
+  asset_ids: z.array(uuidSchema).min(1),
+});
+export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
