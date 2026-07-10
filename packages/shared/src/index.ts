@@ -93,3 +93,52 @@ export const ingestJobPayloadSchema = z.object({
   asset_ids: z.array(uuidSchema).min(1),
 });
 export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
+
+// ── Analyze (spec §8.2) — user-triggered via POST /api/jobs ─────────────────
+
+export const analyzeJobPayloadSchema = ingestJobPayloadSchema;
+export type AnalyzeJobPayload = IngestJobPayload;
+
+export const createJobRequestSchema = z.object({
+  type: z.literal("analyze"),
+  assetIds: z.array(uuidSchema).min(1).max(500),
+});
+export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
+
+export const tagCategorySchema = z.enum(["object", "scene", "place", "attribute", "event", "other"]);
+export type TagCategory = z.infer<typeof tagCategorySchema>;
+
+/** Strict shape the analyze model must return (spec §8.2). `.catch` keeps a
+ *  single sloppy field from failing a whole batch item. */
+export const analyzeOutputSchema = z.object({
+  description: z.string().min(1),
+  tags: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(64),
+        category: tagCategorySchema.catch("other"),
+        confidence: z.number().min(0).max(1).catch(0.5),
+      }),
+    )
+    .max(32)
+    .default([]),
+  ocr_text: z.string().default(""),
+  suggested_facts: z
+    .array(
+      z.object({
+        text: z.string().min(1).max(500),
+        basis: z.enum(["visual", "exif"]).catch("visual"),
+      }),
+    )
+    .max(12)
+    .default([]),
+});
+export type AnalyzeOutput = z.infer<typeof analyzeOutputSchema>;
+
+/** Spec §8.2: person-related output is ATTRIBUTES only — never identity. */
+export const ANALYZE_PROMPT = `You are indexing a documentary photographer's archive.
+Analyze the image and return strict JSON:
+- description: dense factual EN description, 2-4 sentences. No speculation.
+- tags: up to 20 short lowercase tags. category one of: object, scene, place, attribute, event, other. "attribute" covers visible person attributes (e.g. "mustache", "military uniform") — NEVER identity, names, or ethnicity.
+- ocr_text: text visible in the image, verbatim ("" if none).
+- suggested_facts: up to 6 short checkable statements grounded in what is visible (basis "visual") or in provided metadata (basis "exif").`;

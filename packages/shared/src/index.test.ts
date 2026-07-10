@@ -56,6 +56,36 @@ describe("uuidSchema", () => {
   });
 });
 
+describe("analyze contracts", () => {
+  it("parses a full model response and normalizes sloppy fields via catch", async () => {
+    const { analyzeOutputSchema } = await import("./index");
+    const out = analyzeOutputSchema.parse({
+      description: "A minimalist graphic with a circle.",
+      tags: [
+        { name: "circle", category: "object", confidence: 0.99 },
+        { name: "weird", category: "not-a-category", confidence: 2 }, // both caught
+      ],
+      ocr_text: "",
+      suggested_facts: [{ text: "Circle is centered.", basis: "visual" }],
+    });
+    expect(out.tags[1].category).toBe("other");
+    expect(out.tags[1].confidence).toBe(0.5);
+  });
+
+  it("rejects a response without a description", async () => {
+    const { analyzeOutputSchema } = await import("./index");
+    expect(analyzeOutputSchema.safeParse({ tags: [], ocr_text: "", suggested_facts: [] }).success).toBe(false);
+  });
+
+  it("caps createJobRequest batches and requires analyze type", async () => {
+    const { createJobRequestSchema } = await import("./index");
+    const id = "4df136fe-a1a4-49c1-ab22-1f1713a1c53c";
+    expect(createJobRequestSchema.parse({ type: "analyze", assetIds: [id] })).toBeTruthy();
+    expect(createJobRequestSchema.safeParse({ type: "caption", assetIds: [id] }).success).toBe(false);
+    expect(createJobRequestSchema.safeParse({ type: "analyze", assetIds: [] }).success).toBe(false);
+  });
+});
+
 describe("upload contracts", () => {
   it("accepts a valid presign request up to the single-PUT cap", () => {
     expect(

@@ -11,9 +11,10 @@ export interface HandlerContext {
 
 export type JobHandler = (ctx: HandlerContext) => Promise<void>;
 
-/** Registry — handlers land per phase: analyze (#10), caption (#13),
- *  export (#25). A claimed job with no handler goes through the normal retry
- *  path and fails with a clear error. */
+/** Registry — handlers land per phase: caption (#13), export (#25). A claimed
+ *  job with no handler goes through the normal retry path and fails with a
+ *  clear error. */
 export const handlers: Partial<Record<JobType, JobHandler>> = {
   ingest: (ctx) => import("./ingest").then((m) => m.ingestHandler(ctx)),
+  analyze: (ctx) => import("./analyze").then((m) => m.analyzeHandler(ctx)),
 };
