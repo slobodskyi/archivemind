@@ -173,9 +173,11 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
 
   await progress(100, `Processed ${done} file(s)`, done, rows.length);
 
-  // Analyze-on-ingest (spec §8.1 default). No analyze handler until #10 —
-  // the job will surface as failed with a clear error, which is honest.
-  if (analyzeIds.length > 0) {
+  // Analyze is an EXPLICIT user action (selection → POST /api/jobs) — product
+  // decision 2026-07-10: every analyze call costs money, so the user stays in
+  // control. ANALYZE_ON_INGEST=true flips back to spec §8.1's original
+  // analyze-on-ingest behavior for dev/testing.
+  if (process.env.ANALYZE_ON_INGEST === "true" && analyzeIds.length > 0) {
     await pool.query(
       `insert into ai_jobs (workspace_id, user_id, type, payload, total_items, done_items)
        values ($1, $2, 'analyze', $3, $4, 0)`,
