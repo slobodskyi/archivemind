@@ -6,6 +6,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@archivemind/web", "dev"],
       "port": 3000
+    },
+    {
+      "name": "email-templates-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8973", "--directory", "supabase/templates"],
+      "port": 8973
     }
   ]
 }
