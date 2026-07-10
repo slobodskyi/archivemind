@@ -70,6 +70,20 @@ export const SOURCES: Record<PhotoSource, SourceMeta> = {
   dropbox: { key: "dropbox", color: "#00C2FF", label: "Dropbox", abbr: "DB" },
 };
 
+/** Each connected source's own real folder structure, browsed via the Neural drill-down. */
+export const SOURCE_FOLDERS: Record<PhotoSource, string[]> = {
+  gdrive: ["2024 Shoots", "Raw Imports", "Client Deliverables", "Archive Backup"],
+  icloud: ["Camera Roll", "Screenshots", "Shared Albums", "Recently Added"],
+  dropbox: ["Client Proofs", "Team Shared", "Edits WIP", "Final Exports"],
+};
+
+/** Tiny djb2-style hash — local copy to avoid a circular import with lib/layout.ts. */
+function hashId(id: string): number {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) h = ((h * 33) ^ id.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 export const PROJECTS_META: Record<ProjectKey, { label: string; color: string }> = {
   frontline: { label: "Kyiv 2026 — Frontline", color: "#5b9bff" },
   travel: { label: "Travel 2025", color: "#ff7a5c" },
@@ -300,6 +314,7 @@ function generatePhotos(): Photo[] {
     group: p.group as PhotoGroup,
     country: p.country ?? "Ukraine",
     source: p.source as PhotoSource,
+    folder: SOURCE_FOLDERS[p.source as PhotoSource][hashId(p.id) % SOURCE_FOLDERS[p.source as PhotoSource].length],
     project: p.project as ProjectKey,
     exif: { ...EXIF_BLOCK },
   }));

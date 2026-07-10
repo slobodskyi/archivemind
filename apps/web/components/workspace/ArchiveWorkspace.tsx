@@ -5,6 +5,7 @@ import { useWorkspace } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
+import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import NeuralView from "@/components/canvas/NeuralView";
 import TimelineView from "@/components/canvas/TimelineView";
 import TimelineHeader from "@/components/canvas/TimelineHeader";
@@ -13,12 +14,13 @@ import MapView from "@/components/map/MapView";
 import AppHeader from "@/components/header/AppHeader";
 import ViewTabs from "@/components/header/ViewTabs";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
-import ZoomDropdown from "@/components/header/ZoomDropdown";
+import ZoomDropdown, { MAP_ZOOM_PRESETS } from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
 import ChatPanel from "@/components/chat/ChatPanel";
 import LeftToolbar from "@/components/toolbar/LeftToolbar";
 import Minimap from "@/components/toolbar/Minimap";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
+import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import SearchModal from "@/components/modals/SearchModal";
@@ -58,19 +60,27 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         marquee={ws.marquee}
       >
         {!ws.isMapView && (
-          <FrameOverlay frames={ws.frames} draft={ws.frameDraft} onDeleteFrame={ws.deleteFrame} />
+          <FrameOverlay
+            frames={ws.frames}
+            draft={ws.frameDraft}
+            onDeleteFrame={ws.deleteFrame}
+            onRenameFrame={ws.renameFrame}
+          />
+        )}
+        {!ws.isMapView && (
+          <StickyNoteOverlay
+            notes={ws.stickyNotes}
+            onDragStart={ws.onStickyDown}
+            onTextChange={ws.updateStickyText}
+            onDelete={ws.deleteStickyNote}
+          />
         )}
         {ws.isNeural && (
           <NeuralView
-            layout={ws.neuralLayout}
             photos={ws.photos}
-            selectedIds={ws.selectedIds}
-            hoveredId={ws.hoveredId}
-            onNodeDown={ws.onNodeDown}
-            onCardDown={ws.onCardDown}
-            setHover={ws.setHover}
-            openDrawer={ws.openDrawer}
-            deletePhoto={ws.deletePhoto}
+            galleryOverrides={ws.galleryOverrides}
+            onGalleryNodeDown={ws.onGalleryNodeDown}
+            onHubOpen={ws.openSourceTab}
           />
         )}
         {ws.isTimelineView && (
@@ -141,6 +151,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         onClose={ws.closeZoomMenu}
         onSelectPct={ws.setZoomPct}
         onFit={ws.onFit}
+        presets={ws.isMapView ? MAP_ZOOM_PRESETS : undefined}
       />
 
       <ProjectDropdown
@@ -166,6 +177,7 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
 
       <LeftToolbar
         tool={ws.tool}
+        allFilesMode={ws.allFilesMode}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
@@ -180,18 +192,42 @@ export default function ArchiveWorkspace({ initialPhotos }: ArchiveWorkspaceProp
         onToggleBulkPanel={ws.toggleBulkPanel}
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
+        onAddStickyNote={ws.addStickyNote}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
       />
 
-      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />
+      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.drawerRight} />
 
       <AddToProjectPopover
         open={ws.addProjOpen}
+        list={ws.projectList}
         onClose={ws.closeAddProj}
         onSelect={ws.addToProject}
         onCreateNew={ws.createNewProject}
+      />
+
+      <SourceBrowserSidebar
+        open={ws.sidebarOpen}
+        tabs={ws.sidebarTabs}
+        activeTab={ws.sidebarActiveTab}
+        photos={ws.photos}
+        selectedIds={ws.sidebarSelectedIds}
+        searchText={ws.sidebarSearchText}
+        addOpen={ws.sidebarAddOpen}
+        projectList={ws.projectList}
+        right={ws.drawerRight}
+        onSelectTab={ws.setSidebarActiveTab}
+        onCloseTab={ws.closeSourceTab}
+        onClose={ws.closeSidebar}
+        onToggleFile={ws.toggleSidebarFile}
+        onToggleGroup={ws.toggleSidebarGroup}
+        onSearchChange={ws.setSidebarSearch}
+        onToggleAddOpen={ws.toggleSidebarAddOpen}
+        onCloseAddOpen={ws.closeSidebarAddOpen}
+        onSelectProject={ws.sidebarAddToProject}
+        onCreateProject={ws.sidebarCreateProject}
       />
 
       <BulkAiPanel

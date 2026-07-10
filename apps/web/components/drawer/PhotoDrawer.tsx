@@ -44,7 +44,10 @@ export default function PhotoDrawer({
   onCopy,
   onGenSingle,
 }: PhotoDrawerProps) {
-  const sheet = photo ? "translateX(0)" : "translateX(420px)";
+  // Closed offset must clear the drawer's own width *plus* however far `right`
+  // has already shifted it left (e.g. for an open chat panel) — otherwise the
+  // "hidden" drawer lands back on-screen and covers whatever is to its right.
+  const sheet = photo ? "translateX(0)" : `translateX(${410 + right + 20}px)`;
   const st = photo ? statusMeta(photo.status) : statusMeta("Needs check");
   const captionText = getCaptionText(photo, lang, style);
 

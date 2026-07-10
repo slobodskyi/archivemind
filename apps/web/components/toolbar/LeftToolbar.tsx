@@ -9,10 +9,14 @@ import {
   ExifIcon,
   AddIcon,
   FitIcon,
+  StickyNoteIcon,
 } from "@/components/icons/icons";
 
 interface LeftToolbarProps {
   tool?: Tool;
+  /** "All my files" only browses/selects across sources — the frame tool, Smart Search,
+   * bulk captioning, EXIF extraction, and sticky notes all live inside a project instead. */
+  allFilesMode?: boolean;
   showAddToProject?: boolean;
   selCount?: number;
   zoomPct?: string;
@@ -27,6 +31,7 @@ interface LeftToolbarProps {
   onToggleBulkPanel?: () => void;
   onExtractExif?: () => void;
   onAdd?: () => void;
+  onAddStickyNote?: () => void;
   onFit?: () => void;
   onZoomReset?: () => void;
   onAddToProject?: () => void;
@@ -71,6 +76,7 @@ function TbButton({ onClick, title, active, children }: TbButtonProps) {
 
 export default function LeftToolbar({
   tool = "select",
+  allFilesMode = false,
   showAddToProject = false,
   selCount = 0,
   zoomPct = "100%",
@@ -85,6 +91,7 @@ export default function LeftToolbar({
   onToggleBulkPanel,
   onExtractExif,
   onAdd,
+  onAddStickyNote,
   onFit,
   onZoomReset,
   onAddToProject,
@@ -159,42 +166,50 @@ export default function LeftToolbar({
         <HandToolIcon />
         <span className="tip">Pan</span>
       </button>
-      <button
-        onClick={onFrameTool}
-        className="am-tb tw"
-        title="Frame"
-        aria-label="Frame tool"
-        style={{
-          display: "flex",
-          width: 34,
-          height: 34,
-          alignItems: "center",
-          justifyContent: "center",
-          border: 0,
-          borderRadius: 2,
-          cursor: "pointer",
-          background: frameBg,
-          color: frameColor,
-        }}
-      >
-        <FrameToolIcon />
-        <span className="tip">Frame</span>
-      </button>
+      {!allFilesMode && (
+        <button
+          onClick={onFrameTool}
+          className="am-tb tw"
+          title="Frame"
+          aria-label="Frame tool"
+          style={{
+            display: "flex",
+            width: 34,
+            height: 34,
+            alignItems: "center",
+            justifyContent: "center",
+            border: 0,
+            borderRadius: 2,
+            cursor: "pointer",
+            background: frameBg,
+            color: frameColor,
+          }}
+        >
+          <FrameToolIcon />
+          <span className="tip">Frame</span>
+        </button>
+      )}
 
       <Divider />
 
-      <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
-        <SearchIcon />
-      </TbButton>
+      {!allFilesMode && (
+        <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
+          <SearchIcon />
+        </TbButton>
+      )}
       <TbButton onClick={onToggleChat} title="AI Assistant" active={chatOpen}>
         <ChatIcon />
       </TbButton>
-      <TbButton onClick={onToggleBulkPanel} title="Generate Captions" active={bulkPanelOpen}>
-        <TagIcon />
-      </TbButton>
-      <TbButton onClick={onExtractExif} title="Extract EXIF">
-        <ExifIcon />
-      </TbButton>
+      {!allFilesMode && (
+        <>
+          <TbButton onClick={onToggleBulkPanel} title="Generate Captions" active={bulkPanelOpen}>
+            <TagIcon />
+          </TbButton>
+          <TbButton onClick={onExtractExif} title="Extract EXIF">
+            <ExifIcon />
+          </TbButton>
+        </>
+      )}
 
       <Divider />
 
@@ -219,6 +234,29 @@ export default function LeftToolbar({
         <AddIcon />
         <span className="tip">Add</span>
       </button>
+      {!allFilesMode && (
+        <button
+          onClick={onAddStickyNote}
+          title="Sticky Note"
+          aria-label="Add sticky note"
+          className="tw"
+          style={{
+            display: "flex",
+            width: 34,
+            height: 34,
+            alignItems: "center",
+            justifyContent: "center",
+            border: 0,
+            borderRadius: 2,
+            cursor: "pointer",
+            background: "transparent",
+            color: "var(--t2)",
+          }}
+        >
+          <StickyNoteIcon />
+          <span className="tip">Sticky Note</span>
+        </button>
+      )}
 
       <Divider />
 
