@@ -1,4 +1,5 @@
 import type { Photo, PhotoGroup, PhotoSource } from "@/types";
+import { photoSrc } from "./img";
 import { GROUPS, SOURCES } from "./mock-data";
 import type { ViewMode } from "@/types";
 
@@ -487,7 +488,7 @@ export function fanOut(
     const ov = overrides[p.id];
     const fx = ov ? ov.x + w / 2 : fx0;
     const fy = ov ? ov.y + h / 2 : fy0;
-    files.push({ id: p.id, x: fx - w / 2, y: fy - h / 2, w, h, src: p.src ?? `https://picsum.photos/seed/${p.seed}/200/200` });
+    files.push({ id: p.id, x: fx - w / 2, y: fy - h / 2, w, h, src: photoSrc(p, 200, 200) });
     edges.push({ d: mkBez(ex, ey, fx, fy, hash(p.id), 0.18), stroke, op, w: 1 });
   });
   return { edges, files };

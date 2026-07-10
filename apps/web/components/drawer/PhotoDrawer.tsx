@@ -1,5 +1,6 @@
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { FACT_STATUS_COLOR, getCaptionText, statusMeta } from "@/lib/format";
+import { photoSrcMedium } from "@/lib/img";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -75,7 +76,7 @@ export default function PhotoDrawer({
               style={{
                 width: "100%",
                 height: 220,
-                backgroundImage: `url(${photo.srcMedium ?? photo.src ?? `https://picsum.photos/seed/${photo.seed}/840/480`})`,
+                backgroundImage: `url(${photoSrcMedium(photo, 840, 480)})`,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
               }}
