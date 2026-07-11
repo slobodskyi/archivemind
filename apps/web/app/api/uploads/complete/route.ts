@@ -34,31 +34,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "r2Key outside workspace" }, { status: 400 });
   }
 
-  const assetIds: string[] = [];
-  for (const upload of parsed.data.uploads) {
-    const { data: asset, error: assetErr } = await supabase
-      .from("assets")
-      .insert({
+  // Batched inserts: one round trip per table instead of two per file — a
+  // 20-file batch used to hold the "Finalizing" step hostage for ~40 serial
+  // queries. PostgREST returns inserted rows in request order, so index i
+  // maps asset ↔ upload.
+  const uploads = parsed.data.uploads;
+  const { data: assets, error: assetErr } = await supabase
+    .from("assets")
+    .insert(
+      uploads.map((u) => ({
         workspace_id: workspaceId,
         added_by: user.id,
-        kind: assetKindFromMime(upload.mime),
-        title: upload.filename,
-      })
-      .select("id")
-      .single();
-    if (assetErr) return NextResponse.json({ error: assetErr.message }, { status: 500 });
+        kind: assetKindFromMime(u.mime),
+        title: u.filename,
+      })),
+    )
+    .select("id");
+  if (assetErr) return NextResponse.json({ error: assetErr.message }, { status: 500 });
 
-    const { error: fileErr } = await supabase.from("files").insert({
-      asset_id: asset.id,
+  const assetIds = (assets ?? []).map((a) => a.id as string);
+  if (assetIds.length !== uploads.length) {
+    return NextResponse.json({ error: "asset insert count mismatch" }, { status: 500 });
+  }
+
+  const { error: fileErr } = await supabase.from("files").insert(
+    uploads.map((u, i) => ({
+      asset_id: assetIds[i],
       workspace_id: workspaceId,
       origin: "upload",
-      r2_key: upload.r2Key,
-      mime_type: upload.mime,
-      byte_size: upload.size,
-    });
-    if (fileErr) return NextResponse.json({ error: fileErr.message }, { status: 500 });
-    assetIds.push(asset.id as string);
-  }
+      r2_key: u.r2Key,
+      mime_type: u.mime,
+      byte_size: u.size,
+    })),
+  );
+  if (fileErr) return NextResponse.json({ error: fileErr.message }, { status: 500 });
 
   const { data: job, error: jobErr } = await supabase
     .from("ai_jobs")

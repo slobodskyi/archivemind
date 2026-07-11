@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import { runUpload, type UploadProgress } from "@/lib/upload-client";
 
 /** Import modal (issue #17): opens on a fresh project (or via the toolbar
@@ -28,10 +29,12 @@ export default function ImportModal({
   const router = useRouter();
   const [source, setSource] = useState<Source>("local");
   const [phase, setPhase] = useState<Phase>("idle");
-  const [prog, setProg] = useState<UploadProgress>({ totalFiles: 0, doneFiles: 0, progress: 0 });
+  const [prog, setProg] = useState<UploadProgress>({ totalFiles: 0, doneFiles: 0, progress: 0, stage: "uploading" });
   const [result, setResult] = useState<{ added: number; errors: string[] } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const smooth = useSmoothProgress(prog.progress, phase === "uploading");
+  const pct = Math.round(smooth * 100);
 
   if (!open) return null;
 
@@ -159,10 +162,12 @@ export default function ImportModal({
                 {phase === "uploading" ? (
                   <>
                     <div style={{ fontSize: 13, color: "var(--t1)" }}>
-                      Uploading {prog.doneFiles}/{prog.totalFiles} · {Math.round(prog.progress * 100)}%
+                      {prog.stage === "finalizing"
+                        ? `Finalizing ${prog.totalFiles} file${prog.totalFiles === 1 ? "" : "s"}…`
+                        : `Uploading ${prog.doneFiles}/${prog.totalFiles} · ${pct}%`}
                     </div>
                     <div style={{ width: 220, height: 3, background: "var(--bg-el)", borderRadius: 999 }}>
-                      <div style={{ height: 3, width: `${Math.round(prog.progress * 100)}%`, background: "var(--ac)", borderRadius: 999, transition: "width .2s" }} />
+                      <div style={{ height: 3, width: `${pct}%`, background: "var(--ac)", borderRadius: 999, transition: "width .15s linear" }} />
                     </div>
                   </>
                 ) : phase === "done" && result ? (
