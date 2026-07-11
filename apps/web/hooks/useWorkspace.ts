@@ -512,6 +512,23 @@ export function useWorkspace(
     });
   }, []);
 
+  // Fresh server data (router.refresh after an upload / analyze / add-to-project)
+  // syncs in place. The page key used to include photo counts, so every refresh
+  // remounted the whole workspace — resetting pan/zoom/view/selection mid-work.
+  // Documented React pattern: adjust state during render when a prop changes.
+  const [syncedPhotos, setSyncedPhotos] = useState(initialPhotos);
+  if (syncedPhotos !== initialPhotos) {
+    setSyncedPhotos(initialPhotos);
+    const ids = new Set(initialPhotos.map((p) => p.id));
+    setState({
+      photos: initialPhotos,
+      selectedIds: state.selectedIds.filter((id) => ids.has(id)),
+      sidebarSelectedIds: state.sidebarSelectedIds.filter((id) => ids.has(id)),
+      drawerId: state.drawerId && ids.has(state.drawerId) ? state.drawerId : null,
+      hoveredId: state.hoveredId && ids.has(state.hoveredId) ? state.hoveredId : null,
+    });
+  }
+
   const rect = useCallback(() => {
     return canvasElRef.current
       ? canvasElRef.current.getBoundingClientRect()

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Photo } from "@/types";
 import { photoSrc } from "@/lib/img";
 import { monthOf, type TimelineLayout } from "@/lib/layout";
@@ -14,7 +15,7 @@ interface TimelineViewProps {
   ) => void;
 }
 
-export default function TimelineView({ layout, photos, selectedIds, onTlDown }: TimelineViewProps) {
+function TimelineView({ layout, photos, selectedIds, onTlDown }: TimelineViewProps) {
   const { months, tiles, colWidth } = layout;
   const monthX: Record<string, number> = {};
   const monthH: Record<string, number> = {};
@@ -73,3 +74,5 @@ export default function TimelineView({ layout, photos, selectedIds, onTlDown }: 
     </>
   );
 }
+
+export default memo(TimelineView);
