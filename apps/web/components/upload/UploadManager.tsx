@@ -2,162 +2,57 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  SINGLE_PUT_MAX_BYTES,
-  presignUploadResponseSchema,
-  completeUploadResponseSchema,
-} from "@archivemind/shared";
+import { runUpload, type UploadProgress } from "@/lib/upload-client";
 
 /** Window-level drag-and-drop upload (journey step 1: direct local upload).
- *  Self-contained on purpose — no changes inside the canvas tree: listens on
- *  window, shows its own overlay + progress pill, talks to
- *  /api/uploads/presign + /complete, then enqueued ingest takes over (#8).
- *  Per-file progress needs XHR (fetch has no upload progress events).
+ *  Self-contained on purpose — listens on window, shows its own overlay +
+ *  progress pill, delegates to lib/upload-client (shared with ImportModal).
+ *  `projectId` links uploaded assets into the current project (#17).
  *
- *  Also opens a file dialog when any button dispatches `am:open-upload` on the
+ *  Opens a file dialog when any button dispatches `am:open-upload` on the
  *  window (e.g. the homepage "Local upload" card) — one instance, one pill. */
-
-const PARALLEL_UPLOADS = 3;
 
 /** Buttons anywhere can trigger the file dialog without prop-drilling. */
 export const OPEN_UPLOAD_EVENT = "am:open-upload";
 
-interface UploadState {
+interface PillState {
   active: boolean;
   totalFiles: number;
   doneFiles: number;
-  /** 0..1 aggregate byte progress */
   progress: number;
+  note: string | null;
   errors: string[];
-  queuedNote: string | null;
 }
 
-const IDLE: UploadState = {
-  active: false,
-  totalFiles: 0,
-  doneFiles: 0,
-  progress: 0,
-  errors: [],
-  queuedNote: null,
-};
+const IDLE: PillState = { active: false, totalFiles: 0, doneFiles: 0, progress: 0, note: null, errors: [] };
 
-function putWithProgress(url: string, file: File, onProgress: (sent: number) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    // Content-Type is part of the presigned signature — must match exactly.
-    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
-    xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error(`R2 PUT failed (${xhr.status})`));
-    xhr.onerror = () => reject(new Error("R2 PUT network error"));
-    xhr.send(file);
-  });
-}
-
-export default function UploadManager() {
+export default function UploadManager({ projectId }: { projectId?: string }) {
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
-  const [state, setState] = useState<UploadState>(IDLE);
+  const [pill, setPill] = useState<PillState>(IDLE);
   const dragDepth = useRef(0);
   const busy = useRef(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const uploadFiles = useCallback(async (files: File[]) => {
-    if (busy.current || files.length === 0) return;
-    busy.current = true;
+  const upload = useCallback(
+    async (files: File[]) => {
+      if (busy.current || files.length === 0) return;
+      busy.current = true;
+      setPill({ ...IDLE, active: true });
+      const onProgress = (p: UploadProgress) =>
+        setPill((prev) => ({ ...prev, active: true, ...p }));
+      const { assetIds, errors, skipped } = await runUpload(files, { projectId, onProgress });
 
-    const accepted = files.filter((f) => f.size > 0 && f.size <= SINGLE_PUT_MAX_BYTES);
-    const rejected = files.length - accepted.length;
-    const errors: string[] =
-      rejected > 0 ? [`${rejected} file(s) skipped — over 100 MiB (multipart lands later) or empty`] : [];
-    if (accepted.length === 0) {
-      setState({ ...IDLE, errors, queuedNote: null, active: errors.length > 0 });
+      const errs = [...errors];
+      if (skipped > 0) errs.push(`${skipped} file(s) skipped — over 100 MiB or empty`);
+      const note = assetIds.length > 0 ? `${assetIds.length} file(s) uploaded — queued for processing` : null;
+      if (assetIds.length > 0) router.refresh();
+      setPill((prev) => ({ ...prev, active: true, progress: 1, note, errors: errs }));
       busy.current = false;
-      if (errors.length > 0) setTimeout(() => setState(IDLE), 5000);
-      return;
-    }
-
-    const totalBytes = accepted.reduce((s, f) => s + f.size, 0);
-    const sentPerFile = new Array<number>(accepted.length).fill(0);
-    let done = 0;
-    setState({ active: true, totalFiles: accepted.length, doneFiles: 0, progress: 0, errors, queuedNote: null });
-
-    const completed: { r2Key: string; filename: string; mime: string; size: number }[] = [];
-
-    const uploadOne = async (file: File, i: number) => {
-      const presignResp = await fetch("/api/uploads/presign", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          mime: file.type || "application/octet-stream",
-          size: file.size,
-        }),
-      });
-      if (!presignResp.ok) throw new Error(`${file.name}: presign failed (${presignResp.status})`);
-      const { uploadUrl, r2Key } = presignUploadResponseSchema.parse(await presignResp.json());
-      await putWithProgress(uploadUrl, file, (sent) => {
-        sentPerFile[i] = sent;
-        const sentTotal = sentPerFile.reduce((s, n) => s + n, 0);
-        setState((prev) => ({ ...prev, progress: Math.min(1, sentTotal / totalBytes) }));
-      });
-      sentPerFile[i] = file.size;
-      completed.push({
-        r2Key,
-        filename: file.name,
-        mime: file.type || "application/octet-stream",
-        size: file.size,
-      });
-      done += 1;
-      setState((prev) => ({ ...prev, doneFiles: done }));
-    };
-
-    // Simple pool: PARALLEL_UPLOADS at a time.
-    const queue = accepted.map((file, i) => ({ file, i }));
-    const runners = Array.from({ length: Math.min(PARALLEL_UPLOADS, queue.length) }, async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) {
-        try {
-          await uploadOne(next.file, next.i);
-        } catch (e) {
-          errors.push(e instanceof Error ? e.message : String(e));
-          setState((prev) => ({ ...prev, errors: [...errors] }));
-        }
-      }
-    });
-    await Promise.all(runners);
-
-    let queuedNote: string | null = null;
-    if (completed.length > 0) {
-      const completeResp = await fetch("/api/uploads/complete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uploads: completed }),
-      });
-      if (completeResp.ok) {
-        const { assetIds } = completeUploadResponseSchema.parse(await completeResp.json());
-        queuedNote = `${assetIds.length} file(s) uploaded — queued for processing`;
-        // Pull the fresh asset list into the server component; page.tsx keys
-        // the workspace by count so the canvas actually remounts with it.
-        router.refresh();
-      } else {
-        errors.push(`complete failed (${completeResp.status})`);
-      }
-    }
-
-    setState({
-      active: true,
-      totalFiles: accepted.length,
-      doneFiles: done,
-      progress: 1,
-      errors: [...errors],
-      queuedNote,
-    });
-    busy.current = false;
-    setTimeout(() => setState(IDLE), errors.length > 0 ? 8000 : 4000);
-  }, [router]);
+      setTimeout(() => setPill(IDLE), errs.length > 0 ? 8000 : 4000);
+    },
+    [projectId, router],
+  );
 
   useEffect(() => {
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
@@ -180,8 +75,7 @@ export default function UploadManager() {
       e.preventDefault();
       dragDepth.current = 0;
       setDragging(false);
-      const files = Array.from(e.dataTransfer?.files ?? []);
-      void uploadFiles(files);
+      void upload(Array.from(e.dataTransfer?.files ?? []));
     };
     const onOpen = () => fileInputRef.current?.click();
     window.addEventListener("dragenter", onDragEnter);
@@ -196,9 +90,9 @@ export default function UploadManager() {
       window.removeEventListener("drop", onDrop);
       window.removeEventListener(OPEN_UPLOAD_EVENT, onOpen);
     };
-  }, [uploadFiles]);
+  }, [upload]);
 
-  const pct = Math.round(state.progress * 100);
+  const pct = Math.round(pill.progress * 100);
 
   return (
     <>
@@ -209,8 +103,8 @@ export default function UploadManager() {
         hidden
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          e.target.value = ""; // allow re-picking the same file
-          void uploadFiles(files);
+          e.target.value = "";
+          void upload(files);
         }}
       />
       {dragging && (
@@ -244,7 +138,7 @@ export default function UploadManager() {
         </div>
       )}
 
-      {state.active && (
+      {pill.active && (
         <div
           data-upload-pill
           style={{
@@ -263,23 +157,14 @@ export default function UploadManager() {
           }}
         >
           <div style={{ fontSize: 11, color: "var(--t2)", letterSpacing: "0.04em" }}>
-            {state.queuedNote ??
-              `Uploading ${state.doneFiles}/${state.totalFiles} · ${pct}%`}
+            {pill.note ?? `Uploading ${pill.doneFiles}/${pill.totalFiles} · ${pct}%`}
           </div>
-          {!state.queuedNote && (
+          {!pill.note && (
             <div style={{ height: 3, background: "var(--bg-el)", borderRadius: 999, marginTop: 8 }}>
-              <div
-                style={{
-                  height: 3,
-                  width: `${pct}%`,
-                  background: "var(--ac)",
-                  borderRadius: 999,
-                  transition: "width .2s",
-                }}
-              />
+              <div style={{ height: 3, width: `${pct}%`, background: "var(--ac)", borderRadius: 999, transition: "width .2s" }} />
             </div>
           )}
-          {state.errors.map((err) => (
+          {pill.errors.map((err) => (
             <div key={err} style={{ fontSize: 10.5, color: "var(--red)", marginTop: 6, lineHeight: 1.4 }}>
               {err}
             </div>

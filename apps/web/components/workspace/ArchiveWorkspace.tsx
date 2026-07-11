@@ -25,7 +25,7 @@ import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import SearchModal from "@/components/modals/SearchModal";
 import HelpModal from "@/components/modals/HelpModal";
-import ImportDropdown from "@/components/modals/ImportDropdown";
+import ImportModal from "@/components/import/ImportModal";
 import Toast from "@/components/modals/Toast";
 
 interface ArchiveWorkspaceProps {
@@ -33,6 +33,8 @@ interface ArchiveWorkspaceProps {
   workspaceId: string;
   projects: ProjectOption[];
   currentProjectId: string;
+  /** Auto-open the import modal (fresh empty project). */
+  autoImport?: boolean;
 }
 
 export default function ArchiveWorkspace({
@@ -40,8 +42,9 @@ export default function ArchiveWorkspace({
   workspaceId,
   projects,
   currentProjectId,
+  autoImport = false,
 }: ArchiveWorkspaceProps) {
-  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId);
+  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId, autoImport);
 
   const sendHelpTicket = () => {
     ws.closeHelp();
@@ -263,7 +266,12 @@ export default function ArchiveWorkspace({
         onRun={ws.runBulk}
       />
 
-      <ImportDropdown open={ws.impOpen} onUpload={ws.doUpload} />
+      <ImportModal
+        open={ws.impOpen}
+        onClose={ws.closeImport}
+        projectId={ws.projCurrent}
+        projectName={ws.projLabel}
+      />
 
       <SearchModal open={ws.search} onClose={ws.closeSearch} />
 

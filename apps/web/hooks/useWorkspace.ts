@@ -394,7 +394,6 @@ export interface Workspace {
   // Import
   impOpen: boolean;
   addToolbar: () => void;
-  doUpload: () => void;
   closeImport: () => void;
 
   // Expand overlays (sense / map marker drill-down)
@@ -440,6 +439,7 @@ export function useWorkspace(
   workspaceId: string,
   initialProjects: ProjectOption[],
   currentProjectId: string,
+  autoImport = false,
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
@@ -456,7 +456,7 @@ export function useWorkspace(
     addProjOpen: false,
     search: false,
     helpOpen: false,
-    imp: { open: false },
+    imp: { open: autoImport },
     expanded: { kind: null, key: null },
     expandOverrides: {},
     galleryOverrides: EMPTY_GALLERY_OVERRIDES,
@@ -1335,10 +1335,6 @@ export function useWorkspace(
   const addToolbar = useCallback(() => {
     setState({ imp: { open: !stateRef.current.imp.open } });
   }, [setState]);
-  const doUpload = useCallback(() => {
-    setState({ imp: { open: false } });
-    flashToast("4 files imported");
-  }, [setState, flashToast]);
   const closeImport = useCallback(() => setState({ imp: { open: false } }), [setState]);
 
   // ── Misc toolbar actions ────────────────────────────────────────────────
@@ -1776,7 +1772,6 @@ export function useWorkspace(
 
     impOpen: state.imp.open,
     addToolbar,
-    doUpload,
     closeImport,
 
     timelineLayout: timelineLayoutResult,
