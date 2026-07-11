@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import { photoSrc } from "@/lib/img";
 import type {
@@ -1139,12 +1140,17 @@ export function useWorkspace(
   const selectProject = useCallback(
     (k: ProjectKey | "all") => {
       setState({ projOpen: false });
+      if (k === currentProjectId) return; // already here — a push would be a no-op reload
+      navProgressStart();
       router.push(k === "all" ? "/projects/all" : `/projects/${k}`);
     },
-    [setState, router],
+    [setState, router, currentProjectId],
   );
 
-  const goHome = useCallback(() => router.push("/"), [router]);
+  const goHome = useCallback(() => {
+    navProgressStart();
+    router.push("/");
+  }, [router]);
 
   // ── Add to project ───────────────────────────────────────────────────────
 
@@ -1218,7 +1224,11 @@ export function useWorkspace(
   const createNewProject = useCallback(() => {
     const ids = stateRef.current.selectedIds.slice();
     setState({ addProjOpen: false, selectedIds: [] });
-    void commitCreateProject(ids).then((id) => id && router.push(`/projects/${id}`));
+    void commitCreateProject(ids).then((id) => {
+      if (!id) return;
+      navProgressStart();
+      router.push(`/projects/${id}`);
+    });
   }, [commitCreateProject, setState, router]);
 
   // ── Source browser sidebar (Finder-style, All My Files) ─────────────────
@@ -1301,7 +1311,10 @@ export function useWorkspace(
         sidebarActiveTab: null,
         sidebarSearchText: "",
       });
-      void commitAddToProject(key, ids).then(() => router.push(`/projects/${key}`));
+      void commitAddToProject(key, ids).then(() => {
+        navProgressStart();
+        router.push(`/projects/${key}`);
+      });
     },
     [commitAddToProject, setState, router],
   );
@@ -1320,7 +1333,11 @@ export function useWorkspace(
       sidebarActiveTab: null,
       sidebarSearchText: "",
     });
-    void commitCreateProject(ids).then((id) => id && router.push(`/projects/${id}`));
+    void commitCreateProject(ids).then((id) => {
+      if (!id) return;
+      navProgressStart();
+      router.push(`/projects/${id}`);
+    });
   }, [commitCreateProject, setState, router]);
 
   // ── Search / Help ────────────────────────────────────────────────────────

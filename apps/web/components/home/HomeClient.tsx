@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
+import { navProgressStart } from "@/components/nav/TopProgressBar";
 import UploadManager, { OPEN_UPLOAD_EVENT } from "@/components/upload/UploadManager";
 
 /** Homepage hub (issue #17): drawer sidebar + project cards. Projects are
@@ -55,6 +57,7 @@ export default function HomeClient({
       });
       if (!resp.ok) throw new Error(String(resp.status));
       const { id } = createProjectResponseSchema.parse(await resp.json());
+      navProgressStart();
       router.push(`/projects/${id}`);
     } catch {
       setBusy(false);
@@ -83,7 +86,7 @@ export default function HomeClient({
 
         <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <NavItem label="Projects" active icon={<GridIcon />} />
-          <NavItem label="All my files" count={allCount} icon={<FilesIcon />} onClick={() => router.push("/projects/all")} />
+          <NavItem label="All my files" count={allCount} icon={<FilesIcon />} href="/projects/all" />
         </nav>
 
         <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--tm)", padding: "20px 8px 8px" }}>
@@ -189,7 +192,7 @@ export default function HomeClient({
             previews={[]}
             accent="var(--t3)"
             pinned
-            onOpen={() => router.push("/projects/all")}
+            href="/projects/all"
           />
           {projects.map((p) => (
             <ProjectCardView
@@ -198,7 +201,7 @@ export default function HomeClient({
               count={p.count}
               previews={p.previews}
               accent={cardColor(p.id)}
-              onOpen={() => router.push(`/projects/${p.id}`)}
+              href={`/projects/${p.id}`}
             />
           ))}
         </div>
@@ -242,18 +245,19 @@ function ProjectCardView({
   previews,
   accent,
   pinned,
-  onOpen,
+  href,
 }: {
   title: string;
   count: number;
   previews: string[];
   accent: string;
   pinned?: boolean;
-  onOpen: () => void;
+  href: string;
 }) {
   return (
-    <button
-      onClick={onOpen}
+    <Link
+      href={href}
+      onNavigate={() => navProgressStart()}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -265,6 +269,8 @@ function ProjectCardView({
         cursor: "pointer",
         fontFamily: "inherit",
         padding: 0,
+        color: "inherit",
+        textDecoration: "none",
       }}
     >
       <div style={{ position: "relative", height: 122, background: "var(--bg-el)", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 1 }}>
@@ -295,7 +301,7 @@ function ProjectCardView({
           {count} {count === 1 ? "file" : "files"}
         </div>
       </div>
-    </button>
+    </Link>
   );
 }
 
@@ -306,6 +312,7 @@ function NavItem({
   active,
   muted,
   onClick,
+  href,
 }: {
   label: string;
   count?: number;
@@ -313,28 +320,40 @@ function NavItem({
   active?: boolean;
   muted?: boolean;
   onClick?: () => void;
+  href?: string;
 }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 9,
-        width: "100%",
-        padding: "8px 8px",
-        background: active ? "var(--bg-el)" : "transparent",
-        border: 0,
-        borderRadius: 2,
-        cursor: onClick ? "pointer" : "default",
-        color: muted ? "var(--t3)" : active ? "var(--t1)" : "var(--t2)",
-        fontSize: 13,
-        fontFamily: "inherit",
-      }}
-    >
+  const style: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 9,
+    width: "100%",
+    padding: "8px 8px",
+    background: active ? "var(--bg-el)" : "transparent",
+    border: 0,
+    borderRadius: 2,
+    cursor: onClick || href ? "pointer" : "default",
+    color: muted ? "var(--t3)" : active ? "var(--t1)" : "var(--t2)",
+    fontSize: 13,
+    fontFamily: "inherit",
+    textDecoration: "none",
+  };
+  const body = (
+    <>
       <span style={{ display: "flex", flex: "0 0 auto" }}>{icon}</span>
       <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
       {count != null && <span style={{ fontSize: 10.5, color: "var(--tm)" }}>{count}</span>}
+    </>
+  );
+  if (href) {
+    return (
+      <Link href={href} onNavigate={() => navProgressStart()} style={style}>
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <button onClick={onClick} style={style}>
+      {body}
     </button>
   );
 }
