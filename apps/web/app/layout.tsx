@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Space_Mono } from "next/font/google";
+import TopProgressBar from "@/components/nav/TopProgressBar";
 import "./globals.css";
 
 const spaceMono = Space_Mono({
@@ -21,7 +22,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={spaceMono.variable}>
-      <body>{children}</body>
+      <body>
+        <TopProgressBar />
+        {children}
+      </body>
     </html>
   );
 }

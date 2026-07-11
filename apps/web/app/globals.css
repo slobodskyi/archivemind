@@ -125,6 +125,20 @@ textarea {
     opacity: 1;
   }
 }
+@keyframes amSkeleton {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.am-skeleton {
+  background: var(--bg-el);
+  border-radius: 2px;
+  animation: amSkeleton 1.4s ease-in-out infinite;
+}
 
 .leaflet-tile-pane {
   filter: invert(1) grayscale(1) brightness(0.95) contrast(1.08);
