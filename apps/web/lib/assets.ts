@@ -73,11 +73,10 @@ function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
 
 async function toPhoto(a: AssetRow): Promise<Photo> {
   const thumb = a.asset_previews.find((p) => p.size === "thumb");
-  const medium = a.asset_previews.find((p) => p.size === "medium");
-  const [src, srcMedium] = await Promise.all([
-    thumb ? presignGet(thumb.r2_key) : Promise.resolve(undefined),
-    medium ? presignGet(medium.r2_key) : Promise.resolve(undefined),
-  ]);
+  // Only the thumb is presigned up front — the canvas renders thumbs. The
+  // medium is fetched lazily by the drawer via /api/assets/[id]/medium, which
+  // halves the per-load signing work.
+  const src = thumb ? await presignGet(thumb.r2_key) : undefined;
 
   // Tile aspect basis from the thumb; the mock's w/h are ~64–96px display units.
   const aspect = thumb?.width && thumb?.height ? thumb.width / thumb.height : 4 / 3;
@@ -100,7 +99,6 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     id: a.id,
     seed: a.id,
     src,
-    srcMedium,
     w,
     h,
     x: 0,

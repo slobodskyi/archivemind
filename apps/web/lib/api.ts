@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GroupMeta, Photo, Project, SourceMeta } from "@/types";
 import { GROUP_LIST, PROJECTS, SOURCE_LIST } from "./mock-data";
 import { getRealPhotos } from "./assets";
@@ -13,13 +14,17 @@ import { createClient } from "./supabase/server";
  * (projects #17, canvas aggregates #18).
  */
 
-export async function getPhotos(projectId?: string): Promise<Photo[]> {
-  const supabase = await createClient();
+/** Pass the page's own RLS-scoped `supabase` when it has already auth-guarded
+ *  the request — that skips a second client + a second network `getUser()`
+ *  round trip (one full hop off the canvas load). */
+export async function getPhotos(projectId?: string, supabase?: SupabaseClient): Promise<Photo[]> {
+  if (supabase) return getRealPhotos(supabase, projectId);
+  const client = await createClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await client.auth.getUser();
   if (!user) return [];
-  return getRealPhotos(supabase, projectId);
+  return getRealPhotos(client, projectId);
 }
 
 export async function getPhoto(id: string): Promise<Photo | null> {

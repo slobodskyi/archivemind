@@ -15,15 +15,16 @@ export default async function Home() {
   // (deleted account, wiped dev DB) — /auth/reset clears the dead cookies.
   if (!user) redirect("/auth/reset");
 
-  await ensureWorkspace(supabase, user);
-
-  const [projects, allCount] = await Promise.all([getProjectCards(supabase), getAllAssetsCount(supabase)]);
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("display_name")
-    .eq("id", user.id)
-    .maybeSingle();
+  // One parallel batch instead of three sequential awaits. ensureWorkspace is
+  // idempotent bootstrap; on the very first login the sibling selects may see
+  // an empty workspace mid-creation, which renders the same (correct) empty
+  // state a brand-new account has anyway.
+  const [, projects, allCount, { data: profile }] = await Promise.all([
+    ensureWorkspace(supabase, user),
+    getProjectCards(supabase),
+    getAllAssetsCount(supabase),
+    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
+  ]);
 
   const name = profile?.display_name ?? user.email?.split("@")[0] ?? "You";
   const email = user.email ?? "";

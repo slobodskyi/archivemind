@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { FACT_STATUS_COLOR, getCaptionText, statusMeta } from "@/lib/format";
 import { photoSrcMedium } from "@/lib/img";
@@ -45,12 +48,32 @@ export default function PhotoDrawer({
   onCopy,
   onGenSingle,
 }: PhotoDrawerProps) {
+  // The asset list presigns thumbs only; the sharper medium is fetched lazily
+  // here. The thumb renders as an instant placeholder and the medium swaps in
+  // when its URL lands (stale responses are ignored by id).
+  const [medium, setMedium] = useState<{ id: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!photo || photo.source !== "upload" || photo.srcMedium) return;
+    const id = photo.id;
+    let alive = true;
+    fetch(`/api/assets/${id}/medium`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ url: string | null }>) : null))
+      .then((j) => {
+        if (alive && j?.url) setMedium({ id, url: j.url });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [photo]);
+
   // Closed offset must clear the drawer's own width *plus* however far `right`
   // has already shifted it left (e.g. for an open chat panel) — otherwise the
   // "hidden" drawer lands back on-screen and covers whatever is to its right.
   const sheet = photo ? "translateX(0)" : `translateX(${410 + right + 20}px)`;
   const st = photo ? statusMeta(photo.status) : statusMeta("Needs check");
   const captionText = getCaptionText(photo, lang, style);
+  const mediumSrc = photo && medium?.id === photo.id ? medium.url : undefined;
 
   return (
     <div
@@ -76,7 +99,7 @@ export default function PhotoDrawer({
               style={{
                 width: "100%",
                 height: 220,
-                backgroundImage: `url(${photoSrcMedium(photo, 840, 480)})`,
+                backgroundImage: `url(${photoSrcMedium({ ...photo, srcMedium: photo.srcMedium ?? mediumSrc }, 840, 480)})`,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
               }}
