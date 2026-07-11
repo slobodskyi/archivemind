@@ -17,10 +17,12 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   } = await supabase.auth.getUser();
   if (!user) redirect("/auth/reset");
 
-  const workspaceId = await ensureWorkspace(supabase, user);
-
-  const [photos, projectCards] = await Promise.all([
-    getPhotos(id),
+  // Parallel: ensureWorkspace is idempotent bootstrap, and getPhotos reuses
+  // this page's client (skipping its internal re-auth) — the canvas load drops
+  // from four sequential round trips to two.
+  const [workspaceId, photos, projectCards] = await Promise.all([
+    ensureWorkspace(supabase, user),
+    getPhotos(id, supabase),
     getProjectCards(supabase),
   ]);
   const projects = projectCards.map((p) => ({ id: p.id, name: p.name, count: p.count }));
