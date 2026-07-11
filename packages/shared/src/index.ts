@@ -105,6 +105,24 @@ export const createJobRequestSchema = z.object({
 });
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
 
+// ── Projects (spec §9; issue #17) — homepage CRUD + M:N asset membership ─────
+
+export const createProjectRequestSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+});
+export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
+
+export const createProjectResponseSchema = z.object({
+  id: uuidSchema,
+  name: z.string(),
+});
+export type CreateProjectResponse = z.infer<typeof createProjectResponseSchema>;
+
+export const addProjectAssetsRequestSchema = z.object({
+  assetIds: z.array(uuidSchema).min(1).max(500),
+});
+export type AddProjectAssetsRequest = z.infer<typeof addProjectAssetsRequestSchema>;
+
 export const tagCategorySchema = z.enum(["object", "scene", "place", "attribute", "event", "other"]);
 export type TagCategory = z.infer<typeof tagCategorySchema>;
 

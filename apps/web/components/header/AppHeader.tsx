@@ -12,6 +12,7 @@ import {
 interface AppHeaderProps {
   isAll: boolean;
   projLabel: string;
+  onHome: () => void;
   onRootClick: () => void;
   onOpenProj: () => void;
   showZoomControl?: boolean;
@@ -55,6 +56,7 @@ function UtilButton({ label, icon, onClick }: { label: string; icon: ReactNode; 
 export default function AppHeader({
   isAll,
   projLabel,
+  onHome,
   onRootClick,
   onOpenProj,
   showZoomControl = true,
@@ -86,7 +88,30 @@ export default function AppHeader({
         zIndex: 40,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 340, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 380, minWidth: 0 }}>
+        <button
+          onClick={onHome}
+          aria-label="Home"
+          title="Home"
+          style={{
+            display: "flex",
+            width: 30,
+            height: 30,
+            alignItems: "center",
+            justifyContent: "center",
+            border: 0,
+            borderRadius: 2,
+            background: "transparent",
+            color: "var(--t2)",
+            cursor: "pointer",
+            flex: "0 0 auto",
+          }}
+        >
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 10.5 12 3l9 7.5" />
+            <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+          </svg>
+        </button>
         <button
           onClick={onRootClick}
           style={{

@@ -1,35 +1,33 @@
 import { redirect } from "next/navigation";
-import UploadManager from "@/components/upload/UploadManager";
-import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
-import { getPhotos } from "@/lib/api";
+import HomeClient from "@/components/home/HomeClient";
 import { ensureWorkspace } from "@/lib/bootstrap";
+import { getAllAssetsCount, getProjectCards } from "@/lib/projects";
 import { createClient } from "@/lib/supabase/server";
 
+/** Homepage hub (issue #17) — the landing page after login: project cards +
+ *  sources + account. The canvas lives at /projects/[id]. */
 export default async function Home() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   // proxy.ts passed a signature-valid JWT, but the user may no longer exist
-  // (deleted account, wiped dev DB). /auth/reset clears the dead cookies —
-  // redirecting to /login directly would loop (proxy bounces authed → /).
+  // (deleted account, wiped dev DB) — /auth/reset clears the dead cookies.
   if (!user) redirect("/auth/reset");
 
-  const workspaceId = await ensureWorkspace(supabase, user);
+  await ensureWorkspace(supabase, user);
 
-  // Real assets (issue #6). Keyed by count + processed-count: router.refresh()
-  // after an upload OR a finished analyze remounts the workspace so fresh
-  // server data replaces the client copy useWorkspace keeps in state.
-  const photos = await getPhotos();
-  const processedCount = photos.filter((p) => p.processed).length;
-  return (
-    <>
-      <ArchiveWorkspace
-        key={`ws-${photos.length}-${processedCount}`}
-        initialPhotos={photos}
-        workspaceId={workspaceId}
-      />
-      <UploadManager />
-    </>
-  );
+  const [projects, allCount] = await Promise.all([getProjectCards(supabase), getAllAssetsCount(supabase)]);
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const name = profile?.display_name ?? user.email?.split("@")[0] ?? "You";
+  const email = user.email ?? "";
+  const initials = name.slice(0, 2).toUpperCase();
+
+  return <HomeClient account={{ initials, name, email }} projects={projects} allCount={allCount} />;
 }

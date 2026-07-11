@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   SINGLE_PUT_MAX_BYTES,
+  addProjectAssetsRequestSchema,
   assetKindFromMime,
   completeUploadRequestSchema,
+  createProjectRequestSchema,
   jobStatusSchema,
   jobTypeSchema,
   memberRoleSchema,
@@ -114,5 +116,21 @@ describe("upload contracts", () => {
     expect(assetKindFromMime("text/plain")).toBe("document");
     expect(assetKindFromMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe("document");
     expect(assetKindFromMime("video/mp4")).toBe("other");
+  });
+});
+
+describe("project contracts", () => {
+  it("trims and bounds the project name", () => {
+    expect(createProjectRequestSchema.parse({ name: "  Odesa 2026 " }).name).toBe("Odesa 2026");
+    expect(createProjectRequestSchema.safeParse({ name: "" }).success).toBe(false);
+    expect(createProjectRequestSchema.safeParse({ name: "   " }).success).toBe(false);
+    expect(createProjectRequestSchema.safeParse({ name: "x".repeat(81) }).success).toBe(false);
+  });
+
+  it("requires 1-500 asset ids to add to a project", () => {
+    const id = "4df136fe-a1a4-49c1-ab22-1f1713a1c53c";
+    expect(addProjectAssetsRequestSchema.parse({ assetIds: [id] })).toBeTruthy();
+    expect(addProjectAssetsRequestSchema.safeParse({ assetIds: [] }).success).toBe(false);
+    expect(addProjectAssetsRequestSchema.safeParse({ assetIds: ["nope"] }).success).toBe(false);
   });
 });

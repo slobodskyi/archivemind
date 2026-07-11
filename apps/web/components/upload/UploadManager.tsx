@@ -12,9 +12,15 @@ import {
  *  Self-contained on purpose — no changes inside the canvas tree: listens on
  *  window, shows its own overlay + progress pill, talks to
  *  /api/uploads/presign + /complete, then enqueued ingest takes over (#8).
- *  Per-file progress needs XHR (fetch has no upload progress events). */
+ *  Per-file progress needs XHR (fetch has no upload progress events).
+ *
+ *  Also opens a file dialog when any button dispatches `am:open-upload` on the
+ *  window (e.g. the homepage "Local upload" card) — one instance, one pill. */
 
 const PARALLEL_UPLOADS = 3;
+
+/** Buttons anywhere can trigger the file dialog without prop-drilling. */
+export const OPEN_UPLOAD_EVENT = "am:open-upload";
 
 interface UploadState {
   active: boolean;
@@ -57,6 +63,7 @@ export default function UploadManager() {
   const [state, setState] = useState<UploadState>(IDLE);
   const dragDepth = useRef(0);
   const busy = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const uploadFiles = useCallback(async (files: File[]) => {
     if (busy.current || files.length === 0) return;
@@ -150,7 +157,7 @@ export default function UploadManager() {
     });
     busy.current = false;
     setTimeout(() => setState(IDLE), errors.length > 0 ? 8000 : 4000);
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
@@ -176,15 +183,18 @@ export default function UploadManager() {
       const files = Array.from(e.dataTransfer?.files ?? []);
       void uploadFiles(files);
     };
+    const onOpen = () => fileInputRef.current?.click();
     window.addEventListener("dragenter", onDragEnter);
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("dragleave", onDragLeave);
     window.addEventListener("drop", onDrop);
+    window.addEventListener(OPEN_UPLOAD_EVENT, onOpen);
     return () => {
       window.removeEventListener("dragenter", onDragEnter);
       window.removeEventListener("dragover", onDragOver);
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
+      window.removeEventListener(OPEN_UPLOAD_EVENT, onOpen);
     };
   }, [uploadFiles]);
 
@@ -192,6 +202,17 @@ export default function UploadManager() {
 
   return (
     <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = ""; // allow re-picking the same file
+          void uploadFiles(files);
+        }}
+      />
       {dragging && (
         <div
           style={{
