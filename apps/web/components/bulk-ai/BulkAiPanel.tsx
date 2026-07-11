@@ -82,7 +82,7 @@ function OpCard({ icon, title, subtitle, checked, onToggle, children }: OpCardPr
           {icon}
         </span>
         <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: titleColor }}>{title}</span>
+          <span style={{ fontSize: 13, fontWeight: 400, color: titleColor }}>{title}</span>
           <span style={{ fontSize: 11, color: "var(--t3)", display: "flex", alignItems: "center", gap: 4 }}>{subtitle}</span>
         </span>
         <span
@@ -174,18 +174,18 @@ export default function BulkAiPanel({
                   />
                 ))}
               </div>
-              <span style={{ fontSize: 14, fontWeight: 500, color: "var(--t1)" }}>{count} photos selected</span>
+              <span style={{ fontSize: 14, fontWeight: 400, color: "var(--t1)" }}>{count} photos selected</span>
             </div>
             <button
               onClick={onClear}
               aria-label="Clear selection"
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t3)", cursor: "pointer" }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
             >
               <CloseIcon />
             </button>
           </div>
 
-          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--tm)", marginBottom: 8 }}>
+          <div style={{ fontSize: 10, fontWeight: 400, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--tm)", marginBottom: 8 }}>
             AI operations
           </div>
 
@@ -213,7 +213,7 @@ export default function BulkAiPanel({
                               padding: "0 11px",
                               borderRadius: 2,
                               fontSize: 11,
-                              fontWeight: 500,
+                              fontWeight: 400,
                               fontFamily: "inherit",
                               cursor: "pointer",
                               background: active ? "color-mix(in srgb,var(--ac) 16%,transparent)" : "transparent",
@@ -239,7 +239,7 @@ export default function BulkAiPanel({
                             padding: "0 12px",
                             borderRadius: 2,
                             fontSize: 11,
-                            fontWeight: 500,
+                            fontWeight: 400,
                             fontFamily: "inherit",
                             cursor: "pointer",
                             border: 0,

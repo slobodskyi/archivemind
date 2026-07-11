@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { Z } from "@/lib/ui";
 import { AddIcon } from "@/components/icons/icons";
 
 export interface AddToProjectListItem {
@@ -21,7 +22,7 @@ export default function AddToProjectPopover({ open, list, onClose, onSelect, onC
   if (!open) return null;
   return (
     <>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: 63 }} />
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: Z.menuBackdrop }} />
       <div
         style={{
           position: "absolute",
@@ -33,7 +34,7 @@ export default function AddToProjectPopover({ open, list, onClose, onSelect, onC
           borderRadius: 2,
           backdropFilter: "blur(20px)",
           boxShadow: "0 20px 60px rgba(0,0,0,.7)",
-          zIndex: 64,
+          zIndex: Z.menu,
           padding: 6,
           ...positionStyle,
         }}
@@ -45,7 +46,8 @@ export default function AddToProjectPopover({ open, list, onClose, onSelect, onC
           <button
             key={it.key}
             onClick={() => onSelect(it.key)}
-            style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 10px", background: "transparent", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit" }}
+            className="am-mi"
+            style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 10px", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit" }}
           >
             <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", background: it.color }} />
             <span style={{ flex: 1, fontSize: 13, color: "var(--t1)", textAlign: "left" }}>{it.label}</span>
@@ -54,7 +56,8 @@ export default function AddToProjectPopover({ open, list, onClose, onSelect, onC
         <div style={{ height: 1, background: "var(--bd)", margin: "4px 0" }} />
         <button
           onClick={onCreateNew}
-          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", background: "transparent", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit", color: "var(--ac)", fontSize: 13 }}
+          className="am-mi"
+          style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit", color: "var(--ac)", fontSize: 13 }}
         >
           <AddIcon width={13} height={13} strokeWidth={1.6} />
           New project

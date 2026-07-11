@@ -125,7 +125,7 @@ export default function AppHeader({
             borderRadius: 2,
             color: isAll ? "var(--t1)" : "var(--t2)",
             fontSize: 13,
-            fontWeight: 500,
+            fontWeight: 400,
             fontFamily: "inherit",
             cursor: "pointer",
             flex: "0 0 auto",
@@ -155,7 +155,7 @@ export default function AppHeader({
                 borderRadius: 2,
                 color: "var(--t1)",
                 fontSize: 13,
-                fontWeight: 500,
+                fontWeight: 400,
                 fontFamily: "inherit",
                 cursor: "pointer",
                 minWidth: 0,
@@ -241,6 +241,7 @@ export default function AppHeader({
         <UtilButton label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => onFlashToast?.("Privacy Policy coming soon")} />
         <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
         <button
+          onClick={() => onFlashToast?.("Sharing coming soon")}
           style={{
             display: "flex",
             alignItems: "center",
@@ -252,7 +253,7 @@ export default function AppHeader({
             borderRadius: 2,
             color: "var(--t1)",
             fontSize: 12,
-            fontWeight: 500,
+            fontWeight: 400,
             fontFamily: "inherit",
             cursor: "pointer",
           }}

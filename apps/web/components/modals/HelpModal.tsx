@@ -1,4 +1,5 @@
 import { HELP_FAQ } from "@/lib/chat";
+import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import { CloseIcon, SparkleIcon } from "@/components/icons/icons";
 
 interface HelpModalProps {
@@ -25,9 +26,9 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(0,0,0,.62)",
-        backdropFilter: "blur(6px)",
-        zIndex: 65,
+        background: MODAL_BACKDROP,
+        backdropFilter: MODAL_BLUR,
+        zIndex: Z.modal,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -47,7 +48,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
           <button
             onClick={onClose}
             aria-label="Close"
-            style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t3)", cursor: "pointer" }}
+            style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
           >
             <CloseIcon />
           </button>
@@ -58,7 +59,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
           </div>
           {HELP_FAQ.map((q) => (
             <div key={q.q} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--bd)" }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)", marginBottom: 5 }}>{q.q}</div>
+              <div style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)", marginBottom: 5 }}>{q.q}</div>
               <div style={{ fontSize: 12, color: "var(--t2)", lineHeight: 1.6 }}>{q.a}</div>
             </div>
           ))}

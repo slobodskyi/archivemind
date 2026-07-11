@@ -116,7 +116,7 @@ export default function PhotoDrawer({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
-            <span style={{ fontSize: 14, fontWeight: 500, color: "var(--t1)" }}>{photo.filename}</span>
+            <span style={{ fontSize: 14, fontWeight: 400, color: "var(--t1)" }}>{photo.filename}</span>
             <span
               style={{
                 display: "flex",
@@ -152,7 +152,7 @@ export default function PhotoDrawer({
                           border: 0,
                           borderRadius: 2,
                           fontSize: 10.5,
-                          fontWeight: 500,
+                          fontWeight: 400,
                           fontFamily: "inherit",
                           cursor: "pointer",
                           background: lang === l ? "#fff" : "transparent",

@@ -1,3 +1,4 @@
+import { Z } from "@/lib/ui";
 import { CheckIcon } from "@/components/icons/icons";
 
 interface ToastProps {
@@ -22,7 +23,7 @@ export default function Toast({ show, text }: ToastProps) {
         borderRadius: 2,
         padding: "8px 14px",
         boxShadow: "0 12px 40px rgba(0,0,0,.6)",
-        zIndex: 60,
+        zIndex: Z.toast,
         animation: "amFadeScale .2s ease both",
       }}
     >

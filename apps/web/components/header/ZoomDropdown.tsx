@@ -1,3 +1,4 @@
+import { Z } from "@/lib/ui";
 import { CheckIcon, FitIcon } from "@/components/icons/icons";
 
 const DEFAULT_PRESETS = [50, 75, 100, 125, 150, 200];
@@ -25,7 +26,7 @@ export default function ZoomDropdown({
   const curPct = parseInt(zoomPct, 10);
   return (
     <>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: 48 }} />
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: Z.menuBackdrop }} />
       <div
         style={{
           position: "absolute",
@@ -37,7 +38,7 @@ export default function ZoomDropdown({
           borderRadius: 2,
           backdropFilter: "blur(20px)",
           boxShadow: "0 20px 60px rgba(0,0,0,.7)",
-          zIndex: 49,
+          zIndex: Z.menu,
           padding: 6,
         }}
       >
@@ -45,13 +46,13 @@ export default function ZoomDropdown({
           <button
             key={pct}
             onClick={() => onSelectPct(pct)}
+            className="am-mi"
             style={{
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
               width: "100%",
               padding: "7px 10px",
-              background: "transparent",
               border: 0,
               borderRadius: 2,
               cursor: "pointer",
@@ -70,13 +71,13 @@ export default function ZoomDropdown({
             onFit();
             onClose();
           }}
+          className="am-mi"
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
             width: "100%",
             padding: "7px 10px",
-            background: "transparent",
             border: 0,
             borderRadius: 2,
             cursor: "pointer",
