@@ -13,13 +13,13 @@ import { createClient } from "./supabase/server";
  * (projects #17, canvas aggregates #18).
  */
 
-export async function getPhotos(): Promise<Photo[]> {
+export async function getPhotos(projectId?: string): Promise<Photo[]> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
-  return getRealPhotos(supabase);
+  return getRealPhotos(supabase, projectId);
 }
 
 export async function getPhoto(id: string): Promise<Photo | null> {

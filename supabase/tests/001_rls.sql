@@ -4,7 +4,7 @@
 -- denial, bootstrap path, token-column revoke, broadcast trigger.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(14);
 
 -- ── fixtures (as superuser) ─────────────────────────────────────────────
 insert into auth.users (id, email) values
@@ -70,6 +70,23 @@ select lives_ok(
 select is((select count(*)::int from public.workspaces where id = '00000000-0000-0000-0000-00000000cccc'), 1,
   'creator sees own workspace (RETURNING-safe)');
 select is((select count(*)::int from public.workspaces), 1, 'C cannot see other workspaces');
+
+-- ── projects M:N isolation (issue #17) ──────────────────────────────────
+-- User A owns asset f1 in WS-A; create a project and link the asset (allowed),
+-- then user B must not be able to link A's asset into A's project.
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}';
+select lives_ok(
+  $$insert into public.projects (id, workspace_id, name, created_by)
+      values ('00000000-0000-0000-0000-00000000aaa1', '00000000-0000-0000-0000-00000000aaaa', 'A-proj', '00000000-0000-0000-0000-0000000000a1');
+    insert into public.project_assets (project_id, asset_id)
+      values ('00000000-0000-0000-0000-00000000aaa1', '00000000-0000-0000-0000-0000000000f1')$$,
+  'owner links own asset into own project');
+
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000b2","role":"authenticated"}';
+select throws_ok(
+  $$insert into public.project_assets (project_id, asset_id)
+    values ('00000000-0000-0000-0000-00000000aaa1', '00000000-0000-0000-0000-0000000000f1')$$,
+  '42501', null, 'non-member cannot link into another workspace''s project');
 
 select * from finish();
 rollback;

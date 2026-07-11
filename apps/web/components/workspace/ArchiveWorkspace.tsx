@@ -1,7 +1,7 @@
 "use client";
 
 import type { Photo } from "@/types";
-import { useWorkspace } from "@/hooks/useWorkspace";
+import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
@@ -31,10 +31,17 @@ import Toast from "@/components/modals/Toast";
 interface ArchiveWorkspaceProps {
   initialPhotos: Photo[];
   workspaceId: string;
+  projects: ProjectOption[];
+  currentProjectId: string;
 }
 
-export default function ArchiveWorkspace({ initialPhotos, workspaceId }: ArchiveWorkspaceProps) {
-  const ws = useWorkspace(initialPhotos, workspaceId);
+export default function ArchiveWorkspace({
+  initialPhotos,
+  workspaceId,
+  projects,
+  currentProjectId,
+}: ArchiveWorkspaceProps) {
+  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId);
 
   const sendHelpTicket = () => {
     ws.closeHelp();
@@ -131,6 +138,7 @@ export default function ArchiveWorkspace({ initialPhotos, workspaceId }: Archive
       <AppHeader
         isAll={ws.projCurrent === "all"}
         projLabel={ws.projLabel}
+        onHome={ws.goHome}
         onRootClick={ws.projCurrent === "all" ? ws.openProj : () => ws.selectProject("all")}
         onOpenProj={ws.openProj}
         showZoomControl={!ws.isTimelineView}

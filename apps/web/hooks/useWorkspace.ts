@@ -35,24 +35,33 @@ import {
   type TilePos,
   type TimelineLayout,
 } from "@/lib/layout";
-import { PROJECTS_META } from "@/lib/mock-data";
 import { CHAT_FALLBACK_REPLY, CHAT_GREETING, CHAT_REPLIES } from "@/lib/chat";
 import type { MapApi } from "@/components/map/MapCanvas";
 
 const DEFAULT_ZOOM = 0.75;
-const NEW_PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166"];
+const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
 
 export type SidebarViewMode = "pile" | "list" | "gallery";
 
-/** Looks up a project's label/color across both the 3 seed projects and any
- * user-created ones (created at runtime, so they can't live in the static
- * PROJECTS_META table). */
-function resolveProjectMeta(key: string, custom: Project[]): { label: string; color: string } {
-  const seed = PROJECTS_META[key];
-  if (seed) return seed;
-  const found = custom.find((p) => p.key === key);
-  if (found) return { label: found.label, color: found.color };
-  return { label: key, color: "var(--t3)" };
+/** A real project (issue #17), fetched server-side and threaded into the
+ * canvas for the header dropdown, add-to-project popovers, and labels. */
+export interface ProjectOption {
+  id: string;
+  name: string;
+  count: number;
+}
+
+/** Deterministic accent color per project id (stable across renders). */
+function projectColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return PROJECT_COLORS[h % PROJECT_COLORS.length];
+}
+
+/** Looks up a real project's label/color by id. */
+function resolveProjectMeta(key: string, projects: ProjectOption[]): { label: string; color: string } {
+  const found = projects.find((p) => p.id === key);
+  return found ? { label: found.name, color: projectColor(found.id) } : { label: key, color: "var(--t3)" };
 }
 
 interface Marquee {
@@ -213,8 +222,6 @@ type DragSession =
   | null;
 
 const DEFAULT_RECT = { left: 0, top: 0, width: 1000, height: 700 };
-const PROJECT_KEYS: ProjectKey[] = ["frontline", "travel", "client"];
-
 export interface ProjectListItem {
   key: ProjectKey;
   label: string;
@@ -344,6 +351,7 @@ export interface Workspace {
   openProj: () => void;
   closeProj: () => void;
   selectProject: (k: ProjectKey | "all") => void;
+  goHome: () => void;
 
   // Add to project
   addProjOpen: boolean;
@@ -427,7 +435,12 @@ export interface Workspace {
   flashToast: (text: string) => void;
 }
 
-export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Workspace {
+export function useWorkspace(
+  initialPhotos: Photo[],
+  workspaceId: string,
+  initialProjects: ProjectOption[],
+  currentProjectId: string,
+): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
     scale: 1,
@@ -448,13 +461,13 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
     expandOverrides: {},
     galleryOverrides: EMPTY_GALLERY_OVERRIDES,
     customProjects: [],
+    projCurrent: currentProjectId,
     sidebarTabs: [],
     sidebarActiveTab: null,
     sidebarSelectedIds: [],
     sidebarSearchText: "",
     sidebarAddOpen: false,
     sidebarViewMode: "list",
-    projCurrent: "all",
     photos: initialPhotos,
     selectedIds: [],
     hoveredId: null,
@@ -525,9 +538,9 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
     [setState],
   );
 
-  const filteredPhotos = useCallback((photos: Photo[], proj: ProjectKey | "all") => {
-    return proj === "all" ? photos : photos.filter((p) => p.project === proj);
-  }, []);
+  // Real data is already scoped by the route (getPhotos(projectId)), so the
+  // canvas shows every photo the server returned — no client-side project filter.
+  const filteredPhotos = useCallback((photos: Photo[]) => photos, []);
 
   // ── Undo / redo ──────────────────────────────────────────────────────────
 
@@ -1121,30 +1134,17 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
   );
   const closeProj = useCallback(() => setState({ projOpen: false }), [setState]);
 
+  // Real projects are routes (issue #17): switching navigates; the server
+  // refetches the scoped assets and the workspace remounts.
   const selectProject = useCallback(
     (k: ProjectKey | "all") => {
-      const view: ViewMode = k === "all" ? "neural" : "timeline";
-      setState({
-        projCurrent: k,
-        projOpen: false,
-        view,
-        selectedIds: [],
-        expanded: { kind: null, key: null },
-        expandOverrides: {},
-        bulkPanelOpen: false,
-        sidebarTabs: [],
-        sidebarActiveTab: null,
-        sidebarSelectedIds: [],
-        sidebarSearchText: "",
-        sidebarAddOpen: false,
-      });
-      setTimeout(() => {
-        const s = stateRef.current;
-        setState(computeFit(view, s.photos, s.galleryOverrides));
-      }, 0);
+      setState({ projOpen: false });
+      router.push(k === "all" ? "/projects/all" : `/projects/${k}`);
     },
-    [setState, computeFit],
+    [setState, router],
   );
+
+  const goHome = useCallback(() => router.push("/"), [router]);
 
   // ── Add to project ───────────────────────────────────────────────────────
 
@@ -1154,58 +1154,72 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
   );
   const closeAddProj = useCallback(() => setState({ addProjOpen: false }), [setState]);
 
-  /** Stamps `project: key` onto the given photo ids. Shared by the canvas
-   * selection's "ADD" button and the source browser sidebar's own button. */
+  /** Links the given asset ids into a real project (issue #17). Shared by the
+   * canvas selection's "ADD" button and the source browser sidebar's button. */
   const commitAddToProject = useCallback(
-    (key: string, ids: string[]) => {
-      const s = stateRef.current;
+    async (key: string, ids: string[]) => {
       const n = ids.length;
       if (!n) return;
-      const label = resolveProjectMeta(key, s.customProjects).label;
-      const idSet = new Set(ids);
-      const photos = s.photos.map((p) => (idSet.has(p.id) ? { ...p, project: key } : p));
-      setState({ photos });
-      flashToast(`${n} file${n === 1 ? "" : "s"} added to ${label}`);
+      const label = resolveProjectMeta(key, initialProjects).label;
+      try {
+        const resp = await fetch(`/api/projects/${key}/assets`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ assetIds: ids }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        flashToast(`${n} file${n === 1 ? "" : "s"} added to ${label}`);
+        router.refresh();
+      } catch {
+        flashToast("Add to project failed — try again");
+      }
     },
-    [setState, flashToast],
+    [flashToast, router, initialProjects],
   );
 
-  /** Creates a brand-new project from the given photo ids and returns its
-   * generated key (or null if there was nothing to add). */
+  /** Creates a real project from the given asset ids and navigates into it.
+   * Returns the new project id (or null on failure / empty selection). */
   const commitCreateProject = useCallback(
-    (ids: string[]) => {
-      const s = stateRef.current;
+    async (ids: string[]): Promise<string | null> => {
       const n = ids.length;
       if (!n) return null;
-      const key = `proj_${Date.now()}`;
-      const label = `Untitled project ${s.customProjects.length + 1}`;
-      const color = NEW_PROJECT_COLORS[s.customProjects.length % NEW_PROJECT_COLORS.length];
-      const project: Project = { key, label, color, count: n };
-      const idSet = new Set(ids);
-      const photos = s.photos.map((p) => (idSet.has(p.id) ? { ...p, project: key } : p));
-      setState({ photos, customProjects: [...s.customProjects, project] });
-      flashToast(`${n} file${n === 1 ? "" : "s"} added to ${label}`);
-      return key;
+      try {
+        const resp = await fetch("/api/projects", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: `Untitled project ${initialProjects.length + 1}` }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const { id } = (await resp.json()) as { id: string };
+        await fetch(`/api/projects/${id}/assets`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ assetIds: ids }),
+        });
+        flashToast(`${n} file${n === 1 ? "" : "s"} added to new project`);
+        return id;
+      } catch {
+        flashToast("Create project failed — try again");
+        return null;
+      }
     },
-    [setState, flashToast],
+    [flashToast, initialProjects],
   );
 
   const addToProject = useCallback(
     (key: ProjectKey) => {
-      const s = stateRef.current;
-      commitAddToProject(key, s.selectedIds);
+      const ids = stateRef.current.selectedIds.slice();
       setState({ addProjOpen: false, selectedIds: [] });
+      void commitAddToProject(key, ids);
     },
     [commitAddToProject, setState],
   );
 
   const createNewProject = useCallback(() => {
-    const s = stateRef.current;
-    const ids = s.selectedIds;
+    const ids = stateRef.current.selectedIds.slice();
     setState({ addProjOpen: false, selectedIds: [] });
-    const key = commitCreateProject(ids);
-    if (key) selectProject(key);
-  }, [commitCreateProject, setState, selectProject]);
+    void commitCreateProject(ids).then((id) => id && router.push(`/projects/${id}`));
+  }, [commitCreateProject, setState, router]);
 
   // ── Source browser sidebar (Finder-style, All My Files) ─────────────────
 
@@ -1279,8 +1293,7 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
 
   const sidebarAddToProject = useCallback(
     (key: string) => {
-      const s = stateRef.current;
-      commitAddToProject(key, s.sidebarSelectedIds);
+      const ids = stateRef.current.sidebarSelectedIds.slice();
       setState({
         sidebarAddOpen: false,
         sidebarSelectedIds: [],
@@ -1288,9 +1301,9 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
         sidebarActiveTab: null,
         sidebarSearchText: "",
       });
-      selectProject(key);
+      void commitAddToProject(key, ids).then(() => router.push(`/projects/${key}`));
     },
-    [commitAddToProject, setState, selectProject],
+    [commitAddToProject, setState, router],
   );
 
   const setSidebarViewMode = useCallback(
@@ -1299,8 +1312,7 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
   );
 
   const sidebarCreateProject = useCallback(() => {
-    const s = stateRef.current;
-    const ids = s.sidebarSelectedIds;
+    const ids = stateRef.current.sidebarSelectedIds.slice();
     setState({
       sidebarAddOpen: false,
       sidebarSelectedIds: [],
@@ -1308,9 +1320,8 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
       sidebarActiveTab: null,
       sidebarSearchText: "",
     });
-    const key = commitCreateProject(ids);
-    if (key) selectProject(key);
-  }, [commitCreateProject, setState, selectProject]);
+    void commitCreateProject(ids).then((id) => id && router.push(`/projects/${id}`));
+  }, [commitCreateProject, setState, router]);
 
   // ── Search / Help ────────────────────────────────────────────────────────
 
@@ -1523,30 +1534,24 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
   const showAddToProject = isNeural && selectedIds.size > 0;
 
   const projectPhotos = useMemo(
-    () => filteredPhotos(state.photos, state.projCurrent),
-    [state.photos, state.projCurrent, filteredPhotos],
+    () => filteredPhotos(state.photos),
+    [state.photos, filteredPhotos],
   );
 
-  const projectList: ProjectListItem[] = useMemo(() => {
-    const seeded = PROJECT_KEYS.map((k) => ({
-      key: k,
-      label: PROJECTS_META[k].label,
-      color: PROJECTS_META[k].color,
-      count: state.photos.filter((p) => p.project === k).length,
-      active: state.projCurrent === k,
-    }));
-    const custom = state.customProjects.map((p) => ({
-      key: p.key,
-      label: p.label,
-      color: p.color,
-      count: state.photos.filter((ph) => ph.project === p.key).length,
-      active: state.projCurrent === p.key,
-    }));
-    return [...seeded, ...custom];
-  }, [state.photos, state.projCurrent, state.customProjects]);
+  const projectList: ProjectListItem[] = useMemo(
+    () =>
+      initialProjects.map((p) => ({
+        key: p.id,
+        label: p.name,
+        color: projectColor(p.id),
+        count: p.count,
+        active: state.projCurrent === p.id,
+      })),
+    [initialProjects, state.projCurrent],
+  );
 
   const projLabel =
-    state.projCurrent === "all" ? "All my files" : resolveProjectMeta(state.projCurrent, state.customProjects).label;
+    state.projCurrent === "all" ? "All my files" : resolveProjectMeta(state.projCurrent, initialProjects).label;
 
   const sidebarOpen = state.sidebarTabs.length > 0;
   const sidebarSelectedIds = useMemo(() => new Set(state.sidebarSelectedIds), [state.sidebarSelectedIds]);
@@ -1733,6 +1738,7 @@ export function useWorkspace(initialPhotos: Photo[], workspaceId: string): Works
     openProj,
     closeProj,
     selectProject,
+    goHome,
 
     addProjOpen: state.addProjOpen,
     toggleAddProj,

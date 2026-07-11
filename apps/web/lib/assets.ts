@@ -124,19 +124,31 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
   };
 }
 
-export async function getRealPhotos(supabase: SupabaseClient): Promise<Photo[]> {
-  const { data, error } = await supabase
-    .from("assets")
-    .select(
-      `id, title, status, ai_processed_at, created_at,
+const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,
        asset_previews ( size, r2_key, width, height ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
        asset_tags ( tags ( name ) ),
-       facts ( text, status )`,
-    )
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
-    .limit(500);
+       facts ( text, status )`;
+
+/** The caller's assets (RLS-scoped). `projectId` filters to one project's M:N
+ *  membership; omit (or pass "all") for the whole workspace. */
+export async function getRealPhotos(supabase: SupabaseClient, projectId?: string): Promise<Photo[]> {
+  const scoped = projectId && projectId !== "all";
+  // Inner-join through the M:N table so only members of a project return.
+  const { data, error } = scoped
+    ? await supabase
+        .from("assets")
+        .select(`${ASSET_SELECT}, project_assets!inner ( project_id )`)
+        .eq("status", "active")
+        .eq("project_assets.project_id", projectId)
+        .order("created_at", { ascending: false })
+        .limit(500)
+    : await supabase
+        .from("assets")
+        .select(ASSET_SELECT)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(500);
   if (error) throw error;
   return Promise.all(((data ?? []) as unknown as AssetRow[]).map(toPhoto));
 }
