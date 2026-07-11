@@ -29,6 +29,8 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   if (id !== "all" && !projects.some((p) => p.id === id)) redirect("/");
 
   const processedCount = photos.filter((p) => p.processed).length;
+  // A fresh, empty project opens straight into the import modal (issue #17).
+  const autoImport = id !== "all" && photos.length === 0;
 
   return (
     <>
@@ -38,8 +40,9 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
         workspaceId={workspaceId}
         projects={projects}
         currentProjectId={id}
+        autoImport={autoImport}
       />
-      <UploadManager />
+      <UploadManager projectId={id} />
     </>
   );
 }
