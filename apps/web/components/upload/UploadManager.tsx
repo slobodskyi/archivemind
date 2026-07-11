@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { runUpload, type UploadProgress } from "@/lib/upload-client";
+import { useSmoothProgress } from "@/hooks/useSmoothProgress";
+import { runUpload, type UploadProgress, type UploadStage } from "@/lib/upload-client";
 
 /** Window-level drag-and-drop upload (journey step 1: direct local upload).
  *  Self-contained on purpose — listens on window, shows its own overlay +
@@ -20,11 +21,12 @@ interface PillState {
   totalFiles: number;
   doneFiles: number;
   progress: number;
+  stage: UploadStage;
   note: string | null;
   errors: string[];
 }
 
-const IDLE: PillState = { active: false, totalFiles: 0, doneFiles: 0, progress: 0, note: null, errors: [] };
+const IDLE: PillState = { active: false, totalFiles: 0, doneFiles: 0, progress: 0, stage: "uploading", note: null, errors: [] };
 
 export default function UploadManager({ projectId }: { projectId?: string }) {
   const router = useRouter();
@@ -47,7 +49,7 @@ export default function UploadManager({ projectId }: { projectId?: string }) {
       if (skipped > 0) errs.push(`${skipped} file(s) skipped — over 100 MiB or empty`);
       const note = assetIds.length > 0 ? `${assetIds.length} file(s) uploaded — queued for processing` : null;
       if (assetIds.length > 0) router.refresh();
-      setPill((prev) => ({ ...prev, active: true, progress: 1, note, errors: errs }));
+      setPill((prev) => ({ ...prev, active: true, progress: 1, stage: "done", note, errors: errs }));
       busy.current = false;
       setTimeout(() => setPill(IDLE), errs.length > 0 ? 8000 : 4000);
     },
@@ -92,7 +94,13 @@ export default function UploadManager({ projectId }: { projectId?: string }) {
     };
   }, [upload]);
 
-  const pct = Math.round(pill.progress * 100);
+  const smooth = useSmoothProgress(pill.progress, pill.active);
+  const pct = Math.round(smooth * 100);
+  const label =
+    pill.note ??
+    (pill.stage === "finalizing"
+      ? `Finalizing ${pill.totalFiles} file${pill.totalFiles === 1 ? "" : "s"}…`
+      : `Uploading ${pill.doneFiles}/${pill.totalFiles} · ${pct}%`);
 
   return (
     <>
@@ -156,12 +164,10 @@ export default function UploadManager({ projectId }: { projectId?: string }) {
             backdropFilter: "blur(14px)",
           }}
         >
-          <div style={{ fontSize: 11, color: "var(--t2)", letterSpacing: "0.04em" }}>
-            {pill.note ?? `Uploading ${pill.doneFiles}/${pill.totalFiles} · ${pct}%`}
-          </div>
+          <div style={{ fontSize: 11, color: "var(--t2)", letterSpacing: "0.04em" }}>{label}</div>
           {!pill.note && (
             <div style={{ height: 3, background: "var(--bg-el)", borderRadius: 999, marginTop: 8 }}>
-              <div style={{ height: 3, width: `${pct}%`, background: "var(--ac)", borderRadius: 999, transition: "width .2s" }} />
+              <div style={{ height: 3, width: `${pct}%`, background: "var(--ac)", borderRadius: 999, transition: "width .15s linear" }} />
             </div>
           )}
           {pill.errors.map((err) => (
