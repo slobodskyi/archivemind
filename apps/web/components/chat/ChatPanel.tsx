@@ -60,7 +60,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
           <span style={{ display: "flex", width: 27, height: 27, alignItems: "center", justifyContent: "center", borderRadius: 2, background: "color-mix(in srgb,var(--ac) 18%,transparent)" }}>
             <SparkleIcon width={13} height={13} stroke="var(--ac)" strokeWidth={1.7} />
           </span>
-          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>AI Assistant</span>
+          <span style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)" }}>AI Assistant</span>
           <span style={{ height: 18, padding: "0 7px", borderRadius: 2, background: "var(--bg-el)", fontSize: 10, color: "var(--tm)", display: "inline-flex", alignItems: "center" }}>
             Gemini
           </span>
@@ -68,7 +68,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
         <button
           onClick={onClose}
           aria-label="Close chat"
-          style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t3)", cursor: "pointer" }}
+          style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
         >
           <CloseIcon />
         </button>

@@ -1497,6 +1497,7 @@ export function useWorkspace(
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const s = stateRef.current;
+      if (s.imp.open) return; // ImportModal owns Esc while open (upload-aware)
       if (s.drawerId) closeDrawer();
       else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();

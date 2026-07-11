@@ -1,4 +1,5 @@
 import { SEARCH_PLACEHOLDER } from "@/lib/chat";
+import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 
 interface SearchModalProps {
   open: boolean;
@@ -22,9 +23,9 @@ export default function SearchModal({ open, onClose }: SearchModalProps) {
       style={{
         position: "absolute",
         inset: 0,
-        background: "rgba(0,0,0,.45)",
-        backdropFilter: "blur(2px)",
-        zIndex: 58,
+        background: MODAL_BACKDROP,
+        backdropFilter: MODAL_BLUR,
+        zIndex: Z.modal,
         display: "flex",
         justifyContent: "center",
         alignItems: "flex-start",
@@ -50,7 +51,8 @@ export default function SearchModal({ open, onClose }: SearchModalProps) {
           />
           <button
             onClick={onClose}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t3)", cursor: "pointer", fontSize: 10, fontFamily: "inherit" }}
+            aria-label="Close search"
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer", fontSize: 10, fontFamily: "inherit" }}
           >
             ESC
           </button>

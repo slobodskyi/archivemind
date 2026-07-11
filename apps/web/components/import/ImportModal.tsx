@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
+import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import { runUpload, type UploadProgress } from "@/lib/upload-client";
 
 /** Import modal (issue #17): opens on a fresh project (or via the toolbar
@@ -36,6 +37,18 @@ export default function ImportModal({
   const smooth = useSmoothProgress(prog.progress, phase === "uploading");
   const pct = Math.round(smooth * 100);
 
+  // Esc closes like every other modal — owned here (not the global handler in
+  // useWorkspace) because closing must be blocked while an upload is in flight,
+  // and only this component knows the phase.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && phase !== "uploading") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, phase, onClose]);
+
   if (!open) return null;
 
   async function handleFiles(files: File[]) {
@@ -61,12 +74,12 @@ export default function ImportModal({
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 100,
-        background: "rgba(4,4,4,.7)",
+        zIndex: Z.modal,
+        background: MODAL_BACKDROP,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backdropFilter: "blur(2px)",
+        backdropFilter: MODAL_BLUR,
       }}
     >
       <div
@@ -79,7 +92,7 @@ export default function ImportModal({
           display: "flex",
           background: "var(--bg-s)",
           border: "1px solid var(--bdh)",
-          borderRadius: 4,
+          borderRadius: 2,
           overflow: "hidden",
           boxShadow: "0 30px 90px rgba(0,0,0,.6)",
         }}
@@ -108,7 +121,7 @@ export default function ImportModal({
             <button
               onClick={onClose}
               aria-label="Close"
-              style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t3)", cursor: "pointer", borderRadius: 2 }}
+              style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", color: "var(--t2b)", cursor: "pointer", borderRadius: 2 }}
             >
               <CloseIcon />
             </button>
@@ -172,7 +185,7 @@ export default function ImportModal({
                   </>
                 ) : phase === "done" && result ? (
                   <>
-                    <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 600 }}>
+                    <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 700 }}>
                       {result.added} file{result.added === 1 ? "" : "s"} added
                     </div>
                     <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Processing previews — they’ll appear on the canvas shortly.</div>

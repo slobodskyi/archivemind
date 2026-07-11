@@ -117,6 +117,50 @@ export default function ArchiveWorkspace({
         )}
       </PanZoomCanvas>
 
+      {/* Empty state — a project emptied after creation used to render a bare
+          grid with no affordance (the import modal auto-opens only for fresh
+          projects). Sits under the header/toolbar chrome. */}
+      {ws.projectPhotos.length === 0 && !ws.impOpen && (
+        <div
+          style={{
+            position: "absolute",
+            inset: "52px 0 0 0",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            zIndex: 20,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t2)" }}>
+            {ws.projCurrent === "all" ? "Your archive is empty" : "This project is empty"}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Drop files anywhere — or import from a source</div>
+          <button
+            onClick={ws.addToolbar}
+            style={{
+              pointerEvents: "auto",
+              marginTop: 6,
+              height: 32,
+              padding: "0 14px",
+              background: "var(--ac)",
+              color: "#050505",
+              border: 0,
+              borderRadius: 2,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.04em",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            + Import files
+          </button>
+        </div>
+      )}
+
       {ws.isTimelineView && <TimelineHeader layout={ws.timelineLayout} tx={ws.tx} scale={ws.scale} />}
 
       {ws.isMapView && (
@@ -173,6 +217,10 @@ export default function ArchiveWorkspace({
         onClose={ws.closeProj}
         onSelectAll={() => ws.selectProject("all")}
         onSelect={ws.selectProject}
+        onNewArchive={() => {
+          ws.closeProj();
+          ws.flashToast("New archive — coming soon");
+        }}
       />
 
       <AccountDropdown open={ws.acctOpen} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />

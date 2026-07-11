@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
+import Toast from "@/components/modals/Toast";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import UploadManager, { OPEN_UPLOAD_EVENT } from "@/components/upload/UploadManager";
 
@@ -42,7 +43,7 @@ export default function HomeClient({
 
   const flash = (t: string) => {
     setToast(t);
-    setTimeout(() => setToast(null), 2600);
+    setTimeout(() => setToast(null), 3200); // same duration as the workspace toast
   };
 
   async function createProject() {
@@ -133,7 +134,7 @@ export default function HomeClient({
               type="submit"
               aria-label="Sign out"
               title="Sign out"
-              style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t3)", cursor: "pointer", borderRadius: 2 }}
+              style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t2b)", cursor: "pointer", borderRadius: 2 }}
             >
               <SignOutIcon />
             </button>
@@ -144,7 +145,7 @@ export default function HomeClient({
       {/* ── content: project cards ─────────────────────────────────── */}
       <main style={{ flex: 1, height: "100%", overflowY: "auto", padding: "26px 30px" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
-          <h1 style={{ fontSize: 19, fontWeight: 600, color: "var(--t1)", margin: 0 }}>Projects</h1>
+          <h1 style={{ fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0 }}>Projects</h1>
           {!creating && (
             <button
               onClick={() => setCreating(true)}
@@ -171,7 +172,7 @@ export default function HomeClient({
             <button
               onClick={() => void createProject()}
               disabled={busy || !name.trim()}
-              style={{ padding: "0 16px", background: name.trim() ? "var(--ac)" : "var(--bg-el)", color: name.trim() ? "#050505" : "var(--tm)", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: name.trim() ? "pointer" : "default", fontFamily: "inherit" }}
+              style={{ padding: "0 16px", background: !busy && name.trim() ? "var(--ac)" : "var(--bg-el)", color: !busy && name.trim() ? "#050505" : "var(--tm)", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: !busy && name.trim() ? "pointer" : "default", fontFamily: "inherit" }}
             >
               {busy ? "…" : "Create"}
             </button>
@@ -215,26 +216,9 @@ export default function HomeClient({
 
       <UploadManager />
 
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 18,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 95,
-            background: "rgba(12,12,12,.97)",
-            border: "1px solid var(--bd)",
-            borderRadius: 2,
-            padding: "9px 16px",
-            fontSize: 12,
-            color: "var(--t1)",
-            backdropFilter: "blur(14px)",
-          }}
-        >
-          {toast}
-        </div>
-      )}
+      {/* Shared toast primitive (top-center) — the old bottom-center div sat
+          in the exact spot of the upload pill and overlapped it. */}
+      <Toast show={!!toast} text={toast ?? ""} />
     </div>
   );
 }
@@ -294,7 +278,7 @@ function ProjectCardView({
         <span style={{ position: "absolute", top: 8, left: 8, width: 8, height: 8, borderRadius: 999, background: accent }} />
       </div>
       <div style={{ padding: "10px 12px" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {title}
         </div>
         <div style={{ fontSize: 11, color: "var(--tm)", marginTop: 2 }}>

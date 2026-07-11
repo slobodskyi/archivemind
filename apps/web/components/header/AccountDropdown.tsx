@@ -1,3 +1,4 @@
+import { Z } from "@/lib/ui";
 import { SettingsIcon, BillingIcon, UsageIcon, SignOutIcon } from "@/components/icons/icons";
 
 interface AccountDropdownProps {
@@ -17,7 +18,7 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
   if (!open) return null;
   return (
     <>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: 48 }} />
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, zIndex: Z.menuBackdrop }} />
       <div
         style={{
           position: "absolute",
@@ -29,7 +30,7 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
           borderRadius: 2,
           backdropFilter: "blur(20px)",
           boxShadow: "0 20px 60px rgba(0,0,0,.7)",
-          zIndex: 49,
+          zIndex: Z.menu,
           padding: 6,
         }}
       >
@@ -53,7 +54,7 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
             AM
           </div>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Alex M.</div>
+            <div style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)" }}>Alex M.</div>
             <div style={{ fontSize: 10.5, color: "var(--tm)", marginTop: 1 }}>Pro · 12% used</div>
           </div>
         </div>
@@ -63,6 +64,7 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
           return (
             <button
               key={it.label}
+              className="am-mi"
               onClick={() => {
                 onClose();
                 if (it.label === "Sign out") {
@@ -79,7 +81,6 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
                 gap: 9,
                 width: "100%",
                 padding: "9px 10px",
-                background: "transparent",
                 border: 0,
                 borderRadius: 2,
                 cursor: "pointer",

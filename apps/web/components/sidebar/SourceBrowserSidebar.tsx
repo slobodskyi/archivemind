@@ -168,7 +168,7 @@ function ListBody({
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", cursor: "pointer" }}
             >
               <Checkbox checked={allSelected} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--t2)", textTransform: "uppercase", letterSpacing: ".05em" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--t2)", textTransform: "uppercase", letterSpacing: ".05em" }}>
                 {g.label}
               </span>
               <span style={{ fontSize: 10.5, color: "var(--tm)" }}>{g.photos.length}</span>
@@ -237,7 +237,7 @@ function GalleryBody({
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", cursor: "pointer" }}
             >
               <Checkbox checked={allSelected} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--t2)", textTransform: "uppercase", letterSpacing: ".05em" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--t2)", textTransform: "uppercase", letterSpacing: ".05em" }}>
                 {g.label}
               </span>
               <span style={{ fontSize: 10.5, color: "var(--tm)" }}>{g.photos.length}</span>
@@ -354,7 +354,7 @@ function PileBody({
               ))}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {g.label}
               </span>
               <span style={{ fontSize: 11, color: "var(--tm)" }}>
@@ -426,13 +426,13 @@ export default function SourceBrowserSidebar({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 13px 11px", borderBottom: "1px solid var(--bd)" }}>
-        <span style={{ fontSize: 13, fontWeight: 500, color: "var(--t1)" }}>Browse sources</span>
+        <span style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)" }}>Browse sources</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <ViewModeSwitcher mode={viewMode} onSet={onSetViewMode} />
           <button
             onClick={onClose}
             aria-label="Close sidebar"
-            style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t3)", cursor: "pointer" }}
+            style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
           >
             <CloseIcon />
           </button>
@@ -467,7 +467,7 @@ export default function SourceBrowserSidebar({
                   onCloseTab(t);
                 }}
                 aria-label={`Close ${meta.label} tab`}
-                style={{ display: "flex", width: 15, height: 15, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t3)", cursor: "pointer", padding: 0 }}
+                style={{ display: "flex", width: 15, height: 15, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t2b)", cursor: "pointer", padding: 0 }}
               >
                 <CloseIcon width={9} height={9} strokeWidth={2} />
               </button>
@@ -506,7 +506,7 @@ export default function SourceBrowserSidebar({
             <button
               onClick={() => onSearchChange("")}
               aria-label="Clear search"
-              style={{ display: "flex", width: 18, height: 18, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t3)", cursor: "pointer" }}
+              style={{ display: "flex", width: 18, height: 18, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t2b)", cursor: "pointer" }}
             >
               <CloseIcon width={10} height={10} />
             </button>
@@ -528,7 +528,7 @@ export default function SourceBrowserSidebar({
             background: "var(--bg-el)",
             color: selectedIds.size ? "var(--ac)" : "var(--tm)",
             fontSize: 12.5,
-            fontWeight: 600,
+            fontWeight: 700,
             fontFamily: "inherit",
           }}
         >
@@ -551,7 +551,7 @@ export default function SourceBrowserSidebar({
             background: selectedIds.size ? "var(--ac)" : "var(--bg-el)",
             color: selectedIds.size ? "#050505" : "var(--tm)",
             fontSize: 12.5,
-            fontWeight: 600,
+            fontWeight: 700,
             fontFamily: "inherit",
           }}
         >
