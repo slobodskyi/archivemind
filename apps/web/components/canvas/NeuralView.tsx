@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import type { Photo, PhotoSource } from "@/types";
 import type { GalleryOverrides } from "@/lib/layout";
 import { sourcesGallery } from "@/lib/layout";
@@ -16,8 +17,13 @@ interface NeuralViewProps {
   onHubOpen: (source: PhotoSource) => void;
 }
 
-export default function NeuralView({ photos, galleryOverrides, onGalleryNodeDown, onHubOpen }: NeuralViewProps) {
-  const { tiles } = sourcesGallery(photos, galleryOverrides.source);
+function NeuralView({ photos, galleryOverrides, onGalleryNodeDown, onHubOpen }: NeuralViewProps) {
+  // Layout is pure/deterministic — recompute only when inputs change, not on
+  // every parent state tick (pan/zoom/hover used to re-run this per frame).
+  const { tiles } = useMemo(
+    () => sourcesGallery(photos, galleryOverrides.source),
+    [photos, galleryOverrides.source],
+  );
   return (
     <>
       {tiles.map((t) => (
@@ -35,3 +41,5 @@ export default function NeuralView({ photos, galleryOverrides, onGalleryNodeDown
     </>
   );
 }
+
+export default memo(NeuralView);

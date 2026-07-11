@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { Photo, PhotoSource } from "@/types";
 import { photoSrc } from "@/lib/img";
 import type { ProjectListItem, SidebarViewMode } from "@/hooks/useWorkspace";
@@ -369,7 +369,7 @@ function PileBody({
   );
 }
 
-export default function SourceBrowserSidebar({
+function SourceBrowserSidebar({
   open,
   tabs,
   activeTab,
@@ -571,3 +571,5 @@ export default function SourceBrowserSidebar({
     </div>
   );
 }
+
+export default memo(SourceBrowserSidebar);

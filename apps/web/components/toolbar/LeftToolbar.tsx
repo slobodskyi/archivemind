@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Tool } from "@/types";
 import {
   SelectToolIcon,
@@ -74,7 +75,7 @@ function TbButton({ onClick, title, active, children }: TbButtonProps) {
   );
 }
 
-export default function LeftToolbar({
+function LeftToolbar({
   tool = "select",
   allFilesMode = false,
   showAddToProject = false,
@@ -335,3 +336,5 @@ export default function LeftToolbar({
     </div>
   );
 }
+
+export default memo(LeftToolbar);

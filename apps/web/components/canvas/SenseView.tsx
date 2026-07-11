@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { hexA, type SenseBubble, type ExpandOverlay } from "@/lib/layout";
 import ExpandFileTile from "./ExpandFileTile";
 
@@ -13,7 +14,7 @@ interface SenseViewProps {
   deletePhoto: (id: string) => void;
 }
 
-export default function SenseView({
+function SenseView({
   bubbles,
   expandedKey,
   expand,
@@ -91,3 +92,5 @@ export default function SenseView({
     </>
   );
 }
+
+export default memo(SenseView);

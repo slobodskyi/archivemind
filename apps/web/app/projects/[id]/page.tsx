@@ -30,14 +30,13 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   // Guard: an unknown project id (deleted, or not the caller's) → home.
   if (id !== "all" && !projects.some((p) => p.id === id)) redirect("/");
 
-  const processedCount = photos.filter((p) => p.processed).length;
   // A fresh, empty project opens straight into the import modal (issue #17).
   const autoImport = id !== "all" && photos.length === 0;
 
   return (
     <>
       <ArchiveWorkspace
-        key={`ws-${id}-${photos.length}-${processedCount}`}
+        key={`ws-${id}`}
         initialPhotos={photos}
         workspaceId={workspaceId}
         projects={projects}
