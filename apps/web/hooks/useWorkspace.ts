@@ -7,6 +7,8 @@ import { useJobProgress } from "@/hooks/useJobProgress";
 import { photoSrc } from "@/lib/img";
 import type {
   CaptionStyle,
+  CanvasPoint,
+  CanvasUploadPreview,
   ChatMessage,
   Language,
   Photo,
@@ -14,12 +16,18 @@ import type {
   Project,
   ProjectKey,
   Tool,
+  UploadBatchResult,
+  UploadBatchStart,
   ViewMode,
 } from "@/types";
 import {
+  assetGallery,
   centerAtScale,
+  droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
+  fitBounds,
   fitView,
+  hitTestTiles,
   minimapLayout as computeMinimapLayout,
   senseBubbles as computeSenseBubbles,
   senseExpandLayout as computeSenseExpand,
@@ -96,7 +104,6 @@ interface Snapshot {
   tlOverrides: Record<string, { x: number; y: number }>;
   expandOverrides: Record<string, { x: number; y: number }>;
   galleryOverrides: GalleryOverrides;
-  photos: Photo[];
 }
 
 
@@ -129,6 +136,9 @@ interface WorkspaceState {
   sidebarViewMode: SidebarViewMode;
   projCurrent: ProjectKey | "all";
   photos: Photo[];
+  /** Temporary local previews; canonical assets remain server-authoritative. */
+  uploadPreviews: CanvasUploadPreview[];
+  terminalIngestJobs: Record<string, "done" | "failed" | "canceled">;
   selectedIds: string[];
   hoveredId: string | null;
   marquee: Marquee | null;
@@ -174,15 +184,19 @@ type DragSession =
       x1: number;
       y1: number;
       moved: boolean;
+      assetPositions: Record<string, TilePos> | null;
+      initialSelection: string[];
+      additive: boolean;
     }
   | {
       mode: "gallery";
-      kind: "source";
+      kind: "source" | "asset";
       key: string;
       sx: number;
       sy: number;
       orig: { x: number; y: number };
       moved: boolean;
+      historyPushed: boolean;
     }
   | {
       mode: "sticky";
@@ -231,6 +245,28 @@ export interface ProjectListItem {
   active: boolean;
 }
 
+function projectCanvasItems(
+  photos: readonly Photo[],
+  previews: readonly CanvasUploadPreview[],
+): Array<Pick<Photo, "id" | "w" | "h">> {
+  const canonicalIds = new Set(photos.map((photo) => photo.id));
+  const pending = previews
+    .filter((preview) => !preview.assetId || !canonicalIds.has(preview.assetId))
+    .map((preview) => ({
+      id: preview.assetId ?? preview.clientId,
+      w: preview.width,
+      h: preview.height,
+    }));
+  // assetGallery reverses newest-first API order before assigning cells. Treat
+  // optimistic uploads as the newest records so existing defaults never move.
+  return [...pending, ...photos];
+}
+
+function canPreviewLocally(file: File): boolean {
+  if (["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"].includes(file.type)) return true;
+  return /\.(?:jpe?g|png|webp|gif|avif)$/i.test(file.name);
+}
+
 export interface Workspace {
   scale: number;
   tx: number;
@@ -240,6 +276,8 @@ export interface Workspace {
   projCurrent: ProjectKey | "all";
   photos: Photo[];
   projectPhotos: Photo[];
+  uploadPreviews: CanvasUploadPreview[];
+  projectAssetPositions: Record<string, TilePos>;
   selectedIds: Set<string>;
   hoveredId: string | null;
   drawerId: string | null;
@@ -265,6 +303,7 @@ export interface Workspace {
   showAddToProject: boolean;
   /** "All my files" root — drives the trimmed toolbar and enables source double-click browsing. */
   allFilesMode: boolean;
+  projectMode: boolean;
   setCanvasRef: (el: HTMLDivElement | null) => void;
   onCanvasDown: (e: React.PointerEvent) => void;
   onGalleryNodeDown: (
@@ -272,6 +311,11 @@ export interface Workspace {
     kind: "source",
     key: string,
     origCenter: { x: number; y: number },
+  ) => void;
+  onAssetDown: (
+    e: React.PointerEvent,
+    id: string,
+    origCenter: CanvasPoint,
   ) => void;
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
@@ -396,6 +440,8 @@ export interface Workspace {
   impOpen: boolean;
   addToolbar: () => void;
   closeImport: () => void;
+  onUploadBatchStart: (batch: UploadBatchStart) => void;
+  onUploadBatchSettled: (result: UploadBatchResult) => void;
 
   // Expand overlays (sense / map marker drill-down)
   expanded: { kind: "sense" | "map" | null; key: string | null };
@@ -440,7 +486,6 @@ export function useWorkspace(
   workspaceId: string,
   initialProjects: ProjectOption[],
   currentProjectId: string,
-  autoImport = false,
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
@@ -457,7 +502,7 @@ export function useWorkspace(
     addProjOpen: false,
     search: false,
     helpOpen: false,
-    imp: { open: autoImport },
+    imp: { open: false },
     expanded: { kind: null, key: null },
     expandOverrides: {},
     galleryOverrides: EMPTY_GALLERY_OVERRIDES,
@@ -470,6 +515,8 @@ export function useWorkspace(
     sidebarAddOpen: false,
     sidebarViewMode: "list",
     photos: initialPhotos,
+    uploadPreviews: [],
+    terminalIngestJobs: {},
     selectedIds: [],
     hoveredId: null,
     marquee: null,
@@ -502,11 +549,15 @@ export function useWorkspace(
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeJobId = useRef<string | null>(null);
   const mapApiRef = useRef<MapApi | null>(null);
+  const objectUrlsRef = useRef(new Map<string, string>());
 
   // Patch helper that also advances stateRef so sequential reads see fresh data.
-  const setState = useCallback((patch: Partial<WorkspaceState>) => {
+  const setState = useCallback((
+    patch: Partial<WorkspaceState> | ((previous: WorkspaceState) => Partial<WorkspaceState>),
+  ) => {
     setStateRaw((prev) => {
-      const next = { ...prev, ...patch };
+      const resolved = typeof patch === "function" ? patch(prev) : patch;
+      const next = { ...prev, ...resolved };
       stateRef.current = next;
       return next;
     });
@@ -520,8 +571,23 @@ export function useWorkspace(
   if (syncedPhotos !== initialPhotos) {
     setSyncedPhotos(initialPhotos);
     const ids = new Set(initialPhotos.map((p) => p.id));
+    const canonical = new Map(initialPhotos.map((photo) => [photo.id, photo]));
+    const uploadPreviews = state.uploadPreviews.flatMap((preview): CanvasUploadPreview[] => {
+      if (!preview.assetId) return [preview];
+      const photo = canonical.get(preview.assetId);
+      if (photo?.src) return [];
+      if (preview.stage === "error") return [preview];
+      const terminal = preview.jobId ? state.terminalIngestJobs[preview.jobId] : undefined;
+      if (!terminal) return [preview];
+      if (terminal === "done") {
+        if (!photo) return [];
+        return [{ ...preview, stage: "ready", message: "Preview unavailable" }];
+      }
+      return [{ ...preview, stage: "error", message: `Processing ${terminal}` }];
+    });
     setState({
       photos: initialPhotos,
+      uploadPreviews,
       selectedIds: state.selectedIds.filter((id) => ids.has(id)),
       sidebarSelectedIds: state.sidebarSelectedIds.filter((id) => ids.has(id)),
       drawerId: state.drawerId && ids.has(state.drawerId) ? state.drawerId : null,
@@ -568,7 +634,6 @@ export function useWorkspace(
     tlOverrides: s.tlOverrides,
     expandOverrides: s.expandOverrides,
     galleryOverrides: s.galleryOverrides,
-    photos: s.photos,
   }), []);
 
   const pushHistory = useCallback(() => {
@@ -621,7 +686,7 @@ export function useWorkspace(
         cx = e.clientX - r.left,
         cy = e.clientY - r.top;
       const factor = Math.exp(-e.deltaY * 0.0015);
-      const ns = Math.min(4, Math.max(0.2, s.scale * factor));
+      const ns = Math.min(4, Math.max(0.05, s.scale * factor));
       const px = (cx - s.tx) / s.scale,
         py = (cy - s.ty) / s.scale;
       setState({ scale: ns, tx: cx - px * ns, ty: cy - py * ns });
@@ -678,6 +743,11 @@ export function useWorkspace(
           x1: dx0,
           y1: dy0,
           moved: false,
+          assetPositions: s.projCurrent === "all"
+            ? null
+            : assetGallery(s.photos, s.galleryOverrides.asset).pos,
+          initialSelection: s.selectedIds,
+          additive: e.shiftKey || e.metaKey || e.ctrlKey,
         };
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
@@ -689,9 +759,49 @@ export function useWorkspace(
     (e: React.PointerEvent, kind: "source", key: string, origCenter: { x: number; y: number }) => {
       e.stopPropagation();
       pushHistory();
-      dragRef.current = { mode: "gallery", kind, key, sx: e.clientX, sy: e.clientY, orig: origCenter, moved: false };
+      dragRef.current = {
+        mode: "gallery",
+        kind,
+        key,
+        sx: e.clientX,
+        sy: e.clientY,
+        orig: origCenter,
+        moved: false,
+        historyPushed: true,
+      };
     },
     [pushHistory],
+  );
+
+  const onAssetDown = useCallback(
+    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const s = stateRef.current;
+      const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+      let selectedIds: string[];
+      if (additive) {
+        const selection = new Set(s.selectedIds);
+        if (selection.has(id)) selection.delete(id);
+        else selection.add(id);
+        selectedIds = Array.from(selection);
+      } else {
+        selectedIds = s.selectedIds.includes(id) ? s.selectedIds : [id];
+      }
+      setState({ selectedIds, drawerId: null });
+      dragRef.current = {
+        mode: "gallery",
+        kind: "asset",
+        key: id,
+        sx: e.clientX,
+        sy: e.clientY,
+        orig: origCenter,
+        moved: false,
+        historyPushed: false,
+      };
+    },
+    [setState],
   );
 
   const onStickyDown = useCallback(
@@ -783,7 +893,14 @@ export function useWorkspace(
           dy = (e.clientY - d.sy) / div;
         setState({ expandOverrides: { ...s.expandOverrides, [d.id]: { x: d.orig.x + dx, y: d.orig.y + dy } } });
       } else if (d.mode === "gallery") {
-        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        if (Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3) {
+          d.moved = true;
+          if (!d.historyPushed) {
+            pushHistory();
+            d.historyPushed = true;
+          }
+        }
+        if (!d.moved) return;
         const dx = (e.clientX - d.sx) / s.scale,
           dy = (e.clientY - d.sy) / s.scale;
         setState({
@@ -806,10 +923,21 @@ export function useWorkspace(
         d.x1 = e.clientX - r.left;
         d.y1 = e.clientY - r.top;
         if (Math.abs(d.x1 - d.dx0) > 4 || Math.abs(d.y1 - d.dy0) > 4) d.moved = true;
-        // Neural view no longer has individually selectable file tiles on
-        // canvas (browsing/selection now happens in the source browser
-        // sidebar), so there's nothing left to marquee-hit-test here.
-        setState({ marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 }, selectedIds: [] });
+        const current = toContent(e.clientX, e.clientY);
+        const bounds: Bounds = {
+          xl: Math.min(d.startContent.x, current.x),
+          yt: Math.min(d.startContent.y, current.y),
+          xr: Math.max(d.startContent.x, current.x),
+          yb: Math.max(d.startContent.y, current.y),
+        };
+        const hits = d.assetPositions ? hitTestTiles(d.assetPositions, bounds) : [];
+        const selection = d.additive
+          ? Array.from(new Set([...d.initialSelection, ...hits]))
+          : hits;
+        setState({
+          marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 },
+          selectedIds: selection,
+        });
       } else if (d.mode === "frameDraw") {
         const r = rect();
         d.x1 = e.clientX - r.left;
@@ -826,7 +954,7 @@ export function useWorkspace(
         });
       }
     },
-    [rect, toContent, setState],
+    [rect, toContent, setState, pushHistory],
   );
 
   const openDrawer = useCallback(
@@ -863,7 +991,12 @@ export function useWorkspace(
         setState({ selectedIds: sel });
       }
     } else if (d.mode === "marquee") {
-      if (!d.moved) setState({ selectedIds: [], drawerId: null });
+      if (!d.moved) {
+        setState({
+          selectedIds: d.additive ? d.initialSelection : [],
+          drawerId: null,
+        });
+      }
       setState({ marquee: null });
     } else if (d.mode === "frameDraw") {
       setState({ marquee: null, frameDraftRect: null });
@@ -1002,23 +1135,34 @@ export function useWorkspace(
   );
 
   const neuralGalleryFor = useCallback(
-    (photos: Photo[], overrides: GalleryOverrides): { pos: Record<string, TilePos>; bounds: Bounds } =>
-      sourcesGallery(photos, overrides.source),
-    [],
+    (
+      photos: Photo[],
+      overrides: GalleryOverrides,
+      previews: CanvasUploadPreview[] = [],
+    ): { pos: Record<string, TilePos>; bounds: Bounds } =>
+      currentProjectId === "all"
+        ? sourcesGallery(photos, overrides.source)
+        : assetGallery(projectCanvasItems(photos, previews), overrides.asset),
+    [currentProjectId],
   );
 
   const computeFit = useCallback(
-    (view: ViewMode, allPhotos: Photo[], overrides: GalleryOverrides) => {
+    (
+      view: ViewMode,
+      allPhotos: Photo[],
+      overrides: GalleryOverrides,
+      previews: CanvasUploadPreview[],
+    ) => {
       const r = rect();
       if (view === "neural") {
-        // Always center at the fixed default zoom rather than solving for a
-        // best-fit scale — Fit/Zoom-reset should land on the same 75% as the
-        // initial view, not a computed (and often near-105%) fit-to-content.
-        return centerAtScale(neuralGalleryFor(allPhotos, overrides).bounds, r, DEFAULT_ZOOM);
+        const bounds = neuralGalleryFor(allPhotos, overrides, previews).bounds;
+        return currentProjectId === "all"
+          ? centerAtScale(bounds, r, DEFAULT_ZOOM)
+          : fitBounds(bounds, r);
       }
       return fitView(view, r);
     },
-    [rect, neuralGalleryFor],
+    [currentProjectId, rect, neuralGalleryFor],
   );
 
   const doFit = useCallback(() => {
@@ -1027,7 +1171,7 @@ export function useWorkspace(
       mapApiRef.current.fitWorld();
       return;
     }
-    setState(computeFit(s.view, s.photos, s.galleryOverrides));
+    setState(computeFit(s.view, s.photos, s.galleryOverrides, s.uploadPreviews));
   }, [setState, computeFit]);
 
   const setZoomPct = useCallback(
@@ -1070,7 +1214,7 @@ export function useWorkspace(
       setTimeout(() => {
         if (v === "map" && mapApiRef.current) return;
         const s = stateRef.current;
-        setState(computeFit(v, s.photos, s.galleryOverrides));
+        setState(computeFit(v, s.photos, s.galleryOverrides, s.uploadPreviews));
       }, 0);
     },
     [setState, computeFit],
@@ -1078,21 +1222,26 @@ export function useWorkspace(
 
   // Fit once on first mount, but only after the canvas has a real size — a
   // zero-size rect (background tab / not-yet-painted) would produce a bad fit.
-  // The initial view defaults to a fixed 70% zoom rather than a computed
-  // best-fit scale; subsequent viewand navigation still fit-to-content.
+  // Small canvases start at 75%; large project grids use a true fit so every
+  // tile remains reachable without an initial manual zoom-out.
   const didFitRef = useRef(false);
   const tryFit = useCallback(() => {
     if (didFitRef.current) return true;
     const r = rect();
     if (r.width > 0 && r.height > 0) {
       const s = stateRef.current;
-      const bounds = neuralGalleryFor(s.photos, s.galleryOverrides).bounds;
-      setState(centerAtScale(bounds, r, DEFAULT_ZOOM));
+      const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
+      const fitted = fitBounds(bounds, r);
+      setState(
+        currentProjectId !== "all" && fitted.scale < DEFAULT_ZOOM
+          ? fitted
+          : centerAtScale(bounds, r, DEFAULT_ZOOM),
+      );
       didFitRef.current = true;
       return true;
     }
     return false;
-  }, [rect, setState, neuralGalleryFor]);
+  }, [currentProjectId, rect, setState, neuralGalleryFor]);
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 
@@ -1371,6 +1520,98 @@ export function useWorkspace(
   }, [setState]);
   const closeImport = useCallback(() => setState({ imp: { open: false } }), [setState]);
 
+  const onUploadBatchStart = useCallback(
+    (batch: UploadBatchStart) => {
+      const s = stateRef.current;
+      if (s.projCurrent === "all") return;
+      const r = rect();
+      const clientPoint = batch.clientPoint ?? {
+        x: r.left + r.width / 2,
+        y: r.top + r.height / 2,
+      };
+      const anchor = toContent(clientPoint.x, clientPoint.y);
+      const clientIds = batch.files.map((item) => `${batch.batchId}:${item.inputIndex}`);
+      const centers = droppedAssetCenters(clientIds, anchor);
+      const previews = batch.files.map((item): CanvasUploadPreview => {
+        const clientId = `${batch.batchId}:${item.inputIndex}`;
+        const localUrl = canPreviewLocally(item.file) ? URL.createObjectURL(item.file) : null;
+        if (localUrl) objectUrlsRef.current.set(clientId, localUrl);
+        return {
+          clientId,
+          batchId: batch.batchId,
+          inputIndex: item.inputIndex,
+          assetId: null,
+          jobId: null,
+          filename: item.file.name,
+          mime: item.file.type || "application/octet-stream",
+          localUrl,
+          center: centers[clientId],
+          width: 4,
+          height: 3,
+          stage: "uploading",
+          message: null,
+        };
+      });
+      setState((previous) => ({
+        uploadPreviews: [...previous.uploadPreviews, ...previews],
+        galleryOverrides: {
+          ...previous.galleryOverrides,
+          asset: { ...previous.galleryOverrides.asset, ...centers },
+        },
+      }));
+    },
+    [rect, setState, toContent],
+  );
+
+  const onUploadBatchSettled = useCallback(
+    (result: UploadBatchResult) => {
+      if (stateRef.current.projCurrent === "all") return;
+      const uploaded = new Map(result.uploaded.map((item) => [item.inputIndex, item.assetId]));
+      const failed = new Set(result.failedIndexes);
+      const linkFailed = result.projectLink === "failed";
+      const errorClientIds = stateRef.current.uploadPreviews
+        .filter((preview) =>
+          preview.batchId === result.batchId &&
+          (linkFailed || !uploaded.has(preview.inputIndex) || failed.has(preview.inputIndex)),
+        )
+        .map((preview) => preview.clientId);
+      for (const clientId of errorClientIds) {
+        const url = objectUrlsRef.current.get(clientId);
+        if (url) URL.revokeObjectURL(url);
+        objectUrlsRef.current.delete(clientId);
+      }
+      setState((previous) => {
+        const assetOverrides = { ...previous.galleryOverrides.asset };
+        const uploadPreviews = previous.uploadPreviews.map((preview): CanvasUploadPreview => {
+          if (preview.batchId !== result.batchId) return preview;
+          const assetId = uploaded.get(preview.inputIndex);
+          if (!assetId || failed.has(preview.inputIndex)) {
+            return { ...preview, localUrl: null, stage: "error", message: "Upload failed" };
+          }
+          const center = assetOverrides[preview.clientId] ?? preview.center;
+          delete assetOverrides[preview.clientId];
+          assetOverrides[assetId] = center;
+          return {
+            ...preview,
+            assetId,
+            jobId: result.jobId,
+            center,
+            localUrl: linkFailed ? null : preview.localUrl,
+            stage: linkFailed ? "error" : "processing",
+            message: linkFailed ? "Uploaded, but couldn’t add to this project" : null,
+          };
+        });
+        return {
+          uploadPreviews,
+          galleryOverrides: { ...previous.galleryOverrides, asset: assetOverrides },
+          history: [],
+          future: [],
+        };
+      });
+    },
+    [setState],
+  );
+
   // ── Misc toolbar actions ────────────────────────────────────────────────
 
   const extractExif = useCallback(
@@ -1438,6 +1679,31 @@ export function useWorkspace(
   }, [setState, flashToast]);
 
   useJobProgress(workspaceId, (job) => {
+    if (job.type === "ingest") {
+      if (job.status !== "done" && job.status !== "failed" && job.status !== "canceled") return;
+      const terminalStatus = job.status;
+      if (stateRef.current.terminalIngestJobs[job.id]) return;
+      if (terminalStatus !== "done") {
+        for (const preview of stateRef.current.uploadPreviews) {
+          if (preview.jobId !== job.id) continue;
+          const url = objectUrlsRef.current.get(preview.clientId);
+          if (url) URL.revokeObjectURL(url);
+          objectUrlsRef.current.delete(preview.clientId);
+        }
+      }
+      setState((previous) => ({
+        terminalIngestJobs: { ...previous.terminalIngestJobs, [job.id]: terminalStatus },
+        ...(terminalStatus !== "done"
+          ? { uploadPreviews: previous.uploadPreviews.map((preview) =>
+            preview.jobId === job.id
+              ? { ...preview, localUrl: null, stage: "error", message: job.error ?? `Processing ${terminalStatus}` }
+              : preview,
+          ) }
+          : {}),
+      }));
+      router.refresh();
+      return;
+    }
     if (job.id !== activeJobId.current) return;
     if (job.status === "running" || job.status === "queued") {
       setState({
@@ -1479,6 +1745,7 @@ export function useWorkspace(
   useEffect(() => {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
     const el = canvasElRef.current;
     if (el) el.addEventListener("wheel", wheel, { passive: false });
     let ro: ResizeObserver | undefined;
@@ -1502,6 +1769,7 @@ export function useWorkspace(
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
       if (el) el.removeEventListener("wheel", wheel);
       cancelAnimationFrame(raf);
       if (ro) ro.disconnect();
@@ -1527,17 +1795,29 @@ export function useWorkspace(
   }, [closeDrawer, closeSearch, closeHelp, closeExpand, closeChat, closeSidebar]);
 
   useEffect(() => {
+    const activeClientIds = new Set(state.uploadPreviews.map((preview) => preview.clientId));
+    for (const [clientId, url] of objectUrlsRef.current) {
+      if (activeClientIds.has(clientId)) continue;
+      URL.revokeObjectURL(url);
+      objectUrlsRef.current.delete(clientId);
+    }
+  }, [state.uploadPreviews]);
+
+  useEffect(() => {
+    const objectUrls = objectUrlsRef.current;
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (copyTimer.current) clearTimeout(copyTimer.current);
+      for (const url of objectUrls.values()) URL.revokeObjectURL(url);
+      objectUrls.clear();
     };
   }, []);
 
   // ── Derived values ────────────────────────────────────────────────────────
 
   const neuralGalleryPos = useMemo(
-    () => neuralGalleryFor(state.photos, state.galleryOverrides).pos,
-    [state.photos, state.galleryOverrides, neuralGalleryFor],
+    () => neuralGalleryFor(state.photos, state.galleryOverrides, state.uploadPreviews).pos,
+    [state.photos, state.galleryOverrides, state.uploadPreviews, neuralGalleryFor],
   );
 
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
@@ -1562,6 +1842,7 @@ export function useWorkspace(
   const isSenseView = state.view === "sense" && state.projCurrent !== "all";
   const showViewTabs = state.projCurrent !== "all";
   const allFilesMode = state.projCurrent === "all";
+  const projectMode = !allFilesMode;
   const showAddToProject = isNeural && selectedIds.size > 0;
 
   const projectPhotos = useMemo(
@@ -1582,7 +1863,7 @@ export function useWorkspace(
   );
 
   const projLabel =
-    state.projCurrent === "all" ? "All my files" : resolveProjectMeta(state.projCurrent, initialProjects).label;
+    state.projCurrent === "all" ? "Projects" : resolveProjectMeta(state.projCurrent, initialProjects).label;
 
   const sidebarOpen = state.sidebarTabs.length > 0;
   const sidebarSelectedIds = useMemo(() => new Set(state.sidebarSelectedIds), [state.sidebarSelectedIds]);
@@ -1670,6 +1951,8 @@ export function useWorkspace(
     projCurrent: state.projCurrent,
     photos: state.photos,
     projectPhotos,
+    uploadPreviews: state.uploadPreviews,
+    projectAssetPositions: neuralGalleryPos,
     selectedIds,
     hoveredId: state.hoveredId,
     drawerId: state.drawerId,
@@ -1698,9 +1981,11 @@ export function useWorkspace(
     showViewTabs,
     showAddToProject,
     allFilesMode,
+    projectMode,
     setCanvasRef,
     onCanvasDown,
     onGalleryNodeDown,
+    onAssetDown,
     setHover,
     openDrawer,
     closeDrawer,
@@ -1808,6 +2093,8 @@ export function useWorkspace(
     impOpen: state.imp.open,
     addToolbar,
     closeImport,
+    onUploadBatchStart,
+    onUploadBatchSettled,
 
     timelineLayout: timelineLayoutResult,
     onTlDown,

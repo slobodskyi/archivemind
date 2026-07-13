@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import UploadManager from "@/components/upload/UploadManager";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotos } from "@/lib/api";
 import { ensureWorkspace } from "@/lib/bootstrap";
@@ -30,20 +29,13 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   // Guard: an unknown project id (deleted, or not the caller's) → home.
   if (id !== "all" && !projects.some((p) => p.id === id)) redirect("/");
 
-  // A fresh, empty project opens straight into the import modal (issue #17).
-  const autoImport = id !== "all" && photos.length === 0;
-
   return (
-    <>
-      <ArchiveWorkspace
-        key={`ws-${id}`}
-        initialPhotos={photos}
-        workspaceId={workspaceId}
-        projects={projects}
-        currentProjectId={id}
-        autoImport={autoImport}
-      />
-      <UploadManager projectId={id} />
-    </>
+    <ArchiveWorkspace
+      key={`ws-${id}`}
+      initialPhotos={photos}
+      workspaceId={workspaceId}
+      projects={projects}
+      currentProjectId={id}
+    />
   );
 }

@@ -10,10 +10,8 @@ import {
 } from "@/components/icons/icons";
 
 interface AppHeaderProps {
-  isAll: boolean;
   projLabel: string;
   onHome: () => void;
-  onRootClick: () => void;
   onOpenProj: () => void;
   showZoomControl?: boolean;
   zoomPct?: string;
@@ -54,10 +52,8 @@ function UtilButton({ label, icon, onClick }: { label: string; icon: ReactNode; 
 }
 
 export default function AppHeader({
-  isAll,
   projLabel,
   onHome,
-  onRootClick,
   onOpenProj,
   showZoomControl = true,
   zoomPct = "100%",
@@ -113,22 +109,23 @@ export default function AppHeader({
           </svg>
         </button>
         <button
-          onClick={onRootClick}
+          onClick={onOpenProj}
           style={{
             display: "flex",
             alignItems: "center",
             gap: 7,
             height: 30,
             padding: "0 9px",
-            background: isAll ? "var(--bg-sf)" : "transparent",
-            border: 0,
+            background: "var(--bg-sf)",
+            border: "1px solid var(--bd)",
             borderRadius: 2,
-            color: isAll ? "var(--t1)" : "var(--t2)",
+            color: "var(--t1)",
             fontSize: 13,
             fontWeight: 400,
             fontFamily: "inherit",
             cursor: "pointer",
-            flex: "0 0 auto",
+            minWidth: 0,
+            maxWidth: 260,
           }}
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, flex: "0 0 auto" }}>
@@ -136,37 +133,9 @@ export default function AppHeader({
               <span key={i} style={{ width: 5, height: 5, borderRadius: 1, background: "currentColor", opacity: 0.7 }} />
             ))}
           </div>
-          <span style={{ whiteSpace: "nowrap" }}>All my files</span>
-          {isAll && <ChevronDownIcon width={10} height={10} stroke="currentColor" style={{ flex: "0 0 auto", opacity: 0.6 }} />}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
+          <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />
         </button>
-        {!isAll && (
-          <>
-            <span style={{ color: "var(--tm)", fontSize: 13, flex: "0 0 auto" }}>/</span>
-            <button
-              onClick={onOpenProj}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                height: 30,
-                padding: "0 9px",
-                background: "var(--bg-sf)",
-                border: "1px solid var(--bd)",
-                borderRadius: 2,
-                color: "var(--t1)",
-                fontSize: 13,
-                fontWeight: 400,
-                fontFamily: "inherit",
-                cursor: "pointer",
-                minWidth: 0,
-                maxWidth: 220,
-              }}
-            >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
-              <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />
-            </button>
-          </>
-        )}
       </div>
 
       {viewTabs}

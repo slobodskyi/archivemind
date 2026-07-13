@@ -7,6 +7,7 @@ import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import NeuralView from "@/components/canvas/NeuralView";
+import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import TimelineView from "@/components/canvas/TimelineView";
 import TimelineHeader from "@/components/canvas/TimelineHeader";
 import SenseView from "@/components/canvas/SenseView";
@@ -26,6 +27,7 @@ import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import SearchModal from "@/components/modals/SearchModal";
 import HelpModal from "@/components/modals/HelpModal";
 import ImportModal from "@/components/import/ImportModal";
+import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
 
 interface ArchiveWorkspaceProps {
@@ -33,8 +35,6 @@ interface ArchiveWorkspaceProps {
   workspaceId: string;
   projects: ProjectOption[];
   currentProjectId: string;
-  /** Auto-open the import modal (fresh empty project). */
-  autoImport?: boolean;
 }
 
 export default function ArchiveWorkspace({
@@ -42,9 +42,8 @@ export default function ArchiveWorkspace({
   workspaceId,
   projects,
   currentProjectId,
-  autoImport = false,
 }: ArchiveWorkspaceProps) {
-  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId, autoImport);
+  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId);
 
   const sendHelpTicket = () => {
     ws.closeHelp();
@@ -86,7 +85,19 @@ export default function ArchiveWorkspace({
             onDelete={ws.deleteStickyNote}
           />
         )}
-        {ws.isNeural && (
+        {ws.isNeural && ws.projectMode && (
+          <ProjectAssetView
+            photos={ws.projectPhotos}
+            previews={ws.uploadPreviews}
+            positions={ws.projectAssetPositions}
+            selectedIds={ws.selectedIds}
+            hoveredId={ws.hoveredId}
+            onAssetDown={ws.onAssetDown}
+            setHover={ws.setHover}
+            openDrawer={ws.openDrawer}
+          />
+        )}
+        {ws.isNeural && !ws.projectMode && (
           <NeuralView
             photos={ws.photos}
             galleryOverrides={ws.galleryOverrides}
@@ -120,7 +131,7 @@ export default function ArchiveWorkspace({
       {/* Empty state — a project emptied after creation used to render a bare
           grid with no affordance (the import modal auto-opens only for fresh
           projects). Sits under the header/toolbar chrome. */}
-      {ws.projectPhotos.length === 0 && !ws.impOpen && (
+      {ws.projectPhotos.length === 0 && ws.uploadPreviews.length === 0 && !ws.impOpen && (
         <div
           style={{
             position: "absolute",
@@ -183,10 +194,8 @@ export default function ArchiveWorkspace({
       )}
 
       <AppHeader
-        isAll={ws.projCurrent === "all"}
         projLabel={ws.projLabel}
         onHome={ws.goHome}
-        onRootClick={ws.projCurrent === "all" ? ws.openProj : () => ws.selectProject("all")}
         onOpenProj={ws.openProj}
         showZoomControl={!ws.isTimelineView}
         zoomPct={ws.zoomPct}
@@ -212,15 +221,9 @@ export default function ArchiveWorkspace({
 
       <ProjectDropdown
         open={ws.projOpen}
-        isAll={ws.projCurrent === "all"}
         list={ws.projectList}
         onClose={ws.closeProj}
-        onSelectAll={() => ws.selectProject("all")}
         onSelect={ws.selectProject}
-        onNewArchive={() => {
-          ws.closeProj();
-          ws.flashToast("New archive — coming soon");
-        }}
       />
 
       <AccountDropdown open={ws.acctOpen} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />
@@ -319,6 +322,15 @@ export default function ArchiveWorkspace({
         onClose={ws.closeImport}
         projectId={ws.projCurrent}
         projectName={ws.projLabel}
+        onBatchStart={ws.onUploadBatchStart}
+        onBatchSettled={ws.onUploadBatchSettled}
+      />
+
+      <UploadManager
+        projectId={ws.projCurrent}
+        disabled={ws.impOpen}
+        onBatchStart={ws.onUploadBatchStart}
+        onBatchSettled={ws.onUploadBatchSettled}
       />
 
       <SearchModal open={ws.search} onClose={ws.closeSearch} />

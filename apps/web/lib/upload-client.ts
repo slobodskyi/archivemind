@@ -3,6 +3,7 @@ import {
   completeUploadResponseSchema,
   presignUploadResponseSchema,
 } from "@archivemind/shared";
+import type { IndexedUploadFile, UploadResult } from "@/types";
 
 /** Shared client-side upload (issue #6/#17): presign → direct R2 PUT →
  *  complete → optionally link the new assets into a project. Used by both the
@@ -10,6 +11,7 @@ import {
  *  are byte-identical. Per-file byte progress needs XHR (fetch has none). */
 
 const PARALLEL_UPLOADS = 3;
+const MAX_BATCH_FILES = 500;
 
 /** Stage weights inside one file's share of the bar: the presign round-trip
  *  and the server's PUT ack are real work the old bytes-only progress hid —
@@ -31,11 +33,19 @@ export interface UploadProgress {
   stage: UploadStage;
 }
 
-export interface UploadResult {
-  assetIds: string[];
-  errors: string[];
-  /** files skipped up-front (oversize/empty) — surfaced to the user. */
-  skipped: number;
+export function createUploadBatchId(): string {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** Files that can enter the multipart-free upload path, retaining the caller's
+ * original index so optimistic canvas tiles can be reconciled exactly. */
+export function uploadCandidates(files: readonly File[]): IndexedUploadFile[] {
+  return files
+    .map((file, inputIndex) => ({ file, inputIndex }))
+    .filter(({ file }) => file.size > 0 && file.size <= SINGLE_PUT_MAX_BYTES)
+    .slice(0, MAX_BATCH_FILES);
 }
 
 function putWithProgress(url: string, file: File, onSent: (sent: number) => void): Promise<void> {
@@ -56,22 +66,41 @@ export async function runUpload(
   files: File[],
   opts: { projectId?: string; onProgress?: (p: UploadProgress) => void } = {},
 ): Promise<UploadResult> {
-  const accepted = files.filter((f) => f.size > 0 && f.size <= SINGLE_PUT_MAX_BYTES);
+  const accepted = uploadCandidates(files);
   const skipped = files.length - accepted.length;
-  if (accepted.length === 0) return { assetIds: [], errors: [], skipped };
+  const skippedIndexes = files
+    .map((_, inputIndex) => inputIndex)
+    .filter((inputIndex) => !accepted.some((item) => item.inputIndex === inputIndex));
+  if (accepted.length === 0) {
+    return {
+      assetIds: [],
+      uploaded: [],
+      failedIndexes: [],
+      skippedIndexes,
+      jobId: null,
+      projectLink: "not-requested",
+      errors: [],
+      skipped,
+    };
+  }
 
-  const totalBytes = accepted.reduce((s, f) => s + f.size, 0) || 1;
+  const totalBytes = accepted.reduce((s, item) => s + item.file.size, 0) || 1;
   const sentPerFile = new Array<number>(accepted.length).fill(0);
   const presigned = new Array<boolean>(accepted.length).fill(false);
   const putAcked = new Array<boolean>(accepted.length).fill(false);
   const errors: string[] = [];
-  const completed: { r2Key: string; filename: string; mime: string; size: number }[] = [];
+  const failedIndexes: number[] = [];
+  const completed: {
+    inputIndex: number;
+    upload: { r2Key: string; filename: string; mime: string; size: number };
+  }[] = [];
   let doneFiles = 0;
   /** 0 while transferring; bumped as complete/link land. */
   let tail = 0;
 
   const emit = (stage: UploadStage = "uploading") => {
-    const transferred = accepted.reduce((sum, file, i) => {
+    const transferred = accepted.reduce((sum, item, i) => {
+      const file = item.file;
       const frac =
         (presigned[i] ? PRESIGN_FRAC : 0) +
         BYTES_FRAC * Math.min(1, sentPerFile[i] / file.size) +
@@ -83,7 +112,7 @@ export async function runUpload(
   };
   emit();
 
-  const uploadOne = async (file: File, i: number) => {
+  const uploadOne = async (file: File, acceptedIndex: number, inputIndex: number) => {
     const presignResp = await fetch("/api/uploads/presign", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -91,26 +120,30 @@ export async function runUpload(
     });
     if (!presignResp.ok) throw new Error(`${file.name}: presign failed (${presignResp.status})`);
     const { uploadUrl, r2Key } = presignUploadResponseSchema.parse(await presignResp.json());
-    presigned[i] = true;
+    presigned[acceptedIndex] = true;
     emit();
     await putWithProgress(uploadUrl, file, (sent) => {
-      sentPerFile[i] = sent;
+      sentPerFile[acceptedIndex] = sent;
       emit();
     });
-    sentPerFile[i] = file.size;
-    putAcked[i] = true;
-    completed.push({ r2Key, filename: file.name, mime: file.type || "application/octet-stream", size: file.size });
+    sentPerFile[acceptedIndex] = file.size;
+    putAcked[acceptedIndex] = true;
+    completed.push({
+      inputIndex,
+      upload: { r2Key, filename: file.name, mime: file.type || "application/octet-stream", size: file.size },
+    });
     doneFiles += 1;
     emit();
   };
 
-  const queue = accepted.map((file, i) => ({ file, i }));
+  const queue = accepted.map(({ file, inputIndex }, acceptedIndex) => ({ file, inputIndex, acceptedIndex }));
   await Promise.all(
     Array.from({ length: Math.min(PARALLEL_UPLOADS, queue.length) }, async () => {
       for (let next = queue.shift(); next; next = queue.shift()) {
         try {
-          await uploadOne(next.file, next.i);
+          await uploadOne(next.file, next.acceptedIndex, next.inputIndex);
         } catch (e) {
+          failedIndexes.push(next.inputIndex);
           errors.push(e instanceof Error ? e.message : String(e));
         }
       }
@@ -118,37 +151,69 @@ export async function runUpload(
   );
 
   let assetIds: string[] = [];
+  let uploaded: UploadResult["uploaded"] = [];
+  let jobId: string | null = null;
   if (completed.length > 0) {
     emit("finalizing"); // bytes are up; asset rows + project link still pending
-    const completeResp = await fetch("/api/uploads/complete", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ uploads: completed }),
-    });
-    if (completeResp.ok) {
-      assetIds = completeUploadResponseSchema.parse(await completeResp.json()).assetIds;
+    completed.sort((a, b) => a.inputIndex - b.inputIndex);
+    try {
+      const completeResp = await fetch("/api/uploads/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uploads: completed.map((item) => item.upload) }),
+      });
+      if (!completeResp.ok) throw new Error(`complete failed (${completeResp.status})`);
+      const completeResult = completeUploadResponseSchema.parse(await completeResp.json());
+      if (completeResult.assetIds.length !== completed.length) {
+        throw new Error("complete returned an incomplete asset mapping");
+      }
+      assetIds = completeResult.assetIds;
+      jobId = completeResult.jobId;
+      uploaded = completed.map((item, index) => ({
+        inputIndex: item.inputIndex,
+        assetId: assetIds[index],
+      }));
       tail = COMPLETE_DONE - TRANSFER_CEILING;
       emit("finalizing");
-    } else {
-      errors.push(`complete failed (${completeResp.status})`);
+    } catch (error) {
+      assetIds = [];
+      uploaded = [];
+      jobId = null;
+      failedIndexes.push(...completed.map((item) => item.inputIndex));
+      errors.push(error instanceof Error ? error.message : "complete failed");
     }
   }
 
   // Link the fresh assets into the project (issue #17). Best-effort — an upload
   // that lands but fails to link still exists in the workspace.
+  let projectLink: UploadResult["projectLink"] = "not-requested";
   if (assetIds.length > 0 && opts.projectId && opts.projectId !== "all") {
+    projectLink = "linked";
     try {
       const linkResp = await fetch(`/api/projects/${opts.projectId}/assets`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ assetIds }),
       });
-      if (!linkResp.ok) errors.push(`add to project failed (${linkResp.status})`);
+      if (!linkResp.ok) {
+        projectLink = "failed";
+        errors.push(`add to project failed (${linkResp.status})`);
+      }
     } catch {
+      projectLink = "failed";
       errors.push("add to project failed");
     }
   }
 
   emit("done");
-  return { assetIds, errors, skipped };
+  return {
+    assetIds,
+    uploaded,
+    failedIndexes: Array.from(new Set(failedIndexes)),
+    skippedIndexes,
+    jobId,
+    projectLink,
+    errors,
+    skipped,
+  };
 }
