@@ -5,8 +5,8 @@ import { ensureWorkspace } from "@/lib/bootstrap";
 import { getProjectCards } from "@/lib/projects";
 import { createClient } from "@/lib/supabase/server";
 
-/** Canvas route (issue #17): `id === "all"` → the whole workspace; otherwise a
- *  single project's M:N assets. The header/dropdown navigate between these. */
+/** Canvas route (issue #17): a project and its M:N assets. The legacy `all`
+ *  scope remains a read-only recovery grid for unassigned uploads. */
 export default async function ProjectCanvas({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params; // Next 16: params is a Promise
 

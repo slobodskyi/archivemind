@@ -15,8 +15,8 @@ import {
 
 interface LeftToolbarProps {
   tool?: Tool;
-  /** "All my files" only browses/selects across sources — the frame tool, Smart Search,
-   * bulk captioning, EXIF extraction, and sticky notes all live inside a project instead. */
+  /** The legacy workspace recovery grid only selects/adds existing assets.
+   * Editing, AI actions, and imports live inside an open project. */
   allFilesMode?: boolean;
   showAddToProject?: boolean;
   selCount?: number;
@@ -214,27 +214,29 @@ function LeftToolbar({
 
       <Divider />
 
-      <button
-        onClick={onAdd}
-        title="Add"
-        aria-label="Add"
-        className="tw"
-        style={{
-          display: "flex",
-          width: 34,
-          height: 34,
-          alignItems: "center",
-          justifyContent: "center",
-          border: 0,
-          borderRadius: 2,
-          cursor: "pointer",
-          background: "transparent",
-          color: "var(--t2)",
-        }}
-      >
-        <AddIcon />
-        <span className="tip">Add</span>
-      </button>
+      {!allFilesMode && (
+        <button
+          onClick={onAdd}
+          title="Add"
+          aria-label="Add"
+          className="tw"
+          style={{
+            display: "flex",
+            width: 34,
+            height: 34,
+            alignItems: "center",
+            justifyContent: "center",
+            border: 0,
+            borderRadius: 2,
+            cursor: "pointer",
+            background: "transparent",
+            color: "var(--t2)",
+          }}
+        >
+          <AddIcon />
+          <span className="tip">Add</span>
+        </button>
+      )}
       {!allFilesMode && (
         <button
           onClick={onAddStickyNote}

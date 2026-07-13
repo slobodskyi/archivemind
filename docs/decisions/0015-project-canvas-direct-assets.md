@@ -44,11 +44,11 @@ let client state drift from the server.
   ingest updates. A terminal ingest triggers `router.refresh()`, allowing the
   new server `Photo` records and preview URLs to replace the optimistic state
   without remounting the canvas.
-- The workspace-global `/projects/all` scope may retain the source-hub view for
-  now. Source browsing is meaningful across projects and providers, and the
-  global surface will eventually consume the aggregate/virtualized canvas API.
-  Per [0014](0014-project-first-navigation.md), that scope is not restored as a
-  breadcrumb parent or project-switcher destination.
+- The old workspace-global `/projects/all` source-hub canvas is removed from
+  navigation. Its legacy route renders direct asset tiles as a read-only
+  recovery surface, so existing uploads without project membership remain
+  selectable and can be added to a project. New uploads begin only inside an
+  open project, where destination and immediate placement are unambiguous.
 
 ## Consequences
 
@@ -67,5 +67,6 @@ Phase 5 `PUT /api/canvas/layout` persistence work lands; a full reload may
 therefore return manually positioned assets to their deterministic defaults.
 Rendering project assets directly also does not replace the Phase 5
 aggregate/virtualization requirement for archives with tens of thousands of
-assets. Retaining the global source view keeps that scaling path available
-without imposing its extra navigation step on ordinary project work.
+assets. The hidden recovery route is not a replacement for that API. A future
+workspace-wide library, if needed, should be a secondary grid surface rather
+than a source circle in the project navigation flow.

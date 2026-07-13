@@ -10,23 +10,19 @@ import {
   type UploadProgress,
   type UploadStage,
 } from "@/lib/upload-client";
-import type { CanvasPoint, UploadBatchResult, UploadBatchStart, UploadOrigin, UploadResult } from "@/types";
+import type { CanvasPoint, UploadBatchResult, UploadBatchStart, UploadResult } from "@/types";
 
 /** Window-level drag-and-drop upload (journey step 1: direct local upload).
  *  Self-contained on purpose — listens on window, shows its own overlay +
  *  progress pill, delegates to lib/upload-client (shared with ImportModal).
- *  `projectId` links uploaded assets into the current project (#17).
- *
- *  Opens a file dialog when any button dispatches `am:open-upload` on the
- *  window (e.g. the homepage "Local upload" card) — one instance, one pill. */
-
-/** Buttons anywhere can trigger the file dialog without prop-drilling. */
-export const OPEN_UPLOAD_EVENT = "am:open-upload" as const;
+ *  `projectId` links uploaded assets into the current project (#17). */
 
 interface UploadManagerProps {
-  projectId?: string;
+  projectId: string;
   /** The project import modal owns drag/drop while open. */
   disabled?: boolean;
+  /** Optional guidance when this instance is only guarding against native file navigation. */
+  disabledMessage?: string;
   onBatchStart?: (batch: UploadBatchStart) => void;
   onBatchSettled?: (result: UploadBatchResult) => void;
 }
@@ -59,6 +55,7 @@ function failedUploadResult(indexes: number[], message: string): UploadResult {
 export default function UploadManager({
   projectId,
   disabled = false,
+  disabledMessage,
   onBatchStart,
   onBatchSettled,
 }: UploadManagerProps) {
@@ -67,11 +64,10 @@ export default function UploadManager({
   const [pill, setPill] = useState<PillState>(IDLE);
   const dragDepth = useRef(0);
   const busy = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const upload = useCallback(
-    async (files: File[], origin: UploadOrigin, clientPoint: CanvasPoint | null) => {
+    async (files: File[], clientPoint: CanvasPoint) => {
       if (disabled || busy.current || files.length === 0) return;
       busy.current = true;
       if (dismissTimer.current) {
@@ -82,7 +78,7 @@ export default function UploadManager({
       const id = createUploadBatchId();
       const candidates = uploadCandidates(files);
       if (candidates.length > 0) {
-        onBatchStart?.({ batchId: id, origin, clientPoint, files: candidates });
+        onBatchStart?.({ batchId: id, origin: "canvas-drop", clientPoint, files: candidates });
       }
       const onProgress = (p: UploadProgress) =>
         setPill((prev) => ({ ...prev, active: true, ...p }));
@@ -117,7 +113,7 @@ export default function UploadManager({
     const onDragEnter = (e: DragEvent) => {
       if (!hasFiles(e)) return;
       e.preventDefault();
-      if (disabled) return;
+      if (disabled && !disabledMessage) return;
       dragDepth.current += 1;
       setDragging(true);
     };
@@ -126,7 +122,7 @@ export default function UploadManager({
     };
     const onDragLeave = (e: DragEvent) => {
       if (!hasFiles(e)) return;
-      if (disabled) {
+      if (disabled && !disabledMessage) {
         dragDepth.current = 0;
         return;
       }
@@ -141,7 +137,6 @@ export default function UploadManager({
       if (disabled) return;
       void upload(
         Array.from(e.dataTransfer?.files ?? []),
-        "canvas-drop",
         { x: e.clientX, y: e.clientY },
       );
     };
@@ -149,24 +144,19 @@ export default function UploadManager({
       dragDepth.current = 0;
       setDragging(false);
     };
-    const onOpen = () => {
-      if (!disabled) fileInputRef.current?.click();
-    };
     window.addEventListener("dragenter", onDragEnter);
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("dragleave", onDragLeave);
     window.addEventListener("drop", onDrop);
     window.addEventListener("dragend", onDragEnd);
-    window.addEventListener(OPEN_UPLOAD_EVENT, onOpen);
     return () => {
       window.removeEventListener("dragenter", onDragEnter);
       window.removeEventListener("dragover", onDragOver);
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
       window.removeEventListener("dragend", onDragEnd);
-      window.removeEventListener(OPEN_UPLOAD_EVENT, onOpen);
     };
-  }, [disabled, upload]);
+  }, [disabled, disabledMessage, upload]);
 
   useEffect(() => {
     if (!disabled) return;
@@ -189,17 +179,6 @@ export default function UploadManager({
 
   return (
     <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        hidden
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          e.target.value = "";
-          void upload(files, "file-picker", null);
-        }}
-      />
       {dragging && (
         <div
           style={{
@@ -226,7 +205,7 @@ export default function UploadManager({
               letterSpacing: "0.08em",
             }}
           >
-            {projectId && projectId !== "all" ? "DROP TO PLACE ON CANVAS" : "DROP FILES TO UPLOAD"}
+            {disabled ? disabledMessage ?? "UPLOAD DISABLED" : "DROP TO PLACE ON CANVAS"}
           </div>
         </div>
       )}

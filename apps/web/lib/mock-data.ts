@@ -325,16 +325,13 @@ function generatePhotos(): Photo[] {
 /** The full mock archive — 235 photos, generated once at module load. */
 export const PHOTOS: Photo[] = generatePhotos();
 
-/** Project records for the switcher, including the synthetic "All my files". */
-export const PROJECTS: Project[] = [
-  { key: "all", label: "All my files", color: "var(--t3)", count: PHOTOS.length },
-  ...(Object.keys(PROJECTS_META) as ProjectKey[]).map((key) => ({
-    key,
-    label: PROJECTS_META[key].label,
-    color: PROJECTS_META[key].color,
-    count: PHOTOS.filter((p) => p.project === key).length,
-  })),
-];
+/** Project records for the mock API seam. */
+export const PROJECTS: Project[] = (Object.keys(PROJECTS_META) as ProjectKey[]).map((key) => ({
+  key,
+  label: PROJECTS_META[key].label,
+  color: PROJECTS_META[key].color,
+  count: PHOTOS.filter((p) => p.project === key).length,
+}));
 
 export const GROUP_LIST: GroupMeta[] = Object.values(GROUPS);
 export const SOURCE_LIST: SourceMeta[] = Object.values(SOURCES);

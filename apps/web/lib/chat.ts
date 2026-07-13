@@ -31,7 +31,7 @@ export const HELP_FAQ: FaqItem[] = [
   },
   {
     q: "What is the Neural view?",
-    a: "All my files shows every source you've connected — Google Drive, iCloud, Dropbox — as circles, with the folders and files inside them branching out as a connected graph.",
+    a: "Neural is a project's freeform canvas. Files appear directly as tiles, and you can pan, zoom, select, and arrange them spatially.",
   },
   {
     q: "How do project views differ?",

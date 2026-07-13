@@ -81,7 +81,7 @@ export function mkBez(
 }
 
 // ── Neural view: source gallery ─────────────────────────────────────────────
-// One tile per connected source — the persistent "All my files" canvas
+// One tile per connected source — retained for a possible future connector browser.
 // content. No connecting lines. Tiles start scattered (deterministic
 // golden-angle spiral, no Math.random) and can be dragged anywhere — a
 // per-key override then wins over the scattered default. Folders/files within

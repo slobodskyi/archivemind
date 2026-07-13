@@ -7,11 +7,10 @@ import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import Toast from "@/components/modals/Toast";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
-import UploadManager, { OPEN_UPLOAD_EVENT } from "@/components/upload/UploadManager";
+import UploadManager from "@/components/upload/UploadManager";
 
-/** Homepage hub (issue #17): drawer sidebar + project cards. Projects are
- *  real (Supabase); local upload works; cloud sources are "coming soon" until
- *  Phase 6. Opening a project navigates to its canvas at /projects/[id]. */
+/** Homepage hub (issue #17): project-only navigation and project cards.
+ *  Opening a project navigates to its canvas at /projects/[id]. */
 
 interface Account {
   initials: string;
@@ -29,11 +28,9 @@ function cardColor(id: string): string {
 export default function HomeClient({
   account,
   projects,
-  allCount,
 }: {
   account: Account;
   projects: ProjectCard[];
-  allCount: number;
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
@@ -87,17 +84,7 @@ export default function HomeClient({
 
         <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <NavItem label="Projects" active icon={<GridIcon />} />
-          <NavItem label="All my files" count={allCount} icon={<FilesIcon />} href="/projects/all" />
         </nav>
-
-        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--tm)", padding: "20px 8px 8px" }}>
-          Sources
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <NavItem label="Local upload" icon={<UploadIcon />} onClick={() => window.dispatchEvent(new Event(OPEN_UPLOAD_EVENT))} />
-          <NavItem label="Google Drive" muted icon={<CloudIcon />} onClick={() => flash("Google Drive — coming soon")} />
-          <NavItem label="Dropbox" muted icon={<CloudIcon />} onClick={() => flash("Dropbox — coming soon")} />
-        </div>
 
         <div style={{ flex: 1 }} />
 
@@ -186,15 +173,6 @@ export default function HomeClient({
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
-          {/* pinned: all files */}
-          <ProjectCardView
-            title="All my files"
-            count={allCount}
-            previews={[]}
-            accent="var(--t3)"
-            pinned
-            href="/projects/all"
-          />
           {projects.map((p) => (
             <ProjectCardView
               key={p.id}
@@ -214,10 +192,8 @@ export default function HomeClient({
         )}
       </main>
 
-      <UploadManager />
+      <UploadManager projectId="all" disabled disabledMessage="OPEN A PROJECT TO UPLOAD" />
 
-      {/* Shared toast primitive (top-center) — the old bottom-center div sat
-          in the exact spot of the upload pill and overlapped it. */}
       <Toast show={!!toast} text={toast ?? ""} />
     </div>
   );
@@ -228,14 +204,12 @@ function ProjectCardView({
   count,
   previews,
   accent,
-  pinned,
   href,
 }: {
   title: string;
   count: number;
   previews: string[];
   accent: string;
-  pinned?: boolean;
   href: string;
 }) {
   return (
@@ -247,7 +221,7 @@ function ProjectCardView({
         flexDirection: "column",
         textAlign: "left",
         background: "var(--bg-s)",
-        border: `1px solid ${pinned ? "var(--bdh)" : "var(--bd)"}`,
+        border: "1px solid var(--bd)",
         borderRadius: 3,
         overflow: "hidden",
         cursor: "pointer",
@@ -260,7 +234,7 @@ function ProjectCardView({
       <div style={{ position: "relative", height: 122, background: "var(--bg-el)", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 1 }}>
         {previews.length === 0 && (
           <div style={{ gridColumn: "1 / 3", gridRow: "1 / 3", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--tm)", fontSize: 11 }}>
-            {pinned ? "Your whole archive" : "Empty"}
+            Empty
           </div>
         )}
         {previews.slice(0, 4).map((src, i) => (
@@ -291,20 +265,12 @@ function ProjectCardView({
 
 function NavItem({
   label,
-  count,
   icon,
   active,
-  muted,
-  onClick,
-  href,
 }: {
   label: string;
-  count?: number;
   icon: React.ReactNode;
   active?: boolean;
-  muted?: boolean;
-  onClick?: () => void;
-  href?: string;
 }) {
   const style: React.CSSProperties = {
     display: "flex",
@@ -315,8 +281,7 @@ function NavItem({
     background: active ? "var(--bg-el)" : "transparent",
     border: 0,
     borderRadius: 2,
-    cursor: onClick || href ? "pointer" : "default",
-    color: muted ? "var(--t3)" : active ? "var(--t1)" : "var(--t2)",
+    color: active ? "var(--t1)" : "var(--t2)",
     fontSize: 13,
     fontFamily: "inherit",
     textDecoration: "none",
@@ -325,27 +290,12 @@ function NavItem({
     <>
       <span style={{ display: "flex", flex: "0 0 auto" }}>{icon}</span>
       <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
-      {count != null && <span style={{ fontSize: 10.5, color: "var(--tm)" }}>{count}</span>}
     </>
   );
-  if (href) {
-    return (
-      <Link href={href} onNavigate={() => navProgressStart()} style={style}>
-        {body}
-      </Link>
-    );
-  }
-  return (
-    <button onClick={onClick} style={style}>
-      {body}
-    </button>
-  );
+  return <div style={style}>{body}</div>;
 }
 
 /* icons (inline, match the mono/line style) */
 const iconProps = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const GridIcon = () => (<svg {...iconProps}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>);
-const FilesIcon = () => (<svg {...iconProps}><path d="M4 4h9l3 3v13H4z" /><path d="M13 4v3h3" /></svg>);
-const UploadIcon = () => (<svg {...iconProps}><path d="M12 16V4" /><path d="m7 9 5-5 5 5" /><path d="M4 20h16" /></svg>);
-const CloudIcon = () => (<svg {...iconProps}><path d="M6 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.5A4 4 0 0 1 18 18z" /></svg>);
 const SignOutIcon = () => (<svg {...iconProps}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></svg>);

@@ -31,7 +31,6 @@ import {
   minimapLayout as computeMinimapLayout,
   senseBubbles as computeSenseBubbles,
   senseExpandLayout as computeSenseExpand,
-  sourcesGallery,
   STICKY_NOTE_COLORS,
   timelineLayout as computeTimelineLayout,
   type Bounds,
@@ -301,7 +300,7 @@ export interface Workspace {
   isSenseView: boolean;
   showViewTabs: boolean;
   showAddToProject: boolean;
-  /** "All my files" root — drives the trimmed toolbar and enables source double-click browsing. */
+  /** Legacy workspace recovery grid; it is not part of primary navigation. */
   allFilesMode: boolean;
   projectMode: boolean;
   setCanvasRef: (el: HTMLDivElement | null) => void;
@@ -395,7 +394,7 @@ export interface Workspace {
   closeAcct: () => void;
   openProj: () => void;
   closeProj: () => void;
-  selectProject: (k: ProjectKey | "all") => void;
+  selectProject: (k: ProjectKey) => void;
   goHome: () => void;
 
   // Add to project
@@ -405,7 +404,7 @@ export interface Workspace {
   addToProject: (key: ProjectKey) => void;
   createNewProject: () => void;
 
-  // Source browser sidebar (Finder-style, All My Files)
+  // Legacy source browser sidebar (not part of primary navigation)
   sidebarOpen: boolean;
   sidebarTabs: PhotoSource[];
   sidebarActiveTab: PhotoSource | null;
@@ -743,9 +742,7 @@ export function useWorkspace(
           x1: dx0,
           y1: dy0,
           moved: false,
-          assetPositions: s.projCurrent === "all"
-            ? null
-            : assetGallery(s.photos, s.galleryOverrides.asset).pos,
+          assetPositions: assetGallery(s.photos, s.galleryOverrides.asset).pos,
           initialSelection: s.selectedIds,
           additive: e.shiftKey || e.metaKey || e.ctrlKey,
         };
@@ -1140,10 +1137,8 @@ export function useWorkspace(
       overrides: GalleryOverrides,
       previews: CanvasUploadPreview[] = [],
     ): { pos: Record<string, TilePos>; bounds: Bounds } =>
-      currentProjectId === "all"
-        ? sourcesGallery(photos, overrides.source)
-        : assetGallery(projectCanvasItems(photos, previews), overrides.asset),
-    [currentProjectId],
+      assetGallery(projectCanvasItems(photos, previews), overrides.asset),
+    [],
   );
 
   const computeFit = useCallback(
@@ -1156,13 +1151,11 @@ export function useWorkspace(
       const r = rect();
       if (view === "neural") {
         const bounds = neuralGalleryFor(allPhotos, overrides, previews).bounds;
-        return currentProjectId === "all"
-          ? centerAtScale(bounds, r, DEFAULT_ZOOM)
-          : fitBounds(bounds, r);
+        return fitBounds(bounds, r);
       }
       return fitView(view, r);
     },
-    [currentProjectId, rect, neuralGalleryFor],
+    [rect, neuralGalleryFor],
   );
 
   const doFit = useCallback(() => {
@@ -1202,9 +1195,8 @@ export function useWorkspace(
         expanded: { kind: null, key: null },
         expandOverrides: {},
         bulkPanelOpen: false,
-        // Source browser is an "All my files" concept — switching to a
-        // project-scoped view (timeline/map/sense) should retire the sidebar
-        // so it can't overlap the AI chat panel that lives in the same slot.
+        // View changes retire the right-side source browser so it cannot
+        // overlap the AI chat panel that lives in the same slot.
         sidebarTabs: [],
         sidebarActiveTab: null,
         sidebarSelectedIds: [],
@@ -1233,7 +1225,7 @@ export function useWorkspace(
       const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
       const fitted = fitBounds(bounds, r);
       setState(
-        currentProjectId !== "all" && fitted.scale < DEFAULT_ZOOM
+        fitted.scale < DEFAULT_ZOOM
           ? fitted
           : centerAtScale(bounds, r, DEFAULT_ZOOM),
       );
@@ -1241,7 +1233,7 @@ export function useWorkspace(
       return true;
     }
     return false;
-  }, [currentProjectId, rect, setState, neuralGalleryFor]);
+  }, [rect, setState, neuralGalleryFor]);
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 
@@ -1304,11 +1296,11 @@ export function useWorkspace(
   // Real projects are routes (issue #17): switching navigates; the server
   // refetches the scoped assets and the workspace remounts.
   const selectProject = useCallback(
-    (k: ProjectKey | "all") => {
+    (k: ProjectKey) => {
       setState({ projOpen: false });
       if (k === currentProjectId) return; // already here — a push would be a no-op reload
       navProgressStart();
-      router.push(k === "all" ? "/projects/all" : `/projects/${k}`);
+      router.push(`/projects/${k}`);
     },
     [setState, router, currentProjectId],
   );

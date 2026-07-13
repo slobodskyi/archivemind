@@ -26,15 +26,6 @@ export default function HomeLoading() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <Sk w="100%" h={33} />
-          <Sk w="100%" h={33} />
-        </div>
-        <div style={{ padding: "22px 8px 10px" }}>
-          <Sk w={58} h={10} />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <Sk w="100%" h={33} />
-          <Sk w="100%" h={33} />
-          <Sk w="100%" h={33} />
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ borderTop: "1px solid var(--bd)", paddingTop: 12, display: "flex", alignItems: "center", gap: 9 }}>
