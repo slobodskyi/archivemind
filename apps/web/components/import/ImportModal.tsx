@@ -4,7 +4,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
-import { runUpload, type UploadProgress } from "@/lib/upload-client";
+import {
+  createUploadBatchId,
+  runUpload,
+  uploadCandidates,
+  type UploadProgress,
+} from "@/lib/upload-client";
+import type { UploadBatchResult, UploadBatchStart, UploadResult } from "@/types";
 
 /** Import modal (issue #17): opens on a fresh project (or via the toolbar
  *  "Add"). Left = source picker (Local active; Drive/Dropbox land in Phase 6);
@@ -21,11 +27,15 @@ export default function ImportModal({
   onClose,
   projectId,
   projectName,
+  onBatchStart,
+  onBatchSettled,
 }: {
   open: boolean;
   onClose: () => void;
   projectId: string;
   projectName: string;
+  onBatchStart?: (batch: UploadBatchStart) => void;
+  onBatchSettled?: (result: UploadBatchResult) => void;
 }) {
   const router = useRouter();
   const [source, setSource] = useState<Source>("local");
@@ -34,6 +44,7 @@ export default function ImportModal({
   const [result, setResult] = useState<{ added: number; errors: string[] } | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const busyRef = useRef(false);
   const smooth = useSmoothProgress(prog.progress, phase === "uploading");
   const pct = Math.round(smooth * 100);
 
@@ -52,17 +63,40 @@ export default function ImportModal({
   if (!open) return null;
 
   async function handleFiles(files: File[]) {
-    if (files.length === 0 || phase === "uploading") return;
+    if (files.length === 0 || busyRef.current) return;
+    busyRef.current = true;
+    const id = createUploadBatchId();
+    const candidates = uploadCandidates(files);
+    if (candidates.length > 0) {
+      onBatchStart?.({ batchId: id, origin: "import-modal", clientPoint: null, files: candidates });
+    }
     setPhase("uploading");
     setResult(null);
-    const { assetIds, errors, skipped } = await runUpload(files, {
-      projectId,
-      onProgress: (p) => setProg(p),
-    });
-    const errs = [...errors];
-    if (skipped > 0) errs.push(`${skipped} file(s) skipped — over 100 MiB or empty`);
-    if (assetIds.length > 0) router.refresh();
-    setResult({ added: assetIds.length, errors: errs });
+    let uploadResult: UploadResult;
+    try {
+      uploadResult = await runUpload(files, {
+        projectId,
+        onProgress: (p) => setProg(p),
+      });
+    } catch (error) {
+      uploadResult = {
+        assetIds: [],
+        uploaded: [],
+        failedIndexes: candidates.map((item) => item.inputIndex),
+        skippedIndexes: [],
+        jobId: null,
+        projectLink: "not-requested",
+        errors: [error instanceof Error ? error.message : "Upload failed"],
+        skipped: 0,
+      };
+    } finally {
+      busyRef.current = false;
+    }
+    if (candidates.length > 0) onBatchSettled?.({ batchId: id, ...uploadResult });
+    const errs = [...uploadResult.errors];
+    if (uploadResult.skipped > 0) errs.push(`${uploadResult.skipped} file(s) skipped — empty, over 100 MiB, or beyond the 500-file batch limit`);
+    if (uploadResult.assetIds.length > 0) router.refresh();
+    setResult({ added: uploadResult.assetIds.length, errors: errs });
     setPhase("done");
   }
 
@@ -119,9 +153,10 @@ export default function ImportModal({
               {source === "local" ? "Local files" : source === "gdrive" ? "Google Drive" : "Dropbox"}
             </span>
             <button
-              onClick={onClose}
+              onClick={phase === "uploading" ? undefined : onClose}
+              disabled={phase === "uploading"}
               aria-label="Close"
-              style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", color: "var(--t2b)", cursor: "pointer", borderRadius: 2 }}
+              style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", color: "var(--t2b)", cursor: phase === "uploading" ? "default" : "pointer", opacity: phase === "uploading" ? 0.45 : 1, borderRadius: 2 }}
             >
               <CloseIcon />
             </button>

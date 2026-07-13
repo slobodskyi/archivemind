@@ -2,7 +2,7 @@
 
 Date: 2026-07-07
 
-Status: Accepted
+Status: Superseded in part by [0014](0014-project-first-navigation.md)
 
 ## Context
 

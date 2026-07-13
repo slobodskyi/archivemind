@@ -1,159 +1,155 @@
+import type { CanvasUploadStage } from "@/types";
 import type { TilePos } from "@/lib/layout";
-import { OpenIcon, CloseIcon } from "@/components/icons/icons";
 
 interface PhotoTileProps {
-  id: string;
-  seed: string;
-  /** Native dimensions for the picsum src (source uses w*2 × h*2). */
-  natW: number;
-  natH: number;
+  src: string | null;
+  filename: string;
   pos: TilePos;
+  stage: CanvasUploadStage;
+  message?: string | null;
   selected: boolean;
   hovered: boolean;
-  onDown: (e: React.PointerEvent) => void;
-  onEnter: () => void;
-  onLeave: () => void;
-  onOpen: (e: React.MouseEvent) => void;
-  onDelete: (e: React.MouseEvent) => void;
+  interactive: boolean;
+  onDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onEnter?: () => void;
+  onLeave?: () => void;
+  onOpen?: () => void;
 }
 
+const STAGE_LABEL: Record<Exclude<CanvasUploadStage, "ready">, string> = {
+  uploading: "Uploading",
+  processing: "Processing",
+  error: "Needs attention",
+};
+
 export default function PhotoTile({
-  seed,
-  natW,
-  natH,
+  src,
+  filename,
   pos,
+  stage,
+  message,
   selected,
   hovered,
+  interactive,
   onDown,
   onEnter,
   onLeave,
   onOpen,
-  onDelete,
 }: PhotoTileProps) {
-  const src = `https://picsum.photos/seed/${seed}/${natW * 2}/${natH * 2}`;
-  const z = hovered ? 30 : selected ? 12 : 2;
+  const zIndex = hovered ? 30 : selected ? 12 : 2;
+  const status = stage === "ready" ? "" : `, ${STAGE_LABEL[stage]}`;
 
   return (
-    <div
-      onPointerDown={onDown}
+    <button
+      type="button"
+      disabled={!interactive}
+      aria-label={`${filename}${status}`}
+      title={message ?? filename}
+      onPointerDown={interactive ? onDown : undefined}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      onDoubleClick={interactive ? onOpen : undefined}
+      onKeyDown={(event) => {
+        if (interactive && event.key === "Enter") onOpen?.();
+      }}
       style={{
         position: "absolute",
         left: pos.x,
         top: pos.y,
         width: pos.w,
-        zIndex: z,
-        transition:
-          "left .55s cubic-bezier(.22,1,.36,1), top .55s cubic-bezier(.22,1,.36,1)",
-        cursor: "grab",
+        padding: 0,
+        border: 0,
+        background: "transparent",
+        color: "inherit",
+        font: "inherit",
+        textAlign: "left",
+        zIndex,
+        cursor: interactive ? "grab" : "default",
       }}
     >
       {selected && (
-        <div
+        <span
+          aria-hidden="true"
           style={{
             position: "absolute",
-            left: -5,
-            top: -5,
-            right: -5,
-            bottom: -5,
+            inset: -5,
             border: "2px solid var(--ac2)",
-            borderRadius: 2,
+            borderRadius: 3,
             pointerEvents: "none",
           }}
-        >
-          <div style={{ position: "absolute", left: -4, top: -4, width: 8, height: 8, background: "#fff", borderRadius: 1 }} />
-          <div style={{ position: "absolute", right: -4, top: -4, width: 8, height: 8, background: "#fff", borderRadius: 1 }} />
-          <div style={{ position: "absolute", left: -4, bottom: -4, width: 8, height: 8, background: "#fff", borderRadius: 1 }} />
-          <div style={{ position: "absolute", right: -4, bottom: -4, width: 8, height: 8, background: "#fff", borderRadius: 1 }} />
-        </div>
+        />
       )}
-      <div
+      <span
+        aria-hidden="true"
         style={{
           position: "relative",
-          borderRadius: 3,
+          display: "block",
+          width: "100%",
+          height: pos.h,
           overflow: "hidden",
-          border: "1px solid var(--bd)",
+          border: `1px solid ${stage === "error" ? "var(--red)" : selected ? "var(--ac2)" : "var(--bd)"}`,
+          borderRadius: 3,
           background: "var(--bg-in)",
+          backgroundImage: src ? `url(${src})` : undefined,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          boxShadow: hovered ? "0 12px 28px rgba(0,0,0,.42)" : "none",
         }}
       >
-        <div
-          style={{
-            width: "100%",
-            height: pos.h,
-            backgroundImage: `url(${src})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
-        />
-        {hovered && (
-          <div
+        {!src && (
+          <span
             style={{
               position: "absolute",
               inset: 0,
-              background: "rgba(0,0,0,.24)",
-              pointerEvents: "none",
+              display: "grid",
+              placeItems: "center",
+              color: "var(--t3)",
+              fontSize: 10,
+              letterSpacing: ".08em",
+              textTransform: "uppercase",
             }}
-          />
+          >
+            {filename.split(".").pop()?.slice(0, 5) || "FILE"}
+          </span>
         )}
-      </div>
-      {hovered && (
-        <div
-          style={{
-            position: "absolute",
-            top: -38,
-            left: "50%",
-            transform: "translateX(-50%)",
-            display: "flex",
-            alignItems: "center",
-            gap: 2,
-            background: "rgba(20,20,20,.95)",
-            border: "1px solid var(--bd)",
-            borderRadius: 2,
-            padding: 3,
-            backdropFilter: "blur(12px)",
-            boxShadow: "0 8px 24px rgba(0,0,0,.5)",
-            zIndex: 5,
-          }}
-        >
-          <button
-            onClick={onOpen}
-            aria-label="Open photo"
+        {hovered && <span style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.16)" }} />}
+        {stage !== "ready" && (
+          <span
             style={{
-              display: "flex",
-              width: 26,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              background: "transparent",
-              color: "var(--t2)",
+              position: "absolute",
+              left: 7,
+              bottom: 7,
+              maxWidth: "calc(100% - 14px)",
+              padding: "4px 6px",
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,.12)",
               borderRadius: 2,
-              cursor: "pointer",
+              background: "rgba(8,8,8,.82)",
+              color: stage === "error" ? "var(--red)" : "var(--t2)",
+              fontSize: 9.5,
+              lineHeight: 1,
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
           >
-            <OpenIcon />
-          </button>
-          <button
-            onClick={onDelete}
-            aria-label="Delete photo"
-            style={{
-              display: "flex",
-              width: 26,
-              height: 26,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              background: "transparent",
-              color: "var(--red)",
-              borderRadius: 2,
-              cursor: "pointer",
-            }}
-          >
-            <CloseIcon width={13} height={13} strokeWidth={1.6} />
-          </button>
-        </div>
-      )}
-    </div>
+            {STAGE_LABEL[stage]}
+          </span>
+        )}
+      </span>
+      <span
+        style={{
+          display: "block",
+          marginTop: 6,
+          overflow: "hidden",
+          color: stage === "error" ? "var(--red)" : "var(--t2)",
+          fontSize: 10.5,
+          lineHeight: 1.3,
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {filename}
+      </span>
+    </button>
   );
 }

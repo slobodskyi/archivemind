@@ -1,4 +1,4 @@
-import type { Photo, PhotoGroup, PhotoSource } from "@/types";
+import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { photoSrc } from "./img";
 import { GROUPS, SOURCES } from "./mock-data";
 import type { ViewMode } from "@/types";
@@ -91,9 +91,10 @@ export function mkBez(
 
 export interface GalleryOverrides {
   source: Record<string, { x: number; y: number }>;
+  asset: Record<string, CanvasPoint>;
 }
 
-export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {} };
+export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {} };
 
 export interface GalleryTile {
   key: string;
@@ -201,6 +202,104 @@ export function sourcesGallery(
   return { tiles, pos, bounds };
 }
 
+// ── Project canvas: direct asset gallery ───────────────────────────────────
+
+const ASSET_TILE_LONG_EDGE = 148;
+const ASSET_CELL_W = 184;
+const ASSET_CELL_H = 176;
+const ASSET_GRID_COLS = 6;
+const ASSET_GRID_X = 80;
+const ASSET_GRID_Y = 90;
+
+function assetTileSize(photo: Pick<Photo, "w" | "h">): { w: number; h: number } {
+  const sourceW = Number.isFinite(photo.w) && photo.w > 0 ? photo.w : 4;
+  const sourceH = Number.isFinite(photo.h) && photo.h > 0 ? photo.h : 3;
+  const aspect = sourceW / sourceH;
+  if (aspect >= 1) {
+    return { w: ASSET_TILE_LONG_EDGE, h: Math.max(88, Math.round(ASSET_TILE_LONG_EDGE / aspect)) };
+  }
+  return { w: Math.max(88, Math.round(ASSET_TILE_LONG_EDGE * aspect)), h: ASSET_TILE_LONG_EDGE };
+}
+
+function positionsBounds(pos: Record<string, TilePos>): Bounds {
+  const values = Object.values(pos);
+  if (values.length === 0) return { xl: 0, yt: 0, xr: 1000, yb: 700 };
+  return {
+    xl: Math.min(...values.map((p) => p.x)),
+    yt: Math.min(...values.map((p) => p.y)),
+    xr: Math.max(...values.map((p) => p.x + p.w)),
+    yb: Math.max(...values.map((p) => p.y + p.h)),
+  };
+}
+
+/**
+ * Direct file layout for a project. The API returns newest-first, so reversing
+ * makes new uploads append without moving existing default positions.
+ * Overrides store centers so a later real preview/aspect ratio keeps the
+ * user's drop/drag anchor stable.
+ */
+export function assetGallery(
+  photos: readonly Pick<Photo, "id" | "w" | "h">[],
+  overrides: Readonly<Record<string, CanvasPoint>>,
+): { pos: Record<string, TilePos>; bounds: Bounds } {
+  const pos: Record<string, TilePos> = {};
+  [...photos].reverse().forEach((photo, index) => {
+    const size = assetTileSize(photo);
+    const col = index % ASSET_GRID_COLS;
+    const row = Math.floor(index / ASSET_GRID_COLS);
+    const defaultCenter = {
+      x: ASSET_GRID_X + col * ASSET_CELL_W + ASSET_CELL_W / 2 + (hash(photo.id + "x") % 11) - 5,
+      y: ASSET_GRID_Y + row * ASSET_CELL_H + ASSET_CELL_H / 2 + (hash(photo.id + "y") % 11) - 5,
+    };
+    const center = overrides[photo.id] ?? defaultCenter;
+    pos[photo.id] = {
+      x: center.x - size.w / 2,
+      y: center.y - size.h / 2,
+      w: size.w,
+      h: size.h,
+      cx: center.x,
+      cy: center.y,
+    };
+  });
+  return { pos, bounds: positionsBounds(pos) };
+}
+
+/** Centers a small grid of newly dropped assets around the pointer anchor. */
+export function droppedAssetCenters(ids: readonly string[], anchor: CanvasPoint): Record<string, CanvasPoint> {
+  if (ids.length === 0) return {};
+  const cols = Math.min(4, Math.ceil(Math.sqrt(ids.length)));
+  const rows = Math.ceil(ids.length / cols);
+  const startX = anchor.x - ((cols - 1) * ASSET_CELL_W) / 2;
+  const startY = anchor.y - ((rows - 1) * ASSET_CELL_H) / 2;
+  return Object.fromEntries(
+    ids.map((id, index) => {
+      const row = Math.floor(index / cols);
+      const rowStart = row * cols;
+      const rowCount = Math.min(cols, ids.length - rowStart);
+      const centeredRowX = anchor.x - ((rowCount - 1) * ASSET_CELL_W) / 2;
+      return [
+        id,
+        {
+          x: rowCount === cols ? startX + (index % cols) * ASSET_CELL_W : centeredRowX + (index - rowStart) * ASSET_CELL_W,
+          y: startY + row * ASSET_CELL_H,
+        },
+      ];
+    }),
+  );
+}
+
+/** Strict rectangle intersection: touching an edge alone is not a hit. */
+export function hitTestTiles(pos: Readonly<Record<string, TilePos>>, bounds: Bounds): string[] {
+  return Object.entries(pos)
+    .filter(([, tile]) =>
+      tile.x < bounds.xr &&
+      tile.x + tile.w > bounds.xl &&
+      tile.y < bounds.yb &&
+      tile.y + tile.h > bounds.yt,
+    )
+    .map(([id]) => id);
+}
+
 // ── Fit-to-content ───────────────────────────────────────────────────────────
 
 export interface Bounds {
@@ -238,8 +337,8 @@ export function fitBounds(bounds: Bounds, rect: Rect): Transform {
     bottom = 104;
   const bw = Math.max(bounds.xr - bounds.xl, 1),
     bh = Math.max(bounds.yb - bounds.yt, 1);
-  const availW = rect.width - leftPad - pad * 2,
-    availH = rect.height - top - bottom;
+  const availW = Math.max(1, rect.width - leftPad - pad * 2),
+    availH = Math.max(1, rect.height - top - bottom);
   const sc = Math.min(availW / bw, availH / bh, 1.05);
   return {
     scale: sc,
