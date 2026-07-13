@@ -56,14 +56,20 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 
 **✅ Deploy checkpoint 2 — CLOSED 2026-07-10:** cloud worker (Railway) processes prod uploads end-to-end — previews & EXIF appear in the deployed UI (large-batch soak → #9; Realtime progress → #12).
 
-### Phase 2 — Analyze pipeline — IN PROGRESS (worker core ✅ #55 + user-trigger route ✅; remaining: drawer #11, bulk-AI panel + Realtime progress #12)
+### Phase 2 — Analyze pipeline — ✅ DONE 2026-07-10 (#55 #58 #59)
 
-- **Lane K:** analyze handler: medium preview → `gemini-3.1-flash-lite` via `generateContent` + `responseSchema` structured output (zod schema from `packages/shared`) → tags/facts upserts; embeddings via `gemini-embedding-2` (one `Content` per image, 768 dims) → `embeddings`; `usage_events` on every call; concurrency cap 5 + 429 backoff.
-- **Lane W:** drawer shows real tags/captions/facts/EXIF (`GET /api/assets/:id`); bulk-AI panel → real `POST /api/jobs` + Realtime progress (replaces fake `setInterval`); manual tag add/remove; fact confirm (`PATCH /api/facts/:id`).
+- **Lane K:** analyze handler (#55) — medium preview → `gemini-3.1-flash-lite` (`generateContent` + `responseSchema`) → tags/facts upserts; `gemini-embedding-2` (one `Content`, 768 dims) → `embeddings`; `usage_events` per call; 429 backoff. Verified with a real Gemini call (~$0.0004/photo).
+- **Lane W:** drawer on real data (#58 — tags/facts/EXIF, dblclick sidebar → drawer); **Analyze N with AI** button → real `POST /api/jobs` + `useJobProgress` Broadcast channel → toast + `router.refresh()` (#59, closed #12). Mock `setInterval`/`finishBulk` deleted.
 
-### Phase 3 — Captions (~week 5, can overlap Phase 4)
+### Phase 5 (pulled forward) — Homepage + real projects — ✅ DONE 2026-07-10 (#62 #63; part of #17)
 
-Caption handler (langs × styles, prompt templates in `packages/shared/prompts.ts` + per-project `caption_prompt`); `PATCH /api/captions/:id` editing (`is_edited`), regenerate-confirm flow; drawer language/style switching backed by real rows.
+- Homepage hub at `/` (drawer sidebar + real project cards); canvas moved to `/projects/[id]` (`all` = whole workspace, else the project's M:N assets). Real CRUD: `POST /api/projects`, `POST /api/projects/[id]/assets`; `lib/projects.ts` card previews; `getRealPhotos(supabase, projectId?)`. `useWorkspace` project system is now real (mock `customProjects`/`photos[].project` gone).
+- Import flow (#63): a fresh empty project auto-opens an **import modal** (left source picker — Local active, Drive/Dropbox `SOON` — right drop/browse zone) that uploads and links assets to the project; shared `lib/upload-client.ts` backs both the modal and the global drag-drop.
+- **Remaining #17/Phase-5:** project rename/delete, `caption_prompt` field, project members; canvas at scale (#18 virtualize, #19 timeline on real `taken_at`, #22 layout persistence/undo-redo); Map/Sense on live data (#20/#21, fast-follow). **Figma pixel-pass** on homepage + modal is a pending fast-follow.
+
+### Phase 3 — Captions — NEXT (~week 5, can overlap Phase 4)
+
+Caption handler (langs × styles, prompt templates in `packages/shared` + per-project `caption_prompt`); `POST /api/jobs` gains `type='caption'`; `PATCH /api/captions/:id` editing (`is_edited`), regenerate-confirm flow; drawer language/style switching backed by real `captions` rows (retire the mock `CAPTIONS` map). A parked branch `feat/captions` (~90%: worker handler + Regenerate) predates the homepage restructure and has diverged — treat as reference, reimplement cleanly on current `main`.
 
 ### Phase 4 — Search (~week 5–6)
 
