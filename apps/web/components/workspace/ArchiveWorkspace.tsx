@@ -6,7 +6,6 @@ import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
-import NeuralView from "@/components/canvas/NeuralView";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import TimelineView from "@/components/canvas/TimelineView";
 import TimelineHeader from "@/components/canvas/TimelineHeader";
@@ -85,7 +84,7 @@ export default function ArchiveWorkspace({
             onDelete={ws.deleteStickyNote}
           />
         )}
-        {ws.isNeural && ws.projectMode && (
+        {ws.isNeural && (
           <ProjectAssetView
             photos={ws.projectPhotos}
             previews={ws.uploadPreviews}
@@ -95,14 +94,6 @@ export default function ArchiveWorkspace({
             onAssetDown={ws.onAssetDown}
             setHover={ws.setHover}
             openDrawer={ws.openDrawer}
-          />
-        )}
-        {ws.isNeural && !ws.projectMode && (
-          <NeuralView
-            photos={ws.photos}
-            galleryOverrides={ws.galleryOverrides}
-            onGalleryNodeDown={ws.onGalleryNodeDown}
-            onHubOpen={ws.openSourceTab}
           />
         )}
         {ws.isTimelineView && (
@@ -148,9 +139,11 @@ export default function ArchiveWorkspace({
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t2)" }}>
             {ws.projCurrent === "all" ? "Your archive is empty" : "This project is empty"}
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Drop files anywhere — or import from a source</div>
+          <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+            {ws.allFilesMode ? "Open a project to upload files" : "Drop files anywhere — or import from a source"}
+          </div>
           <button
-            onClick={ws.addToolbar}
+            onClick={ws.allFilesMode ? ws.goHome : ws.addToolbar}
             style={{
               pointerEvents: "auto",
               marginTop: 6,
@@ -167,7 +160,7 @@ export default function ArchiveWorkspace({
               fontFamily: "inherit",
             }}
           >
-            + Import files
+            {ws.allFilesMode ? "View projects" : "+ Import files"}
           </button>
         </div>
       )}
@@ -317,18 +310,21 @@ export default function ArchiveWorkspace({
         onRun={ws.runBulk}
       />
 
-      <ImportModal
-        open={ws.impOpen}
-        onClose={ws.closeImport}
-        projectId={ws.projCurrent}
-        projectName={ws.projLabel}
-        onBatchStart={ws.onUploadBatchStart}
-        onBatchSettled={ws.onUploadBatchSettled}
-      />
+      {ws.projectMode && (
+        <ImportModal
+          open={ws.impOpen}
+          onClose={ws.closeImport}
+          projectId={ws.projCurrent}
+          projectName={ws.projLabel}
+          onBatchStart={ws.onUploadBatchStart}
+          onBatchSettled={ws.onUploadBatchSettled}
+        />
+      )}
 
       <UploadManager
         projectId={ws.projCurrent}
-        disabled={ws.impOpen}
+        disabled={ws.impOpen || ws.allFilesMode}
+        disabledMessage={ws.allFilesMode ? "OPEN A PROJECT TO UPLOAD" : undefined}
         onBatchStart={ws.onUploadBatchStart}
         onBatchSettled={ws.onUploadBatchSettled}
       />

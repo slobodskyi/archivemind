@@ -37,4 +37,6 @@ model, project M:N membership, or project filtering.
 Uploads made inside a project must continue to link the resulting assets to
 that project. Before removing any remaining global upload entry point, the UI
 must either require a target project or provide a library surface for assets
-without project membership.
+without project membership. The project-canvas implementation now satisfies
+this by exposing upload controls only inside an open project; the hidden legacy
+grid remains available solely to recover previously unassigned assets.

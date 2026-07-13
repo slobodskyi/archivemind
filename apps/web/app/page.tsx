@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import HomeClient from "@/components/home/HomeClient";
 import { ensureWorkspace } from "@/lib/bootstrap";
-import { getAllAssetsCount, getProjectCards } from "@/lib/projects";
+import { getProjectCards } from "@/lib/projects";
 import { createClient } from "@/lib/supabase/server";
 
 /** Homepage hub (issue #17) — the landing page after login: project cards +
- *  sources + account. The canvas lives at /projects/[id]. */
+ *  account. The canvas lives at /projects/[id]. */
 export default async function Home() {
   const supabase = await createClient();
   const {
@@ -19,10 +19,9 @@ export default async function Home() {
   // idempotent bootstrap; on the very first login the sibling selects may see
   // an empty workspace mid-creation, which renders the same (correct) empty
   // state a brand-new account has anyway.
-  const [, projects, allCount, { data: profile }] = await Promise.all([
+  const [, projects, { data: profile }] = await Promise.all([
     ensureWorkspace(supabase, user),
     getProjectCards(supabase),
-    getAllAssetsCount(supabase),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
 
@@ -30,5 +29,5 @@ export default async function Home() {
   const email = user.email ?? "";
   const initials = name.slice(0, 2).toUpperCase();
 
-  return <HomeClient account={{ initials, name, email }} projects={projects} allCount={allCount} />;
+  return <HomeClient account={{ initials, name, email }} projects={projects} />;
 }
