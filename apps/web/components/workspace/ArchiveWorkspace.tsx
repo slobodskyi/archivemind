@@ -7,14 +7,13 @@ import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
-import TimelineView from "@/components/canvas/TimelineView";
-import TimelineHeader from "@/components/canvas/TimelineHeader";
-import SenseView from "@/components/canvas/SenseView";
-import MapView from "@/components/map/MapView";
+import ColumnGridView from "@/components/canvas/ColumnGridView";
+import ColumnHeader from "@/components/canvas/ColumnHeader";
+import CloudView from "@/components/canvas/CloudView";
 import AppHeader from "@/components/header/AppHeader";
 import ViewTabs from "@/components/header/ViewTabs";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
-import ZoomDropdown, { MAP_ZOOM_PRESETS } from "@/components/header/ZoomDropdown";
+import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
 import ChatPanel from "@/components/chat/ChatPanel";
 import LeftToolbar from "@/components/toolbar/LeftToolbar";
@@ -68,22 +67,18 @@ export default function ArchiveWorkspace({
         canvasTransform={ws.canvasTransform}
         marquee={ws.marquee}
       >
-        {!ws.isMapView && (
-          <FrameOverlay
-            frames={ws.frames}
-            draft={ws.frameDraft}
-            onDeleteFrame={ws.deleteFrame}
-            onRenameFrame={ws.renameFrame}
-          />
-        )}
-        {!ws.isMapView && (
-          <StickyNoteOverlay
-            notes={ws.stickyNotes}
-            onDragStart={ws.onStickyDown}
-            onTextChange={ws.updateStickyText}
-            onDelete={ws.deleteStickyNote}
-          />
-        )}
+        <FrameOverlay
+          frames={ws.frames}
+          draft={ws.frameDraft}
+          onDeleteFrame={ws.deleteFrame}
+          onRenameFrame={ws.renameFrame}
+        />
+        <StickyNoteOverlay
+          notes={ws.stickyNotes}
+          onDragStart={ws.onStickyDown}
+          onTextChange={ws.updateStickyText}
+          onDelete={ws.deleteStickyNote}
+        />
         {ws.isNeural && (
           <ProjectAssetView
             photos={ws.projectPhotos}
@@ -94,24 +89,40 @@ export default function ArchiveWorkspace({
             onAssetDown={ws.onAssetDown}
             setHover={ws.setHover}
             openDrawer={ws.openDrawer}
+            deletePhoto={ws.deletePhoto}
           />
         )}
         {ws.isTimelineView && (
-          <TimelineView
+          <ColumnGridView
             layout={ws.timelineLayout}
             photos={ws.projectPhotos}
             selectedIds={ws.selectedIds}
-            onTlDown={ws.onTlDown}
+            hoveredId={ws.hoveredId}
+            onTileDown={ws.onTlDown}
+            setHover={ws.setHover}
+            openDrawer={ws.openDrawer}
+            deletePhoto={ws.deletePhoto}
+          />
+        )}
+        {ws.isMapView && (
+          <CloudView
+            layout={ws.mapLayout}
+            photos={ws.projectPhotos}
+            selectedIds={ws.selectedIds}
+            hoveredId={ws.hoveredId}
+            onTileDown={ws.onMapAssetDown}
+            setHover={ws.setHover}
+            openDrawer={ws.openDrawer}
+            deletePhoto={ws.deletePhoto}
           />
         )}
         {ws.isSenseView && (
-          <SenseView
-            bubbles={ws.senseBubbles}
-            expandedKey={ws.expanded.kind === "sense" ? ws.expanded.key : null}
-            expand={ws.senseExpand}
+          <CloudView
+            layout={ws.topicLayout}
+            photos={ws.projectPhotos}
+            selectedIds={ws.selectedIds}
             hoveredId={ws.hoveredId}
-            onToggle={ws.toggleSenseExpand}
-            onExpandFileDown={ws.onExpandFileDown}
+            onTileDown={ws.onTopicAssetDown}
             setHover={ws.setHover}
             openDrawer={ws.openDrawer}
             deletePhoto={ws.deletePhoto}
@@ -165,26 +176,7 @@ export default function ArchiveWorkspace({
         </div>
       )}
 
-      {ws.isTimelineView && <TimelineHeader layout={ws.timelineLayout} tx={ws.tx} scale={ws.scale} />}
-
-      {ws.isMapView && (
-        <MapView
-          photos={ws.projectPhotos}
-          contentLeft={ws.contentLeft}
-          drawerRight={ws.drawerRight}
-          expanded={ws.expanded}
-          expandOverrides={ws.expandOverrides}
-          hoveredId={ws.hoveredId}
-          onToggleMapExpand={ws.toggleMapExpand}
-          onCloseExpand={ws.closeExpand}
-          onExpandFileDown={ws.onExpandFileDown}
-          setHover={ws.setHover}
-          openDrawer={ws.openDrawer}
-          deletePhoto={ws.deletePhoto}
-          onMapReady={ws.registerMapApi}
-          onZoomChange={ws.onMapZoomChange}
-        />
-      )}
+      {ws.isTimelineView && <ColumnHeader layout={ws.timelineLayout} tx={ws.tx} scale={ws.scale} />}
 
       <AppHeader
         projLabel={ws.projLabel}
@@ -209,7 +201,6 @@ export default function ArchiveWorkspace({
         onClose={ws.closeZoomMenu}
         onSelectPct={ws.setZoomPct}
         onFit={ws.onFit}
-        presets={ws.isMapView ? MAP_ZOOM_PRESETS : undefined}
       />
 
       <ProjectDropdown
@@ -231,7 +222,6 @@ export default function ArchiveWorkspace({
         onSend={ws.sendChat}
       />
 
-      {!ws.isMapView && (
       <LeftToolbar
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
@@ -254,7 +244,6 @@ export default function ArchiveWorkspace({
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
       />
-      )}
 
       <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />
 

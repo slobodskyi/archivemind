@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
 
 :root {
   --bg: #080808;
@@ -163,23 +162,3 @@ textarea {
   animation: amSkeleton 1.4s ease-in-out infinite;
 }
 
-.leaflet-tile-pane {
-  filter: invert(1) grayscale(1) brightness(0.95) contrast(1.08);
-}
-.leaflet-control-attribution {
-  background: rgba(10, 10, 10, 0.7) !important;
-  color: var(--tm) !important;
-  font-size: 9px !important;
-}
-.leaflet-control-attribution a {
-  color: var(--t3) !important;
-}
-.leaflet-control-zoom a {
-  background: var(--bg-el) !important;
-  color: var(--t1) !important;
-  border-color: var(--bd) !important;
-}
-.am-marker {
-  background: transparent;
-  border: 0;
-}

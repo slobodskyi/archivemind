@@ -1,5 +1,5 @@
 import type { ViewMode } from "@/types";
-import { ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
+import { ViewCanvasIcon, ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
 
 interface ViewTabsProps {
   show: boolean;
@@ -7,7 +7,8 @@ interface ViewTabsProps {
   onSelect: (v: ViewMode) => void;
 }
 
-const TABS: { key: Extract<ViewMode, "timeline" | "map" | "sense">; label: string; Icon: typeof ViewTimelineIcon }[] = [
+const TABS: { key: ViewMode; label: string; Icon: typeof ViewTimelineIcon }[] = [
+  { key: "neural", label: "CANVAS", Icon: ViewCanvasIcon },
   { key: "timeline", label: "TIMELINE", Icon: ViewTimelineIcon },
   { key: "map", label: "MAP", Icon: ViewMapIcon },
   { key: "sense", label: "TOPIC", Icon: ViewSenseIcon },

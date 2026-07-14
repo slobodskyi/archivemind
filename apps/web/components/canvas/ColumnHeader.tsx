@@ -1,12 +1,14 @@
-import type { TimelineLayout } from "@/lib/layout";
+import type { ColumnGridLayout } from "@/lib/layout";
 
-interface TimelineHeaderProps {
-  layout: TimelineLayout;
+interface ColumnHeaderProps {
+  layout: ColumnGridLayout;
   tx: number;
   scale: number;
 }
 
-export default function TimelineHeader({ layout, tx, scale }: TimelineHeaderProps) {
+/** Shared sticky header for Timeline/Map/Topic's column grid — shows each
+ *  column's label (month / country / topic) + file count. */
+export default function ColumnHeader({ layout, tx, scale }: ColumnHeaderProps) {
   return (
     <div
       style={{
@@ -21,12 +23,12 @@ export default function TimelineHeader({ layout, tx, scale }: TimelineHeaderProp
         zIndex: 20,
       }}
     >
-      {layout.months.map((mo) => (
+      {layout.columns.map((col) => (
         <div
-          key={mo.key}
+          key={col.key}
           style={{
             position: "absolute",
-            left: tx + mo.x * scale,
+            left: tx + col.x * scale,
             top: 14,
             width: layout.colWidth * scale,
             whiteSpace: "nowrap",
@@ -35,9 +37,9 @@ export default function TimelineHeader({ layout, tx, scale }: TimelineHeaderProp
           }}
         >
           <span style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", letterSpacing: "0.02em" }}>
-            {mo.key}
+            {col.label}
           </span>
-          <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 8 }}>{mo.count} files</span>
+          <span style={{ fontSize: 11, color: "var(--t3)", marginLeft: 8 }}>{col.count} files</span>
         </div>
       ))}
     </div>

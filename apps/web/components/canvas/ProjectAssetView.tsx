@@ -13,6 +13,7 @@ interface ProjectAssetViewProps {
   onAssetDown: (event: React.PointerEvent, id: string, center: CanvasPoint) => void;
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
+  deletePhoto: (id: string) => void;
 }
 
 function ProjectAssetView({
@@ -24,6 +25,7 @@ function ProjectAssetView({
   onAssetDown,
   setHover,
   openDrawer,
+  deletePhoto,
 }: ProjectAssetViewProps) {
   const previewByAsset = useMemo(
     () => new Map(previews.flatMap((preview) => preview.assetId ? [[preview.assetId, preview]] : [])),
@@ -57,6 +59,10 @@ function ProjectAssetView({
             onEnter={() => setHover(photo.id)}
             onLeave={() => setHover(null)}
             onOpen={() => openDrawer(photo.id)}
+            onDelete={(e) => {
+              e.stopPropagation();
+              deletePhoto(photo.id);
+            }}
           />
         );
       })}

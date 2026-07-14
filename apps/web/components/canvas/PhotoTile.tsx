@@ -1,5 +1,6 @@
 import type { CanvasUploadStage } from "@/types";
 import type { TilePos } from "@/lib/layout";
+import { CloseIcon } from "@/components/icons/icons";
 
 interface PhotoTileProps {
   src: string | null;
@@ -14,6 +15,9 @@ interface PhotoTileProps {
   onEnter?: () => void;
   onLeave?: () => void;
   onOpen?: () => void;
+  /** Shown as a small hover button, top-right of the tile — every view that
+   *  renders a PhotoTile gets file deletion for free (issue: delete on any view). */
+  onDelete?: (e: React.MouseEvent) => void;
 }
 
 const STAGE_LABEL: Record<Exclude<CanvasUploadStage, "ready">, string> = {
@@ -35,35 +39,37 @@ export default function PhotoTile({
   onEnter,
   onLeave,
   onOpen,
+  onDelete,
 }: PhotoTileProps) {
   const zIndex = hovered ? 30 : selected ? 12 : 2;
   const status = stage === "ready" ? "" : `, ${STAGE_LABEL[stage]}`;
 
   return (
+    <div
+      style={{ position: "absolute", left: pos.x, top: pos.y, width: pos.w, zIndex }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
     <button
       type="button"
       disabled={!interactive}
       aria-label={`${filename}${status}`}
       title={message ?? filename}
       onPointerDown={interactive ? onDown : undefined}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
       onDoubleClick={interactive ? onOpen : undefined}
       onKeyDown={(event) => {
         if (interactive && event.key === "Enter") onOpen?.();
       }}
       style={{
-        position: "absolute",
-        left: pos.x,
-        top: pos.y,
-        width: pos.w,
+        position: "relative",
+        display: "block",
+        width: "100%",
         padding: 0,
         border: 0,
         background: "transparent",
         color: "inherit",
         font: "inherit",
         textAlign: "left",
-        zIndex,
         cursor: interactive ? "grab" : "default",
       }}
     >
@@ -151,5 +157,32 @@ export default function PhotoTile({
         {filename}
       </span>
     </button>
+    {interactive && onDelete && hovered && (
+      <button
+        type="button"
+        aria-label={`Delete ${filename}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onDelete}
+        style={{
+          position: "absolute",
+          top: 4,
+          right: 4,
+          display: "flex",
+          width: 20,
+          height: 20,
+          alignItems: "center",
+          justifyContent: "center",
+          border: "1px solid rgba(255,255,255,.14)",
+          borderRadius: 2,
+          background: "rgba(10,10,10,.65)",
+          color: "#fff",
+          cursor: "pointer",
+          zIndex: 5,
+        }}
+      >
+        <CloseIcon width={10} height={10} strokeWidth={2.2} />
+      </button>
+    )}
+    </div>
   );
 }
