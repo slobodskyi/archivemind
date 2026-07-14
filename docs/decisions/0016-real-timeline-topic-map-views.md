@@ -2,7 +2,9 @@
 
 Date: 2026-07-13
 
-Status: Accepted
+Status: Accepted · **Map/Topic parts superseded by [0017](0017-column-grid-map-topic-photo-delete.md),
+then by [0018](0018-cloud-clusters-map-topic-default-zoom.md) — read 0018 for what ships
+today.** The real-capture-date Timeline decided here is unchanged and still current.
 
 ## Context
 

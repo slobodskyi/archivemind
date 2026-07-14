@@ -15,8 +15,10 @@ can't infer on its own.
 
 ## Branch protection
 `main` is protected by a GitHub repository ruleset (not classic branch
-protection): CI (`checks` — lint, typecheck, build) must pass, and force-pushes
-and branch deletion are blocked. Only the repo admin (`slobodskyi`) is on the
+protection): CI (`checks` — lint, typecheck, test, build) must pass and the branch
+must be up to date with `main` (a PR that falls behind shows `BEHIND` and must be
+rebased before it will merge), and force-pushes and branch deletion are blocked.
+Only the repo admin (`slobodskyi`) is on the
 ruleset's **bypass list**, as a break-glass escape hatch — everyone else,
 including `gangsta-george`, lands changes through the default flow: branch → PR →
 green CI → review → squash-merge. That's by design (nobody bypasses CI as a
@@ -37,8 +39,11 @@ worktrees with `git worktree list`, then `git worktree remove <path>` once a
 branch is merged.
 
 ## Before opening a PR
-- `pnpm lint`, `pnpm typecheck`, and `pnpm build` all pass (from the repo root;
-  they fan out via turborepo).
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` all pass (from the
+  repo root; they fan out via turborepo). CI runs exactly these four.
+- If you touched `supabase/**`, also run `supabase db reset && supabase test db` —
+  the pgTAP suites are the migration gate but are **not** wired into CI, so a green
+  CI says nothing about them (ADR 0013).
 - The diff does only what the PR describes — no unrelated drive-by changes.
 - If an AI agent produced the diff, skim it yourself before pushing — see the
   review checklist in `.github/PULL_REQUEST_TEMPLATE.md`.
@@ -52,11 +57,24 @@ branch is merged.
   nits.
 
 ## Database migrations
-The database schema arrives in **Phase 0** (`docs/PLAN.md`), not later. One dev is
-the **migrations owner** for the build: all schema changes go through them and land
-**PR-only** — never applied ad hoc against the shared database. (This supersedes the
-earlier "daily check-in rotation" idea; TECH_SPEC §11 pins a single owner to avoid
-two people racing migrations on one database.) Assign the owner when Phase 0 starts.
+**Migrations owner: Oleksandr (`slobodskyi`).** All schema changes go through him and
+land **PR-only** — never applied ad hoc against the shared database. (TECH_SPEC §11
+pins a single owner to avoid two people racing migrations on one database; this
+supersedes the earlier "daily check-in rotation" idea.) If your work needs a schema
+change, don't write the migration — open an issue titled `schema: <what>` with the SQL
+you'd propose and what's blocked, and build around it in the meantime.
+
+Migrations are **append-only**: once a migration is merged, treat it as immutable —
+you don't know who has already applied it, and Supabase's ledger keys on the timestamp
+prefix with no checksum, so editing a pushed migration means the fix silently never
+re-applies. Add a new migration instead.
+
+Pushing to prod is the owner's job and follows one rule: **only from a clean `main`
+checkout, and always `supabase db push --dry-run` first** (`db push` reads the files on
+disk and knows nothing about git — from a feature branch it will happily ship an
+unmerged migration). Verify after with `supabase migration list --linked` **and**
+`supabase db diff --linked` — `db push` has been observed printing a `pgdelta`
+certificate error while having succeeded, so its own output proves nothing either way.
 
 ## Documenting decisions
 Non-obvious architectural choices go in `docs/decisions/` as a short ADR

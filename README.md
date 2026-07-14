@@ -9,13 +9,14 @@ with AI content understanding (what) — e.g. *"mustached men I shot in Odesa."*
 
 ## Status
 
-**Live in production** (Phases 0–1 shipped, Phase 2 in progress — see
-[`docs/PLAN.md`](docs/PLAN.md)): [`apps/web`](apps/web) on Vercel (real auth,
-drag-and-drop upload to R2, canvas renders your actual archive),
-[`apps/worker`](apps/worker) on Railway (ingest: dedup/EXIF/previews incl.
-HEIC/RAW; analyze: Gemini tags + embeddings, user-triggered),
-[`packages/shared`](packages/shared) (zod contracts). Map/Sense/projects/search
-still run on mock data until their phases.
+**Live in production** (Phases 0–2 shipped, plus the homepage + real projects pulled
+forward from Phase 5; Phase 3 — Captions — next; see [`docs/PLAN.md`](docs/PLAN.md)):
+[`apps/web`](apps/web) on Vercel (real auth, drag-and-drop upload to R2, a homepage of
+real projects, and all four canvas views rendering your actual archive),
+[`apps/worker`](apps/worker) on Railway (ingest: dedup/EXIF/previews incl. HEIC/RAW;
+analyze: Gemini tags + embeddings, user-triggered; plus the trashed-project retention
+sweep), [`packages/shared`](packages/shared) (zod contracts). Chat/search is still a
+canned surface until Phase 4.
 
 ## Getting started
 

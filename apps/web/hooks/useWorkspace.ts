@@ -1037,7 +1037,7 @@ export function useWorkspace(
 
   const regen = useCallback(() => flashToast("Caption regenerated"), [flashToast]);
 
-  /** Real soft-delete (spec §11: user delete → assets.status='deleted'; R2
+  /** Real soft-delete (spec §12: user delete → assets.status='deleted'; R2
    *  derivatives purge is a background job, not this request). Optimistic —
    *  removes the tile immediately and reconciles from the server on failure. */
   const deletePhoto = useCallback(

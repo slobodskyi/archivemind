@@ -25,7 +25,7 @@ The 2026-07-03 pre-build verification amendments (originally `PLAN.md` §0) and 
 
 ## 2. Build order
 
-Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — one dev each, swap as needed. **Migrations owner: assign ONE dev in Phase 0** (spec §3); schema changes PR-only.
+Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — one dev each, swap as needed. **Migrations owner: Oleksandr (`slobodskyi`)** (spec §11); schema changes PR-only — see CONTRIBUTING.md.
 
 ### Phase 0 — Foundations — ✅ DONE 2026-07-10 (#38 #39 #43 #44 #46)
 
@@ -103,7 +103,7 @@ Export handler (ZIP: owned originals else medium previews + note; `captions.csv`
 ## 3. Working agreements for this build
 
 - Each phase = short-lived branches into `main`; deploy checkpoints must be green before the next phase starts (spec §15 discipline).
-- `lib/api.ts` stays the only UI→data seam; Phase 1 also cleans the 5 known mock-data leak sites as their features go real.
+- Data reaches the UI through server-side readers (`lib/api.ts`, `lib/projects.ts`, `lib/bootstrap.ts`) awaited by Server Components, and through `app/api/*` route handlers for everything client-side — see ARCHITECTURE.md. The remaining direct `mock-data` importers get cleaned as their features go real.
 - Every AI call writes a `usage_events` row from day 1 — no exceptions (future credits model).
 - Decision records for the key backend calls (accepted; expand as phases start): [0007 generateContent-over-Interactions](decisions/0007-generatecontent-over-interactions.md), [0008 dropbox-originals-in-r2](decisions/0008-dropbox-originals-in-r2.md) (Phase 6), [0009 broadcast-over-postgres-changes](decisions/0009-broadcast-over-postgres-changes.md) (Phase 0), [0010 analyze-model-choice](decisions/0010-analyze-model-choice.md) (Phase 2), [0011 asset-over-file](decisions/0011-asset-over-file.md) (the v1.2 domain model).
 - Re-verify model ids/prices when Phase 2 starts — Gemini's surface moves fast (model sunsets, shifting API shapes). We pin `generateContent` + `gemini-3.1-flash-lite` (ADR 0007 / 0010) and evaluate `gemini-3.5-flash` at Phase 2.
@@ -125,8 +125,11 @@ Gaps surfaced in the 2026-07-06 setup audit. Fold each into a GitHub issue (via
   all gate on real dirty files (500+ mixed, real-iPhone HEIC, NEF/CR2/ARW, no-EXIF).
   Someone must actually gather these from target users — an unowned dependency that
   can block a milestone.
-- **Seam-leak cleanup as a tracked task (Phase 1).** The five direct `mock-data`
-  importers (see §1) are covered in prose but map to no issue.
+- **Seam-leak cleanup as a tracked task.** Three direct `mock-data` importers remain
+  (`lib/format.ts`, `lib/layout.ts`, `components/sidebar/SourceBrowserSidebar.tsx`) —
+  covered in prose but mapped to no issue. Related dead mocks with zero callers:
+  `lib/api.ts`'s `getPhoto`/`getProjects`/`getGroups`/`getSources`,
+  `lib/projects.ts::getAllAssetsCount`, `lib/layout.ts::sourcesGallery`.
 - **Phase-2 analyze-model re-verify (Phase 2).** Spec §14 item 3 / §3 above — confirm
   `gemini-3.1-flash-lite` id+price and the `generateContent` shape, evaluate
   `gemini-3.5-flash`. Currently in no issue (issue #9 covers only HEIC/RAW QA).

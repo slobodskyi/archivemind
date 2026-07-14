@@ -2,7 +2,9 @@
 
 Date: 2026-07-02
 
-Status: Accepted
+Status: Accepted · **Superseded in part by [0016](0016-real-timeline-topic-map-views.md)**
+— the Timeline `hash(photo.id)` bucketing quirk below was deliberately retired once real
+assets carried real capture dates. The rest of this ADR still stands.
 
 ## Context
 
@@ -21,7 +23,8 @@ discussion first:
 
 - Timeline column bucketing is `hash(photo.id)`-based, not derived from the
   photo's actual date field — a mockup shortcut to spread items across all 6
-  months.
+  months. **(Retired 2026-07-14 by [0016](0016-real-timeline-topic-map-views.md):
+  Timeline now buckets on the real capture date. Do not restore this.)**
 - Several Bulk AI operation toggles (caption languages/style, tags, faces
   checkboxes) are cosmetically wired but functionally ignored — every run
   produces the same canned output regardless of which are checked.
