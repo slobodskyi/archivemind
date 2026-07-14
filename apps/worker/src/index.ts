@@ -11,16 +11,19 @@ import {
   updateProgress,
   type Job,
 } from "./queue";
+import { sweepTrashedProjects } from "./retention";
 
 /** Poll loop + graceful shutdown (TECH_SPEC §7).
  *  - idle: poll every POLL_MS (default 2 s)
  *  - reaper: every 5 min requeue stale 'running' jobs (crash recovery)
  *  - heartbeat: refresh claimed_at every 60 s while a job runs
+ *  - sweeper: on start, then every 6 h, hard-delete expired trashed projects
  *  - SIGTERM/SIGINT: stop claiming; release the in-flight job back to queued */
 
 const POLL_MS = Number(process.env.POLL_MS ?? 2000);
 const REAPER_EVERY_MS = 5 * 60 * 1000;
 const HEARTBEAT_EVERY_MS = 60 * 1000;
+const SWEEP_EVERY_MS = 6 * 60 * 60 * 1000;
 const workerId = process.env.WORKER_ID ?? `${os.hostname()}:${process.pid}`;
 
 const log = (msg: string) => console.log(`[worker ${workerId}] ${msg}`);
@@ -66,6 +69,15 @@ async function main(): Promise<void> {
       .catch((e: unknown) => log(`reaper failed: ${String(e)}`));
   }, REAPER_EVERY_MS);
 
+  const runSweep = () =>
+    sweepTrashedProjects(pool)
+      .then((n) => n > 0 && log(`sweeper removed ${n} expired trashed project(s)`))
+      .catch((e: unknown) => log(`sweeper failed: ${String(e)}`));
+  // Once on boot as well as on the timer: redeploys can be more frequent than
+  // SWEEP_EVERY_MS, and a timer-only sweep would then never fire.
+  void runSweep();
+  const sweeper = setInterval(() => void runSweep(), SWEEP_EVERY_MS);
+
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -92,6 +104,7 @@ async function main(): Promise<void> {
   }
 
   clearInterval(reaper);
+  clearInterval(sweeper);
   if (currentJob) {
     await releaseJob(pool, currentJob.id);
     log(`released in-flight job ${currentJob.id} back to queue`);
