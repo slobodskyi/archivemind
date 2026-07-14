@@ -2,6 +2,24 @@ import { NextResponse } from "next/server";
 import { createProjectRequestSchema, type CreateProjectResponse } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
+import { getProjectCards, type ProjectScope } from "@/lib/projects";
+
+/** GET /api/projects?scope=active|archived|trash — homepage sidebar's
+ *  Archived/Trash lists, fetched on demand (the initial page load only
+ *  fetches the active scope). */
+export async function GET(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const scopeParam = new URL(request.url).searchParams.get("scope") ?? "active";
+  const scope: ProjectScope = scopeParam === "archived" || scopeParam === "trash" ? scopeParam : "active";
+
+  const projects = await getProjectCards(supabase, scope);
+  return NextResponse.json({ projects });
+}
 
 /** POST /api/projects (spec §9, issue #17) — create a project in the caller's
  *  workspace. RLS scopes the insert (projects_insert = is_editor). */

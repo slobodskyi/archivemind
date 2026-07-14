@@ -28,23 +28,22 @@ import {
   fitBounds,
   fitView,
   hitTestTiles,
+  mapCloudLayout as computeMapLayout,
   minimapLayout as computeMinimapLayout,
-  senseBubbles as computeSenseBubbles,
-  senseExpandLayout as computeSenseExpand,
   STICKY_NOTE_COLORS,
   timelineLayout as computeTimelineLayout,
+  topicCloudLayout as computeTopicLayout,
   type Bounds,
-  type ExpandOverlay,
+  type CloudLayout,
+  type ColumnGridLayout,
   type Frame,
   type GalleryOverrides,
   type MinimapLayout,
-  type SenseBubble,
+  type Rect,
   type StickyNote,
   type TilePos,
-  type TimelineLayout,
 } from "@/lib/layout";
 import { CHAT_FALLBACK_REPLY, CHAT_GREETING, CHAT_REPLIES } from "@/lib/chat";
-import type { MapApi } from "@/components/map/MapCanvas";
 
 const DEFAULT_ZOOM = 0.75;
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
@@ -96,12 +95,11 @@ interface ProcState {
 }
 
 /** Undo/redo checkpoint — everything the frame tool, node drags, timeline
- * drags, and expand-file drags can mutate. */
+ * drags, and gallery/map/topic tile drags can mutate. */
 interface Snapshot {
   frames: Frame[];
   stickyNotes: StickyNote[];
   tlOverrides: Record<string, { x: number; y: number }>;
-  expandOverrides: Record<string, { x: number; y: number }>;
   galleryOverrides: GalleryOverrides;
 }
 
@@ -121,8 +119,6 @@ interface WorkspaceState {
   search: boolean;
   helpOpen: boolean;
   imp: ImpState;
-  expanded: { kind: "sense" | "map" | null; key: string | null };
-  expandOverrides: Record<string, { x: number; y: number }>;
   galleryOverrides: GalleryOverrides;
   /** Projects created at runtime via the source browser sidebar's "New project" flow. */
   customProjects: Project[];
@@ -161,8 +157,6 @@ interface WorkspaceState {
   history: Snapshot[];
   future: Snapshot[];
   zoomMenuOpen: boolean;
-  /** Real Leaflet zoom %, kept in sync via MapCanvas's onZoomChange while view === "map". */
-  mapZoomPct: number;
 }
 
 interface TlBounds {
@@ -189,7 +183,7 @@ type DragSession =
     }
   | {
       mode: "gallery";
-      kind: "source" | "asset";
+      kind: "source" | "asset" | "map" | "topic";
       key: string;
       sx: number;
       sy: number;
@@ -212,15 +206,6 @@ type DragSession =
       sy: number;
       orig: { x: number; y: number };
       bounds: TlBounds;
-      moved: boolean;
-    }
-  | {
-      mode: "expandFile";
-      id: string;
-      sx: number;
-      sy: number;
-      orig: { x: number; y: number };
-      space: "canvas" | "map";
       moved: boolean;
     }
   | {
@@ -362,10 +347,6 @@ export interface Workspace {
   minimap: MinimapLayout;
   onMinimapDown: (e: React.PointerEvent<HTMLDivElement>) => void;
 
-  // Map (Leaflet) imperative bridge for Fit/Zoom
-  registerMapApi: (api: MapApi | null) => void;
-  onMapZoomChange: (pct: number) => void;
-
   // Layout constants (no left sidebar anymore)
   contentLeft: number;
   drawerRight: number;
@@ -442,21 +423,16 @@ export interface Workspace {
   onUploadBatchStart: (batch: UploadBatchStart) => void;
   onUploadBatchSettled: (result: UploadBatchResult) => void;
 
-  // Expand overlays (sense / map marker drill-down)
-  expanded: { kind: "sense" | "map" | null; key: string | null };
-  expandOverrides: Record<string, { x: number; y: number }>;
-  senseExpand: ExpandOverlay | null;
-  toggleSenseExpand: (key: string) => void;
-  toggleMapExpand: (key: string) => void;
-  closeExpand: () => void;
-  onExpandFileDown: (e: React.PointerEvent, id: string, x: number, y: number, space: "canvas" | "map") => void;
-
-  // Timeline
-  timelineLayout: TimelineLayout;
+  // Timeline — month columns.
+  timelineLayout: ColumnGridLayout;
   onTlDown: (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => void;
 
-  // Sense
-  senseBubbles: SenseBubble[];
+  // Map / Topic — freeform clusters ("clouds") connected by lines (ADR 0018).
+  // Tiles drag like the Canvas asset grid (select-on-down, free position).
+  mapLayout: CloudLayout;
+  topicLayout: CloudLayout;
+  onMapAssetDown: (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => void;
+  onTopicAssetDown: (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => void;
 
   // Bulk AI
   bulkPanelOpen: boolean;
@@ -502,8 +478,6 @@ export function useWorkspace(
     search: false,
     helpOpen: false,
     imp: { open: false },
-    expanded: { kind: null, key: null },
-    expandOverrides: {},
     galleryOverrides: EMPTY_GALLERY_OVERRIDES,
     customProjects: [],
     projCurrent: currentProjectId,
@@ -537,7 +511,6 @@ export function useWorkspace(
     history: [],
     future: [],
     zoomMenuOpen: false,
-    mapZoomPct: 100,
   });
 
   // Mirror of committed state, kept current for window-level event handlers.
@@ -547,7 +520,6 @@ export function useWorkspace(
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeJobId = useRef<string | null>(null);
-  const mapApiRef = useRef<MapApi | null>(null);
   const objectUrlsRef = useRef(new Map<string, string>());
 
   // Patch helper that also advances stateRef so sequential reads see fresh data.
@@ -631,7 +603,6 @@ export function useWorkspace(
     frames: s.frames,
     stickyNotes: s.stickyNotes,
     tlOverrides: s.tlOverrides,
-    expandOverrides: s.expandOverrides,
     galleryOverrides: s.galleryOverrides,
   }), []);
 
@@ -661,11 +632,6 @@ export function useWorkspace(
     hist.push(snapshot(s));
     setState({ ...next, history: hist, future });
   }, [setState, snapshot]);
-
-  const registerMapApi = useCallback((api: MapApi | null) => {
-    mapApiRef.current = api;
-  }, []);
-  const onMapZoomChange = useCallback((pct: number) => setState({ mapZoomPct: pct }), [setState]);
 
   // ── Pan / zoom ────────────────────────────────────────────────────────────
 
@@ -770,8 +736,11 @@ export function useWorkspace(
     [pushHistory],
   );
 
-  const onAssetDown = useCallback(
-    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
+  /** Shared by Canvas asset tiles and Map/Topic cloud tiles — select-on-down
+   *  (with the same additive/shift-click semantics), then a free-position
+   *  drag session keyed to whichever override bucket `kind` names. */
+  const onGalleryAssetDown = useCallback(
+    (kind: "asset" | "map" | "topic", e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
@@ -789,7 +758,7 @@ export function useWorkspace(
       setState({ selectedIds, drawerId: null });
       dragRef.current = {
         mode: "gallery",
-        kind: "asset",
+        kind,
         key: id,
         sx: e.clientX,
         sy: e.clientY,
@@ -799,6 +768,18 @@ export function useWorkspace(
       };
     },
     [setState],
+  );
+  const onAssetDown = useCallback(
+    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => onGalleryAssetDown("asset", e, id, origCenter),
+    [onGalleryAssetDown],
+  );
+  const onMapAssetDown = useCallback(
+    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => onGalleryAssetDown("map", e, id, origCenter),
+    [onGalleryAssetDown],
+  );
+  const onTopicAssetDown = useCallback(
+    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => onGalleryAssetDown("topic", e, id, origCenter),
+    [onGalleryAssetDown],
   );
 
   const onStickyDown = useCallback(
@@ -854,16 +835,6 @@ export function useWorkspace(
     [pushHistory],
   );
 
-  const onExpandFileDown = useCallback(
-    (e: React.PointerEvent, id: string, x: number, y: number, space: "canvas" | "map") => {
-      e.stopPropagation();
-      e.preventDefault();
-      pushHistory();
-      dragRef.current = { mode: "expandFile", id, sx: e.clientX, sy: e.clientY, orig: { x, y }, space, moved: false };
-    },
-    [pushHistory],
-  );
-
   const move = useCallback(
     (e: PointerEvent) => {
       const d = dragRef.current;
@@ -883,12 +854,6 @@ export function useWorkspace(
         nx = Math.min(d.bounds.maxX, Math.max(d.bounds.minX, nx));
         ny = Math.min(d.bounds.maxY, Math.max(d.bounds.minY, ny));
         setState({ tlOverrides: { ...s.tlOverrides, [d.id]: { x: nx, y: ny } } });
-      } else if (d.mode === "expandFile") {
-        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
-        const div = d.space === "canvas" ? s.scale : 1;
-        const dx = (e.clientX - d.sx) / div,
-          dy = (e.clientY - d.sy) / div;
-        setState({ expandOverrides: { ...s.expandOverrides, [d.id]: { x: d.orig.x + dx, y: d.orig.y + dy } } });
       } else if (d.mode === "gallery") {
         if (Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3) {
           d.moved = true;
@@ -1030,26 +995,6 @@ export function useWorkspace(
   // ── Simple actions ──────────────────────────────────────────────────────
 
   const setHover = useCallback((id: string | null) => setState({ hoveredId: id }), [setState]);
-  const closeExpand = useCallback(
-    () => setState({ expanded: { kind: null, key: null }, expandOverrides: {} }),
-    [setState],
-  );
-  const toggleSenseExpand = useCallback(
-    (key: string) => {
-      const s = stateRef.current;
-      if (s.expanded.kind === "sense" && s.expanded.key === key) closeExpand();
-      else setState({ expanded: { kind: "sense", key }, expandOverrides: {} });
-    },
-    [setState, closeExpand],
-  );
-  const toggleMapExpand = useCallback(
-    (key: string) => {
-      const s = stateRef.current;
-      if (s.expanded.kind === "map" && s.expanded.key === key) closeExpand();
-      else setState({ expanded: { kind: "map", key }, expandOverrides: {} });
-    },
-    [setState, closeExpand],
-  );
   const closeDrawer = useCallback(() => setState({ drawerId: null }), [setState]);
   const setLang = useCallback((l: Language) => setState({ drawerLang: l }), [setState]);
   const setStyle = useCallback((st: CaptionStyle) => setState({ drawerStyle: st }), [setState]);
@@ -1092,6 +1037,9 @@ export function useWorkspace(
 
   const regen = useCallback(() => flashToast("Caption regenerated"), [flashToast]);
 
+  /** Real soft-delete (spec §11: user delete → assets.status='deleted'; R2
+   *  derivatives purge is a background job, not this request). Optimistic —
+   *  removes the tile immediately and reconciles from the server on failure. */
   const deletePhoto = useCallback(
     (id: string) => {
       const s = stateRef.current;
@@ -1100,8 +1048,16 @@ export function useWorkspace(
         selectedIds: s.selectedIds.filter((x) => x !== id),
         drawerId: s.drawerId === id ? null : s.drawerId,
       });
+      fetch(`/api/assets/${id}`, { method: "DELETE" })
+        .then((resp) => {
+          if (!resp.ok) throw new Error(String(resp.status));
+        })
+        .catch(() => {
+          flashToast("Could not delete — try again");
+          router.refresh();
+        });
     },
-    [setState],
+    [setState, flashToast, router],
   );
 
   const genSingle = useCallback(
@@ -1141,6 +1097,14 @@ export function useWorkspace(
     [],
   );
 
+  /** Fit to content, but never zoom in past DEFAULT_ZOOM (75%) — small
+   *  projects stay at a comfortable default instead of filling the viewport
+   *  at 300%; large ones still shrink further so everything stays visible. */
+  const fitCapped = useCallback((bounds: Bounds, r: Rect) => {
+    const fitted = fitBounds(bounds, r);
+    return fitted.scale < DEFAULT_ZOOM ? fitted : centerAtScale(bounds, r, DEFAULT_ZOOM);
+  }, []);
+
   const computeFit = useCallback(
     (
       view: ViewMode,
@@ -1151,37 +1115,30 @@ export function useWorkspace(
       const r = rect();
       if (view === "neural") {
         const bounds = neuralGalleryFor(allPhotos, overrides, previews).bounds;
-        return fitBounds(bounds, r);
+        return fitCapped(bounds, r);
       }
+      if (view === "map") return fitCapped(computeMapLayout(allPhotos, overrides.map).bounds, r);
+      if (view === "sense") return fitCapped(computeTopicLayout(allPhotos, overrides.topic).bounds, r);
       return fitView(view, r);
     },
-    [rect, neuralGalleryFor],
+    [rect, neuralGalleryFor, fitCapped],
   );
 
   const doFit = useCallback(() => {
     const s = stateRef.current;
-    if (s.view === "map" && mapApiRef.current) {
-      mapApiRef.current.fitWorld();
-      return;
-    }
     setState(computeFit(s.view, s.photos, s.galleryOverrides, s.uploadPreviews));
   }, [setState, computeFit]);
 
   const setZoomPct = useCallback(
     (pct: number) => {
       const s = stateRef.current;
-      if (s.view === "map" && mapApiRef.current) {
-        mapApiRef.current.setZoomPct(pct);
-      } else {
-        const r = rect(),
-          cx = r.width / 2,
-          cy = r.height / 2,
-          ns = pct / 100;
-        const px = (cx - s.tx) / s.scale,
-          py = (cy - s.ty) / s.scale;
-        setState({ scale: ns, tx: cx - px * ns, ty: cy - py * ns });
-      }
-      setState({ zoomMenuOpen: false });
+      const r = rect(),
+        cx = r.width / 2,
+        cy = r.height / 2,
+        ns = pct / 100;
+      const px = (cx - s.tx) / s.scale,
+        py = (cy - s.ty) / s.scale;
+      setState({ scale: ns, tx: cx - px * ns, ty: cy - py * ns, zoomMenuOpen: false });
     },
     [rect, setState],
   );
@@ -1192,8 +1149,6 @@ export function useWorkspace(
         view: v,
         marquee: null,
         selectedIds: [],
-        expanded: { kind: null, key: null },
-        expandOverrides: {},
         bulkPanelOpen: false,
         // View changes retire the right-side source browser so it cannot
         // overlap the AI chat panel that lives in the same slot.
@@ -1204,7 +1159,6 @@ export function useWorkspace(
         sidebarAddOpen: false,
       });
       setTimeout(() => {
-        if (v === "map" && mapApiRef.current) return;
         const s = stateRef.current;
         setState(computeFit(v, s.photos, s.galleryOverrides, s.uploadPreviews));
       }, 0);
@@ -1223,17 +1177,12 @@ export function useWorkspace(
     if (r.width > 0 && r.height > 0) {
       const s = stateRef.current;
       const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
-      const fitted = fitBounds(bounds, r);
-      setState(
-        fitted.scale < DEFAULT_ZOOM
-          ? fitted
-          : centerAtScale(bounds, r, DEFAULT_ZOOM),
-      );
+      setState(fitCapped(bounds, r));
       didFitRef.current = true;
       return true;
     }
     return false;
-  }, [rect, setState, neuralGalleryFor]);
+  }, [rect, setState, neuralGalleryFor, fitCapped]);
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 
@@ -1772,19 +1721,28 @@ export function useWorkspace(
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const target = e.target as HTMLElement | null;
+        const isTyping = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+        const s = stateRef.current;
+        if (!isTyping && s.selectedIds.length > 0) {
+          e.preventDefault();
+          s.selectedIds.forEach((id) => deletePhoto(id));
+        }
+        return;
+      }
       if (e.key !== "Escape") return;
       const s = stateRef.current;
       if (s.imp.open) return; // ImportModal owns Esc while open (upload-aware)
       if (s.drawerId) closeDrawer();
       else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();
-      else if (s.expanded.kind) closeExpand();
       else if (s.chatOpen) closeChat();
       else if (s.sidebarTabs.length) closeSidebar();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closeExpand, closeChat, closeSidebar]);
+  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeSidebar, deletePhoto]);
 
   useEffect(() => {
     const activeClientIds = new Set(state.uploadPreviews.map((preview) => preview.clientId));
@@ -1865,13 +1823,14 @@ export function useWorkspace(
     [projectPhotos, state.tlOverrides],
   );
 
-  const senseBubblesResult = useMemo(() => computeSenseBubbles(projectPhotos), [projectPhotos]);
-  const senseExpand = useMemo(
-    () =>
-      state.expanded.kind === "sense" && state.expanded.key
-        ? computeSenseExpand(senseBubblesResult, state.expanded.key, state.expandOverrides)
-        : null,
-    [state.expanded, state.expandOverrides, senseBubblesResult],
+  const mapLayoutResult = useMemo(
+    () => computeMapLayout(projectPhotos, state.galleryOverrides.map),
+    [projectPhotos, state.galleryOverrides.map],
+  );
+
+  const topicLayoutResult = useMemo(
+    () => computeTopicLayout(projectPhotos, state.galleryOverrides.topic),
+    [projectPhotos, state.galleryOverrides.topic],
   );
 
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
@@ -1899,14 +1858,14 @@ export function useWorkspace(
     (state.drawerId ? 410 : 0);
 
   const minimapPoints = useMemo(() => {
-    if (isMapView) return [];
     if (isNeural) return Object.values(neuralGalleryPos).map((p) => ({ x: p.cx, y: p.cy }));
     if (isTimelineView) {
       return Object.values(timelineLayoutResult.tiles).map((t) => ({ x: t.x + t.w / 2, y: t.y + t.h / 2 }));
     }
-    if (isSenseView) return senseBubblesResult.map((b) => ({ x: b.x, y: b.y }));
+    if (isSenseView) return Object.values(topicLayoutResult.tiles).map((t) => ({ x: t.cx, y: t.cy }));
+    if (isMapView) return Object.values(mapLayoutResult.tiles).map((t) => ({ x: t.cx, y: t.cy }));
     return [];
-  }, [isMapView, isNeural, isTimelineView, isSenseView, neuralGalleryPos, timelineLayoutResult, senseBubblesResult]);
+  }, [isMapView, isNeural, isTimelineView, isSenseView, neuralGalleryPos, timelineLayoutResult, topicLayoutResult, mapLayoutResult]);
 
   const minimap = useMemo(
     () =>
@@ -1932,7 +1891,7 @@ export function useWorkspace(
     [minimap, rect, setState],
   );
 
-  const zoomPct = isMapView ? Math.round(state.mapZoomPct) + "%" : Math.round(state.scale * 100) + "%";
+  const zoomPct = Math.round(state.scale * 100) + "%";
 
   return {
     scale: state.scale,
@@ -1956,7 +1915,7 @@ export function useWorkspace(
     galleryOverrides: state.galleryOverrides,
     gridSize: Math.max(4, 40 * state.scale),
     gridPos: `${state.tx}px ${state.ty}px`,
-    gridOpacity: isMapView ? 0 : 1,
+    gridOpacity: 1,
     zoomPct,
     canvasTransform: `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
     canvasCursor: state.panning
@@ -2018,9 +1977,6 @@ export function useWorkspace(
 
     minimap,
     onMinimapDown,
-
-    registerMapApi,
-    onMapZoomChange,
 
     contentLeft,
     drawerRight,
@@ -2091,14 +2047,10 @@ export function useWorkspace(
     timelineLayout: timelineLayoutResult,
     onTlDown,
 
-    senseBubbles: senseBubblesResult,
-    senseExpand,
-    expanded: state.expanded,
-    expandOverrides: state.expandOverrides,
-    toggleSenseExpand,
-    toggleMapExpand,
-    closeExpand,
-    onExpandFileDown,
+    mapLayout: mapLayoutResult,
+    topicLayout: topicLayoutResult,
+    onMapAssetDown,
+    onTopicAssetDown,
 
     bulkPanelOpen: state.bulkPanelOpen,
     toggleBulkPanel,

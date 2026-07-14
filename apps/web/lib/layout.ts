@@ -1,6 +1,5 @@
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
-import { photoSrc } from "./img";
-import { GROUPS, SOURCES } from "./mock-data";
+import { COUNTRY_LATLON, GROUPS, SOURCES } from "./mock-data";
 import type { ViewMode } from "@/types";
 
 /**
@@ -39,19 +38,7 @@ export interface TilePos {
   cy: number;
 }
 
-export interface EdgePath {
-  d: string;
-  stroke: string;
-  op: number;
-  w: number;
-}
-
 // ── Helpers (verbatim) ──────────────────────────────────────────────────────
-
-export function hexA(hex: string, a: number): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-}
 
 export function hash(id: string): number {
   let h = 5381;
@@ -59,25 +46,21 @@ export function hash(id: string): number {
   return h;
 }
 
-export function mkBez(
-  sx: number,
-  sy: number,
-  ex: number,
-  ey: number,
-  seed: number,
-  str: number,
-): string {
+export function hexA(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+/** Deterministic quadratic-bezier control point, offset to one side of the
+ *  straight line by `str` × the line's own length — no Math.random. */
+export function mkBez(sx: number, sy: number, ex: number, ey: number, seed: number, str: number): string {
   const dx = ex - sx,
     dy = ey - sy,
     len = Math.sqrt(dx * dx + dy * dy) || 1;
   const side = (seed % 2 === 0 ? 1 : -1) * (0.18 + (seed % 7) * 0.025);
   const cpx = (sx + ex) / 2 + (-dy / len) * len * side * str,
     cpy = (sy + ey) / 2 + (dx / len) * len * side * str;
-  return (
-    "M " + sx.toFixed(1) + "," + sy.toFixed(1) +
-    " Q " + cpx.toFixed(1) + "," + cpy.toFixed(1) +
-    " " + ex.toFixed(1) + "," + ey.toFixed(1)
-  );
+  return `M ${sx.toFixed(1)},${sy.toFixed(1)} Q ${cpx.toFixed(1)},${cpy.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)}`;
 }
 
 // ── Neural view: source gallery ─────────────────────────────────────────────
@@ -92,9 +75,11 @@ export function mkBez(
 export interface GalleryOverrides {
   source: Record<string, { x: number; y: number }>;
   asset: Record<string, CanvasPoint>;
+  map: Record<string, CanvasPoint>;
+  topic: Record<string, CanvasPoint>;
 }
 
-export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {} };
+export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {}, map: {}, topic: {} };
 
 export interface GalleryTile {
   key: string;
@@ -320,16 +305,7 @@ export interface Rect {
   height: number;
 }
 
-const MONTH_COUNT = 6;
-
-export function viewBounds(view: ViewMode): Bounds {
-  if (view === "timeline") return { xl: 0, yt: 0, xr: 60 + MONTH_COUNT * 380, yb: 900 };
-  if (view === "map") return { xl: 0, yt: 0, xr: 1200, yb: 700 };
-  if (view === "sense") return { xl: 0, yt: 0, xr: 1200, yb: 900 };
-  return { xl: 0, yt: 0, xr: 1000, yb: 700 };
-}
-
-/** Shared scale/pan solve — same math the neural gallery, timeline, map, and sense fits all use. */
+/** Shared scale/pan solve — same math the neural gallery, timeline, map, and topic fits all use. */
 export function fitBounds(bounds: Bounds, rect: Rect): Transform {
   const leftPad = 24,
     pad = 60,
@@ -358,16 +334,25 @@ export function centerAtScale(bounds: Bounds, rect: Rect, scale: number): Transf
   };
 }
 
+/** Default zoom everywhere is 75% — Timeline's fixed column-grid transform
+ *  uses it directly; neural/map/topic (real content bounds) apply it as a cap
+ *  via fitCapped in useWorkspace, not here. */
+export const DEFAULT_ZOOM = 0.75;
+
+/** Only the neural asset grid (and map/topic clouds) resolve bounds this way
+ *  — Timeline is a column grid with its own fixed fit transform below. */
 export function fitView(view: ViewMode, rect: Rect): Transform {
   if (view === "timeline") {
-    return { scale: 1, tx: 24 + 20, ty: 100 };
+    return { scale: DEFAULT_ZOOM, tx: 24 + 20, ty: 100 };
   }
-  return fitBounds(viewBounds(view), rect);
+  return fitBounds({ xl: 0, yt: 0, xr: 1000, yb: 700 }, rect);
 }
 
-// ── Timeline view: month columns + deterministic scattered tiles ───────────
-
-export const MONTH_LIST = ["Feb 2026", "Mar 2026", "Apr 2026", "May 2026", "Jun 2026", "Jul 2026"];
+// ── Timeline: real-capture-date month columns ───────────────────────────────
+// Fixed-width columns, each header-labeled with its month + file count, tiles
+// packed tightly against the header in a 2-per-row grid with small
+// deterministic jitter. Map and Topic used to share this column layout too
+// (ADR 0017) but moved to freeform clusters below (ADR 0018).
 
 const COL_W = 340;
 const COL_GAP = 40;
@@ -377,52 +362,73 @@ const TOP_Y = 4;
 const MIN_CELL = 116;
 const PER_ROW = Math.floor(COL_W / MIN_CELL); // 2
 
-export function monthOf(photo: Photo): string {
-  return MONTH_LIST[hash(photo.id) % MONTH_LIST.length];
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** `exif.dateTaken` is always `"YYYY-MM-DD HH:mm"` (lib/assets.ts's toExifData) —
+ *  never absent, so an unparseable value only happens for malformed test data. */
+function capturedAt(photo: Photo): Date {
+  const d = new Date(photo.exif.dateTaken.replace(" ", "T"));
+  return Number.isNaN(d.getTime()) ? new Date(0) : d;
 }
 
-export interface TimelineTilePos {
+export function monthOf(photo: Photo): string {
+  const d = capturedAt(photo);
+  return `${MONTH_ABBR[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function monthSortValue(key: string): number {
+  const [abbr, yearStr] = key.split(" ");
+  return parseInt(yearStr, 10) * 12 + MONTH_ABBR.indexOf(abbr);
+}
+
+export interface ColumnTilePos {
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Which column this tile belongs to — lets a generic renderer clamp drag
+   *  bounds without re-deriving the bucket key from the photo. */
+  columnKey: string;
 }
 
-export interface TimelineMonthColumn {
+export interface LayoutColumn {
   key: string;
+  /** Header text — usually equal to `key` (month, country); Topic prettifies
+   *  its raw group id via GROUPS[key].label. */
+  label: string;
   x: number;
   colH: number;
   count: number;
 }
 
-export interface TimelineLayout {
-  months: TimelineMonthColumn[];
-  tiles: Record<string, TimelineTilePos>;
+export interface ColumnGridLayout {
+  columns: LayoutColumn[];
+  tiles: Record<string, ColumnTilePos>;
   colWidth: number;
   colGap: number;
 }
 
-export function timelineLayout(
-  photos: Photo[],
-  tlOverrides: Record<string, { x: number; y: number }>,
-): TimelineLayout {
-  const byMonth: Record<string, Photo[]> = {};
-  MONTH_LIST.forEach((m) => (byMonth[m] = []));
-  photos.forEach((p) => byMonth[monthOf(p)].push(p));
-  MONTH_LIST.forEach((m) => byMonth[m].sort((a, b) => hash(a.id + m) - hash(b.id + m)));
+/** Shared column-packing math: given photos already bucketed by key (with a
+ *  chosen column order and per-column sort), lay out fixed-width columns and
+ *  pack each bucket's tiles tightly against the header. */
+function buildColumnGrid(
+  byBucket: Record<string, Photo[]>,
+  orderedKeys: string[],
+  labelOf: (key: string) => string,
+  overrides: Record<string, { x: number; y: number }>,
+): ColumnGridLayout {
+  const columns: LayoutColumn[] = [];
+  const tiles: Record<string, ColumnTilePos> = {};
 
-  const months: TimelineMonthColumn[] = [];
-  const tiles: Record<string, TimelineTilePos> = {};
-
-  MONTH_LIST.forEach((m, mi) => {
-    const items = byMonth[m];
+  orderedKeys.forEach((key, ki) => {
+    const items = byBucket[key];
     const rows = Math.max(1, Math.ceil(items.length / PER_ROW));
     // Pack rows tightly against the header instead of stretching to fill the
-    // viewport — months with few photos used to leave a big gap up top;
+    // viewport — columns with few photos used to leave a big gap up top;
     // vertical scroll (not viewport-stretching) now handles tall columns.
     const colH = rows * MIN_CELL;
-    const colX = mi * (COL_W + COL_GAP);
-    months.push({ key: m, x: colX, colH, count: items.length });
+    const colX = ki * (COL_W + COL_GAP);
+    columns.push({ key, label: labelOf(key), x: colX, colH, count: items.length });
 
     const cellW = COL_W / PER_ROW;
     const cellH = colH / rows;
@@ -436,41 +442,149 @@ export function timelineLayout(
       const h1 = hash(p.id);
       const h2 = hash(p.id) >>> 4;
       const jx = (h1 % Math.round(jitterX * 2)) - jitterX;
-      // Top-anchor the tile within its row cell (small nonnegative jitter)
-      // so row 0 packs tightly against the sticky month header instead of
-      // being center-aligned inside a 116 px cell.
+      // Top-anchor the tile within its row cell (small nonnegative jitter) so
+      // row 0 packs tightly against the sticky header instead of being
+      // center-aligned inside a 116 px cell.
       const jy = h2 % Math.round(jitterY);
       const w = TILE_MIN + (hash(p.id + "w") % (TILE_MAX - TILE_MIN));
       const h = Math.round(w * (p.h / p.w));
       let bx = cx + jx - w / 2;
       let by = TOP_Y + row * cellH + jy;
-      if (tlOverrides[p.id]) {
-        bx = tlOverrides[p.id].x;
-        by = tlOverrides[p.id].y;
+      if (overrides[p.id]) {
+        bx = overrides[p.id].x;
+        by = overrides[p.id].y;
       }
-      tiles[p.id] = { x: bx, y: by, w, h };
+      tiles[p.id] = { x: bx, y: by, w, h, columnKey: key };
     });
   });
 
-  return { months, tiles, colWidth: COL_W, colGap: COL_GAP };
+  return { columns, tiles, colWidth: COL_W, colGap: COL_GAP };
 }
 
-// ── Sense view: circle-pack bubbles clustered by group ──────────────────────
+/** Timeline: columns are the distinct "Mon YYYY" months actually present in
+ *  `photo.exif.dateTaken` (real EXIF capture time when the worker extracted
+ *  one, otherwise the asset's upload time — never a placeholder), sorted
+ *  chronologically. Supersedes the hash-bucketed placeholder documented as a
+ *  preserved quirk in ADR 0003 — see ADR 0016. */
+export function timelineLayout(
+  photos: Photo[],
+  tlOverrides: Record<string, { x: number; y: number }>,
+): ColumnGridLayout {
+  const byMonth: Record<string, Photo[]> = {};
+  photos.forEach((p) => {
+    const m = monthOf(p);
+    (byMonth[m] = byMonth[m] || []).push(p);
+  });
+  const monthKeys = Object.keys(byMonth).sort((a, b) => monthSortValue(a) - monthSortValue(b));
+  monthKeys.forEach((m) =>
+    byMonth[m].sort((a, b) => capturedAt(a).getTime() - capturedAt(b).getTime() || hash(a.id + m) - hash(b.id + m)),
+  );
+  return buildColumnGrid(byMonth, monthKeys, (key) => key, tlOverrides);
+}
 
-export interface SenseBubble {
-  key: PhotoGroup;
-  x: number;
-  y: number;
-  size: number;
-  color: string;
+// ── Map / Topic: freeform clusters ("clouds") connected by lines ───────────
+// Each cluster ("cloud") is a group of photo tiles packed around a shared hub
+// point, labeled above with the country/topic name, with every tile in the
+// cloud connected to the hub by a line in that cloud's color. Photos that
+// share the *other* dimension (e.g. two photos from different countries but
+// the same topic, in Map view) get a direct line between them in a gradient
+// blending both clouds' colors — "some files may have connections to files
+// from different clouds." Unrecognized/unclassified photos land in one
+// "Unsorted" cloud with no lines at all, in or out (ADR 0018). Tiles are
+// freely draggable — a drag override simply wins over the packed position.
+
+export interface CloudNode {
+  key: string;
   label: string;
+  color: string;
+  hubX: number;
+  hubY: number;
+  /** Bounding radius of this cloud's tiles, for placing the label above them. */
+  radius: number;
   count: number;
-  items: Photo[];
 }
 
-const GOLDEN_ANGLE = 2.39996;
-const PACK_ITERATIONS = 500;
-const PACK_CENTER_PULL = 0.012;
+export interface CloudEdge {
+  id: string;
+  d: string;
+  /** Equal to strokeEnd for a same-cloud (hub) edge — a solid color. Distinct
+   *  colors mean a cross-cloud edge, rendered as a gradient between them. */
+  strokeStart: string;
+  strokeEnd: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  op: number;
+  w: number;
+}
+
+export interface CloudLayout {
+  clouds: CloudNode[];
+  tiles: Record<string, TilePos>;
+  edges: CloudEdge[];
+  bounds: Bounds;
+}
+
+export const UNSORTED_CLOUD_KEY = "Unsorted";
+const UNSORTED_CLOUD_COLOR = "#8a8f98";
+
+/** Fixed visual gutter enforced between every pair of tiles, on top of their
+ *  own bounding-circle radius — this is what makes "same space between each
+ *  other by default" true regardless of each tile's own aspect ratio. */
+const CLOUD_TILE_GAP = 18;
+const CLOUD_CANVAS_CX = 760;
+const CLOUD_CANVAS_CY = 520;
+/** Hexagonal-ish packing rarely exceeds ~75% density once center-pull
+ *  relaxation settles with mixed tile sizes — dividing by this instead of 1
+ *  gives the macro cluster circle enough room that packCircles doesn't have
+ *  to fight for space (which is what caused overlap before). */
+const CLOUD_PACK_DENSITY = 0.62;
+
+/** A tile's own bounding-circle radius (half its diagonal) plus the fixed
+ *  gutter — using the *actual* rendered size (not a guessed constant) is
+ *  what guarantees packCircles never overlaps two real tile rectangles. */
+function cloudTileRadius(photo: Pick<Photo, "w" | "h">): number {
+  const size = assetTileSize(photo);
+  return Math.hypot(size.w, size.h) / 2 + CLOUD_TILE_GAP;
+}
+
+/** Deterministic Prim's-algorithm minimum spanning tree over a set of
+ *  points — connects every point with the shortest possible total line
+ *  length and no separate "hub" node: every edge runs between two real
+ *  points. O(n²), fine for the small clusters a project's photos form. */
+function buildMst(points: { id: string; cx: number; cy: number }[]): [string, string][] {
+  if (points.length < 2) return [];
+  const edges: [string, string][] = [];
+  const inTree = new Set([points[0].id]);
+  const remaining = points.slice(1);
+  while (remaining.length) {
+    let bestDist = Infinity,
+      bestFrom = "",
+      bestIdx = -1;
+    for (const a of points) {
+      if (!inTree.has(a.id)) continue;
+      for (let i = 0; i < remaining.length; i++) {
+        const b = remaining[i];
+        const d = Math.hypot(a.cx - b.cx, a.cy - b.cy);
+        if (d < bestDist) {
+          bestDist = d;
+          bestFrom = a.id;
+          bestIdx = i;
+        }
+      }
+    }
+    const chosen = remaining[bestIdx];
+    edges.push([bestFrom, chosen.id]);
+    inTree.add(chosen.id);
+    remaining.splice(bestIdx, 1);
+  }
+  return edges;
+}
+
+const CLOUD_GOLDEN_ANGLE = 2.39996;
+const CLOUD_PACK_ITERATIONS = 500;
+const CLOUD_PACK_CENTER_PULL = 0.012;
 
 /** Deterministic circle-packing relaxation — no Math.random anywhere. */
 export function packCircles(
@@ -479,11 +593,11 @@ export function packCircles(
   cy: number,
 ): Record<string, { x: number; y: number }> {
   const nodes = items.map((it, i) => {
-    const angle = i * GOLDEN_ANGLE;
+    const angle = i * CLOUD_GOLDEN_ANGLE;
     const radius = 40 + i * 6;
     return { key: it.key, r: it.r, x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
   });
-  for (let iter = 0; iter < PACK_ITERATIONS; iter++) {
+  for (let iter = 0; iter < CLOUD_PACK_ITERATIONS; iter++) {
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i],
@@ -504,8 +618,8 @@ export function packCircles(
       }
     }
     nodes.forEach((n) => {
-      n.x += (cx - n.x) * PACK_CENTER_PULL;
-      n.y += (cy - n.y) * PACK_CENTER_PULL;
+      n.x += (cx - n.x) * CLOUD_PACK_CENTER_PULL;
+      n.y += (cy - n.y) * CLOUD_PACK_CENTER_PULL;
     });
   }
   const result: Record<string, { x: number; y: number }> = {};
@@ -513,147 +627,174 @@ export function packCircles(
   return result;
 }
 
-export function senseBubbles(photos: Photo[]): SenseBubble[] {
-  const byGroup: Partial<Record<PhotoGroup, Photo[]>> = {};
+const MAP_CLOUD_COLORS = ["#39ff6a", "#5b9bff", "#ff7a5c", "#ffd166", "#c084fc", "#4fd1c5"];
+
+function mapCloudColor(key: string): string {
+  return key === UNSORTED_CLOUD_KEY ? UNSORTED_CLOUD_COLOR : MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
+}
+
+function topicCloudColor(key: string): string {
+  return key === UNSORTED_CLOUD_KEY ? UNSORTED_CLOUD_COLOR : (GROUPS[key as PhotoGroup]?.color ?? UNSORTED_CLOUD_COLOR);
+}
+
+function buildCloudLayout(
+  photos: readonly Photo[],
+  primaryOf: (p: Photo) => string,
+  secondaryOf: (p: Photo) => string,
+  colorOf: (key: string) => string,
+  labelOf: (key: string) => string,
+  overrides: Record<string, CanvasPoint>,
+): CloudLayout {
+  const byPrimary: Record<string, Photo[]> = {};
   photos.forEach((p) => {
-    (byGroup[p.group] = byGroup[p.group] || []).push(p);
+    const k = primaryOf(p);
+    (byPrimary[k] = byPrimary[k] || []).push(p);
   });
-  const groupKeys = Object.keys(byGroup) as PhotoGroup[];
-  const sized = groupKeys.map((g) => ({
-    key: g,
-    size: Math.min(190, Math.max(88, 70 + (byGroup[g]?.length ?? 0) * 16)),
-  }));
-  const positions = packCircles(
-    sized.map((s) => ({ key: s.key, r: s.size / 2 })),
-    620,
-    460,
+  const primaryKeys = Object.keys(byPrimary).sort(
+    (a, b) => byPrimary[b].length - byPrimary[a].length || a.localeCompare(b),
   );
-  return sized.map((s) => ({
-    key: s.key,
-    x: positions[s.key].x,
-    y: positions[s.key].y,
-    size: s.size,
-    color: GROUPS[s.key].color,
-    label: GROUPS[s.key].label,
-    count: byGroup[s.key]?.length ?? 0,
-    items: byGroup[s.key] ?? [],
-  }));
-}
 
-// ── Expand overlays (Sense topic / Map marker drill-down) ────────────────────
-// Files fan out from a bubble/marker toward free space, connected by thin
-// Bezier edges. Shared shape so Sense (canvas space) and Map (screen space)
-// render identically. Deterministic: no Math.random — curve seeded on id hash.
-
-export interface ExpandFile {
-  id: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  src: string;
-}
-
-export interface ExpandOverlay {
-  edges: EdgePath[];
-  files: ExpandFile[];
-}
-
-/**
- * Fan `items` out from an origin, spread ±0.9rad around `ang`, at radius `R`.
- * `ex,ey` is the edge origin on the bubble/marker surface. `overrides` lets a
- * dragged file pin to an absolute position. Pure — same inputs, same output.
- */
-export function fanOut(
-  items: Photo[],
-  originX: number,
-  originY: number,
-  ang: number,
-  R: number,
-  ex: number,
-  ey: number,
-  fileW: number,
-  stroke: string,
-  op: number,
-  overrides: Record<string, { x: number; y: number }>,
-): ExpandOverlay {
-  const n = items.length;
-  const edges: EdgePath[] = [];
-  const files: ExpandFile[] = [];
-  items.forEach((p, i) => {
-    const fang = ang + (n > 1 ? -0.9 + (i / (n - 1)) * 1.8 : 0);
-    const w = fileW;
-    const h = Math.round((p.h * w) / p.w);
-    const fx0 = originX + Math.cos(fang) * R;
-    const fy0 = originY + Math.sin(fang) * R;
-    const ov = overrides[p.id];
-    const fx = ov ? ov.x + w / 2 : fx0;
-    const fy = ov ? ov.y + h / 2 : fy0;
-    files.push({ id: p.id, x: fx - w / 2, y: fy - h / 2, w, h, src: photoSrc(p, 200, 200) });
-    edges.push({ d: mkBez(ex, ey, fx, fy, hash(p.id), 0.18), stroke, op, w: 1 });
+  // Enclosing-circle estimate for N packed circles of known radii: the area
+  // they need is sum(π·r²), so the enclosing radius is sqrt(that / density).
+  const macroSized = primaryKeys.map((k) => {
+    const sumR2 = byPrimary[k].reduce((acc, p) => acc + cloudTileRadius(p) ** 2, 0);
+    return { key: k, r: Math.sqrt(sumR2 / CLOUD_PACK_DENSITY) + CLOUD_TILE_GAP };
   });
-  return { edges, files };
-}
+  const macroPos = packCircles(
+    macroSized.map((s) => ({ key: s.key, r: s.r })),
+    CLOUD_CANVAS_CX,
+    CLOUD_CANVAS_CY,
+  );
 
-/** Sense topic drill-down: files fan out from a bubble, away from the pack centroid. */
-export function senseExpandLayout(
-  bubbles: SenseBubble[],
-  key: string,
-  overrides: Record<string, { x: number; y: number }>,
-): ExpandOverlay | null {
-  const node = bubbles.find((b) => b.key === key);
-  if (!node || bubbles.length === 0) return null;
-  let cxAll = 0;
-  let cyAll = 0;
-  bubbles.forEach((b) => {
-    cxAll += b.x;
-    cyAll += b.y;
+  const tiles: Record<string, TilePos> = {};
+  const clouds: CloudNode[] = [];
+  const tileCluster: Record<string, string> = {};
+
+  primaryKeys.forEach((k) => {
+    const items = byPrimary[k];
+    const { x: hx, y: hy } = macroPos[k];
+    const packed = packCircles(
+      items.map((p) => ({ key: p.id, r: cloudTileRadius(p) })),
+      hx,
+      hy,
+    );
+    let maxDist = 0;
+    items.forEach((p) => {
+      const pt = overrides[p.id] ?? packed[p.id];
+      const size = assetTileSize(p);
+      tiles[p.id] = { x: pt.x - size.w / 2, y: pt.y - size.h / 2, w: size.w, h: size.h, cx: pt.x, cy: pt.y };
+      tileCluster[p.id] = k;
+      maxDist = Math.max(maxDist, Math.hypot(pt.x - hx, pt.y - hy) + Math.max(size.w, size.h) / 2);
+    });
+    clouds.push({
+      key: k,
+      label: labelOf(k),
+      color: colorOf(k),
+      hubX: hx,
+      hubY: hy,
+      radius: Math.max(70, maxDist + 24),
+      count: items.length,
+    });
   });
-  cxAll /= bubbles.length;
-  cyAll /= bubbles.length;
-  const dx0 = node.x - cxAll;
-  const dy0 = node.y - cyAll;
-  const ang = Math.abs(dx0) < 0.01 && Math.abs(dy0) < 0.01 ? -Math.PI / 2 : Math.atan2(dy0, dx0);
-  const R = node.size / 2 + 92;
-  const ex = node.x + Math.cos(ang) * (node.size / 2);
-  const ey = node.y + Math.sin(ang) * (node.size / 2);
-  return fanOut(node.items, node.x, node.y, ang, R, ex, ey, 96, node.color, 0.35, overrides);
-}
 
-/**
- * Map marker drill-down. `cp` is the clicked marker's container point and
- * `otherCps` the other markers' — files fan away from their centroid (toward
- * free space). Screen space, so the caller recomputes on map pan/zoom.
- */
-export function mapExpandLayout(
-  items: Photo[],
-  cp: { x: number; y: number },
-  otherCps: { x: number; y: number }[],
-  markerSize: number,
-  overrides: Record<string, { x: number; y: number }>,
-): ExpandOverlay {
-  let cxAll = 0;
-  let cyAll = 0;
-  otherCps.forEach((o) => {
-    cxAll += o.x;
-    cyAll += o.y;
+  const edges: CloudEdge[] = [];
+
+  // File-to-file edges within each real cluster — a minimum spanning tree
+  // over the tiles' own positions, so every line runs between two actual
+  // files with no separate hub point anywhere (the Unsorted cloud gets none).
+  primaryKeys.forEach((k) => {
+    if (k === UNSORTED_CLOUD_KEY || byPrimary[k].length < 2) return;
+    const color = colorOf(k);
+    const points = byPrimary[k].map((p) => ({ id: p.id, cx: tiles[p.id].cx, cy: tiles[p.id].cy }));
+    buildMst(points).forEach(([aId, bId]) => {
+      const ta = tiles[aId],
+        tb = tiles[bId];
+      edges.push({
+        id: `mst-${aId}-${bId}`,
+        d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(aId + bId), 0.42),
+        strokeStart: color,
+        strokeEnd: color,
+        x1: ta.cx,
+        y1: ta.cy,
+        x2: tb.cx,
+        y2: tb.cy,
+        op: 0.32,
+        w: 1.6,
+      });
+    });
   });
-  const cnt = otherCps.length;
-  if (cnt) {
-    cxAll /= cnt;
-    cyAll /= cnt;
-  }
-  const dx0 = cp.x - cxAll;
-  const dy0 = cp.y - cyAll;
-  const ang = !cnt || (Math.abs(dx0) < 0.01 && Math.abs(dy0) < 0.01) ? -Math.PI / 2 : Math.atan2(dy0, dx0);
-  const R = 118;
-  const ex = cp.x + Math.cos(ang) * (markerSize / 2);
-  const ey = cp.y + Math.sin(ang) * (markerSize / 2);
-  return fanOut(items, cp.x, cp.y, ang, R, ex, ey, 88, "#39ff6a", 0.4, overrides);
+
+  // Cross-cloud edges: photos sharing the secondary key across ≥2 clusters —
+  // one representative link per pair of clusters, not a full O(n²) tangle.
+  const bySecondary: Record<string, Photo[]> = {};
+  photos.forEach((p) => {
+    if (tileCluster[p.id] === UNSORTED_CLOUD_KEY) return;
+    const sk = secondaryOf(p);
+    (bySecondary[sk] = bySecondary[sk] || []).push(p);
+  });
+  Object.values(bySecondary).forEach((items) => {
+    const byCluster: Record<string, Photo[]> = {};
+    items.forEach((p) => (byCluster[tileCluster[p.id]] = byCluster[tileCluster[p.id]] || []).push(p));
+    const clusterKeys = Object.keys(byCluster);
+    if (clusterKeys.length < 2) return;
+    for (let i = 0; i < clusterKeys.length; i++) {
+      const a = byCluster[clusterKeys[i]][0];
+      const b = byCluster[clusterKeys[(i + 1) % clusterKeys.length]][0];
+      if (a.id === b.id) continue;
+      const ta = tiles[a.id],
+        tb = tiles[b.id];
+      const colorA = colorOf(tileCluster[a.id]),
+        colorB = colorOf(tileCluster[b.id]);
+      edges.push({
+        id: `x-${a.id}-${b.id}`,
+        d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(a.id + b.id), 0.46),
+        strokeStart: colorA,
+        strokeEnd: colorB,
+        x1: ta.cx,
+        y1: ta.cy,
+        x2: tb.cx,
+        y2: tb.cy,
+        op: 0.45,
+        w: 2,
+      });
+      if (clusterKeys.length === 2) break; // wrap-around would just redraw the same pair
+    }
+  });
+
+  return { clouds, tiles, edges, bounds: positionsBounds(tiles) };
 }
 
-// ── Minimap: orientation aid for pannable canvas views (not Map, which has
-// its own navigation) ────────────────────────────────────────────────────
+/** Map: clouds are countries — real per-asset `country` data is still pending
+ *  its own backend phase (ADR 0015/0016), so an unrecognized/default country
+ *  lands in the Unsorted cloud rather than being silently mislabeled. Photos
+ *  sharing a topic (`group`) across different countries get a cross-cloud
+ *  gradient line. */
+export function mapCloudLayout(photos: readonly Photo[], mapOverrides: Record<string, CanvasPoint>): CloudLayout {
+  return buildCloudLayout(
+    photos,
+    (p) => (COUNTRY_LATLON[p.country] ? p.country : UNSORTED_CLOUD_KEY),
+    (p) => p.group,
+    mapCloudColor,
+    (key) => key,
+    mapOverrides,
+  );
+}
+
+/** Topic: clouds are `photo.group`, labeled with its friendly name
+ *  (GROUPS[key].label). Photos sharing a country across different topics get
+ *  a cross-cloud gradient line. */
+export function topicCloudLayout(photos: readonly Photo[], topicOverrides: Record<string, CanvasPoint>): CloudLayout {
+  return buildCloudLayout(
+    photos,
+    (p) => p.group,
+    (p) => (COUNTRY_LATLON[p.country] ? p.country : UNSORTED_CLOUD_KEY),
+    topicCloudColor,
+    (key) => GROUPS[key as PhotoGroup]?.label ?? key,
+    topicOverrides,
+  );
+}
+
+// ── Minimap: orientation aid for pannable canvas views ──────────────────────
 
 const MB_W = 180;
 const MB_H = 120;

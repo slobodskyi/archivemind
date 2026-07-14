@@ -268,6 +268,17 @@ export function SignOutIcon({ width = 14, height = 14, ...props }: IconProps) {
   );
 }
 
+export function ViewCanvasIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x={3} y={3} width={7} height={7} rx={1} />
+      <rect x={14} y={3} width={7} height={7} rx={1} />
+      <rect x={3} y={14} width={7} height={7} rx={1} />
+      <rect x={14} y={14} width={7} height={7} rx={1} />
+    </svg>
+  );
+}
+
 export function ViewTimelineIcon({ width = 14, height = 14, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -292,6 +303,116 @@ export function ViewSenseIcon({ width = 14, height = 14, ...props }: IconProps) 
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
       <circle cx={8} cy={9} r={4} />
       <circle cx={16} cy={15} r={5} />
+    </svg>
+  );
+}
+
+export function DataSourcesIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M7 17a4 4 0 0 1-1-7.87A5.5 5.5 0 0 1 16.5 7h.5a4.5 4.5 0 0 1 .5 9" />
+      <path d="M12 12v7" />
+      <path d="m9 16 3 3 3-3" />
+    </svg>
+  );
+}
+
+export function RecentsIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx={12} cy={13} r={8} />
+      <path d="M12 9v4l3 2" />
+      <path d="M9 2h6" />
+    </svg>
+  );
+}
+
+export function ArchiveIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x={2} y={4} width={20} height={5} rx={1} />
+      <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+      <path d="M10 13h4" />
+    </svg>
+  );
+}
+
+export function TrashIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+export function UpgradeIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 19V5" />
+      <path d="M5 12l7-7 7 7" />
+    </svg>
+  );
+}
+
+export function MoreIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="currentColor" stroke="none" {...props}>
+      <circle cx={12} cy={5} r={1.8} />
+      <circle cx={12} cy={12} r={1.8} />
+      <circle cx={12} cy={19} r={1.8} />
+    </svg>
+  );
+}
+
+export function TeamIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx={9} cy={8} r={3.2} />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+      <path d="M16.5 5.2a3.2 3.2 0 0 1 0 6" />
+      <path d="M18.5 20a6 6 0 0 0-4.2-8.4" />
+    </svg>
+  );
+}
+
+export function ThemeIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z" />
+    </svg>
+  );
+}
+
+export function DesktopIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x={2} y={4} width={20} height={13} rx={1.5} />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
+}
+
+export function GDriveIcon({ width = 18, height = 18, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="#4285F4" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M8 3h8l5 9-4 8H7l-4-8z" />
+    </svg>
+  );
+}
+
+export function DropboxIcon({ width = 18, height = 18, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="#00C2FF" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M7 3l5 3.2L7 9.4 2 6.2z" />
+      <path d="M17 3l5 3.2-5 3.2-5-3.2z" />
+      <path d="M2 12.6l5 3.2 5-3.2-5-3.2z" />
+      <path d="M17 9.4l5 3.2-5 3.2-5-3.2z" />
+      <path d="M7 16.8l5 3.2 5-3.2v-3.4l-5 3.2-5-3.2z" />
     </svg>
   );
 }
