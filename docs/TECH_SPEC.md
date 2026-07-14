@@ -220,10 +220,21 @@ create table projects (
   name text not null,
   description text,
   caption_prompt text,               -- per-project caption tone/instructions
+  archived_at timestamptz,           -- soft state: tucked away, still readable
+  deleted_at timestamptz,            -- soft state: in trash; drives the 30-day sweep
   created_by uuid references profiles(id),
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+create index projects_ws_active_idx on projects (workspace_id)
+  where archived_at is null and deleted_at is null;
+
+-- Retention: hard-deletes trashed projects past the window. project_assets
+-- cascades; assets are workspace-global and survive (rule 9). Scheduled by the
+-- worker (§7), not pg_cron. See ADR 0019.
+create function sweep_trashed_projects(retention interval default interval '30 days')
+returns integer ...   -- security invoker: trusted caller sweeps all, others stay RLS-scoped
 
 create table project_assets (
   project_id uuid not null references projects(id) on delete cascade,
@@ -556,6 +567,7 @@ TOKEN_ENC_KEY · WORKER_ID · GEMINI_CONCURRENCY=5
 - Product policy stated in UI + ToS: user data is never used to train models.
 - `usage_events` doubles as AI-action audit trail (who ran what, when, on how many files).
 - Deletion: user delete → `status='deleted'` + purge R2 derivatives (background); source file deleted upstream → on fetch failure mark `source_missing`, **keep derivatives** (captions/tags/embeddings survive — archive value).
+- Project retention: archive (`archived_at`) is reversible and open-ended; trash (`deleted_at`) is a **30-day grace period**, after which `sweep_trashed_projects()` hard-deletes the project on the worker's schedule (§7). The UI states the window, so it must stay enforced. Only the project dies — its assets are workspace-global and survive (rule 9), so no R2 purge is involved. ADR 0019.
 - Privacy Policy + ToS before first external user (GDPR-aware: data location EU where possible — Supabase EU region, R2 EU jurisdiction).
 
 ---
