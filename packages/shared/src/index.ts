@@ -118,6 +118,19 @@ export const createProjectResponseSchema = z.object({
 });
 export type CreateProjectResponse = z.infer<typeof createProjectResponseSchema>;
 
+/** PATCH /api/projects/[id]: rename and/or move between active/archived/trash.
+ *  At least one field must be present. */
+export const patchProjectRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    archived: z.boolean().optional(),
+    deleted: z.boolean().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.archived !== undefined || v.deleted !== undefined, {
+    message: "at least one of name, archived, deleted is required",
+  });
+export type PatchProjectRequest = z.infer<typeof patchProjectRequestSchema>;
+
 export const addProjectAssetsRequestSchema = z.object({
   assetIds: z.array(uuidSchema).min(1).max(500),
 });

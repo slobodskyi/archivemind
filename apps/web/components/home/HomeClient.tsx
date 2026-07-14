@@ -6,8 +6,22 @@ import { useState } from "react";
 import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import Toast from "@/components/modals/Toast";
+import DataSourcesModal from "@/components/modals/DataSourcesModal";
+import RenameModal from "@/components/modals/RenameModal";
+import ConfirmModal from "@/components/modals/ConfirmModal";
+import AccountMenu from "@/components/home/AccountMenu";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import UploadManager from "@/components/upload/UploadManager";
+import { Z } from "@/lib/ui";
+import {
+  SearchIcon,
+  DataSourcesIcon,
+  RecentsIcon,
+  ArchiveIcon,
+  TrashIcon,
+  UpgradeIcon,
+  MoreIcon,
+} from "@/components/icons/icons";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
  *  Opening a project navigates to its canvas at /projects/[id]. */
@@ -25,6 +39,36 @@ function cardColor(id: string): string {
   return CARD_COLORS[h % CARD_COLORS.length];
 }
 
+type ViewMode = "projects" | "recents" | "archived" | "trash";
+
+const VIEW_TITLE: Record<ViewMode, string> = {
+  projects: "Projects",
+  recents: "Recents",
+  archived: "Archived",
+  trash: "Trash",
+};
+
+const VIEW_EMPTY: Record<ViewMode, string> = {
+  projects: "No projects yet — create one to group photos from your archive.",
+  recents: "No recently opened projects yet.",
+  archived: "No archived projects — archive a project to tuck it away without deleting it.",
+  trash: "Trash is empty — deleted projects stay here for 30 days before they're removed for good.",
+};
+
+const RECENTS_KEY = "archivemind:recentProjects";
+const RECENTS_MAX = 8;
+
+function recordRecentProject(id: string) {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY);
+    const ids: string[] = raw ? JSON.parse(raw) : [];
+    const next = [id, ...ids.filter((x) => x !== id)].slice(0, RECENTS_MAX);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  } catch {
+    // localStorage unavailable (private mode, etc.) — recents just stay empty
+  }
+}
+
 export default function HomeClient({
   account,
   projects,
@@ -37,11 +81,121 @@ export default function HomeClient({
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [view, setView] = useState<ViewMode>("projects");
+  const [query, setQuery] = useState("");
+  const [recentIds, setRecentIds] = useState<string[]>([]);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [activeProjects, setActiveProjects] = useState<ProjectCard[]>(projects);
+  const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
+  const [trashProjects, setTrashProjects] = useState<ProjectCard[] | null>(null);
+  const [renameTarget, setRenameTarget] = useState<ProjectCard | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{ project: ProjectCard; action: "archive" | "delete" } | null>(null);
 
   const flash = (t: string) => {
     setToast(t);
     setTimeout(() => setToast(null), 3200); // same duration as the workspace toast
   };
+
+  const openRecents = () => {
+    try {
+      const raw = localStorage.getItem(RECENTS_KEY);
+      setRecentIds(raw ? JSON.parse(raw) : []);
+    } catch {
+      setRecentIds([]);
+    }
+    setView("recents");
+  };
+
+  async function fetchScope(scope: "archived" | "trash"): Promise<ProjectCard[]> {
+    try {
+      const resp = await fetch(`/api/projects?scope=${scope}`);
+      if (!resp.ok) return [];
+      const { projects: list } = await resp.json();
+      return list as ProjectCard[];
+    } catch {
+      return [];
+    }
+  }
+
+  const openArchived = () => {
+    setView("archived");
+    void fetchScope("archived").then(setArchivedProjects);
+  };
+
+  const openTrash = () => {
+    setView("trash");
+    void fetchScope("trash").then(setTrashProjects);
+  };
+
+  const baseList = view === "recents"
+    ? (recentIds.map((id) => activeProjects.find((p) => p.id === id)).filter(Boolean) as ProjectCard[])
+    : view === "projects"
+      ? activeProjects
+      : view === "archived"
+        ? (archivedProjects ?? [])
+        : (trashProjects ?? []);
+
+  const q = query.trim().toLowerCase();
+  const visibleProjects = q ? baseList.filter((p) => p.name.toLowerCase().includes(q)) : baseList;
+
+  async function patchProject(id: string, patch: { name?: string; archived?: boolean; deleted?: boolean }): Promise<boolean> {
+    try {
+      const resp = await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async function renameProject(id: string, newName: string) {
+    setRenameTarget(null);
+    const ok = await patchProject(id, { name: newName });
+    if (!ok) return flash("Could not rename — try again");
+    const applyName = (list: ProjectCard[]) => list.map((p) => (p.id === id ? { ...p, name: newName } : p));
+    setActiveProjects(applyName);
+    setArchivedProjects((l) => (l ? applyName(l) : l));
+    setTrashProjects((l) => (l ? applyName(l) : l));
+    flash("Project renamed");
+  }
+
+  async function archiveProject(project: ProjectCard) {
+    setConfirmTarget(null);
+    const ok = await patchProject(project.id, { archived: true });
+    if (!ok) return flash("Could not archive — try again");
+    setActiveProjects((l) => l.filter((p) => p.id !== project.id));
+    setArchivedProjects((l) => (l ? [project, ...l] : l));
+    flash(`"${project.name}" archived`);
+  }
+
+  async function deleteProject(project: ProjectCard) {
+    setConfirmTarget(null);
+    const ok = await patchProject(project.id, { deleted: true });
+    if (!ok) return flash("Could not delete — try again");
+    setActiveProjects((l) => l.filter((p) => p.id !== project.id));
+    setArchivedProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
+    setTrashProjects((l) => (l ? [project, ...l] : l));
+    flash(`"${project.name}" moved to Trash`);
+  }
+
+  async function restoreProject(project: ProjectCard, from: "archived" | "trash") {
+    const ok = await patchProject(project.id, from === "archived" ? { archived: false } : { deleted: false });
+    if (!ok) return flash("Could not restore — try again");
+    if (from === "archived") setArchivedProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
+    else setTrashProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
+    setActiveProjects((l) => [project, ...l]);
+    flash(`"${project.name}" restored`);
+  }
+
+  function openProject(id: string) {
+    recordRecentProject(id);
+    navProgressStart();
+    router.push(`/projects/${id}`);
+  }
 
   async function createProject() {
     const trimmed = name.trim();
@@ -78,62 +232,71 @@ export default function HomeClient({
           padding: "18px 14px 14px",
         }}
       >
-        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", letterSpacing: "0.04em", padding: "0 8px 18px" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", letterSpacing: "0.04em", padding: "0 8px 14px" }}>
           ArchiveMind
         </div>
 
+        <AccountMenu
+          account={account}
+          open={accountMenuOpen}
+          onToggle={() => setAccountMenuOpen((v) => !v)}
+          onClose={() => setAccountMenuOpen(false)}
+          onFlashToast={flash}
+        />
+
+        <button
+          onClick={() => setSourcesOpen(true)}
+          style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 8px", marginBottom: 10, background: "transparent", border: 0, borderRadius: 2, color: "var(--t2)", fontSize: 13, fontFamily: "inherit", cursor: "pointer", textAlign: "left" }}
+        >
+          <span style={{ display: "flex", flex: "0 0 auto" }}><DataSourcesIcon /></span>
+          <span style={{ flex: 1 }}>Data Sources</span>
+        </button>
+
+        <div style={{ height: 1, background: "var(--bd)", margin: "2px 0 10px" }} />
+
+        <div style={{ position: "relative", marginBottom: 10 }}>
+          <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", display: "flex", color: "var(--t3)", pointerEvents: "none" }}>
+            <SearchIcon width={13} height={13} />
+          </span>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search projects…"
+            style={{
+              width: "100%",
+              height: 30,
+              padding: "0 8px 0 28px",
+              background: "var(--bg-in)",
+              border: "1px solid var(--bd)",
+              borderRadius: 2,
+              color: "var(--t1)",
+              fontSize: 12.5,
+              fontFamily: "inherit",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+
         <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <NavItem label="Projects" active icon={<GridIcon />} />
+          <NavItem label="Projects" active={view === "projects"} icon={<GridIcon />} onClick={() => setView("projects")} />
+          <NavItem label="Recents" active={view === "recents"} icon={<RecentsIcon />} onClick={openRecents} />
         </nav>
 
         <div style={{ flex: 1 }} />
 
-        {/* account block */}
-        <div style={{ borderTop: "1px solid var(--bd)", paddingTop: 12, display: "flex", alignItems: "center", gap: 9 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 2,
-              background: "var(--bg-el)",
-              border: "1px solid var(--bdh)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--t1)",
-              fontSize: 11,
-              fontWeight: 700,
-              flex: "0 0 auto",
-            }}
-          >
-            {account.initials}
-          </div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {account.name}
-            </div>
-            <div style={{ fontSize: 10.5, color: "var(--tm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {account.email}
-            </div>
-          </div>
-          <form action="/auth/signout" method="post">
-            <button
-              type="submit"
-              aria-label="Sign out"
-              title="Sign out"
-              style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "transparent", color: "var(--t2b)", cursor: "pointer", borderRadius: 2 }}
-            >
-              <SignOutIcon />
-            </button>
-          </form>
-        </div>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <NavItem label="Upgrade" icon={<UpgradeIcon />} onClick={() => flash("Upgrade plans — coming soon")} />
+          <NavItem label="Archived" active={view === "archived"} icon={<ArchiveIcon />} onClick={openArchived} />
+          <NavItem label="Trash" active={view === "trash"} icon={<TrashIcon />} onClick={openTrash} />
+        </nav>
       </aside>
 
       {/* ── content: project cards ─────────────────────────────────── */}
       <main style={{ flex: 1, height: "100%", overflowY: "auto", padding: "26px 30px" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
-          <h1 style={{ fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0 }}>Projects</h1>
-          {!creating && (
+          <h1 style={{ fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0 }}>{VIEW_TITLE[view]}</h1>
+          {view === "projects" && !creating && (
             <button
               onClick={() => setCreating(true)}
               style={{ display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, letterSpacing: ".04em", cursor: "pointer", fontFamily: "inherit" }}
@@ -143,7 +306,7 @@ export default function HomeClient({
           )}
         </div>
 
-        {creating && (
+        {view === "projects" && creating && (
           <div style={{ display: "flex", gap: 8, marginBottom: 18, maxWidth: 420 }}>
             <input
               autoFocus
@@ -173,7 +336,7 @@ export default function HomeClient({
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
-          {projects.map((p) => (
+          {visibleProjects.map((p) => (
             <ProjectCardView
               key={p.id}
               title={p.name}
@@ -181,13 +344,23 @@ export default function HomeClient({
               previews={p.previews}
               accent={cardColor(p.id)}
               href={`/projects/${p.id}`}
-            />
+              onOpen={() => recordRecentProject(p.id)}
+            >
+              <CardMenu
+                restoreOnly={view === "archived" || view === "trash"}
+                onOpen={() => openProject(p.id)}
+                onRename={() => setRenameTarget(p)}
+                onArchive={() => setConfirmTarget({ project: p, action: "archive" })}
+                onDelete={() => setConfirmTarget({ project: p, action: "delete" })}
+                onRestore={() => restoreProject(p, view === "archived" ? "archived" : "trash")}
+              />
+            </ProjectCardView>
           ))}
         </div>
 
-        {projects.length === 0 && !creating && (
+        {visibleProjects.length === 0 && !(view === "projects" && creating) && (
           <div style={{ marginTop: 26, fontSize: 12.5, color: "var(--tm)" }}>
-            No projects yet — create one to group photos from your archive.
+            {q ? "No projects match your search." : VIEW_EMPTY[view]}
           </div>
         )}
       </main>
@@ -195,6 +368,41 @@ export default function HomeClient({
       <UploadManager projectId="all" disabled disabledMessage="OPEN A PROJECT TO UPLOAD" />
 
       <Toast show={!!toast} text={toast ?? ""} />
+
+      <DataSourcesModal
+        open={sourcesOpen}
+        onClose={() => setSourcesOpen(false)}
+        onConnect={(name) => {
+          setSourcesOpen(false);
+          flash(`${name} — connect flow coming soon`);
+        }}
+      />
+
+      <RenameModal
+        key={renameTarget?.id ?? "none"}
+        open={!!renameTarget}
+        initialName={renameTarget?.name ?? ""}
+        onSave={(newName) => renameTarget && void renameProject(renameTarget.id, newName)}
+        onClose={() => setRenameTarget(null)}
+      />
+
+      <ConfirmModal
+        open={!!confirmTarget}
+        title={confirmTarget?.action === "archive" ? "Archive project?" : "Delete project?"}
+        body={
+          confirmTarget?.action === "archive"
+            ? `"${confirmTarget.project.name}" will move to Archived. You can restore it anytime.`
+            : `"${confirmTarget?.project.name}" will move to Trash and be permanently removed after 30 days.`
+        }
+        confirmLabel={confirmTarget?.action === "archive" ? "Archive" : "Delete"}
+        danger={confirmTarget?.action === "delete"}
+        onConfirm={() => {
+          if (!confirmTarget) return;
+          if (confirmTarget.action === "archive") void archiveProject(confirmTarget.project);
+          else void deleteProject(confirmTarget.project);
+        }}
+        onClose={() => setConfirmTarget(null)}
+      />
     </div>
   );
 }
@@ -205,61 +413,154 @@ function ProjectCardView({
   previews,
   accent,
   href,
+  onOpen,
+  children,
 }: {
   title: string;
   count: number;
   previews: string[];
   accent: string;
   href: string;
+  onOpen?: () => void;
+  children?: React.ReactNode;
 }) {
+  const extra = count - previews.length;
   return (
-    <Link
-      href={href}
-      onNavigate={() => navProgressStart()}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        textAlign: "left",
-        background: "var(--bg-s)",
-        border: "1px solid var(--bd)",
-        borderRadius: 3,
-        overflow: "hidden",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        padding: 0,
-        color: "inherit",
-        textDecoration: "none",
-      }}
-    >
-      <div style={{ position: "relative", height: 122, background: "var(--bg-el)", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 1 }}>
-        {previews.length === 0 && (
-          <div style={{ gridColumn: "1 / 3", gridRow: "1 / 3", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--tm)", fontSize: 11 }}>
-            Empty
+    <div style={{ position: "relative" }}>
+      <Link
+        href={href}
+        onNavigate={() => {
+          onOpen?.();
+          navProgressStart();
+        }}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          textAlign: "left",
+          background: "var(--bg-s)",
+          border: "1px solid var(--bd)",
+          borderRadius: 3,
+          overflow: "hidden",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          padding: 0,
+          color: "inherit",
+          textDecoration: "none",
+        }}
+      >
+        <div style={{ position: "relative", height: 122, background: "var(--bg-el)", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 1 }}>
+          {previews.length === 0 && (
+            <div style={{ gridColumn: "1 / 3", gridRow: "1 / 3", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--tm)", fontSize: 11 }}>
+              No files yet
+            </div>
+          )}
+          {previews.slice(0, 4).map((src, i) => (
+            <div
+              key={i}
+              style={{
+                position: "relative",
+                gridColumn: previews.length === 1 ? "1 / 3" : undefined,
+                gridRow: previews.length === 1 ? "1 / 3" : undefined,
+                backgroundImage: `url(${src})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            >
+              {i === 3 && extra > 0 && (
+                <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.55)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 13, fontWeight: 700 }}>
+                  +{extra}
+                </div>
+              )}
+            </div>
+          ))}
+          <span style={{ position: "absolute", top: 8, left: 8, width: 8, height: 8, borderRadius: 999, background: accent }} />
+        </div>
+        <div style={{ padding: "10px 12px" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {title}
+        </div>
+          <div style={{ fontSize: 11, color: "var(--tm)", marginTop: 2 }}>
+            {count} {count === 1 ? "file" : "files"}
           </div>
-        )}
-        {previews.slice(0, 4).map((src, i) => (
+        </div>
+      </Link>
+      {children}
+    </div>
+  );
+}
+
+function CardMenu({
+  restoreOnly,
+  onOpen,
+  onRename,
+  onArchive,
+  onDelete,
+  onRestore,
+}: {
+  restoreOnly: boolean;
+  onOpen: () => void;
+  onRename: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+  onRestore: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "absolute", top: 8, right: 8, zIndex: 2 }}>
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-label="Project options"
+        style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", background: "rgba(10,10,10,.55)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 2, color: "#fff", cursor: "pointer" }}
+      >
+        <MoreIcon width={13} height={13} />
+      </button>
+      {open && (
+        <>
           <div
-            key={i}
-            style={{
-              gridColumn: previews.length === 1 ? "1 / 3" : undefined,
-              gridRow: previews.length === 1 ? "1 / 3" : undefined,
-              backgroundImage: `url(${src})`,
-              backgroundSize: "cover",
-              backgroundPosition: "center",
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpen(false);
             }}
+            style={{ position: "fixed", inset: 0, zIndex: Z.menuBackdrop }}
           />
-        ))}
-        <span style={{ position: "absolute", top: 8, left: 8, width: 8, height: 8, borderRadius: 999, background: accent }} />
-      </div>
-      <div style={{ padding: "10px 12px" }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {title}
-        </div>
-        <div style={{ fontSize: 11, color: "var(--tm)", marginTop: 2 }}>
-          {count} {count === 1 ? "file" : "files"}
-        </div>
-      </div>
-    </Link>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: "absolute", top: 28, right: 0, width: 150, background: "rgba(18,18,18,.97)", border: "1px solid var(--bd)", borderRadius: 2, backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,.7)", zIndex: Z.menu, padding: 6 }}
+          >
+            <MenuBtn label="Open" onClick={() => { setOpen(false); onOpen(); }} />
+            {restoreOnly ? (
+              <MenuBtn label="Restore" onClick={() => { setOpen(false); onRestore(); }} />
+            ) : (
+              <>
+                <MenuBtn label="Rename" onClick={() => { setOpen(false); onRename(); }} />
+                <MenuBtn label="Archive" onClick={() => { setOpen(false); onArchive(); }} />
+                <MenuBtn label="Delete" danger onClick={() => { setOpen(false); onDelete(); }} />
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MenuBtn({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{ display: "flex", width: "100%", padding: "8px 10px", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit", color: danger ? "var(--red)" : "var(--t2)", fontSize: 12.5, background: "transparent", textAlign: "left" }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -267,10 +568,12 @@ function NavItem({
   label,
   icon,
   active,
+  onClick,
 }: {
   label: string;
   icon: React.ReactNode;
   active?: boolean;
+  onClick?: () => void;
 }) {
   const style: React.CSSProperties = {
     display: "flex",
@@ -285,17 +588,16 @@ function NavItem({
     fontSize: 13,
     fontFamily: "inherit",
     textDecoration: "none",
+    cursor: onClick ? "pointer" : undefined,
   };
-  const body = (
-    <>
+  return (
+    <button onClick={onClick} style={style}>
       <span style={{ display: "flex", flex: "0 0 auto" }}>{icon}</span>
       <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
-    </>
+    </button>
   );
-  return <div style={style}>{body}</div>;
 }
 
 /* icons (inline, match the mono/line style) */
 const iconProps = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const GridIcon = () => (<svg {...iconProps}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>);
-const SignOutIcon = () => (<svg {...iconProps}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></svg>);

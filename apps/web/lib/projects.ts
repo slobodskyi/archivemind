@@ -33,14 +33,31 @@ interface ProjectRow {
   project_assets: ProjectAssetRow[];
 }
 
-export async function getProjectCards(supabase: SupabaseClient): Promise<ProjectCard[]> {
-  const { data, error } = await supabase
-    .from("projects")
-    .select(
-      `id, name, created_at,
-       project_assets ( assets ( status, asset_previews ( size, r2_key ) ) )`,
-    )
-    .order("created_at", { ascending: true });
+export type ProjectScope = "active" | "archived" | "trash";
+
+const PROJECT_CARD_SELECT = `id, name, created_at,
+     project_assets ( assets ( status, asset_previews ( size, r2_key ) ) )`;
+
+export async function getProjectCards(
+  supabase: SupabaseClient,
+  scope: ProjectScope = "active",
+): Promise<ProjectCard[]> {
+  let query = supabase.from("projects").select(PROJECT_CARD_SELECT).order("created_at", { ascending: true });
+  if (scope === "active") query = query.is("archived_at", null).is("deleted_at", null);
+  else if (scope === "archived") query = query.not("archived_at", "is", null).is("deleted_at", null);
+  else query = query.not("deleted_at", "is", null);
+
+  let { data, error } = await query;
+  if (error?.code === "42703") {
+    // archived_at/deleted_at migration (20260713000001) not applied to this
+    // database yet — degrade to pre-migration behavior instead of a hard
+    // crash: every project counts as active, Archived/Trash stay empty.
+    if (scope !== "active") return [];
+    ({ data, error } = await supabase
+      .from("projects")
+      .select(PROJECT_CARD_SELECT)
+      .order("created_at", { ascending: true }));
+  }
   if (error) throw error;
 
   const rows = (data ?? []) as unknown as ProjectRow[];
