@@ -2,7 +2,9 @@
 
 Date: 2026-07-13
 
-Status: Accepted
+Status: Accepted · **Map/Topic parts superseded by
+[0018](0018-cloud-clusters-map-topic-default-zoom.md) — read 0018 for what ships today.**
+The delete-on-any-view decision made here is unchanged and still current.
 
 Supersedes the Map/Topic parts of [0016](0016-real-timeline-topic-map-views.md).
 

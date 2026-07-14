@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { uuidSchema } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
 
-/** DELETE /api/assets/[id] — soft delete (TECH_SPEC §11: user delete →
+/** DELETE /api/assets/[id] — soft delete (TECH_SPEC §12: user delete →
  *  status='deleted'; R2 derivative purge is a background job, not this
  *  request). RLS scopes the update (assets_update = is_editor). Any view's
  *  photo tile can call this — it isn't project- or view-specific. */

@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
  *  Call `navProgressStart()` right before any push/Link navigation; the bar
  *  trickles toward ~90% and completes when the pathname actually changes.
  *
- *  Deterministic on purpose — no `Math.random` in this codebase (see
+ *  Deterministic on purpose — no `Math.random` on layout/render paths (see
  *  ARCHITECTURE.md); the trickle is a fixed asymptotic curve. */
 
 let notifyStart: (() => void) | null = null;

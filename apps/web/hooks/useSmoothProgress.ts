@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 /** rAF-smoothed display value for a 0..1 progress target. Eases toward the
  *  target, trickles slightly ahead while the target stalls (capped at 98.5%),
  *  never moves backward mid-run, and wraps up quickly once the target hits 1.
- *  Deterministic — no Math.random in this codebase (see ARCHITECTURE.md).
+ *  Deterministic — no Math.random on layout/render paths (see ARCHITECTURE.md).
  *
  *  A target that drops by more than 0.5 is a new run (upload → done → new
  *  upload) and hard-resets the display. */

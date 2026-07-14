@@ -82,6 +82,7 @@ archive-mind/
 │       ├── src/
 │       │   ├── index.ts            # poll loop + graceful shutdown
 │       │   ├── queue.ts            # claim / heartbeat / complete / retry / reaper
+│       │   ├── retention.ts        # periodic sweeps (trashed-project purge, §7)
 │       │   ├── handlers/           # ingest.ts, analyze.ts, caption.ts, export.ts
 │       │   ├── services/           # gemini.ts, embeddings.ts, r2.ts, exif.ts,
 │       │   │                       # previews.ts, heic.ts, raw.ts, pdf.ts,
@@ -429,6 +430,7 @@ returning *;
 - **Loop:** poll every 2s when idle; process; update `progress/progress_label/done_items` every N items (Realtime propagates to UI).
 - **Retry:** on error, if `attempts < 3` → `status='queued', run_after = now() + (attempts * interval '2 min')`, else `failed` + `error`.
 - **Reaper:** every 5 min, `running` jobs with `claimed_at < now() - interval '15 min'` → back to `queued` (crash recovery).
+- **Retention sweeper:** on boot, then every 6 h, `select sweep_trashed_projects()` — hard-deletes projects past the 30-day trash window (§12). Not an `ai_jobs` type: it's neither user-triggered nor per-asset. Failures are logged and retried on the next tick. See ADR 0019.
 - **Idempotency:** handlers upsert by natural keys (`asset_previews` PK, `captions (asset_id,lang,style)`, `embeddings (asset_id,kind,chunk_index)`) — safe to re-run.
 - **Rate limiting:** worker-side concurrency cap on Gemini calls (start: 5 parallel) + exponential backoff on 429.
 - Graceful shutdown: finish current item, release job back to `queued`.
@@ -493,11 +495,12 @@ All routes authed (Supabase session); workspace derived from membership.
 | `GET  /api/assets` | list (workspace or `?projectId=`), cursor-paginated, incl. preview URLs |
 | `GET  /api/assets/:id` | asset + files + exif + tags + captions + facts |
 | `PATCH /api/assets/:id` | rename (title), status |
+| `DELETE /api/assets/:id` | **shipped** — soft delete (`status='deleted'`, §12). Callable from any canvas view. Note this overlaps the status half of the PATCH row above; the two want reconciling. |
 | `GET  /api/canvas?projectId=` | aggregates for neural view (workspace-wide, or scoped to a project — matches the `canvas_layouts.scope` = `'all'` \| project uuid): sources → folders → counts + first-K tile previews (lazy-load the rest) |
 | `PUT  /api/canvas/layout` | persist `canvas_layouts` (scope, overrides, organize_mode) |
 | `GET/POST /api/sources/:provider/oauth` | OAuth start + callback; store encrypted tokens |
 | `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `assets` + `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
-| `POST /api/projects` · `GET /api/projects` · `PATCH /api/projects/:id` | CRUD incl. `caption_prompt` |
+| `POST /api/projects` · `GET /api/projects` · `PATCH /api/projects/:id` | CRUD incl. `caption_prompt`. **Shipped:** `GET` takes `?scope=active\|archived\|trash`; `PATCH` does rename **and** archive/trash (`{name}` / `{archived}` / `{deleted}` → `archived_at`/`deleted_at`, ADR 0019). `caption_prompt` is not wired yet (Phase 3). |
 | `POST /api/projects/:id/assets` · `DELETE .../assets/:assetId` | M:N add/remove |
 | `POST /api/jobs` | `{type:'analyze'|'caption'|'export', assetIds|projectId, options}` → insert `ai_jobs` |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |

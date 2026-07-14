@@ -2,7 +2,9 @@
 
 Date: 2026-07-07
 
-Status: Superseded in part by [0014](0014-project-first-navigation.md)
+Status: Superseded in part by [0014](0014-project-first-navigation.md), and its
+Map/Leaflet prose by [0016](0016-real-timeline-topic-map-views.md)→[0018](0018-cloud-clusters-map-topic-default-zoom.md)
+— the Leaflet geo map and `components/map/` described below no longer exist.
 
 ## Context
 
