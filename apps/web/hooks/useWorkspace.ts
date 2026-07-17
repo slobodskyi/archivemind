@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
+import { CAPTION_LANG_DB, CAPTION_STYLE_DB, getCaptionRow } from "@/lib/format";
 import { photoSrc } from "@/lib/img";
 import type {
   CaptionStyle,
@@ -310,6 +311,7 @@ export interface Workspace {
   setStyle: (s: CaptionStyle) => void;
   copyCap: () => void;
   regen: () => void;
+  saveCaption: (text: string) => void;
   genSingle: (id: string) => void;
   toolSelect: () => void;
   toolHand: () => void;
@@ -1035,7 +1037,73 @@ export function useWorkspace(
     copyTimer.current = setTimeout(() => setState({ copyLabel: "Copy" }), 1400);
   }, [setState]);
 
-  const regen = useCallback(() => flashToast("Caption regenerated"), [flashToast]);
+  /** Regenerate the visible caption (drawer lang × style) via a real caption
+   *  job (#14). An edited caption asks first, then clears is_edited — the
+   *  worker skips edited units otherwise. */
+  const regen = useCallback(async () => {
+    const s = stateRef.current;
+    const photo = s.photos.find((p) => p.id === s.drawerId);
+    if (!photo || activeJobId.current) return;
+    const row = getCaptionRow(photo, s.drawerLang, s.drawerStyle);
+    if (row?.edited) {
+      if (!window.confirm("This caption was edited by hand. Regenerate and overwrite it?")) return;
+      const reset = await fetch(`/api/captions/${row.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ resetEdited: true }),
+      });
+      if (!reset.ok) {
+        flashToast("Could not unlock the caption — try again");
+        return;
+      }
+    }
+    setState({ proc: { active: true, label: "Queueing caption…", pct: 3 } });
+    try {
+      const resp = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "caption",
+          assetIds: [photo.id],
+          langs: [CAPTION_LANG_DB[s.drawerLang]],
+          style: CAPTION_STYLE_DB[s.drawerStyle],
+        }),
+      });
+      if (!resp.ok) throw new Error(String(resp.status));
+      const { jobId } = (await resp.json()) as { jobId: string };
+      activeJobId.current = jobId;
+      setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
+    } catch {
+      setState({ proc: { active: false, label: "", pct: 0 } });
+      flashToast("Caption failed to start — try again");
+    }
+  }, [setState, flashToast]);
+
+  /** Persist a drawer caption edit — PATCH stamps is_edited=true (spec §8.3),
+   *  so bulk regeneration never silently clobbers it. */
+  const saveCaption = useCallback(
+    async (text: string) => {
+      const s = stateRef.current;
+      const photo = s.photos.find((p) => p.id === s.drawerId);
+      const row = photo ? getCaptionRow(photo, s.drawerLang, s.drawerStyle) : null;
+      if (!row) {
+        flashToast("Nothing to save yet — regenerate a caption first");
+        return;
+      }
+      const resp = await fetch(`/api/captions/${row.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (resp.ok) {
+        flashToast("Caption saved");
+        router.refresh();
+      } else {
+        flashToast("Save failed — try again");
+      }
+    },
+    [flashToast, router],
+  );
 
   /** Real soft-delete (spec §12: user delete → assets.status='deleted'; R2
    *  derivatives purge is a background job, not this request). Optimistic —
@@ -1664,10 +1732,15 @@ export function useWorkspace(
       bulkPanelOpen: false,
     });
     if (job.status === "done") {
-      flashToast(`${job.total_items ?? 0} photo(s) analyzed`);
-      router.refresh(); // pulls fresh tags/facts into the server payload
+      flashToast(
+        job.type === "caption"
+          ? `${job.total_items ?? 0} caption(s) generated`
+          : `${job.total_items ?? 0} photo(s) analyzed`,
+      );
+      router.refresh(); // pulls fresh tags/facts/captions into the server payload
     } else {
-      flashToast(`Analyze ${job.status}${job.error ? ` — ${job.error}` : ""}`);
+      const verb = job.type === "caption" ? "Caption" : "Analyze";
+      flashToast(`${verb} ${job.status}${job.error ? ` — ${job.error}` : ""}`);
     }
   });
 
@@ -1946,6 +2019,7 @@ export function useWorkspace(
     setStyle,
     copyCap,
     regen,
+    saveCaption,
     genSingle,
     toolSelect,
     toolHand,

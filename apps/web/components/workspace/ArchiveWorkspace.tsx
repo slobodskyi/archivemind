@@ -336,6 +336,7 @@ export default function ArchiveWorkspace({
         onRegen={ws.regen}
         onCopy={ws.copyCap}
         onGenSingle={() => ws.drawerPhoto && ws.genSingle(ws.drawerPhoto.id)}
+        onSaveCaption={ws.saveCaption}
       />
 
       <Toast show={ws.toast.show} text={ws.toast.text} />

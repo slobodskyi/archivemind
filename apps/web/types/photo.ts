@@ -35,6 +35,16 @@ export interface Fact {
 /** A multilingual caption: one string per supported language. */
 export type Caption = Record<Language, string>;
 
+/** One real caption row (DB `captions`) surfaced to the UI. */
+export interface CaptionRow {
+  id: string;
+  text: string;
+  edited: boolean;
+}
+
+/** Real captions per language × style; a missing key = not generated yet. */
+export type PhotoCaptions = Partial<Record<Language, Partial<Record<CaptionStyle, CaptionRow>>>>;
+
 export interface ExifData {
   camera: string;
   lens: string;
@@ -66,6 +76,8 @@ export interface Photo {
   status: PhotoStatus;
   captionKey: CaptionKey | null;
   captionStyle: CaptionStyle;
+  /** Real caption rows keyed lang × style (absent on mock rows). */
+  captions?: PhotoCaptions;
   /** Authored short-caption teaser; not surfaced in the current UI. */
   chip: string | null;
   tags: string[] | null;

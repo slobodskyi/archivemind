@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { ExifData, Photo } from "@/types";
+import type { ExifData, Photo, PhotoCaptions } from "@/types";
 import { presignGet } from "@/lib/r2";
 
 /** Real assets → the mockup's Photo shape (server-side; RLS-scoped query +
@@ -37,6 +37,14 @@ interface FactRow {
   status: "confirmed" | "likely" | "needs_check";
 }
 
+interface CaptionDbRow {
+  id: string;
+  lang: "en" | "uk" | "ru";
+  style: "social" | "agency" | "archival";
+  text: string;
+  is_edited: boolean;
+}
+
 interface AssetRow {
   id: string;
   title: string | null;
@@ -47,6 +55,22 @@ interface AssetRow {
   asset_exif: ExifRow | null;
   asset_tags: TagRow[];
   facts: FactRow[];
+  captions: CaptionDbRow[];
+}
+
+/** DB caption enums → the mockup's UI labels. */
+const CAPTION_LANG_UP = { en: "EN", uk: "UK", ru: "RU" } as const;
+const CAPTION_STYLE_UP = { social: "Social", agency: "Agency", archival: "Archival" } as const;
+
+function toCaptions(rows: CaptionDbRow[]): PhotoCaptions {
+  const captions: PhotoCaptions = {};
+  for (const c of rows) {
+    const lang = CAPTION_LANG_UP[c.lang];
+    const style = CAPTION_STYLE_UP[c.style];
+    if (!lang || !style) continue; // unknown enum value from a future migration
+    (captions[lang] ??= {})[style] = { id: c.id, text: c.text, edited: c.is_edited };
+  }
+  return captions;
 }
 
 /** DB fact_status → the mockup's 3-dot FactStatus. */
@@ -108,6 +132,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     status: processed ? "Likely" : "Needs check",
     captionKey: null,
     captionStyle: "Agency",
+    captions: toCaptions(a.captions),
     chip: null,
     tags: tagNames.length > 0 ? tagNames : null,
     facts,
@@ -126,7 +151,8 @@ const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,
        asset_previews ( size, r2_key, width, height ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
        asset_tags ( tags ( name ) ),
-       facts ( text, status )`;
+       facts ( text, status ),
+       captions ( id, lang, style, text, is_edited )`;
 
 /** The caller's assets (RLS-scoped). `projectId` filters to one project's M:N
  *  membership; omit (or pass "all") for the whole workspace. */
