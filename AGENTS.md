@@ -19,8 +19,9 @@ next**. `docs/PLAN.md` is canonical for phase status — trust it over this line
   cloud. That's the data, not a bug in the view (ADR 0018). Chat/search is still the
   canned surface in `lib/chat.ts`.
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
-  HEIC + RAW paths) and analyze (Gemini tags/facts + embeddings; user-triggered
-  only — never automatic).
+  HEIC + RAW paths), analyze (Gemini tags/facts + embeddings; user-triggered
+  only — never automatic) and caption (styled multilingual captions — handler
+  live, user-facing wiring lands with #14).
 - `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),

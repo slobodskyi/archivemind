@@ -10,8 +10,10 @@ A pnpm + turborepo monorepo, live in production (Phases 0–1 shipped, Phase 2 i
 progress). `apps/web` (Vercel) is the ported Claude Design canvas UI with real
 email+password auth, drag-and-drop upload to R2, and a canvas that renders the
 caller's own assets. `apps/worker` (Railway) processes `ai_jobs`: ingest
-(sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths) and
-analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only).
+(sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths),
+analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only) and
+caption (styled multilingual captions per spec §8.3 — handler live, `POST
+/api/jobs` wiring lands with #14).
 `packages/shared` holds the zod contracts both sides parse. Projects and all four
 canvas views now run on the caller's real assets; Map and Topic cluster by
 `country`/`group`, which `lib/assets.ts` still fills with inert defaults, so they

@@ -99,6 +99,48 @@ export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
 export const analyzeJobPayloadSchema = ingestJobPayloadSchema;
 export type AnalyzeJobPayload = IngestJobPayload;
 
+// ── Captions (spec §8.3) — worker handler #13; API wiring joins with #14 ─────
+
+export const captionLangSchema = z.enum(["en", "uk", "ru"]);
+export type CaptionLang = z.infer<typeof captionLangSchema>;
+
+export const captionStyleSchema = z.enum(["social", "agency", "archival"]);
+export type CaptionStyleKey = z.infer<typeof captionStyleSchema>;
+
+export const captionJobPayloadSchema = z.object({
+  asset_ids: z.array(uuidSchema).min(1),
+  // dedupe: every duplicate lang would be a paid Gemini call + a billed usage row
+  langs: z
+    .array(captionLangSchema)
+    .min(1)
+    .transform((l) => [...new Set(l)]),
+  style: captionStyleSchema,
+});
+export type CaptionJobPayload = z.infer<typeof captionJobPayloadSchema>;
+
+/** Base prompt templates per style (spec §8.3; packages/shared so web and
+ *  worker never drift). `projects.caption_prompt` joins once the job payload
+ *  carries project context (#14 — a caption job is asset-scoped and assets are
+ *  M:N across projects, so the trigger must say which project's tone applies). */
+export const CAPTION_PROMPTS: Record<CaptionStyleKey, string> = {
+  social:
+    "Write a short, punchy social-media caption for this photo: 1-2 sentences, engaging but factual, then 2-4 relevant hashtags. No emoji spam (max 1).",
+  agency:
+    "Write a wire-agency photo caption: one dense factual paragraph in present tense — who/what/where/when as far as visible or provided. Neutral tone, no speculation, no opinions.",
+  archival:
+    "Write an archival catalog description: 2-3 objective sentences documenting subjects, setting, composition and any visible text. Dry, precise, suitable for a searchable archive record.",
+};
+
+export const CAPTION_LANG_NAMES: Record<CaptionLang, string> = {
+  en: "English",
+  uk: "Ukrainian",
+  ru: "Russian",
+};
+
+/** POST /api/jobs — analyze-only for now; gains a type='caption' union member
+ *  with the API wiring (#14). The route hardcodes the analyze insert, so
+ *  widening this schema before the route handles caption would silently
+ *  enqueue the wrong job type. */
 export const createJobRequestSchema = z.object({
   type: z.literal("analyze"),
   assetIds: z.array(uuidSchema).min(1).max(500),
