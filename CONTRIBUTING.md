@@ -15,9 +15,10 @@ can't infer on its own.
 
 ## Branch protection
 `main` is protected by a GitHub repository ruleset (not classic branch
-protection): CI (`checks` — lint, typecheck, test, build) must pass and the branch
-must be up to date with `main` (a PR that falls behind shows `BEHIND` and must be
-rebased before it will merge), and force-pushes and branch deletion are blocked.
+protection): CI must pass — both `checks` (lint, typecheck, test, build) and
+`db-tests` (the pgTAP suite; ADR 0020) — and the branch must be up to date with
+`main` (a PR that falls behind shows `BEHIND` and must be rebased before it will
+merge), and force-pushes and branch deletion are blocked.
 Only the repo admin (`slobodskyi`) is on the
 ruleset's **bypass list**, as a break-glass escape hatch — everyone else,
 including `gangsta-george`, lands changes through the default flow: branch → PR →
@@ -41,9 +42,10 @@ branch is merged.
 ## Before opening a PR
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` all pass (from the
   repo root; they fan out via turborepo). CI runs exactly these four.
-- If you touched `supabase/**`, also run `supabase db reset && supabase test db` —
-  the pgTAP suites are the migration gate but are **not** wired into CI, so a green
-  CI says nothing about them (ADR 0013).
+- If you touched `supabase/**`, run `supabase db reset && supabase test db`
+  locally as the fast pre-flight — CI runs the same pgTAP suites as the required
+  `db-tests` check, so a red suite now blocks the merge on its own (ADR 0020;
+  supersedes ADR 0013's local-only discipline).
 - The diff does only what the PR describes — no unrelated drive-by changes.
 - If an AI agent produced the diff, skim it yourself before pushing — see the
   review checklist in `.github/PULL_REQUEST_TEMPLATE.md`.

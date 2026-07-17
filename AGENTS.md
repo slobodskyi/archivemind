@@ -9,7 +9,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 AI-powered creator archive workspace — infinite-canvas photo archive UI.
 A **pnpm + turborepo monorepo**, live in production (Phases 0–2 shipped 2026-07-10,
 plus Phase 5's homepage + real projects pulled forward; **Phase 3 — Captions — is
-next**. `docs/PLAN.md` is canonical for phase status — trust it over this line):
+in flight**: the worker handler shipped (#79), the web wiring (#14) is next.
+`docs/PLAN.md` is canonical for phase status — trust it over this line):
 - `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
   real auth (email+password), drag-and-drop upload to R2, a real homepage of project
   cards, and Canvas/Timeline/Map/Topic all rendering the caller's real assets.
@@ -62,9 +63,10 @@ script (packages without it are skipped). CI runs them as one job named `checks`
 `pnpm turbo run lint typecheck test build` — a red test blocks merge exactly like
 a type error.
 
-The pgTAP suites (`supabase/tests/*.sql`) are **not** in CI — they run locally via
-`supabase test db` and gate every migration PR by discipline alone. Run them by hand
-when you touch `supabase/**`. See `docs/decisions/0013-test-strategy.md`.
+The pgTAP suites (`supabase/tests/*.sql`) run in CI as the required `db-tests`
+check (fast-skips on non-DB PRs; full run when `supabase/**` changes — ADR 0020,
+required since 2026-07-17). `supabase test db` locally is the fast pre-flight
+when you touch `supabase/**`, not the only line of defence anymore.
 
 ## Conventions
 - TypeScript strict, no `any`.
