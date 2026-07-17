@@ -11,10 +11,11 @@ import type { HandlerContext } from "./index";
 
 /** Captions (spec §8.3), per asset × lang: medium preview + known metadata
  *  (EXIF date/camera/GPS label + confirmed facts) → styled caption → upsert.
- *  Never overwrites a user-edited caption (is_edited guard in the upsert —
- *  the UI owns the confirm-overwrite flow). One usage_event per caption. */
+ *  Never overwrites a user-edited caption: edited units are skipped before the
+ *  paid model call, and the upsert's is_edited guard backstops the race — the
+ *  UI owns the confirm-overwrite flow. One usage_event per generated caption. */
 
-interface CaptionAssetRow {
+export interface CaptionAssetRow {
   asset_id: string;
   workspace_id: string;
   title: string | null;
@@ -25,24 +26,21 @@ interface CaptionAssetRow {
   gps_label: string | null;
 }
 
-export interface CaptionContext {
-  taken_at: string | Date | null;
-  camera_make: string | null;
-  camera_model: string | null;
-  gps_label: string | null;
-  confirmed_facts: string[];
-}
-
 /** Pure prompt assembly: style template + target language + whatever metadata
  *  actually exists — the model is told to never invent beyond it. */
-export function buildCaptionPrompt(style: CaptionStyleKey, lang: CaptionLang, ctx: CaptionContext): string {
+export function buildCaptionPrompt(
+  style: CaptionStyleKey,
+  lang: CaptionLang,
+  meta: Pick<CaptionAssetRow, "taken_at" | "camera_make" | "camera_model" | "gps_label">,
+  confirmedFacts: string[],
+): string {
   const metadata = [
-    ctx.taken_at ? `Taken: ${new Date(ctx.taken_at).toISOString().slice(0, 10)}` : null,
-    ctx.camera_make || ctx.camera_model
-      ? `Camera: ${[ctx.camera_make, ctx.camera_model].filter(Boolean).join(" ")}`
+    meta.taken_at ? `Taken: ${new Date(meta.taken_at).toISOString().slice(0, 10)}` : null,
+    meta.camera_make || meta.camera_model
+      ? `Camera: ${[meta.camera_make, meta.camera_model].filter(Boolean).join(" ")}`
       : null,
-    ctx.gps_label ? `Location: ${ctx.gps_label}` : null,
-    ctx.confirmed_facts.length ? `Confirmed facts: ${ctx.confirmed_facts.join(" · ")}` : null,
+    meta.gps_label ? `Location: ${meta.gps_label}` : null,
+    confirmedFacts.length ? `Confirmed facts: ${confirmedFacts.join(" · ")}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -66,41 +64,56 @@ export async function captionHandler({ pool, job, progress }: HandlerContext): P
     [asset_ids],
   );
 
+  // User-edited captions are never regenerated: fetch them once and skip those
+  // units before the paid model call — the upsert's is_edited guard would
+  // discard the result anyway (it stays below as the race backstop).
+  const { rows: edited } = await pool.query<{ asset_id: string; lang: string }>(
+    `select asset_id, lang from captions
+     where asset_id = any($1::uuid[]) and style = $2 and is_edited = true`,
+    [asset_ids, style],
+  );
+  const editedUnits = new Set(edited.map((r) => `${r.asset_id}:${r.lang}`));
+
   const totalUnits = rows.length * langs.length;
-  let done = 0; // progress units, including skipped assets
+  let done = 0; // progress units, including skipped
   let generated = 0; // captions actually written
 
   for (const row of rows) {
+    const label = row.title ?? row.asset_id;
+
     if (!row.preview_key) {
-      console.log(`[caption] ${row.title ?? row.asset_id}: no medium preview — skipped`);
+      console.log(`[caption] ${label}: no medium preview — skipped`);
       done += langs.length;
       continue;
     }
+
+    const pendingLangs = langs.filter((lang) => !editedUnits.has(`${row.asset_id}:${lang}`));
+    if (pendingLangs.length < langs.length) {
+      console.log(`[caption] ${label}: ${langs.length - pendingLangs.length} user-edited caption(s) — skipped`);
+      done += langs.length - pendingLangs.length;
+    }
+    if (pendingLangs.length === 0) continue;
 
     const image = await getObjectBuffer(row.preview_key);
     const { rows: confirmed } = await pool.query(
       `select text from facts where asset_id = $1 and status = 'confirmed' limit 6`,
       [row.asset_id],
     );
+    const confirmedFacts = confirmed.map((f) => f.text as string);
 
-    for (const lang of langs) {
+    for (const lang of pendingLangs) {
       await progress(
         Math.round((done / totalUnits) * 100),
-        `Captioning ${row.title ?? row.asset_id} (${lang.toUpperCase()})`,
+        `Captioning ${label} (${lang.toUpperCase()})`,
         done,
         totalUnits,
       );
 
-      const prompt = buildCaptionPrompt(style, lang, {
-        taken_at: row.taken_at,
-        camera_make: row.camera_make,
-        camera_model: row.camera_model,
-        gps_label: row.gps_label,
-        confirmed_facts: confirmed.map((f) => f.text as string),
-      });
+      const prompt = buildCaptionPrompt(style, lang, row, confirmedFacts);
       const text = await generateCaption(image, "image/webp", prompt);
 
-      // is_edited guard: a user-edited caption is never silently replaced.
+      // is_edited guard (race backstop): a caption edited after the pre-fetch
+      // above is still never silently replaced.
       await pool.query(
         `insert into captions (asset_id, lang, style, text, generated_by)
          values ($1, $2, $3, $4, $5)
