@@ -58,9 +58,10 @@ applies the migrations from scratch; `supabase test db` only ever talks to
 Postgres, so the full stack would be minutes of waste per run. Docker is
 preinstalled on `ubuntu-latest`.
 
-**`db-tests` is not yet a required check.** The ruleset requires only `checks`,
-and editing it is a repo-admin action (Oleksandr) — see ADR 0006. Until that
-flip, this job reports honestly but blocks nothing.
+**`db-tests` became a required check on 2026-07-17** — added to the `main`
+ruleset alongside `checks` right after this PR merged (repo-admin action per
+ADR 0006, done at Oleksandr's direction). From that date the gate blocks, not
+just reports.
 
 ## Consequences
 
@@ -70,9 +71,10 @@ flip, this job reports honestly but blocks nothing.
   the job red in CI, and reverting turned it green.
 - Non-DB PRs pay ~15 seconds. That is the price of a requirable check; a
   trigger-level filter would cost 0s and deadlock the ruleset.
-- **Action for Oleksandr:** add `db-tests` to the `main` ruleset's required
-  checks. Until then the gate is advisory, which is where ADR 0013 already got
-  burned — the convention is what failed, not the tests.
+- ~~**Action for Oleksandr:** add `db-tests` to the `main` ruleset's required
+  checks.~~ Done 2026-07-17 — the gate is no longer advisory. (The advisory
+  window is where ADR 0013 already got burned — the convention is what failed,
+  not the tests.)
 - The CLI pin will drift. Bumping is one line; the alternative is a gate whose
   behaviour changes without a commit.
 - `supabase test db` still works locally exactly as before; ADR 0013's
