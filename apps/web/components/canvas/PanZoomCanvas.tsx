@@ -6,6 +6,10 @@ interface PanZoomCanvasProps {
   onCanvasDown: (e: React.PointerEvent) => void;
   canvasCursor: string;
   canvasTransform: string;
+  /** True only while a view/sort switch re-fits the viewport — glides the pan/zoom
+   *  so the reflow feels like one page settling, not a page swap. Off during
+   *  normal pan/zoom so those stay 1:1 with the pointer. */
+  animating: boolean;
   marquee: { show: boolean; left: number; top: number; width: number; height: number };
   children: ReactNode;
 }
@@ -15,6 +19,7 @@ export default function PanZoomCanvas({
   onCanvasDown,
   canvasCursor,
   canvasTransform,
+  animating,
   marquee,
   children,
 }: PanZoomCanvasProps) {
@@ -39,6 +44,7 @@ export default function PanZoomCanvas({
           height: 1,
           transformOrigin: "0 0",
           transform: canvasTransform,
+          transition: animating ? "transform .45s cubic-bezier(.4,0,.2,1)" : undefined,
         }}
       >
         {children}

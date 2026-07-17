@@ -7,10 +7,16 @@ import PhotoTile from "./PhotoTile";
 interface ProjectAssetViewProps {
   photos: Photo[];
   previews: CanvasUploadPreview[];
+  /** Positions for canonical photos in the active view (grid or cloud). */
   positions: Record<string, TilePos>;
+  /** Positions for pending uploads — always the neutral grid, since a file has
+   *  no month/country/topic to sort by until the worker processes it. */
+  previewPositions: Record<string, TilePos>;
   selectedIds: Set<string>;
   hoveredId: string | null;
-  onAssetDown: (event: React.PointerEvent, id: string, center: CanvasPoint) => void;
+  /** True while a view/sort switch reflows every tile — enables the glide. */
+  animating: boolean;
+  onTileDown: (event: React.PointerEvent, id: string, center: CanvasPoint) => void;
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
   deletePhoto: (id: string) => void;
@@ -20,9 +26,11 @@ function ProjectAssetView({
   photos,
   previews,
   positions,
+  previewPositions,
   selectedIds,
   hoveredId,
-  onAssetDown,
+  animating,
+  onTileDown,
   setHover,
   openDrawer,
   deletePhoto,
@@ -55,7 +63,8 @@ function ProjectAssetView({
             selected={selectedIds.has(photo.id)}
             hovered={hoveredId === photo.id}
             interactive
-            onDown={(event) => onAssetDown(event, photo.id, { x: pos.cx, y: pos.cy })}
+            animating={animating}
+            onDown={(event) => onTileDown(event, photo.id, { x: pos.cx, y: pos.cy })}
             onEnter={() => setHover(photo.id)}
             onLeave={() => setHover(null)}
             onOpen={() => openDrawer(photo.id)}
@@ -68,7 +77,7 @@ function ProjectAssetView({
       })}
       {pending.map((preview) => {
         const id = preview.assetId ?? preview.clientId;
-        const pos = positions[id];
+        const pos = previewPositions[id];
         if (!pos) return null;
         return (
           <PhotoTile
@@ -81,6 +90,7 @@ function ProjectAssetView({
             selected={false}
             hovered={false}
             interactive={false}
+            animating={animating}
           />
         );
       })}

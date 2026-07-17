@@ -1,6 +1,5 @@
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { COUNTRY_LATLON, GROUPS, SOURCES } from "./mock-data";
-import type { ViewMode } from "@/types";
 
 /**
  * Pure, deterministic layout algorithms ported verbatim from the source.
@@ -77,9 +76,10 @@ export interface GalleryOverrides {
   asset: Record<string, CanvasPoint>;
   map: Record<string, CanvasPoint>;
   topic: Record<string, CanvasPoint>;
+  timeline: Record<string, CanvasPoint>;
 }
 
-export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {}, map: {}, topic: {} };
+export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {}, map: {}, topic: {}, timeline: {} };
 
 export interface GalleryTile {
   key: string;
@@ -334,33 +334,14 @@ export function centerAtScale(bounds: Bounds, rect: Rect, scale: number): Transf
   };
 }
 
-/** Default zoom everywhere is 75% — Timeline's fixed column-grid transform
- *  uses it directly; neural/map/topic (real content bounds) apply it as a cap
- *  via fitCapped in useWorkspace, not here. */
+/** Default zoom everywhere is 75% — every view is now a real content-bounds
+ *  cloud/grid, so all of them apply this as a cap via fitCapped in useWorkspace. */
 export const DEFAULT_ZOOM = 0.75;
 
-/** Only the neural asset grid (and map/topic clouds) resolve bounds this way
- *  — Timeline is a column grid with its own fixed fit transform below. */
-export function fitView(view: ViewMode, rect: Rect): Transform {
-  if (view === "timeline") {
-    return { scale: DEFAULT_ZOOM, tx: 24 + 20, ty: 100 };
-  }
-  return fitBounds({ xl: 0, yt: 0, xr: 1000, yb: 700 }, rect);
-}
-
-// ── Timeline: real-capture-date month columns ───────────────────────────────
-// Fixed-width columns, each header-labeled with its month + file count, tiles
-// packed tightly against the header in a 2-per-row grid with small
-// deterministic jitter. Map and Topic used to share this column layout too
-// (ADR 0017) but moved to freeform clusters below (ADR 0018).
-
-const COL_W = 340;
-const COL_GAP = 40;
-const TILE_MIN = 64;
-const TILE_MAX = 96;
-const TOP_Y = 4;
-const MIN_CELL = 116;
-const PER_ROW = Math.floor(COL_W / MIN_CELL); // 2
+// ── Timeline: real-capture-date grouping ────────────────────────────────────
+// Timeline groups photos by their real capture month ("Mon YYYY"); those groups
+// render as freeform "clouds" via buildCloudLayout below, exactly like Map and
+// Topic (ADR 0020). Only the month bucketing/ordering helpers live here.
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -381,127 +362,36 @@ function monthSortValue(key: string): number {
   return parseInt(yearStr, 10) * 12 + MONTH_ABBR.indexOf(abbr);
 }
 
-export interface ColumnTilePos {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  /** Which column this tile belongs to — lets a generic renderer clamp drag
-   *  bounds without re-deriving the bucket key from the photo. */
-  columnKey: string;
-}
-
-export interface LayoutColumn {
-  key: string;
-  /** Header text — usually equal to `key` (month, country); Topic prettifies
-   *  its raw group id via GROUPS[key].label. */
-  label: string;
-  x: number;
-  colH: number;
-  count: number;
-}
-
-export interface ColumnGridLayout {
-  columns: LayoutColumn[];
-  tiles: Record<string, ColumnTilePos>;
-  colWidth: number;
-  colGap: number;
-}
-
-/** Shared column-packing math: given photos already bucketed by key (with a
- *  chosen column order and per-column sort), lay out fixed-width columns and
- *  pack each bucket's tiles tightly against the header. */
-function buildColumnGrid(
-  byBucket: Record<string, Photo[]>,
-  orderedKeys: string[],
-  labelOf: (key: string) => string,
-  overrides: Record<string, { x: number; y: number }>,
-): ColumnGridLayout {
-  const columns: LayoutColumn[] = [];
-  const tiles: Record<string, ColumnTilePos> = {};
-
-  orderedKeys.forEach((key, ki) => {
-    const items = byBucket[key];
-    const rows = Math.max(1, Math.ceil(items.length / PER_ROW));
-    // Pack rows tightly against the header instead of stretching to fill the
-    // viewport — columns with few photos used to leave a big gap up top;
-    // vertical scroll (not viewport-stretching) now handles tall columns.
-    const colH = rows * MIN_CELL;
-    const colX = ki * (COL_W + COL_GAP);
-    columns.push({ key, label: labelOf(key), x: colX, colH, count: items.length });
-
-    const cellW = COL_W / PER_ROW;
-    const cellH = colH / rows;
-    const jitterX = Math.max(4, cellW * 0.14);
-    const jitterY = Math.max(4, cellH * 0.14);
-
-    items.forEach((p, i) => {
-      const col = i % PER_ROW;
-      const row = Math.floor(i / PER_ROW);
-      const cx = colX + col * cellW + cellW / 2;
-      const h1 = hash(p.id);
-      const h2 = hash(p.id) >>> 4;
-      const jx = (h1 % Math.round(jitterX * 2)) - jitterX;
-      // Top-anchor the tile within its row cell (small nonnegative jitter) so
-      // row 0 packs tightly against the sticky header instead of being
-      // center-aligned inside a 116 px cell.
-      const jy = h2 % Math.round(jitterY);
-      const w = TILE_MIN + (hash(p.id + "w") % (TILE_MAX - TILE_MIN));
-      const h = Math.round(w * (p.h / p.w));
-      let bx = cx + jx - w / 2;
-      let by = TOP_Y + row * cellH + jy;
-      if (overrides[p.id]) {
-        bx = overrides[p.id].x;
-        by = overrides[p.id].y;
-      }
-      tiles[p.id] = { x: bx, y: by, w, h, columnKey: key };
-    });
-  });
-
-  return { columns, tiles, colWidth: COL_W, colGap: COL_GAP };
-}
-
-/** Timeline: columns are the distinct "Mon YYYY" months actually present in
- *  `photo.exif.dateTaken` (real EXIF capture time when the worker extracted
- *  one, otherwise the asset's upload time — never a placeholder), sorted
- *  chronologically. Supersedes the hash-bucketed placeholder documented as a
- *  preserved quirk in ADR 0003 — see ADR 0016. */
-export function timelineLayout(
-  photos: Photo[],
-  tlOverrides: Record<string, { x: number; y: number }>,
-): ColumnGridLayout {
-  const byMonth: Record<string, Photo[]> = {};
-  photos.forEach((p) => {
-    const m = monthOf(p);
-    (byMonth[m] = byMonth[m] || []).push(p);
-  });
-  const monthKeys = Object.keys(byMonth).sort((a, b) => monthSortValue(a) - monthSortValue(b));
-  monthKeys.forEach((m) =>
-    byMonth[m].sort((a, b) => capturedAt(a).getTime() - capturedAt(b).getTime() || hash(a.id + m) - hash(b.id + m)),
-  );
-  return buildColumnGrid(byMonth, monthKeys, (key) => key, tlOverrides);
-}
-
-// ── Map / Topic: freeform clusters ("clouds") connected by lines ───────────
-// Each cluster ("cloud") is a group of photo tiles packed around a shared hub
-// point, labeled above with the country/topic name, with every tile in the
-// cloud connected to the hub by a line in that cloud's color. Photos that
+// ── Timeline / Map / Topic: freeform clusters ("clouds") connected by lines ─
+// Each cluster ("cloud") is a group of photo tiles packed together, labeled on
+// its colored backdrop, with a *complete graph* of lines among the cluster's
+// tiles in that cloud's color — every file connected to every other, so the
+// group reads as a web rather than a tree with hub files (edit #1). Photos that
 // share the *other* dimension (e.g. two photos from different countries but
 // the same topic, in Map view) get a direct line between them in a gradient
 // blending both clouds' colors — "some files may have connections to files
 // from different clouds." Unrecognized/unclassified photos land in one
-// "Unsorted" cloud with no lines at all, in or out (ADR 0018). Tiles are
-// freely draggable — a drag override simply wins over the packed position.
+// "Unsorted" cloud with no lines at all (ADR 0018). A tile dropped onto an
+// artboard (frame) is detached from the web — its lines are removed (edit #4).
+// Tiles are freely draggable — a drag override simply wins over the packed
+// position, and those overrides persist per project (edit #2).
 
 export interface CloudNode {
   key: string;
   label: string;
   color: string;
-  hubX: number;
-  hubY: number;
-  /** Bounding radius of this cloud's tiles, for placing the label above them. */
-  radius: number;
   count: number;
+  /** Label anchor: top-center of the cloud's *current* tile bbox (override-aware),
+   *  so the label sits on the colored backdrop above the tiles — visible, and
+   *  always tracking the group as its files move (ADR 0020). */
+  labelX: number;
+  labelY: number;
+  /** Bounding box of the cloud's current tiles, for the blurred backdrop blob
+   *  that visually groups them (ADR 0020). */
+  bx: number;
+  by: number;
+  bw: number;
+  bh: number;
 }
 
 export interface CloudEdge {
@@ -547,39 +437,6 @@ const CLOUD_PACK_DENSITY = 0.62;
 function cloudTileRadius(photo: Pick<Photo, "w" | "h">): number {
   const size = assetTileSize(photo);
   return Math.hypot(size.w, size.h) / 2 + CLOUD_TILE_GAP;
-}
-
-/** Deterministic Prim's-algorithm minimum spanning tree over a set of
- *  points — connects every point with the shortest possible total line
- *  length and no separate "hub" node: every edge runs between two real
- *  points. O(n²), fine for the small clusters a project's photos form. */
-function buildMst(points: { id: string; cx: number; cy: number }[]): [string, string][] {
-  if (points.length < 2) return [];
-  const edges: [string, string][] = [];
-  const inTree = new Set([points[0].id]);
-  const remaining = points.slice(1);
-  while (remaining.length) {
-    let bestDist = Infinity,
-      bestFrom = "",
-      bestIdx = -1;
-    for (const a of points) {
-      if (!inTree.has(a.id)) continue;
-      for (let i = 0; i < remaining.length; i++) {
-        const b = remaining[i];
-        const d = Math.hypot(a.cx - b.cx, a.cy - b.cy);
-        if (d < bestDist) {
-          bestDist = d;
-          bestFrom = a.id;
-          bestIdx = i;
-        }
-      }
-    }
-    const chosen = remaining[bestIdx];
-    edges.push([bestFrom, chosen.id]);
-    inTree.add(chosen.id);
-    remaining.splice(bestIdx, 1);
-  }
-  return edges;
 }
 
 const CLOUD_GOLDEN_ANGLE = 2.39996;
@@ -637,6 +494,11 @@ function topicCloudColor(key: string): string {
   return key === UNSORTED_CLOUD_KEY ? UNSORTED_CLOUD_COLOR : (GROUPS[key as PhotoGroup]?.color ?? UNSORTED_CLOUD_COLOR);
 }
 
+/** A stable color per "Mon YYYY" month key, drawn from the same palette Map uses. */
+function monthCloudColor(key: string): string {
+  return MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
+}
+
 function buildCloudLayout(
   photos: readonly Photo[],
   primaryOf: (p: Photo) => string,
@@ -644,6 +506,12 @@ function buildCloudLayout(
   colorOf: (key: string) => string,
   labelOf: (key: string) => string,
   overrides: Record<string, CanvasPoint>,
+  /** Frames (artboards) on the canvas — any tile whose center lands inside one
+   *  is detached from the connecting-line web (edit #4). */
+  frames: readonly Frame[],
+  /** Optional cluster-ordering comparator — defaults to largest-first. Timeline
+   *  passes a chronological one so months pack in a stable time order. */
+  orderKeys?: (a: string, b: string) => number,
 ): CloudLayout {
   const byPrimary: Record<string, Photo[]> = {};
   photos.forEach((p) => {
@@ -651,7 +519,7 @@ function buildCloudLayout(
     (byPrimary[k] = byPrimary[k] || []).push(p);
   });
   const primaryKeys = Object.keys(byPrimary).sort(
-    (a, b) => byPrimary[b].length - byPrimary[a].length || a.localeCompare(b),
+    orderKeys ?? ((a, b) => byPrimary[b].length - byPrimary[a].length || a.localeCompare(b)),
   );
 
   // Enclosing-circle estimate for N packed circles of known radii: the area
@@ -678,57 +546,84 @@ function buildCloudLayout(
       hx,
       hy,
     );
-    let maxDist = 0;
+    // Label anchor + backdrop bbox are derived from the *live* tile positions
+    // (override-aware), not the fixed macro hub — so both track the group as
+    // its files are dragged and never strand (ADR 0020).
+    let xl = Infinity,
+      yt = Infinity,
+      xr = -Infinity,
+      yb = -Infinity;
     items.forEach((p) => {
       const pt = overrides[p.id] ?? packed[p.id];
       const size = assetTileSize(p);
       tiles[p.id] = { x: pt.x - size.w / 2, y: pt.y - size.h / 2, w: size.w, h: size.h, cx: pt.x, cy: pt.y };
       tileCluster[p.id] = k;
-      maxDist = Math.max(maxDist, Math.hypot(pt.x - hx, pt.y - hy) + Math.max(size.w, size.h) / 2);
+      xl = Math.min(xl, pt.x - size.w / 2);
+      yt = Math.min(yt, pt.y - size.h / 2);
+      xr = Math.max(xr, pt.x + size.w / 2);
+      yb = Math.max(yb, pt.y + size.h / 2);
     });
     clouds.push({
       key: k,
       label: labelOf(k),
       color: colorOf(k),
-      hubX: hx,
-      hubY: hy,
-      radius: Math.max(70, maxDist + 24),
       count: items.length,
+      labelX: (xl + xr) / 2,
+      labelY: yt,
+      bx: xl,
+      by: yt,
+      bw: xr - xl,
+      bh: yb - yt,
     });
   });
 
   const edges: CloudEdge[] = [];
 
-  // File-to-file edges within each real cluster — a minimum spanning tree
-  // over the tiles' own positions, so every line runs between two actual
-  // files with no separate hub point anywhere (the Unsorted cloud gets none).
+  // A file dropped onto an artboard (frame) is detached from the web — its
+  // connecting lines are removed so it reads as pulled out of the cluster.
+  const detached = new Set<string>();
+  if (frames.length) {
+    for (const id of Object.keys(tiles)) {
+      const t = tiles[id];
+      if (frames.some((f) => t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h)) {
+        detached.add(id);
+      }
+    }
+  }
+
+  // File-to-file edges within each real cluster — a *complete* graph over the
+  // cluster's tiles (every pair), so the group reads as all files connected to
+  // each other rather than a tree that makes some files look like hubs. Files
+  // detached onto an artboard drop out of the web (the Unsorted cloud has none).
   primaryKeys.forEach((k) => {
-    if (k === UNSORTED_CLOUD_KEY || byPrimary[k].length < 2) return;
+    if (k === UNSORTED_CLOUD_KEY) return;
     const color = colorOf(k);
-    const points = byPrimary[k].map((p) => ({ id: p.id, cx: tiles[p.id].cx, cy: tiles[p.id].cy }));
-    buildMst(points).forEach(([aId, bId]) => {
-      const ta = tiles[aId],
-        tb = tiles[bId];
-      edges.push({
-        id: `mst-${aId}-${bId}`,
-        d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(aId + bId), 0.42),
-        strokeStart: color,
-        strokeEnd: color,
-        x1: ta.cx,
-        y1: ta.cy,
-        x2: tb.cx,
-        y2: tb.cy,
-        op: 0.32,
-        w: 1.6,
-      });
-    });
+    const ids = byPrimary[k].map((p) => p.id).filter((id) => !detached.has(id));
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const ta = tiles[ids[i]],
+          tb = tiles[ids[j]];
+        edges.push({
+          id: `mesh-${ids[i]}-${ids[j]}`,
+          d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(ids[i] + ids[j]), 0.32),
+          strokeStart: color,
+          strokeEnd: color,
+          x1: ta.cx,
+          y1: ta.cy,
+          x2: tb.cx,
+          y2: tb.cy,
+          op: 0.16,
+          w: 1.1,
+        });
+      }
+    }
   });
 
   // Cross-cloud edges: photos sharing the secondary key across ≥2 clusters —
   // one representative link per pair of clusters, not a full O(n²) tangle.
   const bySecondary: Record<string, Photo[]> = {};
   photos.forEach((p) => {
-    if (tileCluster[p.id] === UNSORTED_CLOUD_KEY) return;
+    if (tileCluster[p.id] === UNSORTED_CLOUD_KEY || detached.has(p.id)) return;
     const sk = secondaryOf(p);
     (bySecondary[sk] = bySecondary[sk] || []).push(p);
   });
@@ -769,7 +664,11 @@ function buildCloudLayout(
  *  lands in the Unsorted cloud rather than being silently mislabeled. Photos
  *  sharing a topic (`group`) across different countries get a cross-cloud
  *  gradient line. */
-export function mapCloudLayout(photos: readonly Photo[], mapOverrides: Record<string, CanvasPoint>): CloudLayout {
+export function mapCloudLayout(
+  photos: readonly Photo[],
+  mapOverrides: Record<string, CanvasPoint>,
+  frames: readonly Frame[] = [],
+): CloudLayout {
   return buildCloudLayout(
     photos,
     (p) => (COUNTRY_LATLON[p.country] ? p.country : UNSORTED_CLOUD_KEY),
@@ -777,13 +676,18 @@ export function mapCloudLayout(photos: readonly Photo[], mapOverrides: Record<st
     mapCloudColor,
     (key) => key,
     mapOverrides,
+    frames,
   );
 }
 
 /** Topic: clouds are `photo.group`, labeled with its friendly name
  *  (GROUPS[key].label). Photos sharing a country across different topics get
  *  a cross-cloud gradient line. */
-export function topicCloudLayout(photos: readonly Photo[], topicOverrides: Record<string, CanvasPoint>): CloudLayout {
+export function topicCloudLayout(
+  photos: readonly Photo[],
+  topicOverrides: Record<string, CanvasPoint>,
+  frames: readonly Frame[] = [],
+): CloudLayout {
   return buildCloudLayout(
     photos,
     (p) => p.group,
@@ -791,6 +695,29 @@ export function topicCloudLayout(photos: readonly Photo[], topicOverrides: Recor
     topicCloudColor,
     (key) => GROUPS[key as PhotoGroup]?.label ?? key,
     topicOverrides,
+    frames,
+  );
+}
+
+/** Timeline: clouds are the distinct "Mon YYYY" capture months actually present
+ *  in `photo.exif.dateTaken`, ordered chronologically. Same freeform cloud
+ *  layout as Map/Topic (ADR 0020) — the tab is a grouping filter, not a
+ *  different canvas. Photos sharing a topic (`group`) across different months
+ *  get a cross-cloud gradient line. */
+export function timelineCloudLayout(
+  photos: readonly Photo[],
+  timelineOverrides: Record<string, CanvasPoint>,
+  frames: readonly Frame[] = [],
+): CloudLayout {
+  return buildCloudLayout(
+    photos,
+    (p) => monthOf(p),
+    (p) => p.group,
+    monthCloudColor,
+    (key) => key,
+    timelineOverrides,
+    frames,
+    (a, b) => monthSortValue(a) - monthSortValue(b),
   );
 }
 

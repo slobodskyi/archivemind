@@ -55,6 +55,41 @@ const FACT_STATUS_MAP = { confirmed: "confirmed", likely: "pending", needs_check
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * TEMP demo scaffold (edit #2) — ⚠️ SET BACK TO false / REMOVE BEFORE MERGE.
+ * On today's uniform real data every asset is Ukraine / archive / same-ish
+ * month, so Map/Topic/Timeline each render a single cloud. Flipping this on
+ * spreads assets deterministically across a few countries, topics and months
+ * so the multi-cloud layout is visible while we test. This must NOT reach
+ * production — the real fields land with their own backend phase (ADR 0018).
+ * (Wanted this behind an env flag, but .env.local isn't writable here.)
+ * ──────────────────────────────────────────────────────────────────────── */
+const DEMO_CLOUDS = true;
+const DEMO_COUNTRIES = ["Ukraine", "Poland", "Italy"];
+const DEMO_GROUPS = ["rescue", "aid", "urban"] as const;
+const DEMO_MONTHS = [3, 4, 6]; // Apr / May / Jul 2026 (0-indexed)
+
+function demoHash(id: string): number {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) h = ((h * 33) ^ id.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function diversifyForDemo(photo: Photo): Photo {
+  if (!DEMO_CLOUDS) return photo;
+  const h = demoHash(photo.id);
+  const month = DEMO_MONTHS[(h >>> 6) % DEMO_MONTHS.length];
+  const day = ((h >>> 9) % 27) + 1;
+  return {
+    ...photo,
+    country: DEMO_COUNTRIES[h % DEMO_COUNTRIES.length],
+    group: DEMO_GROUPS[(h >>> 3) % DEMO_GROUPS.length],
+    time: `${pad(month + 1)}-${pad(day)} 12:00`,
+    day: `${MONTHS[month]} ${day}`,
+    exif: { ...photo.exif, dateTaken: `2026-${pad(month + 1)}-${pad(day)} 12:00` },
+  };
+}
+
 function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
   const camera = [e?.camera_make, e?.camera_model].filter(Boolean).join(" ") || "—";
   const taken = e?.taken_at ? new Date(e.taken_at) : fallbackDate;
@@ -95,7 +130,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
         ? []
         : [{ text: "Analyze to extract facts", status: "unknown" as const }];
 
-  return {
+  const photo: Photo = {
     id: a.id,
     seed: a.id,
     src,
@@ -120,6 +155,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     project: "",
     exif: toExifData(a.asset_exif, created),
   };
+  return diversifyForDemo(photo);
 }
 
 const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,

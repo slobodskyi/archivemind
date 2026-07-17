@@ -11,6 +11,9 @@ interface PhotoTileProps {
   selected: boolean;
   hovered: boolean;
   interactive: boolean;
+  /** When true, the tile glides to a new position instead of snapping — used
+   *  while a sort/view change reflows every tile at once (not during drag). */
+  animating?: boolean;
   onDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
   onEnter?: () => void;
   onLeave?: () => void;
@@ -35,6 +38,7 @@ export default function PhotoTile({
   selected,
   hovered,
   interactive,
+  animating,
   onDown,
   onEnter,
   onLeave,
@@ -46,7 +50,14 @@ export default function PhotoTile({
 
   return (
     <div
-      style={{ position: "absolute", left: pos.x, top: pos.y, width: pos.w, zIndex }}
+      style={{
+        position: "absolute",
+        left: pos.x,
+        top: pos.y,
+        width: pos.w,
+        zIndex,
+        transition: animating ? "left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1)" : undefined,
+      }}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
     >

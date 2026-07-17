@@ -296,7 +296,7 @@ export default function HomeClient({
       <main style={{ flex: 1, height: "100%", overflowY: "auto", padding: "26px 30px" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
           <h1 style={{ fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0 }}>{VIEW_TITLE[view]}</h1>
-          {view === "projects" && !creating && (
+          {(view === "projects" || view === "recents") && !creating && (
             <button
               onClick={() => setCreating(true)}
               style={{ display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, letterSpacing: ".04em", cursor: "pointer", fontFamily: "inherit" }}
@@ -306,7 +306,7 @@ export default function HomeClient({
           )}
         </div>
 
-        {view === "projects" && creating && (
+        {(view === "projects" || view === "recents") && creating && (
           <div style={{ display: "flex", gap: 8, marginBottom: 18, maxWidth: 420 }}>
             <input
               autoFocus
@@ -358,7 +358,7 @@ export default function HomeClient({
           ))}
         </div>
 
-        {visibleProjects.length === 0 && !(view === "projects" && creating) && (
+        {visibleProjects.length === 0 && !((view === "projects" || view === "recents") && creating) && (
           <div style={{ marginTop: 26, fontSize: 12.5, color: "var(--tm)" }}>
             {q ? "No projects match your search." : VIEW_EMPTY[view]}
           </div>
