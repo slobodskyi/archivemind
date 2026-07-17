@@ -1,6 +1,7 @@
 # 0013 — Test strategy: contract + worker-unit + RLS suites; no E2E in MVP
 
 Status: accepted (2026-07-10) · Issue: #31
+Amended 2026-07-14: the deferred CI wiring for layer 3 landed — see ADR 0020.
 
 ## Context
 
@@ -27,8 +28,9 @@ Layers, in value order:
 3. **RLS suites** (`supabase/tests/*.sql`, pgTAP via `supabase test db`):
    workspace isolation, asset-child isolation, write denial, bootstrap path,
    token-column revoke. **Gate for every migration PR** — run locally by the
-   migrations owner; CI wiring on `supabase/**` changes is a follow-up
-   (needs the CLI + Docker in Actions).
+   migrations owner, and (since 2026-07-14, ADR 0020) enforced by the `db-tests`
+   CI job, which boots Postgres and runs the suite whenever a PR touches
+   `supabase/**`.
 4. **API route contract tests** (from Phase 1): route handlers validated
    against shared schemas with a mocked db client.
 
@@ -40,11 +42,15 @@ conventions, not pixels).
 ## Consequences
 
 - CI stays one job, a few seconds slower; a failing schema/RLS test blocks
-  merge exactly like a type error.
+  merge exactly like a type error. (Amended: CI is now two jobs — ADR 0020 adds
+  `db-tests` alongside `checks`, since the pgTAP suite needs Docker and only
+  earns its cost on `supabase/**` changes.)
 - RLS regressions become executable: the Phase-0 bootstrap bug (workspace
   `INSERT … RETURNING` vs creator visibility, fixed in migration 0002) is now
   a permanent test case.
 - Adding a schema without tests is visible in review (contract-test pattern
   lives next to the schema file).
-- `supabase test db` requires the local stack; DB-test CI automation is
-  deferred and tracked in #31 until it lands.
+- `supabase test db` requires the local stack. DB-test CI automation was
+  deferred here and never picked up — PR #74 then shipped migration
+  `20260713000001` through green CI with no coverage of its own columns. ADR
+  0020 closes that hole; the gap it left open is the reason that ADR exists.

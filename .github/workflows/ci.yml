@@ -18,3 +18,69 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm turbo run lint typecheck test build
+
+  # pgTAP gate for migration PRs (ADR 0013 / ADR 0020).
+  #
+  # This job always runs, and the supabase/** path filter is a *step* rather than
+  # an `on.pull_request.paths:` trigger or a job-level `if:`. That is deliberate:
+  # GitHub leaves a required check that never reports stuck on "Waiting for status
+  # to be reported" forever, so a path-filtered trigger and a required check are
+  # mutually exclusive ("You should not use path or branch filtering to skip
+  # workflow runs if the workflow is required to pass before merging" — GitHub
+  # docs, Troubleshooting required status checks). Filtering inside the job keeps
+  # this requirable while still letting ordinary PRs off in ~15s: only supabase/**
+  # changes pay to boot Postgres.
+  db-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Does this change touch supabase/**?
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; else base="$PUSH_BASE"; fi
+          # Fail closed. A force-push or a branch's first push leaves the base sha
+          # unresolvable (or all-zeroes); run the suite rather than wave the PR
+          # through on a filter we could not evaluate.
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "base '$base' unresolvable — running the suite anyway"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base" HEAD | grep -q '^supabase/'; then
+            echo "supabase/** touched — running the suite"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no supabase/** changes — skipping the suite"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Pinned, not `latest`: a CLI release must never be able to turn this gate
+      # red (or quietly change its behaviour) on a PR that did not touch the DB.
+      # Bumping is a one-line change. Docker is preinstalled on ubuntu-latest.
+      - uses: supabase/setup-cli@v3
+        if: steps.filter.outputs.run == 'true'
+        with:
+          version: 2.109.0
+
+      # `db start` boots Postgres alone and applies supabase/migrations from
+      # scratch — `supabase test db` only ever talks to Postgres, so the full
+      # stack (auth/storage/realtime/studio) would be minutes of waste.
+      - name: Start Postgres and apply migrations
+        if: steps.filter.outputs.run == 'true'
+        run: supabase db start
+
+      - name: Run pgTAP suite
+        if: steps.filter.outputs.run == 'true'
+        run: supabase test db
+
+      - name: No database changes
+        if: steps.filter.outputs.run != 'true'
+        run: echo 'No supabase/** changes in this PR — pgTAP suite intentionally not run.'
