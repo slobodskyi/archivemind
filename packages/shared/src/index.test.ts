@@ -9,7 +9,9 @@ import {
   captionLangSchema,
   captionStyleSchema,
   completeUploadRequestSchema,
+  createJobRequestSchema,
   createProjectRequestSchema,
+  patchCaptionRequestSchema,
   jobStatusSchema,
   jobTypeSchema,
   memberRoleSchema,
@@ -156,6 +158,22 @@ describe("caption contracts", () => {
   it("dedupes repeated langs — each duplicate would be a paid model call", () => {
     const p = captionJobPayloadSchema.parse({ asset_ids: [id], langs: ["en", "en", "uk", "en"], style: "social" });
     expect(p.langs).toEqual(["en", "uk"]);
+  });
+
+  it("createJobRequestSchema routes caption jobs and dedupes their langs (#14)", () => {
+    const ok = createJobRequestSchema.parse({ type: "caption", assetIds: [id], langs: ["uk", "uk", "en"], style: "social" });
+    expect(ok.type).toBe("caption");
+    if (ok.type === "caption") expect(ok.langs).toEqual(["uk", "en"]);
+    expect(createJobRequestSchema.safeParse({ type: "caption", assetIds: [id] }).success).toBe(false);
+    expect(createJobRequestSchema.safeParse({ type: "export", assetIds: [id] }).success).toBe(false);
+  });
+
+  it("patchCaptionRequestSchema takes exactly one of text / resetEdited", () => {
+    expect(patchCaptionRequestSchema.parse({ text: "  edited  " })).toEqual({ text: "edited" });
+    expect(patchCaptionRequestSchema.parse({ resetEdited: true })).toEqual({ resetEdited: true });
+    expect(patchCaptionRequestSchema.safeParse({}).success).toBe(false);
+    expect(patchCaptionRequestSchema.safeParse({ text: "x", resetEdited: true }).success).toBe(false);
+    expect(patchCaptionRequestSchema.safeParse({ text: "" }).success).toBe(false);
   });
 
   it("rejects empty langs, unknown lang/style, and missing asset ids", () => {

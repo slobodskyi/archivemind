@@ -137,14 +137,37 @@ export const CAPTION_LANG_NAMES: Record<CaptionLang, string> = {
   ru: "Russian",
 };
 
-/** POST /api/jobs — analyze-only for now; gains a type='caption' union member
- *  with the API wiring (#14). The route hardcodes the analyze insert, so
- *  widening this schema before the route handles caption would silently
- *  enqueue the wrong job type. */
-export const createJobRequestSchema = z.object({
-  type: z.literal("analyze"),
-  assetIds: z.array(uuidSchema).min(1).max(500),
-});
+/** PATCH /api/captions/[id] — a user edit stamps is_edited=true (the worker
+ *  then skips that unit); resetEdited=true clears the flag so a confirmed
+ *  regenerate can overwrite. Exactly one of the two per request. */
+export const patchCaptionRequestSchema = z
+  .object({
+    text: z.string().trim().min(1).max(2000).optional(),
+    resetEdited: z.literal(true).optional(),
+  })
+  .refine((v) => (v.text !== undefined) !== (v.resetEdited !== undefined), {
+    message: "exactly one of text, resetEdited is required",
+  });
+export type PatchCaptionRequest = z.infer<typeof patchCaptionRequestSchema>;
+
+/** POST /api/jobs — the user-triggered AI entry point (analyze #12, caption
+ *  #14; export joins with its phase). */
+export const createJobRequestSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("analyze"),
+    assetIds: z.array(uuidSchema).min(1).max(500),
+  }),
+  z.object({
+    type: z.literal("caption"),
+    assetIds: z.array(uuidSchema).min(1).max(500),
+    // dedupe mirrors captionJobPayloadSchema: dupes = paid calls + billed rows
+    langs: z
+      .array(captionLangSchema)
+      .min(1)
+      .transform((l) => [...new Set(l)]),
+    style: captionStyleSchema,
+  }),
+]);
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
 
 // ── Projects (spec §9; issue #17) — homepage CRUD + M:N asset membership ─────

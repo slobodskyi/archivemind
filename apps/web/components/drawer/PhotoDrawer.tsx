@@ -28,6 +28,7 @@ interface PhotoDrawerProps {
   onRegen: () => void;
   onCopy: () => void;
   onGenSingle: () => void;
+  onSaveCaption: (text: string) => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -47,6 +48,7 @@ export default function PhotoDrawer({
   onRegen,
   onCopy,
   onGenSingle,
+  onSaveCaption,
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
@@ -74,6 +76,19 @@ export default function PhotoDrawer({
   const st = photo ? statusMeta(photo.status) : statusMeta("Needs check");
   const captionText = getCaptionText(photo, lang, style);
   const mediumSrc = photo && medium?.id === photo.id ? medium.url : undefined;
+
+  // Caption editing (#14): local draft over the server text. Reset is done by
+  // adjusting state during render (not in an effect) whenever the edited
+  // scope — photo × lang × style × server text — changes.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [draftScope, setDraftScope] = useState("");
+  const captionScope = `${photo?.id ?? "none"}:${lang}:${style}:${captionText}`;
+  if (draftScope !== captionScope) {
+    setDraftScope(captionScope);
+    setDraft(null);
+  }
+  const shownCaption = draft ?? captionText;
+  const captionDirty = draft !== null && draft !== captionText;
 
   return (
     <div
@@ -186,8 +201,9 @@ export default function PhotoDrawer({
                   ))}
                 </div>
                 <textarea
-                  value={captionText}
-                  readOnly
+                  value={shownCaption}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="No caption yet — Regenerate to generate one"
                   style={{
                     width: "100%",
                     minHeight: 96,
@@ -211,6 +227,11 @@ export default function PhotoDrawer({
                     <CopyIcon />
                     {copyLabel}
                   </button>
+                  {captionDirty && (
+                    <button onClick={() => onSaveCaption(shownCaption)} style={smallBtn}>
+                      Save
+                    </button>
+                  )}
                 </div>
               </div>
 
