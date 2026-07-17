@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  CAPTION_LANG_NAMES,
+  CAPTION_PROMPTS,
   SINGLE_PUT_MAX_BYTES,
   addProjectAssetsRequestSchema,
   assetKindFromMime,
+  captionJobPayloadSchema,
+  captionLangSchema,
+  captionStyleSchema,
   completeUploadRequestSchema,
   createProjectRequestSchema,
   jobStatusSchema,
@@ -132,5 +137,42 @@ describe("project contracts", () => {
     expect(addProjectAssetsRequestSchema.parse({ assetIds: [id] })).toBeTruthy();
     expect(addProjectAssetsRequestSchema.safeParse({ assetIds: [] }).success).toBe(false);
     expect(addProjectAssetsRequestSchema.safeParse({ assetIds: ["nope"] }).success).toBe(false);
+  });
+});
+
+describe("caption contracts", () => {
+  const id = "4df136fe-a1a4-49c1-ab22-1f1713a1c53c";
+
+  it("accepts a full caption job payload", () => {
+    const p = captionJobPayloadSchema.parse({
+      asset_ids: [id],
+      langs: ["en", "uk"],
+      style: "agency",
+    });
+    expect(p.langs).toEqual(["en", "uk"]);
+    expect(p.style).toBe("agency");
+  });
+
+  it("dedupes repeated langs — each duplicate would be a paid model call", () => {
+    const p = captionJobPayloadSchema.parse({ asset_ids: [id], langs: ["en", "en", "uk", "en"], style: "social" });
+    expect(p.langs).toEqual(["en", "uk"]);
+  });
+
+  it("rejects empty langs, unknown lang/style, and missing asset ids", () => {
+    expect(captionJobPayloadSchema.safeParse({ asset_ids: [id], langs: [], style: "agency" }).success).toBe(false);
+    expect(captionJobPayloadSchema.safeParse({ asset_ids: [id], langs: ["de"], style: "agency" }).success).toBe(false);
+    expect(captionJobPayloadSchema.safeParse({ asset_ids: [id], langs: ["en"], style: "poetic" }).success).toBe(false);
+    expect(captionJobPayloadSchema.safeParse({ asset_ids: [], langs: ["en"], style: "social" }).success).toBe(false);
+    expect(captionJobPayloadSchema.safeParse({ langs: ["en"], style: "social" }).success).toBe(false);
+  });
+
+  it("carries a prompt template and language name for every enum member", () => {
+    // The §4 caption_lang / caption_style enums and these maps must never drift.
+    for (const style of captionStyleSchema.options) {
+      expect(CAPTION_PROMPTS[style].length).toBeGreaterThan(20);
+    }
+    for (const lang of captionLangSchema.options) {
+      expect(CAPTION_LANG_NAMES[lang].length).toBeGreaterThan(2);
+    }
   });
 });

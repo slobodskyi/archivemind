@@ -98,6 +98,26 @@ export async function analyzeImage(image: Buffer, mimeType: string): Promise<Ana
   return analyzeOutputSchema.parse(JSON.parse(res.text ?? "{}"));
 }
 
+/** Plain-text generation for captions (spec §8.3) — no schema, the prompt
+ *  carries style/language; slightly warmer temperature than analysis. */
+export async function generateCaption(image: Buffer, mimeType: string, prompt: string): Promise<string> {
+  const res = await withRetry(() =>
+    ai().models.generateContent({
+      model: analyzeModel(),
+      contents: [
+        {
+          role: "user",
+          parts: [{ inlineData: { mimeType, data: image.toString("base64") } }, { text: prompt }],
+        },
+      ],
+      config: { temperature: 0.6 },
+    }),
+  );
+  const text = res.text?.trim();
+  if (!text) throw new Error("caption: empty model response");
+  return text;
+}
+
 export async function embedImage(image: Buffer, mimeType: string): Promise<number[]> {
   const res = await withRetry(() =>
     ai().models.embedContent({
