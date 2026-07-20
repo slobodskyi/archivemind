@@ -72,9 +72,10 @@ when you touch `supabase/**`, not the only line of defence anymore.
 ## Conventions
 - TypeScript strict, no `any`.
 - Mockup paths below are relative to **`apps/web/`**.
-- Mock/demo data lives in `lib/mock-data.ts` (plus the canned chat/search surface
-  in `lib/chat.ts`). **Known debt:** three modules still import `lib/mock-data.ts`
-  directly — `lib/format.ts` (CAPTIONS/STATUS_META), `lib/layout.ts`
+- Mock/demo data lives in `lib/mock-data.ts` (`lib/chat.ts` is now only static
+  help/greeting copy — the canned replies retired with #84). **Known debt:**
+  three modules still import `lib/mock-data.ts`
+  directly — `lib/format.ts` (STATUS_META), `lib/layout.ts`
   (COUNTRY_LATLON/GROUPS/SOURCES), `components/sidebar/SourceBrowserSidebar.tsx`
   (SOURCES). They're cleaned as their features go real; untracked, no issue yet.
   Don't add new direct imports. (`lib/api.ts` imports it too — that's the seam
