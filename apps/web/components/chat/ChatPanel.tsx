@@ -9,13 +9,16 @@ interface ChatPanelProps {
   onInput: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKey: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: (text?: string) => void;
+  onOpenResult: (id: string) => void;
+  onSelectResults: (ids: string[]) => void;
 }
 
+// Real search examples (#16) — each one runs against GET /api/search.
 const SUGGESTIONS = [
-  "Find photos with medical workers",
-  "Generate captions for unprocessed photos",
-  "Which locations have the most photos?",
-  "Group photos by visual theme",
+  "medical workers",
+  "flooded streets",
+  "portraits at night",
+  "photos from Kyiv in June",
 ];
 
 function SendIcon() {
@@ -35,7 +38,7 @@ function ChevronRight() {
   );
 }
 
-export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, onSend }: ChatPanelProps) {
+export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, onSend, onOpenResult, onSelectResults }: ChatPanelProps) {
   if (!open) return null;
   const showSug = msgs.length <= 1;
 
@@ -109,6 +112,57 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
                 }}
               >
                 {m.text}
+                {m.results && m.results.length > 0 && (
+                  <>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
+                      {m.results.slice(0, 12).map((r) => (
+                        <button
+                          key={r.assetId}
+                          onClick={() => onOpenResult(r.assetId)}
+                          title={`${r.filename}${r.matchedTags.length ? ` · ${r.matchedTags.join(", ")}` : ""}${r.matchedPlace ? ` · ${r.matchedPlace}` : ""}`}
+                          aria-label={`Open ${r.filename}`}
+                          style={{
+                            width: 38,
+                            height: 38,
+                            padding: 0,
+                            border: "1px solid var(--bd)",
+                            borderRadius: 2,
+                            background: "var(--bg-in)",
+                            cursor: "pointer",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {r.src ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={r.src} alt={r.filename} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                          ) : (
+                            <span style={{ fontSize: 8, color: "var(--tm)" }}>…</span>
+                          )}
+                        </button>
+                      ))}
+                      {m.results.length > 12 && (
+                        <span style={{ alignSelf: "center", fontSize: 10, color: "var(--tm)" }}>+{m.results.length - 12}</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => onSelectResults(m.results?.map((r) => r.assetId) ?? [])}
+                      style={{
+                        marginTop: 7,
+                        height: 24,
+                        padding: "0 10px",
+                        border: "1px solid var(--bd)",
+                        borderRadius: 2,
+                        background: "var(--bg-in)",
+                        color: "var(--t2)",
+                        fontSize: 11,
+                        fontFamily: "inherit",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Select {m.results.length} on canvas
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           );
@@ -177,7 +231,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
           </button>
         </div>
         <div style={{ fontSize: 10, color: "var(--tm)", textAlign: "center", marginTop: 6 }}>
-          Powered by Gemini Flash · 12 files in context
+          Powered by Gemini · searches your analyzed photos
         </div>
       </div>
     </div>

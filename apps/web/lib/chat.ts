@@ -1,20 +1,8 @@
 /**
- * AI Assistant is a pure client-side canned-response simulator — no LLM call
- * anywhere. Exact-string lookup against this table; generic fallback otherwise.
+ * Static copy for the chat/help surfaces. The canned-response simulator that
+ * used to live here retired with #16 — the assistant now answers through the
+ * real `GET /api/search` (see `sendChat` in hooks/useWorkspace.ts).
  */
-export const CHAT_REPLIES: Record<string, string> = {
-  "Find photos with medical workers":
-    "Found 3 photos tagged with medics or medical — photos a, b and g. Two from Jun 18, one from Jun 17, all in Kyiv. Want me to select them?",
-  "Generate captions for unprocessed photos":
-    "There are several unprocessed photos. Switch to a project's Timeline view, select them, and I can caption all of them in one pass — multilingual, with your chosen style.",
-  "Which locations have the most photos?":
-    "Ukraine leads, with United Kingdom and France close behind. Switch to Map view within a project to see the full geographic spread.",
-  "Group photos by visual theme":
-    "Switch to Sense view — I'll cluster everything by visual theme automatically, sized by how many files belong to each.",
-};
-
-export const CHAT_FALLBACK_REPLY =
-  "Let me look into that — I'll search across your whole archive and pull what matches.";
 
 export const CHAT_GREETING =
   "Hi! I can help you search, analyze, and work with your archive. Ask me anything about your photos.";

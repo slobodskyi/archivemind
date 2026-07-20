@@ -220,6 +220,8 @@ export default function ArchiveWorkspace({
         onInput={ws.onChatInput}
         onKey={ws.onChatKey}
         onSend={ws.sendChat}
+        onOpenResult={ws.openDrawer}
+        onSelectResults={ws.selectSearchResults}
       />
 
       <LeftToolbar

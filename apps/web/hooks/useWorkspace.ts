@@ -11,6 +11,7 @@ import type {
   CanvasPoint,
   CanvasUploadPreview,
   ChatMessage,
+  ChatResult,
   Language,
   Photo,
   PhotoSource,
@@ -44,7 +45,8 @@ import {
   type StickyNote,
   type TilePos,
 } from "@/lib/layout";
-import { CHAT_FALLBACK_REPLY, CHAT_GREETING, CHAT_REPLIES } from "@/lib/chat";
+import type { SearchResponse } from "@archivemind/shared";
+import { CHAT_GREETING } from "@/lib/chat";
 
 const DEFAULT_ZOOM = 0.75;
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
@@ -365,6 +367,7 @@ export interface Workspace {
   toggleChat: () => void;
   closeChat: () => void;
   sendChat: (text?: string) => void;
+  selectSearchResults: (ids: string[]) => void;
   onChatInput: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onChatKey: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 
@@ -1252,20 +1255,80 @@ export function useWorkspace(
     return false;
   }, [rect, setState, neuralGalleryFor, fitCapped]);
 
-  // ── Chat ─────────────────────────────────────────────────────────────────
+  // ── Chat = Smart Search (#16) — the assistant's answers ARE search results ─
 
-  const sendChat = useCallback(
-    (text?: string) => {
-      const s = stateRef.current;
-      const t = (typeof text === "string" ? text : s.chatInput || "").trim();
-      if (!t) return;
-      const reply = CHAT_REPLIES[t] || CHAT_FALLBACK_REPLY;
-      setState({
-        chatMsgs: [...s.chatMsgs, { role: "user", text: t }, { role: "assistant", text: reply }],
-        chatInput: "",
-      });
+  const chatBusy = useRef(false);
+
+  /** Swap the trailing "Searching…" placeholder for the real answer. */
+  const patchLastChatMsg = useCallback(
+    (text: string, results?: ChatResult[]) => {
+      const msgs = stateRef.current.chatMsgs.slice();
+      msgs[msgs.length - 1] = { role: "assistant", text, ...(results?.length ? { results } : {}) };
+      setState({ chatMsgs: msgs });
     },
     [setState],
+  );
+
+  const sendChat = useCallback(
+    async (text?: string) => {
+      const s = stateRef.current;
+      const t = (typeof text === "string" ? text : s.chatInput || "").trim();
+      if (!t || chatBusy.current) return;
+      chatBusy.current = true;
+      setState({
+        chatMsgs: [...s.chatMsgs, { role: "user", text: t }, { role: "assistant", text: "Searching your archive…" }],
+        chatInput: "",
+      });
+      try {
+        const qs = new URLSearchParams({ q: t });
+        if (currentProjectId !== "all") qs.set("projectId", currentProjectId);
+        const resp = await fetch(`/api/search?${qs.toString()}`);
+        if (!resp.ok) throw new Error(String(resp.status));
+        const data = (await resp.json()) as SearchResponse;
+
+        const byId = new Map(stateRef.current.photos.map((p) => [p.id, p]));
+        const results: ChatResult[] = data.results.map((r) => {
+          const p = byId.get(r.assetId);
+          return {
+            assetId: r.assetId,
+            src: p ? photoSrc(p, 76, 76) : undefined,
+            filename: p?.filename ?? "outside this view",
+            matchedTags: r.matchedTags,
+            matchedPlace: r.matchedPlace,
+          };
+        });
+
+        const filters: string[] = [];
+        if (data.parsed.date_from || data.parsed.date_to)
+          filters.push(`dates ${data.parsed.date_from ?? "…"} – ${data.parsed.date_to ?? "…"}`);
+        if (data.parsed.place_terms.length) filters.push(`place: ${data.parsed.place_terms.join(", ")}`);
+        if (data.parsed.tag_terms.length) filters.push(`tags: ${data.parsed.tag_terms.join(", ")}`);
+        const filterNote = filters.length ? ` (filters — ${filters.join("; ")})` : "";
+
+        patchLastChatMsg(
+          results.length
+            ? `Found ${results.length} photo(s)${filterNote}. Tap a thumb to open it, or select them all on the canvas.`
+            : `No matches${filterNote}. Only analyzed photos are searchable — run "Analyze with AI" first, or try different wording.`,
+          results,
+        );
+      } catch {
+        patchLastChatMsg("Search is unavailable right now — try again in a moment.");
+      } finally {
+        chatBusy.current = false;
+      }
+    },
+    [setState, patchLastChatMsg, currentProjectId],
+  );
+
+  /** Chat's "Select N results": select the matches that are on this canvas. */
+  const selectSearchResults = useCallback(
+    (ids: string[]) => {
+      const loaded = new Set(stateRef.current.photos.map((p) => p.id));
+      const found = ids.filter((id) => loaded.has(id));
+      setState({ selectedIds: found });
+      flashToast(found.length ? `${found.length} photo(s) selected` : "Results are outside this view");
+    },
+    [setState, flashToast],
   );
 
   const onChatInput = useCallback(
@@ -2064,6 +2127,7 @@ export function useWorkspace(
     toggleChat,
     closeChat,
     sendChat,
+    selectSearchResults,
     onChatInput,
     onChatKey,
 
