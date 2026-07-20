@@ -2,7 +2,9 @@
 
 Date: 2026-07-13
 
-Status: Accepted
+Status: Accepted · **Extended by [0022](0022-timeline-clouds-and-live-cloud-labels.md):
+Timeline joins the clouds, labels/backdrops track live tile positions, and the
+connecting lines became real shared-AI-tag relations — read 0022 for what ships today.**
 
 Supersedes the Map/Topic parts of [0017](0017-column-grid-map-topic-photo-delete.md)
 (Timeline's column grid is unaffected and unchanged).

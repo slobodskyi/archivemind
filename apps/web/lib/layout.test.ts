@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
+import type { Photo } from "@/types";
 import {
   assetGallery,
   droppedAssetCenters,
   fitBounds,
   hitTestTiles,
+  mapCloudLayout,
+  topicCloudLayout,
   type Bounds,
+  type Frame,
   type TilePos,
 } from "./layout";
 
@@ -12,6 +16,45 @@ type AssetInput = Parameters<typeof assetGallery>[0][number];
 
 function asset(id: string, w = 400, h = 300): AssetInput {
   return { id, w, h };
+}
+
+/** Minimal real-shaped Photo for the cloud layouts (mirrors lib/assets.ts). */
+function photo(id: string, overrides: Partial<Photo> = {}): Photo {
+  return {
+    id,
+    seed: id,
+    w: 400,
+    h: 300,
+    x: 0,
+    y: 0,
+    filename: `${id}.jpg`,
+    processed: true,
+    status: "Likely",
+    captionKey: null,
+    captionStyle: "Agency",
+    chip: null,
+    tags: null,
+    facts: [],
+    time: "07-15 12:00",
+    day: "Jul 15",
+    group: "archive",
+    country: "Ukraine",
+    source: "upload",
+    folder: "Uploads",
+    project: "",
+    exif: {
+      camera: "—",
+      lens: "—",
+      dateTaken: "2026-07-15 12:00",
+      gpsLat: 0,
+      gpsLon: 0,
+      gpsLabel: "",
+      iso: 0,
+      aperture: "—",
+      shutter: "—",
+    },
+    ...overrides,
+  };
 }
 
 function intersects(a: TilePos, b: TilePos): boolean {
@@ -136,6 +179,99 @@ describe("droppedAssetCenters", () => {
       expect(points.reduce((sum, point) => sum + point.x, 0) / points.length).toBe(anchor.x);
       expect((Math.min(...points.map((point) => point.y)) + Math.max(...points.map((point) => point.y))) / 2).toBe(anchor.y);
     }
+  });
+});
+
+describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
+  it("links two files iff they share at least one tag", () => {
+    const layout = topicCloudLayout(
+      [
+        photo("a", { tags: ["rescue", "kyiv"] }),
+        photo("b", { tags: ["kyiv"] }),
+        photo("c", { tags: ["harbor"] }),
+        photo("unanalyzed", { tags: null, processed: false }),
+      ],
+      {},
+    );
+
+    expect(layout.edges).toHaveLength(1);
+    expect(layout.edges[0].id).toBe("tag-a-b");
+    // Same-cloud link: solid cluster color, drawn between the pair's tile centers.
+    expect(layout.edges[0].strokeStart).toBe(layout.edges[0].strokeEnd);
+    expect(layout.edges[0].x1).toBe(layout.tiles.a.cx);
+    expect(layout.edges[0].y2).toBe(layout.tiles.b.cy);
+  });
+
+  it("is not a complete graph: only tag-sharing pairs are linked", () => {
+    const layout = topicCloudLayout(
+      [
+        photo("a", { tags: ["fire"] }),
+        photo("b", { tags: ["fire"] }),
+        photo("c", { tags: ["water"] }),
+        photo("d", { tags: ["water"] }),
+      ],
+      {},
+    );
+
+    expect(layout.edges.map((e) => e.id).sort()).toEqual(["tag-a-b", "tag-c-d"]);
+  });
+
+  it("weights a same-cloud link by how many tags the pair shares (capped)", () => {
+    const one = topicCloudLayout([photo("a", { tags: ["t1"] }), photo("b", { tags: ["t1"] })], {}).edges[0];
+    const many = topicCloudLayout(
+      [photo("a", { tags: ["t1", "t2", "t3"] }), photo("b", { tags: ["t1", "t2", "t3"] })],
+      {},
+    ).edges[0];
+    const excess = topicCloudLayout(
+      [
+        photo("a", { tags: ["t1", "t2", "t3", "t4", "t5", "t6", "t7"] }),
+        photo("b", { tags: ["t1", "t2", "t3", "t4", "t5", "t6", "t7"] }),
+      ],
+      {},
+    ).edges[0];
+
+    expect(one.op).toBeCloseTo(0.16);
+    expect(many.op).toBeGreaterThan(one.op);
+    expect(excess.op).toBeCloseTo(0.34); // cap
+  });
+
+  it("reduces cross-cloud links to one strongest bridge per pair of clouds", () => {
+    const layout = mapCloudLayout(
+      [
+        photo("ua1", { country: "Ukraine", tags: ["evac", "train"] }),
+        photo("ua2", { country: "Ukraine", tags: ["evac"] }),
+        photo("pl1", { country: "Poland", tags: ["evac", "train"] }),
+        photo("pl2", { country: "Poland", tags: ["evac"] }),
+      ],
+      {},
+    );
+
+    const cross = layout.edges.filter((e) => e.id.startsWith("x-"));
+    expect(cross).toHaveLength(1);
+    // Strongest pair: ua1↔pl1 share two tags, everything else shares one.
+    expect(cross[0].id).toBe("x-pl1-ua1");
+    expect(cross[0].strokeStart).not.toBe(cross[0].strokeEnd); // gradient between the clouds
+    // The same-cloud webs still exist on both sides.
+    expect(layout.edges.some((e) => e.id === "tag-ua1-ua2")).toBe(true);
+    expect(layout.edges.some((e) => e.id === "tag-pl1-pl2")).toBe(true);
+  });
+
+  it("detaches a file dropped onto an artboard from the web", () => {
+    const base = topicCloudLayout([photo("a", { tags: ["x"] }), photo("b", { tags: ["x"] })], {});
+    const tile = base.tiles.a;
+    const frame: Frame = { id: "f1", x: tile.cx - 10, y: tile.cy - 10, w: 20, h: 20, label: "Board" };
+
+    const layout = topicCloudLayout([photo("a", { tags: ["x"] }), photo("b", { tags: ["x"] })], {}, [frame]);
+    expect(layout.edges).toHaveLength(0);
+  });
+
+  it("is deterministic for equivalent inputs", () => {
+    const photos = [
+      photo("a", { tags: ["t1", "t2"] }),
+      photo("b", { tags: ["t2"] }),
+      photo("c", { tags: ["t1"], country: "Poland" }),
+    ];
+    expect(mapCloudLayout(photos, {})).toEqual(mapCloudLayout(photos.map((p) => ({ ...p })), {}));
   });
 });
 

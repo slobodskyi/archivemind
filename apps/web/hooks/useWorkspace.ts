@@ -295,7 +295,7 @@ export interface Workspace {
     origCenter: { x: number; y: number },
   ) => void;
   /** One tile-drag handler for every view — free-position drag into the active
-   *  view's own override bucket (ADR 0020). */
+   *  view's own override bucket (ADR 0022). */
   onTileDown: (
     e: React.PointerEvent,
     id: string,
@@ -428,7 +428,7 @@ export interface Workspace {
   // Grouping views (Timeline / Map / Topic) are the same canvas as Canvas, just
   // sorted — `activePositions` is the current view's tile layout and `cloudDecor`
   // is its backdrop/edges/labels (null on the unsorted Canvas). `tilesAnimating`
-  // gates the reflow glide when a sort changes (ADR 0020).
+  // gates the reflow glide when a sort changes (ADR 0022).
   activePositions: Record<string, TilePos>;
   cloudDecor: CloudLayout | null;
   tilesAnimating: boolean;
@@ -676,7 +676,7 @@ export function useWorkspace(
       if (s.projOpen) patch.projOpen = false;
       if (Object.keys(patch).length) setState(patch);
       const r = rect();
-      // Every view behaves like Canvas now (ADR 0020): the frame and select
+      // Every view behaves like Canvas now (ADR 0022): the frame and select
       // (marquee) tools work in all four, and only the hand tool pans on a
       // background drag. Marquee hit-tests against the active view's own tile
       // positions so it selects whatever is on screen, sorted or not.
@@ -1199,7 +1199,7 @@ export function useWorkspace(
       if (v === s.view) return;
       // Turn on the glide, then re-fit and re-sort in the same commit so the
       // tiles and the viewport animate together — the sort feels like the page
-      // reflowing in place, not a page swap (ADR 0020). Selection is kept: a tile
+      // reflowing in place, not a page swap (ADR 0022). Selection is kept: a tile
       // stays selected as it flies to its new cluster.
       setState({
         view: v,
@@ -1982,7 +1982,7 @@ export function useWorkspace(
   const allFilesMode = state.projCurrent === "all";
   const projectMode = !allFilesMode;
   // Selection + add-to-project work the same in every project view now, not just
-  // Canvas — the views differ only in how tiles are sorted (ADR 0020).
+  // Canvas — the views differ only in how tiles are sorted (ADR 0022).
   const showAddToProject = projectMode && selectedIds.size > 0;
 
   const projectPhotos = useMemo(

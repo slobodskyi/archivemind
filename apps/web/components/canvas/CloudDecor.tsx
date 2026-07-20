@@ -18,7 +18,7 @@ interface CloudDecorProps {
  *  color cloud behind each group and the connecting lines. Rendered *behind* the
  *  photo tiles; the labels render on top via CloudLabels. Tiles themselves are
  *  drawn by the shared ProjectAssetView so they persist (and animate) across
- *  every view (ADR 0020). */
+ *  every view (ADR 0022). */
 function CloudDecor({ layout, edgesReady }: CloudDecorProps) {
   return (
     <>

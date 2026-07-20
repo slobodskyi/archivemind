@@ -1,6 +1,8 @@
-# 0020. Timeline joins Map/Topic as freeform clouds; labels + backdrops track live tile positions
+# 0022. Timeline joins Map/Topic as freeform clouds; labels + backdrops track live tile positions; lines are shared-AI-tag relations
 
-Date: 2026-07-16
+Date: 2026-07-16 (authored on the design branch as "0020"; renumbered and
+amended 2026-07-20 at merge time — 0020/0021 were taken by then, and the
+connecting lines shipped tag-driven, see the amendment below)
 
 Status: Accepted
 
@@ -84,10 +86,18 @@ Two problems also surfaced with the existing cloud labels:
   functional `setState` so a `forEach` over the selection composes instead of
   each object-patch clobbering the last (previously only one file left state per
   keypress).
-- **Cluster lines are a complete graph, not a spanning tree.** `buildCloudLayout`
-  connects every pair of tiles within a cluster (`buildMst` is gone), so a group
-  reads as "all files connected to each other" rather than a tree where some
-  files look like hubs. Rendered at low opacity so the web stays legible.
+- **Connecting lines are real shared-AI-tag relations** *(amended 2026-07-20 —
+  the design branch drew a complete graph within each cluster as a placeholder
+  look; by merge time the analyze pipeline was live end-to-end, so the demo
+  graph never reached `main`)*. `buildCloudLayout` links two files iff they
+  share at least one AI tag (`photo.tags`, written by the analyze job — spec
+  §8.2). Same-cloud links draw in the cloud's color, slightly stronger the more
+  tags a pair shares; cross-cloud links draw as a gradient between the two
+  clouds' colors, reduced to the strongest representative link per pair of
+  clouds so inter-cloud relations read as one bridge, not a tangle (this keeps
+  0018's cross-cloud restraint). Unanalyzed files have no tags, hence no lines —
+  the web itself shows what AI has processed and how it relates. `buildMst` is
+  gone; determinism holds (no `Math.random`, insertion-ordered maps only).
 - **A file on an artboard is detached from the web.** Any tile whose center lands
   inside a frame is dropped from the cluster's connecting lines (both intra- and
   cross-cluster); `buildCloudLayout` takes the current `frames` and computes the
@@ -120,4 +130,9 @@ Two problems also surfaced with the existing cloud labels:
 - Background drag no longer pans in the grouping views (it marquee-selects, like
   Canvas); panning is the hand tool / scroll / minimap, as on Canvas.
 - Same known data limitation as 0018 still applies to Map (`country` awaits its
-  backend phase); Timeline and Topic run on real per-asset data today.
+  backend phase) and Topic (`group` is the inert `"archive"` default) — each
+  renders one cloud on real data until those fields go real. Timeline runs on
+  real per-asset capture months today, and the connecting lines run on real AI
+  tags in every grouping view.
+- The lines only appear after "Analyze with AI" has run — an unanalyzed archive
+  shows clouds without a web. That is intentional signal, not a bug.

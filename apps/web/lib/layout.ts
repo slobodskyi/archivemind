@@ -341,7 +341,7 @@ export const DEFAULT_ZOOM = 0.75;
 // ── Timeline: real-capture-date grouping ────────────────────────────────────
 // Timeline groups photos by their real capture month ("Mon YYYY"); those groups
 // render as freeform "clouds" via buildCloudLayout below, exactly like Map and
-// Topic (ADR 0020). Only the month bucketing/ordering helpers live here.
+// Topic (ADR 0022). Only the month bucketing/ordering helpers live here.
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -364,17 +364,17 @@ function monthSortValue(key: string): number {
 
 // ── Timeline / Map / Topic: freeform clusters ("clouds") connected by lines ─
 // Each cluster ("cloud") is a group of photo tiles packed together, labeled on
-// its colored backdrop, with a *complete graph* of lines among the cluster's
-// tiles in that cloud's color — every file connected to every other, so the
-// group reads as a web rather than a tree with hub files (edit #1). Photos that
-// share the *other* dimension (e.g. two photos from different countries but
-// the same topic, in Map view) get a direct line between them in a gradient
-// blending both clouds' colors — "some files may have connections to files
-// from different clouds." Unrecognized/unclassified photos land in one
-// "Unsorted" cloud with no lines at all (ADR 0018). A tile dropped onto an
-// artboard (frame) is detached from the web — its lines are removed (edit #4).
-// Tiles are freely draggable — a drag override simply wins over the packed
-// position, and those overrides persist per project (edit #2).
+// its colored backdrop. Connecting lines are REAL relations (ADR 0022): two
+// files are linked iff they share at least one AI tag (`photo.tags`, written by
+// the analyze job). Same-cloud links render in the cloud's color, slightly
+// stronger the more tags the pair shares; links across clouds render as a
+// gradient blending both clouds' colors, one strongest representative link per
+// pair of clouds so the canvas never becomes a tangle. Unanalyzed (untagged)
+// files simply have no lines — the web itself shows what AI has processed. A
+// tile dropped onto an artboard (frame) is detached from the web — its lines
+// are removed (edit #4). Tiles are freely draggable — a drag override simply
+// wins over the packed position, and those overrides persist per project
+// (edit #2).
 
 export interface CloudNode {
   key: string;
@@ -383,11 +383,11 @@ export interface CloudNode {
   count: number;
   /** Label anchor: top-center of the cloud's *current* tile bbox (override-aware),
    *  so the label sits on the colored backdrop above the tiles — visible, and
-   *  always tracking the group as its files move (ADR 0020). */
+   *  always tracking the group as its files move (ADR 0022). */
   labelX: number;
   labelY: number;
   /** Bounding box of the cloud's current tiles, for the blurred backdrop blob
-   *  that visually groups them (ADR 0020). */
+   *  that visually groups them (ADR 0022). */
   bx: number;
   by: number;
   bw: number;
@@ -502,7 +502,6 @@ function monthCloudColor(key: string): string {
 function buildCloudLayout(
   photos: readonly Photo[],
   primaryOf: (p: Photo) => string,
-  secondaryOf: (p: Photo) => string,
   colorOf: (key: string) => string,
   labelOf: (key: string) => string,
   overrides: Record<string, CanvasPoint>,
@@ -548,7 +547,7 @@ function buildCloudLayout(
     );
     // Label anchor + backdrop bbox are derived from the *live* tile positions
     // (override-aware), not the fixed macro hub — so both track the group as
-    // its files are dragged and never strand (ADR 0020).
+    // its files are dragged and never strand (ADR 0022).
     let xl = Infinity,
       yt = Infinity,
       xr = -Infinity,
@@ -591,69 +590,79 @@ function buildCloudLayout(
     }
   }
 
-  // File-to-file edges within each real cluster — a *complete* graph over the
-  // cluster's tiles (every pair), so the group reads as all files connected to
-  // each other rather than a tree that makes some files look like hubs. Files
-  // detached onto an artboard drop out of the web (the Unsorted cloud has none).
-  primaryKeys.forEach((k) => {
-    if (k === UNSORTED_CLOUD_KEY) return;
-    const color = colorOf(k);
-    const ids = byPrimary[k].map((p) => p.id).filter((id) => !detached.has(id));
+  // Edges are real relations (ADR 0022): a pair of files is linked iff it
+  // shares ≥1 AI tag. An inverted index (tag → linkable photo ids) turns that
+  // into candidate pairs; counting how many tags each pair shares drives the
+  // line's weight. Untagged (unanalyzed) and artboard-detached files never
+  // enter the index, so they have no lines — by design, not by omission.
+  const byTag: Record<string, string[]> = {};
+  photos.forEach((p) => {
+    if (detached.has(p.id) || !p.tags) return;
+    for (const tag of p.tags) (byTag[tag] = byTag[tag] || []).push(p.id);
+  });
+  // Pair key is id-ordered so (a,b) and (b,a) accumulate into one entry; Map
+  // iteration is insertion-ordered, so edge order stays deterministic.
+  const sharedTags = new Map<string, { a: string; b: string; n: number }>();
+  Object.values(byTag).forEach((ids) => {
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
-        const ta = tiles[ids[i]],
-          tb = tiles[ids[j]];
-        edges.push({
-          id: `mesh-${ids[i]}-${ids[j]}`,
-          d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(ids[i] + ids[j]), 0.32),
-          strokeStart: color,
-          strokeEnd: color,
-          x1: ta.cx,
-          y1: ta.cy,
-          x2: tb.cx,
-          y2: tb.cy,
-          op: 0.16,
-          w: 1.1,
-        });
+        const [a, b] = ids[i] < ids[j] ? [ids[i], ids[j]] : [ids[j], ids[i]];
+        const key = `${a}|${b}`;
+        const entry = sharedTags.get(key);
+        if (entry) entry.n += 1;
+        else sharedTags.set(key, { a, b, n: 1 });
       }
     }
   });
 
-  // Cross-cloud edges: photos sharing the secondary key across ≥2 clusters —
-  // one representative link per pair of clusters, not a full O(n²) tangle.
-  const bySecondary: Record<string, Photo[]> = {};
-  photos.forEach((p) => {
-    if (tileCluster[p.id] === UNSORTED_CLOUD_KEY || detached.has(p.id)) return;
-    const sk = secondaryOf(p);
-    (bySecondary[sk] = bySecondary[sk] || []).push(p);
-  });
-  Object.values(bySecondary).forEach((items) => {
-    const byCluster: Record<string, Photo[]> = {};
-    items.forEach((p) => (byCluster[tileCluster[p.id]] = byCluster[tileCluster[p.id]] || []).push(p));
-    const clusterKeys = Object.keys(byCluster);
-    if (clusterKeys.length < 2) return;
-    for (let i = 0; i < clusterKeys.length; i++) {
-      const a = byCluster[clusterKeys[i]][0];
-      const b = byCluster[clusterKeys[(i + 1) % clusterKeys.length]][0];
-      if (a.id === b.id) continue;
-      const ta = tiles[a.id],
-        tb = tiles[b.id];
-      const colorA = colorOf(tileCluster[a.id]),
-        colorB = colorOf(tileCluster[b.id]);
+  // Same-cloud pairs each get their own line; cross-cloud pairs are reduced to
+  // the strongest link per pair of clouds (most shared tags, id-ordered
+  // tie-break) so inter-cloud relations read as one clear bridge, not a tangle.
+  const strongestCross = new Map<string, { a: string; b: string; n: number }>();
+  sharedTags.forEach(({ a, b, n }) => {
+    const clusterA = tileCluster[a],
+      clusterB = tileCluster[b];
+    if (clusterA === clusterB) {
+      const ta = tiles[a],
+        tb = tiles[b];
+      const color = colorOf(clusterA);
       edges.push({
-        id: `x-${a.id}-${b.id}`,
-        d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(a.id + b.id), 0.46),
-        strokeStart: colorA,
-        strokeEnd: colorB,
+        id: `tag-${a}-${b}`,
+        d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(a + b), 0.32),
+        strokeStart: color,
+        strokeEnd: color,
         x1: ta.cx,
         y1: ta.cy,
         x2: tb.cx,
         y2: tb.cy,
-        op: 0.45,
-        w: 2,
+        op: Math.min(0.16 + (n - 1) * 0.05, 0.34),
+        w: 1.1,
       });
-      if (clusterKeys.length === 2) break; // wrap-around would just redraw the same pair
+    } else {
+      const key = clusterA < clusterB ? `${clusterA}|${clusterB}` : `${clusterB}|${clusterA}`;
+      const current = strongestCross.get(key);
+      if (!current || n > current.n || (n === current.n && `${a}|${b}` < `${current.a}|${current.b}`)) {
+        strongestCross.set(key, { a, b, n });
+      }
     }
+  });
+  strongestCross.forEach(({ a, b }) => {
+    const ta = tiles[a],
+      tb = tiles[b];
+    const colorA = colorOf(tileCluster[a]),
+      colorB = colorOf(tileCluster[b]);
+    edges.push({
+      id: `x-${a}-${b}`,
+      d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(a + b), 0.46),
+      strokeStart: colorA,
+      strokeEnd: colorB,
+      x1: ta.cx,
+      y1: ta.cy,
+      x2: tb.cx,
+      y2: tb.cy,
+      op: 0.45,
+      w: 2,
+    });
   });
 
   return { clouds, tiles, edges, bounds: positionsBounds(tiles) };
@@ -661,9 +670,8 @@ function buildCloudLayout(
 
 /** Map: clouds are countries — real per-asset `country` data is still pending
  *  its own backend phase (ADR 0015/0016), so an unrecognized/default country
- *  lands in the Unsorted cloud rather than being silently mislabeled. Photos
- *  sharing a topic (`group`) across different countries get a cross-cloud
- *  gradient line. */
+ *  lands in the Unsorted cloud rather than being silently mislabeled. Lines
+ *  are shared-AI-tag relations (ADR 0022), same as every grouping view. */
 export function mapCloudLayout(
   photos: readonly Photo[],
   mapOverrides: Record<string, CanvasPoint>,
@@ -672,7 +680,6 @@ export function mapCloudLayout(
   return buildCloudLayout(
     photos,
     (p) => (COUNTRY_LATLON[p.country] ? p.country : UNSORTED_CLOUD_KEY),
-    (p) => p.group,
     mapCloudColor,
     (key) => key,
     mapOverrides,
@@ -681,8 +688,7 @@ export function mapCloudLayout(
 }
 
 /** Topic: clouds are `photo.group`, labeled with its friendly name
- *  (GROUPS[key].label). Photos sharing a country across different topics get
- *  a cross-cloud gradient line. */
+ *  (GROUPS[key].label). Lines are shared-AI-tag relations (ADR 0022). */
 export function topicCloudLayout(
   photos: readonly Photo[],
   topicOverrides: Record<string, CanvasPoint>,
@@ -691,7 +697,6 @@ export function topicCloudLayout(
   return buildCloudLayout(
     photos,
     (p) => p.group,
-    (p) => (COUNTRY_LATLON[p.country] ? p.country : UNSORTED_CLOUD_KEY),
     topicCloudColor,
     (key) => GROUPS[key as PhotoGroup]?.label ?? key,
     topicOverrides,
@@ -701,9 +706,8 @@ export function topicCloudLayout(
 
 /** Timeline: clouds are the distinct "Mon YYYY" capture months actually present
  *  in `photo.exif.dateTaken`, ordered chronologically. Same freeform cloud
- *  layout as Map/Topic (ADR 0020) — the tab is a grouping filter, not a
- *  different canvas. Photos sharing a topic (`group`) across different months
- *  get a cross-cloud gradient line. */
+ *  layout as Map/Topic (ADR 0022) — the tab is a grouping filter, not a
+ *  different canvas. Lines are shared-AI-tag relations (ADR 0022). */
 export function timelineCloudLayout(
   photos: readonly Photo[],
   timelineOverrides: Record<string, CanvasPoint>,
@@ -712,7 +716,6 @@ export function timelineCloudLayout(
   return buildCloudLayout(
     photos,
     (p) => monthOf(p),
-    (p) => p.group,
     monthCloudColor,
     (key) => key,
     timelineOverrides,
