@@ -180,8 +180,11 @@ export async function getRealPhotos(supabase: SupabaseClient, projectId?: string
         .limit(500);
   if (error) throw error;
   const rows = (data ?? []) as unknown as AssetRow[];
-  // Topic clouds are workspace-relative (an asset's topic is its most
-  // *shared* viable tag), so derivation runs over the whole result set.
+  // Topic clouds are RESULT-SET-relative: sharing counts, the ambient
+  // threshold and the top-6 fold are computed over exactly the rows this
+  // call returns (one project's newest ≤500, or the workspace window for
+  // "all") — the same asset can legitimately carry different topics in
+  // different projects (ADR 0023).
   const topics = deriveTopics(
     rows.map((r) => ({
       id: r.id,

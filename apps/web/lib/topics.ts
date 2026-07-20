@@ -22,18 +22,21 @@ export interface TopicAsset {
 export const TOPIC_CATEGORY_PRIORITY = ["event", "scene", "object"] as const;
 
 /** A tag carried by more than this share of the tagged assets names the whole
- *  archive, not a theme inside it — skipped as a topic candidate. */
+ *  archive, not a theme inside it — skipped while the asset has any more
+ *  specific alternative. Assets whose only thematic tags are ambient keep the
+ *  ambient tag rather than falling to Other, so a tiny archive sharing one
+ *  tag still gets a named cloud instead of renaming itself to "Other" on the
+ *  third upload. */
 export const TOPIC_AMBIENT_FRACTION = 0.6;
 
-/** At most this many named topic clouds; smaller topics fold into Other.
- *  Matches the 6-color cloud palette so named topics get distinct colors. */
+/** At most this many named topic clouds; smaller topics fold into Other so
+ *  the canvas stays readable. (Colors come from the shared hash palette and
+ *  CAN collide between clouds — the cap bounds cloud count, not colors.) */
 export const TOPIC_CLOUD_CAP = 6;
 
 /** Tagged assets whose tags yield no viable topic. Capitalized on purpose:
  *  Gemini tags are lowercase, so this can never collide with a real tag. */
 export const TOPIC_OTHER_KEY = "Other";
-
-const countKey = (t: TopicTag) => `${t.category}:${t.name}`;
 
 /**
  * Assigns every asset a topic cloud key:
@@ -42,43 +45,51 @@ const countKey = (t: TopicTag) => `${t.category}:${t.name}`;
  *   priority, and within the first category that has any viable tag pick the
  *   one shared with the most other assets (ambient tags excluded), name
  *   tie-break;
- * - no viable tag in any thematic category → Other;
+ * - if every thematic tag the asset has is ambient, re-walk allowing them —
+ *   the asset keeps its ambient tag instead of falling to Other;
+ * - no tag in any thematic category at all → Other;
  * - finally only the TOPIC_CLOUD_CAP biggest topics keep their name — the
  *   rest fold into Other so the canvas stays readable.
  */
 export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string> {
   const topics = new Map<string, string>();
 
-  // Distinct-asset count per (category, name) — a duplicated name on one
-  // asset (same name under two categories is two DB rows) must not double.
+  // Distinct-asset count per tag NAME. Names merge across categories on
+  // purpose: re-analyze can drift a tag's category (the DB unique key is
+  // name+category), and counting the halves separately would let an ambient
+  // name sneak under the threshold. The per-asset Set also keeps a name
+  // carried under two categories from counting its asset twice.
   const counts = new Map<string, number>();
   let taggedCount = 0;
   for (const asset of assets) {
     if (asset.tags.length === 0) continue;
     taggedCount += 1;
-    for (const key of new Set(asset.tags.map(countKey))) {
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const name of new Set(asset.tags.map((t) => t.name))) {
+      counts.set(name, (counts.get(name) ?? 0) + 1);
     }
   }
-  const ambientMax = Math.max(2, Math.round(taggedCount * TOPIC_AMBIENT_FRACTION));
+  // floor, not round: a tag on strictly more than the fraction is ambient
+  // (round would let 4-of-6 = 67% pass a 60% threshold).
+  const ambientMax = Math.max(2, Math.floor(taggedCount * TOPIC_AMBIENT_FRACTION));
 
   for (const asset of assets) {
     if (asset.tags.length === 0) {
       topics.set(asset.id, UNSORTED_CLOUD_KEY);
       continue;
     }
-    let topic = TOPIC_OTHER_KEY;
-    for (const category of TOPIC_CATEGORY_PRIORITY) {
-      const viable = asset.tags
-        .filter((t) => t.category === category)
-        .map((t) => ({ name: t.name, count: counts.get(countKey(t)) ?? 0 }))
-        .filter((t) => t.count <= ambientMax);
-      if (viable.length === 0) continue;
-      viable.sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
-      topic = viable[0].name;
-      break;
-    }
-    topics.set(asset.id, topic);
+    const pick = (allowAmbient: boolean): string | null => {
+      for (const category of TOPIC_CATEGORY_PRIORITY) {
+        const viable = asset.tags
+          .filter((t) => t.category === category)
+          .map((t) => ({ name: t.name, count: counts.get(t.name) ?? 0 }))
+          .filter((t) => allowAmbient || t.count <= ambientMax);
+        if (viable.length === 0) continue;
+        viable.sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
+        return viable[0].name;
+      }
+      return null;
+    };
+    topics.set(asset.id, pick(false) ?? pick(true) ?? TOPIC_OTHER_KEY);
   }
 
   // Fold everything past the TOPIC_CLOUD_CAP biggest topics into Other

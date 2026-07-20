@@ -13,7 +13,9 @@ lines" rule is gone — lines are shared-AI-tag relations now, so tagged Unsorte
 files do link, while *unanalyzed* files have no lines. And
 [0023](0023-topic-clouds-derived-from-tags.md) replaced Topic's inert
 `group: "archive"` default with tag-derived topics — "one Topic cloud on real
-data" no longer holds (Map's one-cloud `country` note still does).
+data" no longer holds (Map's one-cloud `country` note still does), and
+`photo.group` is no longer a closed enum this document could assume — it is
+any string now.
 
 Supersedes the Map/Topic parts of [0017](0017-column-grid-map-topic-photo-delete.md)
 (Timeline's column grid is unaffected and unchanged).

@@ -98,10 +98,11 @@ Two problems also surfaced with the existing cloud labels:
   0018's cross-cloud restraint). Unanalyzed files have no tags, hence no lines —
   the web itself shows what AI has processed and how it relates. `buildMst` is
   gone; determinism holds (no `Math.random`, insertion-ordered maps only).
-  Two caps keep the web O(n) — on real data Map/Topic are a single cloud
-  (ADR 0018's inert `country`/`group` defaults), where an uncapped rule would
-  mean ~125k SVG paths at the 500-asset read limit whenever Gemini stamps a
-  near-universal tag: **(1)** a tag attached to more than
+  Two caps keep the web O(n) — on real data Map is a single cloud (ADR 0018's
+  inert `country` default; Topic was too until
+  [0023](0023-topic-clouds-derived-from-tags.md) made it tag-derived), and any
+  single big cloud with an uncapped rule would mean ~125k SVG paths at the
+  500-asset read limit whenever Gemini stamps a near-universal tag: **(1)** a tag attached to more than
   `TAG_LINK_MEMBER_CAP` (24) linkable files is ambient vocabulary and draws no
   lines; **(2)** each file keeps only its `SAME_CLOUD_LINKS_PER_FILE` (4)
   strongest same-cloud links (a link survives if either endpoint keeps it).
