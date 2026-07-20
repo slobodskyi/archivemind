@@ -17,8 +17,9 @@ drawer Regenerate/edit/Save, `is_edited` guard + confirmed-overwrite unlock).
 `packages/shared` holds the zod contracts both sides parse. Projects and all four
 canvas views now run on the caller's real assets; Map and Topic cluster by
 `country`/`group`, which `lib/assets.ts` still fills with inert defaults, so they
-render one cloud until a backend owns those fields. Chat/search is still the canned
-surface in `lib/chat.ts`.
+render one cloud until a backend owns those fields. The chat panel is Smart Search
+(#16): `sendChat` → `GET /api/search` → ranked results with thumb strip +
+select-on-canvas; `lib/chat.ts` keeps only static help/greeting copy.
 
 ## Data flow (today — paths relative to `apps/web/`)
 

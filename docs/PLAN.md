@@ -81,7 +81,7 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 `GET /api/search`: `gemini-3.1-flash-lite` query parse (structured output via `generateContent`) → embed query text into the same space → pgvector cosine (HNSW) scoped to workspace/project + metadata joins (dates from `asset_exif.taken_at`, places via `gps_label`/place-tags with the no-GPS fallback, tag boost) → top-N with matched-filter explanation. Wire into the chat panel (canned replies → search results; `lib/chat.ts` retires). Log `search_query` usage.
 
 - **PR 1 (#15, in review):** migration `20260717000001` — `search_assets()` RPC (SECURITY INVOKER: RLS is the boundary; cosine + date/place/tag filters, tag-boost ranking; pgTAP `003_search.sql`) + `usage_events` INSERT policy for members; `GET /api/search` route (parse → embed → RPC → results with matched-filter explanations, graceful degradation when the parse model hiccups); web-side Gemini client `lib/gemini.ts`; `@google/genai` added to `apps/web`. **Deploy prereqs: `GEMINI_API_KEY` + `GEMINI_ANALYZE_MODEL` on Vercel (worker-only until now); migration push = owner runbook.** Cross-modal text→image search verified against official docs (#35).
-- **PR 2 (#16, next):** chat panel consumes real results; `lib/chat.ts` retires.
+- **PR 2 (#16, in review):** chat panel consumes real results — `sendChat` calls `GET /api/search` (project-scoped on a project canvas), answers carry a thumb strip (click = drawer) + "Select N on canvas"; zero-hit answers explain that only analyzed photos are searchable. Canned `CHAT_REPLIES`/`CHAT_FALLBACK_REPLY` deleted; `lib/chat.ts` keeps only static copy (greeting, HELP_FAQ, search placeholder).
 
 ### Phase 5 — Projects + canvas at scale (~weeks 6–7)
 

@@ -8,9 +8,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 AI-powered creator archive workspace — infinite-canvas photo archive UI.
 A **pnpm + turborepo monorepo**, live in production (Phases 0–2 shipped 2026-07-10,
-plus Phase 5's homepage + real projects pulled forward and Phase 3 — Captions —
-done 2026-07-17; **Phase 4 — Search — is in flight**: the search API PR (#15) is
-in review, the chat-panel wiring (#16) is next.
+plus Phase 5's homepage + real projects pulled forward and Phases 3–4 (captions,
+search) done 2026-07-17/20.
 `docs/PLAN.md` is canonical for phase status — trust it over this line):
 - `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
   real auth (email+password), drag-and-drop upload to R2, a real homepage of project
@@ -18,8 +17,9 @@ in review, the chat-panel wiring (#16) is next.
   **Trap worth knowing:** Map and Topic cluster by `country`/`group`, but
   `lib/assets.ts` fills both with inert defaults (`"Ukraine"`/`"archive"`) because no
   backend owns them yet — so on real data both views correctly render exactly one
-  cloud. That's the data, not a bug in the view (ADR 0018). Chat/search is still the
-  canned surface in `lib/chat.ts`.
+  cloud. That's the data, not a bug in the view (ADR 0018). The chat panel IS
+  Smart Search (#16): `sendChat` calls `GET /api/search` and renders ranked
+  results (`lib/chat.ts` keeps only static help/greeting copy).
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
   HEIC + RAW paths), analyze (Gemini tags/facts + embeddings; user-triggered
   only — never automatic) and caption (styled multilingual captions — live
