@@ -502,7 +502,10 @@ function mapCloudColor(key: string): string {
 }
 
 function topicCloudColor(key: string): string {
-  return key === UNSORTED_CLOUD_KEY ? UNSORTED_CLOUD_COLOR : (GROUPS[key as PhotoGroup]?.color ?? UNSORTED_CLOUD_COLOR);
+  if (key === UNSORTED_CLOUD_KEY) return UNSORTED_CLOUD_COLOR;
+  // Mock seed groups keep their curated GROUPS colors; real tag-derived
+  // topics (ADR 0023) are arbitrary strings and hash into the shared palette.
+  return GROUPS[key as PhotoGroup]?.color ?? MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
 }
 
 /** A stable color per "Mon YYYY" month key, drawn from the same palette Map uses. */
@@ -606,9 +609,10 @@ function buildCloudLayout(
   // ids) turns that into candidate pairs; counting how many tags each pair
   // shares drives the line's weight. Untagged (unanalyzed) and artboard-
   // detached files never enter the index, so they have no lines — by design,
-  // not by omission. Two caps keep the web O(n) instead of O(n²) — on real
-  // data Map/Topic are a single cloud (ADR 0018), so without them a common
-  // tag at the 500-asset read limit means ~125k SVG paths and a frozen tab:
+  // not by omission. Two caps keep the web O(n) instead of O(n²) — real data
+  // routinely concentrates in one big cloud (Map's inert country, ADR 0018;
+  // one shoot's month), so without them a common tag at the 500-asset read
+  // limit means ~125k SVG paths and a frozen tab:
   const byTag: Record<string, string[]> = {};
   photos.forEach((p) => {
     if (detached.has(p.id) || !p.tags) return;

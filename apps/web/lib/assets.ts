@@ -1,12 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ExifData, Photo, PhotoCaptions } from "@/types";
 import { presignGet } from "@/lib/r2";
+import { UNSORTED_CLOUD_KEY } from "@/lib/layout";
+import { deriveTopics } from "@/lib/topics";
 
 /** Real assets → the mockup's Photo shape (server-side; RLS-scoped query +
  *  presigned preview URLs). Per the 2026-07-10 product decision the canvas
  *  shows ONLY real files — no mock mixing; the demo archive is issue #42.
- *  Fields the backend doesn't own yet (group/country/project) get inert
- *  defaults until their phases (#17–#21). */
+ *  `group` is DERIVED from the asset's AI tags (lib/topics.ts, ADR 0023);
+ *  fields the backend doesn't own yet (country/project) keep inert defaults
+ *  until their phases (#17–#21). */
 
 interface PreviewRow {
   size: string;
@@ -29,7 +32,7 @@ interface ExifRow {
 }
 
 interface TagRow {
-  tags: { name: string } | null;
+  tags: { name: string; category: string } | null;
 }
 
 interface FactRow {
@@ -95,7 +98,7 @@ function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
   };
 }
 
-async function toPhoto(a: AssetRow): Promise<Photo> {
+async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   const thumb = a.asset_previews.find((p) => p.size === "thumb");
   // Only the thumb is presigned up front — the canvas renders thumbs. The
   // medium is fetched lazily by the drawer via /api/assets/[id]/medium, which
@@ -111,7 +114,8 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
   const takenAt = a.asset_exif?.taken_at ? new Date(a.asset_exif.taken_at) : created;
 
   const processed = a.ai_processed_at != null;
-  const tagNames = a.asset_tags.map((t) => t.tags?.name).filter((n): n is string => Boolean(n));
+  // De-duped: the same tag NAME can be two DB rows (unique key is name+category).
+  const tagNames = [...new Set(a.asset_tags.map((t) => t.tags?.name).filter((n): n is string => Boolean(n)))];
   const facts =
     a.facts.length > 0
       ? a.facts.map((f) => ({ text: f.text, status: FACT_STATUS_MAP[f.status] }))
@@ -138,7 +142,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     facts,
     time: `${pad(takenAt.getMonth() + 1)}-${pad(takenAt.getDate())} ${pad(takenAt.getHours())}:${pad(takenAt.getMinutes())}`,
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
-    group: "archive",
+    group: topic,
     country: "Ukraine",
     source: "upload",
     folder: "Uploads",
@@ -151,7 +155,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
 const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,
        asset_previews ( size, r2_key, width, height ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
-       asset_tags ( tags ( name ) ),
+       asset_tags ( tags ( name, category ) ),
        facts ( text, status ),
        captions ( id, lang, style, text, is_edited )`;
 
@@ -175,5 +179,17 @@ export async function getRealPhotos(supabase: SupabaseClient, projectId?: string
         .order("created_at", { ascending: false })
         .limit(500);
   if (error) throw error;
-  return Promise.all(((data ?? []) as unknown as AssetRow[]).map(toPhoto));
+  const rows = (data ?? []) as unknown as AssetRow[];
+  // Topic clouds are RESULT-SET-relative: sharing counts, the ambient
+  // threshold and the top-6 fold are computed over exactly the rows this
+  // call returns (one project's newest ≤500, or the workspace window for
+  // "all") — the same asset can legitimately carry different topics in
+  // different projects (ADR 0023).
+  const topics = deriveTopics(
+    rows.map((r) => ({
+      id: r.id,
+      tags: r.asset_tags.flatMap((t) => (t.tags ? [{ name: t.tags.name, category: t.tags.category }] : [])),
+    })),
+  );
+  return Promise.all(rows.map((r) => toPhoto(r, topics.get(r.id) ?? UNSORTED_CLOUD_KEY)));
 }

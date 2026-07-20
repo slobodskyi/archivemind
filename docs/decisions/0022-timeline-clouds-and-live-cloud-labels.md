@@ -98,10 +98,11 @@ Two problems also surfaced with the existing cloud labels:
   0018's cross-cloud restraint). Unanalyzed files have no tags, hence no lines —
   the web itself shows what AI has processed and how it relates. `buildMst` is
   gone; determinism holds (no `Math.random`, insertion-ordered maps only).
-  Two caps keep the web O(n) — on real data Map/Topic are a single cloud
-  (ADR 0018's inert `country`/`group` defaults), where an uncapped rule would
-  mean ~125k SVG paths at the 500-asset read limit whenever Gemini stamps a
-  near-universal tag: **(1)** a tag attached to more than
+  Two caps keep the web O(n) — on real data Map is a single cloud (ADR 0018's
+  inert `country` default; Topic was too until
+  [0023](0023-topic-clouds-derived-from-tags.md) made it tag-derived), and any
+  single big cloud with an uncapped rule would mean ~125k SVG paths at the
+  500-asset read limit whenever Gemini stamps a near-universal tag: **(1)** a tag attached to more than
   `TAG_LINK_MEMBER_CAP` (24) linkable files is ambient vocabulary and draws no
   lines; **(2)** each file keeps only its `SAME_CLOUD_LINKS_PER_FILE` (4)
   strongest same-cloud links (a link survives if either endpoint keeps it).
@@ -148,10 +149,11 @@ Two problems also surfaced with the existing cloud labels:
 - Background drag no longer pans in the grouping views (it marquee-selects, like
   Canvas); panning is the hand tool / scroll / minimap, as on Canvas.
 - Same known data limitation as 0018 still applies to Map (`country` awaits its
-  backend phase) and Topic (`group` is the inert `"archive"` default) — each
-  renders one cloud on real data until those fields go real. Timeline runs on
-  real per-asset capture months today, and the connecting lines run on real AI
-  tags in every grouping view.
+  backend phase) — one cloud on real data until that field goes real. Timeline
+  runs on real per-asset capture months, and the connecting lines run on real AI
+  tags in every grouping view. *(Amended: Topic's `group` was the inert
+  `"archive"` default when this shipped; [0023](0023-topic-clouds-derived-from-tags.md)
+  made it tag-derived the same day.)*
 - The lines only appear after "Analyze with AI" has run — an unanalyzed archive
   shows clouds without a web. That is intentional signal, not a bug.
 - Known cost, deferred to Phase 5 ("canvas at scale"): dragging a tile in a

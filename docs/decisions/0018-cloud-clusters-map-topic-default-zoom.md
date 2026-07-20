@@ -10,7 +10,12 @@ Timeline joined the clouds; the zoom regime in this ADR's own title is replaced
 content overflows); background drag no longer pans on Map/Topic (marquee-select
 works on every view, panning is the hand tool); and the "Unsorted cloud has no
 lines" rule is gone — lines are shared-AI-tag relations now, so tagged Unsorted
-files do link, while *unanalyzed* files have no lines.
+files do link, while *unanalyzed* files have no lines. And
+[0023](0023-topic-clouds-derived-from-tags.md) replaced Topic's inert
+`group: "archive"` default with tag-derived topics — "one Topic cloud on real
+data" no longer holds (Map's one-cloud `country` note still does), and
+`photo.group` is no longer a closed enum this document could assume — it is
+any string now.
 
 Supersedes the Map/Topic parts of [0017](0017-column-grid-map-topic-photo-delete.md)
 (Timeline's column grid is unaffected and unchanged).
