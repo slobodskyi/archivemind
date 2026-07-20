@@ -119,7 +119,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
         ? []
         : [{ text: "Analyze to extract facts", status: "unknown" as const }];
 
-  return {
+  const photo: Photo = {
     id: a.id,
     seed: a.id,
     src,
@@ -145,6 +145,7 @@ async function toPhoto(a: AssetRow): Promise<Photo> {
     project: "",
     exif: toExifData(a.asset_exif, created),
   };
+  return photo;
 }
 
 const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,

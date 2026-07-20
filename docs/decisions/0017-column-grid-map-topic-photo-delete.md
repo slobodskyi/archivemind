@@ -3,7 +3,8 @@
 Date: 2026-07-13
 
 Status: Accepted · **Map/Topic parts superseded by
-[0018](0018-cloud-clusters-map-topic-default-zoom.md) — read 0018 for what ships today.**
+[0018](0018-cloud-clusters-map-topic-default-zoom.md), and the column grid itself (Timeline's
+too) by [0022](0022-timeline-clouds-and-live-cloud-labels.md) — read 0022 for what ships today.**
 The delete-on-any-view decision made here is unchanged and still current.
 
 Supersedes the Map/Topic parts of [0016](0016-real-timeline-topic-map-views.md).

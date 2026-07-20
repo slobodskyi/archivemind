@@ -7,9 +7,7 @@ import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
-import ColumnGridView from "@/components/canvas/ColumnGridView";
-import ColumnHeader from "@/components/canvas/ColumnHeader";
-import CloudView from "@/components/canvas/CloudView";
+import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
 import AppHeader from "@/components/header/AppHeader";
 import ViewTabs from "@/components/header/ViewTabs";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
@@ -65,6 +63,7 @@ export default function ArchiveWorkspace({
         onCanvasDown={ws.onCanvasDown}
         canvasCursor={ws.canvasCursor}
         canvasTransform={ws.canvasTransform}
+        animating={ws.tilesAnimating}
         marquee={ws.marquee}
       >
         <FrameOverlay
@@ -79,55 +78,24 @@ export default function ArchiveWorkspace({
           onTextChange={ws.updateStickyText}
           onDelete={ws.deleteStickyNote}
         />
-        {ws.isNeural && (
-          <ProjectAssetView
-            photos={ws.projectPhotos}
-            previews={ws.uploadPreviews}
-            positions={ws.projectAssetPositions}
-            selectedIds={ws.selectedIds}
-            hoveredId={ws.hoveredId}
-            onAssetDown={ws.onAssetDown}
-            setHover={ws.setHover}
-            openDrawer={ws.openDrawer}
-            deletePhoto={ws.deletePhoto}
-          />
-        )}
-        {ws.isTimelineView && (
-          <ColumnGridView
-            layout={ws.timelineLayout}
-            photos={ws.projectPhotos}
-            selectedIds={ws.selectedIds}
-            hoveredId={ws.hoveredId}
-            onTileDown={ws.onTlDown}
-            setHover={ws.setHover}
-            openDrawer={ws.openDrawer}
-            deletePhoto={ws.deletePhoto}
-          />
-        )}
-        {ws.isMapView && (
-          <CloudView
-            layout={ws.mapLayout}
-            photos={ws.projectPhotos}
-            selectedIds={ws.selectedIds}
-            hoveredId={ws.hoveredId}
-            onTileDown={ws.onMapAssetDown}
-            setHover={ws.setHover}
-            openDrawer={ws.openDrawer}
-            deletePhoto={ws.deletePhoto}
-          />
-        )}
-        {ws.isSenseView && (
-          <CloudView
-            layout={ws.topicLayout}
-            photos={ws.projectPhotos}
-            selectedIds={ws.selectedIds}
-            hoveredId={ws.hoveredId}
-            onTileDown={ws.onTopicAssetDown}
-            setHover={ws.setHover}
-            openDrawer={ws.openDrawer}
-            deletePhoto={ws.deletePhoto}
-          />
-        )}
+        {/* Grouping views draw their colored backdrop + connecting lines behind
+            the tiles; the tiles themselves are the same persistent set in every
+            view, so switching a sort just reflows (animates) their positions. */}
+        {ws.cloudDecor && <CloudDecor layout={ws.cloudDecor} edgesReady={!ws.tilesAnimating} />}
+        <ProjectAssetView
+          photos={ws.projectPhotos}
+          previews={ws.uploadPreviews}
+          positions={ws.activePositions}
+          previewPositions={ws.projectAssetPositions}
+          selectedIds={ws.selectedIds}
+          hoveredId={ws.hoveredId}
+          animating={ws.tilesAnimating}
+          onTileDown={ws.onTileDown}
+          setHover={ws.setHover}
+          openDrawer={ws.openDrawer}
+          deletePhoto={ws.deletePhoto}
+        />
+        {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} />}
       </PanZoomCanvas>
 
       {/* Empty state — a project emptied after creation used to render a bare
@@ -176,13 +144,11 @@ export default function ArchiveWorkspace({
         </div>
       )}
 
-      {ws.isTimelineView && <ColumnHeader layout={ws.timelineLayout} tx={ws.tx} scale={ws.scale} />}
-
       <AppHeader
         projLabel={ws.projLabel}
         onHome={ws.goHome}
         onOpenProj={ws.openProj}
-        showZoomControl={!ws.isTimelineView}
+        showZoomControl
         zoomPct={ws.zoomPct}
         onToggleZoomMenu={ws.toggleZoomMenu}
         canUndo={ws.canUndo}

@@ -3,8 +3,9 @@
 Date: 2026-07-13
 
 Status: Accepted · **Map/Topic parts superseded by [0017](0017-column-grid-map-topic-photo-delete.md),
-then by [0018](0018-cloud-clusters-map-topic-default-zoom.md) — read 0018 for what ships
-today.** The real-capture-date Timeline decided here is unchanged and still current.
+then by [0018](0018-cloud-clusters-map-topic-default-zoom.md); the Timeline *layout* (column
+grid) superseded by [0022](0022-timeline-clouds-and-live-cloud-labels.md) — read 0022 for what
+ships today.** The real-capture-date month *grouping* decided here is unchanged and still current.
 
 ## Context
 
