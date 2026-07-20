@@ -148,10 +148,11 @@ Two problems also surfaced with the existing cloud labels:
 - Background drag no longer pans in the grouping views (it marquee-selects, like
   Canvas); panning is the hand tool / scroll / minimap, as on Canvas.
 - Same known data limitation as 0018 still applies to Map (`country` awaits its
-  backend phase) and Topic (`group` is the inert `"archive"` default) — each
-  renders one cloud on real data until those fields go real. Timeline runs on
-  real per-asset capture months today, and the connecting lines run on real AI
-  tags in every grouping view.
+  backend phase) — one cloud on real data until that field goes real. Timeline
+  runs on real per-asset capture months, and the connecting lines run on real AI
+  tags in every grouping view. *(Amended: Topic's `group` was the inert
+  `"archive"` default when this shipped; [0023](0023-topic-clouds-derived-from-tags.md)
+  made it tag-derived the same day.)*
 - The lines only appear after "Analyze with AI" has run — an unanalyzed archive
   shows clouds without a web. That is intentional signal, not a bug.
 - Known cost, deferred to Phase 5 ("canvas at scale"): dragging a tile in a

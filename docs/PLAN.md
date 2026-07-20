@@ -100,6 +100,11 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
   server-side `PUT /api/canvas/layout`. Still open for #18: virtualization — and the
   known drag-relayout cost on large single clouds is deferred to that work (ADR 0022
   Consequences).
+- Same-day follow-up: **Topic clouds went real** — `group` derived from AI tags at
+  read time (`lib/topics.ts`: event→scene→object priority, ambient-tag skip, top-6 +
+  Other, unanalyzed → Unsorted; [ADR 0023](decisions/0023-topic-clouds-derived-from-tags.md)).
+  Interim until the post-MVP embedding-clustering job (spec §13); Map's `country`
+  stays inert (ADR 0018).
 
 ### Phase 5 — Projects + canvas at scale (~weeks 6–7)
 

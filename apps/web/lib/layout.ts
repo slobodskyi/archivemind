@@ -502,7 +502,10 @@ function mapCloudColor(key: string): string {
 }
 
 function topicCloudColor(key: string): string {
-  return key === UNSORTED_CLOUD_KEY ? UNSORTED_CLOUD_COLOR : (GROUPS[key as PhotoGroup]?.color ?? UNSORTED_CLOUD_COLOR);
+  if (key === UNSORTED_CLOUD_KEY) return UNSORTED_CLOUD_COLOR;
+  // Mock seed groups keep their curated GROUPS colors; real tag-derived
+  // topics (ADR 0023) are arbitrary strings and hash into the shared palette.
+  return GROUPS[key as PhotoGroup]?.color ?? MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
 }
 
 /** A stable color per "Mon YYYY" month key, drawn from the same palette Map uses. */

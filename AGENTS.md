@@ -20,10 +20,12 @@ search) done 2026-07-17/20.
   to `/login` as a *code only* — never the provider's own text. Read
   `docs/decisions/0021` before touching it; the obvious "improvement" of rendering
   `error_description` is the vulnerability that ADR exists to prevent.
-  **Trap worth knowing:** Map and Topic cluster by `country`/`group`, but
-  `lib/assets.ts` fills both with inert defaults (`"Ukraine"`/`"archive"`) because no
-  backend owns them yet — so on real data both views correctly render exactly one
-  cloud. That's the data, not a bug in the view (ADR 0018). The chat panel IS
+  **Trap worth knowing:** Map clusters by `country`, which `lib/assets.ts` still
+  fills with the inert `"Ukraine"` default — so on real data Map correctly renders
+  exactly one cloud; that's the data, not a bug in the view (ADR 0018). Topic no
+  longer shares this trap: `group` is DERIVED from AI tags (`lib/topics.ts`,
+  ADR 0023) — real multi-cloud, but only for analyzed assets (unanalyzed →
+  Unsorted). The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders ranked
   results (`lib/chat.ts` keeps only static help/greeting copy).
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
@@ -44,8 +46,9 @@ design from this file:**
   architecture, schema, models, and security. Single source of truth.
 - `docs/PLAN.md` — the phase-by-phase build order (Phase 0–7).
 - `docs/decisions/` — the "why" behind each call. Some ADRs supersede earlier ones in
-  part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 — read **0022**
-  (unified cloud canvas + tag-driven connecting lines) for what ships today.
+  part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 — read
+  **0022** (unified cloud canvas + tag-driven connecting lines) and **0023**
+  (tag-derived Topic clouds) for what ships today.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

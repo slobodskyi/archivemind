@@ -1,14 +1,9 @@
 export type PhotoSource = "gdrive" | "icloud" | "dropbox" | "upload";
 
-export type PhotoGroup =
-  | "rescue"
-  | "aid"
-  | "urban"
-  | "street"
-  | "portraits"
-  | "aerial"
-  | "night"
-  | "archive";
+/** Topic-cloud key. The old fixed union (rescue/aid/urban/…) survives only as
+ *  mock seed keys with curated GROUPS colors; real assets carry a topic
+ *  DERIVED from their AI tags (lib/topics.ts, ADR 0023) — any string. */
+export type PhotoGroup = string;
 
 /** The 3 seed projects are still valid values, but any string is a valid
  * project key — user-created projects (from the sidebar "new project" flow)
