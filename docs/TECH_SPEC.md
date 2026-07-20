@@ -29,7 +29,8 @@ AI archive workspace for documentary photographers / photojournalists whose file
 ```
 Browser (Next.js on Vercel)
   │  supabase-js (anon key + RLS)          ── auth, reads, Realtime job progress
-  │  Route handlers (/api/*)               ── presign R2 uploads, OAuth, enqueue jobs, search
+  │  Route handlers (/api/* + /auth/*)     ── presign R2 uploads, sign-in PKCE exchange,
+  │                                           source OAuth, enqueue jobs, search
   ▼
 Supabase Postgres (+ Auth, + pgvector, + Realtime)
   ▲
@@ -486,7 +487,10 @@ Payload: asset_ids, langs, style. Worker builds ZIP (owned original files where 
 
 ## 9. API surface (Next.js route handlers)
 
-All routes authed (Supabase session); workspace derived from membership.
+All `/api/*` routes authed (Supabase session); workspace derived from membership.
+The one deliberately public handler is `GET /auth/callback` — the PKCE code exchange
+for both email confirmation and Google sign-in, which by definition runs before a
+session exists. It is the only route outside the table below; see §5 and ADR 0021.
 
 | Method & path | Purpose |
 |---|---|
@@ -565,6 +569,11 @@ TOKEN_ENC_KEY · WORKER_ID · GEMINI_CONCURRENCY=5
 
 - RLS on all tables (§5); `viewer` role read-only enforced in policies.
 - Encrypted OAuth tokens; short-TTL presigned URLs (15 min PUT / 1 h GET; 7 d exports).
+- Auth surface (ADR 0021): post-auth `?next=` targets are validated to a same-origin
+  absolute path (`lib/safe-redirect.ts`) — no open redirect off the trusted callback.
+  Failures reach `/login` as a **reason code only**; the provider's `error_description`
+  is never forwarded or rendered, so no attacker-authored sentence can speak in the
+  app's voice on the credential page. Both guards are load-bearing — don't relax them.
 - Narrow scopes only (`drive.file`, Dropbox Chooser) — no CASA in MVP.
 - Attribute-level people recognition only; no face-ID, no identity persistence. Face grouping = post-MVP, opt-in, consent-gated.
 - Product policy stated in UI + ToS: user data is never used to train models.
