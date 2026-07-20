@@ -6,9 +6,10 @@
  *  same-origin absolute path survives: one leading "/", no scheme, and no
  *  protocol-relative form.
  *
- *  Pass the request's *public* base — `request.nextUrl`, not
- *  `new URL(request.url)`: behind Vercel's proxy the latter can carry the
- *  internal host, and every redirect we build would inherit it.
+ *  Pass the request's own base — `request.nextUrl` is the convenient one. Note
+ *  it resolves to the same host as `request.url`: NextRequest builds the latter
+ *  from the former, and neither consults `x-forwarded-host`. So this guard is
+ *  about the *path*, not about trusting a host.
  */
 export function safeNextUrl(next: string | null | undefined, base: string | URL): URL {
   const baseUrl = new URL(base.toString());
