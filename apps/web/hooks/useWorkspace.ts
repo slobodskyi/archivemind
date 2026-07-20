@@ -1131,29 +1131,29 @@ export function useWorkspace(
     [setState, flashToast, router],
   );
 
+  /** Drawer's single-photo Analyze — a REAL analyze job. This was the last
+   *  mock stamp left from the mockup (#59 fixed only the bulk path): it
+   *  painted fake tags/facts/processed client-side without ever enqueueing,
+   *  so photos looked analyzed while search had no embedding to find. Real
+   *  tags/facts land via the job's Broadcast → router.refresh. */
   const genSingle = useCallback(
-    (id: string) => {
-      const s = stateRef.current;
-      const photos = s.photos.map((p): Photo =>
-        p.id !== id
-          ? p
-          : {
-              ...p,
-              processed: true,
-              status: "Likely",
-              captionKey: "gen",
-              captionStyle: "Agency",
-              chip: "Scene from the Kyiv frontline archive…",
-              tags: ["kyiv", "documentary", "street", "2026"],
-              facts: [
-                { text: "Location: confirmed via GPS", status: "confirmed" },
-                { text: "Date: confirmed via EXIF", status: "confirmed" },
-                { text: "People: verification pending", status: "pending" },
-              ],
-            },
-      );
-      setState({ photos });
-      flashToast("1 photo captioned · 4 tags added");
+    async (id: string) => {
+      if (activeJobId.current) return;
+      setState({ proc: { active: true, label: "Queueing analyze…", pct: 3 } });
+      try {
+        const resp = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "analyze", assetIds: [id] }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const { jobId } = (await resp.json()) as { jobId: string };
+        activeJobId.current = jobId;
+        setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
+      } catch {
+        setState({ proc: { active: false, label: "", pct: 0 } });
+        flashToast("Analyze failed to start — try again");
+      }
     },
     [setState, flashToast],
   );
