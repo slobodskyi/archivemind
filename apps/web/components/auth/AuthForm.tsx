@@ -5,6 +5,10 @@ import { createClient } from "@/lib/supabase/client";
 
 interface AuthFormProps {
   mode: "login" | "signup";
+  /** Failure carried over from /auth/callback, already resolved to display copy
+   *  by the server. Seeds the same red line a submit failure uses, so retrying
+   *  clears it. */
+  initialError?: string | null;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -45,10 +49,10 @@ function GoogleMark() {
   );
 }
 
-export default function AuthForm({ mode }: AuthFormProps) {
+export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
