@@ -27,17 +27,14 @@ import {
   centerAtScale,
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
-  fitBounds,
-  fitView,
   hitTestTiles,
   mapCloudLayout as computeMapLayout,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
-  timelineLayout as computeTimelineLayout,
+  timelineCloudLayout as computeTimelineLayout,
   topicCloudLayout as computeTopicLayout,
   type Bounds,
   type CloudLayout,
-  type ColumnGridLayout,
   type Frame,
   type GalleryOverrides,
   type MinimapLayout,
@@ -50,6 +47,18 @@ import { CHAT_GREETING } from "@/lib/chat";
 
 const DEFAULT_ZOOM = 0.75;
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
+
+/** Per-project canvas arrangement (tile drags, frames, sticky notes) is kept in
+ *  localStorage so it survives leaving and re-opening the project (edit #2).
+ *  Positions are UI-only, so the browser is the right home — no backend/schema. */
+const CANVAS_STORE_PREFIX = "archivemind:canvas:";
+const canvasStoreKey = (projectId: string) => `${CANVAS_STORE_PREFIX}${projectId}`;
+
+interface PersistedCanvas {
+  galleryOverrides?: Partial<GalleryOverrides>;
+  frames?: Frame[];
+  stickyNotes?: StickyNote[];
+}
 
 export type SidebarViewMode = "pile" | "list" | "gallery";
 
@@ -97,12 +106,11 @@ interface ProcState {
   pct: number;
 }
 
-/** Undo/redo checkpoint — everything the frame tool, node drags, timeline
- * drags, and gallery/map/topic tile drags can mutate. */
+/** Undo/redo checkpoint — everything the frame tool, node drags, and
+ * gallery/timeline/map/topic tile drags can mutate. */
 interface Snapshot {
   frames: Frame[];
   stickyNotes: StickyNote[];
-  tlOverrides: Record<string, { x: number; y: number }>;
   galleryOverrides: GalleryOverrides;
 }
 
@@ -144,7 +152,6 @@ interface WorkspaceState {
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
-  tlOverrides: Record<string, { x: number; y: number }>;
   bulkOps: BulkOps;
   bulkLangs: string[];
   bulkStyle: CaptionStyle;
@@ -160,13 +167,10 @@ interface WorkspaceState {
   history: Snapshot[];
   future: Snapshot[];
   zoomMenuOpen: boolean;
-}
-
-interface TlBounds {
-  minX: number;
-  maxX: number;
-  minY: number;
-  maxY: number;
+  /** True briefly after a view/sort switch, while every tile reflows to its new
+   *  position and the viewport re-fits — gates the CSS glide (never on during
+   *  drag/pan, which must stay 1:1 with the pointer). */
+  tilesAnimating: boolean;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -186,7 +190,7 @@ type DragSession =
     }
   | {
       mode: "gallery";
-      kind: "source" | "asset" | "map" | "topic";
+      kind: "source" | "asset" | "map" | "topic" | "timeline";
       key: string;
       sx: number;
       sy: number;
@@ -200,15 +204,6 @@ type DragSession =
       sx: number;
       sy: number;
       orig: { x: number; y: number };
-      moved: boolean;
-    }
-  | {
-      mode: "tl";
-      id: string;
-      sx: number;
-      sy: number;
-      orig: { x: number; y: number };
-      bounds: TlBounds;
       moved: boolean;
     }
   | {
@@ -299,7 +294,9 @@ export interface Workspace {
     key: string,
     origCenter: { x: number; y: number },
   ) => void;
-  onAssetDown: (
+  /** One tile-drag handler for every view — free-position drag into the active
+   *  view's own override bucket (ADR 0020). */
+  onTileDown: (
     e: React.PointerEvent,
     id: string,
     origCenter: CanvasPoint,
@@ -428,16 +425,13 @@ export interface Workspace {
   onUploadBatchStart: (batch: UploadBatchStart) => void;
   onUploadBatchSettled: (result: UploadBatchResult) => void;
 
-  // Timeline — month columns.
-  timelineLayout: ColumnGridLayout;
-  onTlDown: (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => void;
-
-  // Map / Topic — freeform clusters ("clouds") connected by lines (ADR 0018).
-  // Tiles drag like the Canvas asset grid (select-on-down, free position).
-  mapLayout: CloudLayout;
-  topicLayout: CloudLayout;
-  onMapAssetDown: (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => void;
-  onTopicAssetDown: (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => void;
+  // Grouping views (Timeline / Map / Topic) are the same canvas as Canvas, just
+  // sorted — `activePositions` is the current view's tile layout and `cloudDecor`
+  // is its backdrop/edges/labels (null on the unsorted Canvas). `tilesAnimating`
+  // gates the reflow glide when a sort changes (ADR 0020).
+  activePositions: Record<string, TilePos>;
+  cloudDecor: CloudLayout | null;
+  tilesAnimating: boolean;
 
   // Bulk AI
   bulkPanelOpen: boolean;
@@ -469,7 +463,9 @@ export function useWorkspace(
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
-    scale: 1,
+    // Start at the 75% default so the first paint matches every view's fit,
+    // even in the brief window before tryFit centers on the real content (edit #3).
+    scale: DEFAULT_ZOOM,
     tx: 200,
     ty: 120,
     tool: "select",
@@ -502,7 +498,6 @@ export function useWorkspace(
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
-    tlOverrides: {},
     bulkOps: { captions: true, tags: true, faces: false },
     bulkLangs: ["EN"],
     bulkStyle: "Agency",
@@ -516,6 +511,7 @@ export function useWorkspace(
     history: [],
     future: [],
     zoomMenuOpen: false,
+    tilesAnimating: false,
   });
 
   // Mirror of committed state, kept current for window-level event handlers.
@@ -524,6 +520,8 @@ export function useWorkspace(
   const canvasElRef = useRef<HTMLDivElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeJobId = useRef<string | null>(null);
   const objectUrlsRef = useRef(new Map<string, string>());
 
@@ -607,7 +605,6 @@ export function useWorkspace(
   const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
     frames: s.frames,
     stickyNotes: s.stickyNotes,
-    tlOverrides: s.tlOverrides,
     galleryOverrides: s.galleryOverrides,
   }), []);
 
@@ -638,20 +635,25 @@ export function useWorkspace(
     setState({ ...next, history: hist, future });
   }, [setState, snapshot]);
 
+  /** Canonical-photo tile positions for whichever view is active — the single
+   *  source both the renderer and marquee hit-testing read, so selection and
+   *  tile layout stay identical across Canvas / Timeline / Map / Topic. */
+  const activeTilePositions = useCallback(
+    (s: WorkspaceState): Record<string, TilePos> => {
+      if (s.view === "timeline") return computeTimelineLayout(s.photos, s.galleryOverrides.timeline, s.frames).tiles;
+      if (s.view === "map") return computeMapLayout(s.photos, s.galleryOverrides.map, s.frames).tiles;
+      if (s.view === "sense") return computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles;
+      return assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
+    },
+    [],
+  );
+
   // ── Pan / zoom ────────────────────────────────────────────────────────────
 
   const wheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
       const s = stateRef.current;
-      if (s.view === "timeline") {
-        // ty: 100 is the fit-to-header alignment fitView() computes (row 0
-        // sits right under the sticky month header). Clamp so scrolling up
-        // can't push content past that and open a gap above the first row —
-        // there's nothing above row 0 to reveal.
-        setState({ tx: s.tx - e.deltaX, ty: Math.min(100, s.ty - e.deltaY) });
-        return;
-      }
       const r = rect(),
         cx = e.clientX - r.left,
         cy = e.clientY - r.top;
@@ -674,7 +676,11 @@ export function useWorkspace(
       if (s.projOpen) patch.projOpen = false;
       if (Object.keys(patch).length) setState(patch);
       const r = rect();
-      if (s.tool === "frame" && s.view !== "map") {
+      // Every view behaves like Canvas now (ADR 0020): the frame and select
+      // (marquee) tools work in all four, and only the hand tool pans on a
+      // background drag. Marquee hit-tests against the active view's own tile
+      // positions so it selects whatever is on screen, sorted or not.
+      if (s.tool === "frame") {
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
           dy0 = e.clientY - r.top;
@@ -692,7 +698,7 @@ export function useWorkspace(
           marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 },
           frameDraftRect: { x: c.x, y: c.y, w: 0, h: 0 },
         });
-      } else if (s.tool === "hand" || s.view !== "neural") {
+      } else if (s.tool === "hand") {
         dragRef.current = {
           mode: "pan",
           sx: e.clientX,
@@ -713,14 +719,14 @@ export function useWorkspace(
           x1: dx0,
           y1: dy0,
           moved: false,
-          assetPositions: assetGallery(s.photos, s.galleryOverrides.asset).pos,
+          assetPositions: activeTilePositions(s),
           initialSelection: s.selectedIds,
           additive: e.shiftKey || e.metaKey || e.ctrlKey,
         };
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
-    [rect, toContent, setState],
+    [rect, toContent, setState, activeTilePositions],
   );
 
   const onGalleryNodeDown = useCallback(
@@ -745,7 +751,7 @@ export function useWorkspace(
    *  (with the same additive/shift-click semantics), then a free-position
    *  drag session keyed to whichever override bucket `kind` names. */
   const onGalleryAssetDown = useCallback(
-    (kind: "asset" | "map" | "topic", e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
+    (kind: "asset" | "map" | "topic" | "timeline", e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
       if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
@@ -774,16 +780,15 @@ export function useWorkspace(
     },
     [setState],
   );
-  const onAssetDown = useCallback(
-    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => onGalleryAssetDown("asset", e, id, origCenter),
-    [onGalleryAssetDown],
-  );
-  const onMapAssetDown = useCallback(
-    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => onGalleryAssetDown("map", e, id, origCenter),
-    [onGalleryAssetDown],
-  );
-  const onTopicAssetDown = useCallback(
-    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => onGalleryAssetDown("topic", e, id, origCenter),
+  /** One tile-drag entry point for every view — routes to the override bucket
+   *  that matches the active sort, so a tile stays where you drop it within the
+   *  view you dropped it in (and Canvas keeps its own unsorted positions). */
+  const onTileDown = useCallback(
+    (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
+      const v = stateRef.current.view;
+      const kind = v === "timeline" ? "timeline" : v === "map" ? "map" : v === "sense" ? "topic" : "asset";
+      onGalleryAssetDown(kind, e, id, origCenter);
+    },
     [onGalleryAssetDown],
   );
 
@@ -831,15 +836,6 @@ export function useWorkspace(
     [pushHistory, setState],
   );
 
-  const onTlDown = useCallback(
-    (e: React.PointerEvent, id: string, orig: { x: number; y: number }, bounds: TlBounds) => {
-      e.stopPropagation();
-      pushHistory();
-      dragRef.current = { mode: "tl", id, sx: e.clientX, sy: e.clientY, orig, bounds, moved: false };
-    },
-    [pushHistory],
-  );
-
   const move = useCallback(
     (e: PointerEvent) => {
       const d = dragRef.current;
@@ -850,15 +846,6 @@ export function useWorkspace(
           tx: d.otx + (e.clientX - d.sx),
           ty: d.oty + (e.clientY - d.sy),
         });
-      } else if (d.mode === "tl") {
-        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
-        const dx = (e.clientX - d.sx) / s.scale,
-          dy = (e.clientY - d.sy) / s.scale;
-        let nx = d.orig.x + dx,
-          ny = d.orig.y + dy;
-        nx = Math.min(d.bounds.maxX, Math.max(d.bounds.minX, nx));
-        ny = Math.min(d.bounds.maxY, Math.max(d.bounds.minY, ny));
-        setState({ tlOverrides: { ...s.tlOverrides, [d.id]: { x: nx, y: ny } } });
       } else if (d.mode === "gallery") {
         if (Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3) {
           d.moved = true;
@@ -948,15 +935,6 @@ export function useWorkspace(
     dragRef.current = null;
     if (d.mode === "pan") {
       setState({ panning: false });
-    } else if (d.mode === "tl") {
-      if (!d.moved) {
-        const s = stateRef.current;
-        const sel = s.selectedIds.slice();
-        const i = sel.indexOf(d.id);
-        if (i >= 0) sel.splice(i, 1);
-        else sel.push(d.id);
-        setState({ selectedIds: sel });
-      }
     } else if (d.mode === "marquee") {
       if (!d.moved) {
         setState({
@@ -1113,12 +1091,14 @@ export function useWorkspace(
    *  removes the tile immediately and reconciles from the server on failure. */
   const deletePhoto = useCallback(
     (id: string) => {
-      const s = stateRef.current;
-      setState({
-        photos: s.photos.filter((p) => p.id !== id),
-        selectedIds: s.selectedIds.filter((x) => x !== id),
-        drawerId: s.drawerId === id ? null : s.drawerId,
-      });
+      // Functional update so deleting a multi-selection (a forEach of these in
+      // one tick) composes instead of each call clobbering the last — otherwise
+      // only one file would actually disappear per keypress.
+      setState((prev) => ({
+        photos: prev.photos.filter((p) => p.id !== id),
+        selectedIds: prev.selectedIds.filter((x) => x !== id),
+        drawerId: prev.drawerId === id ? null : prev.drawerId,
+      }));
       fetch(`/api/assets/${id}`, { method: "DELETE" })
         .then((resp) => {
           if (!resp.ok) throw new Error(String(resp.status));
@@ -1168,13 +1148,11 @@ export function useWorkspace(
     [],
   );
 
-  /** Fit to content, but never zoom in past DEFAULT_ZOOM (75%) — small
-   *  projects stay at a comfortable default instead of filling the viewport
-   *  at 300%; large ones still shrink further so everything stays visible. */
-  const fitCapped = useCallback((bounds: Bounds, r: Rect) => {
-    const fitted = fitBounds(bounds, r);
-    return fitted.scale < DEFAULT_ZOOM ? fitted : centerAtScale(bounds, r, DEFAULT_ZOOM);
-  }, []);
+  /** Every view opens at a fixed DEFAULT_ZOOM (75%), centered on its content —
+   *  the same default zoom across Canvas / Timeline / Map / Topic (edit #3), so
+   *  a big archive no longer shrinks to 40–60% on one view and 75% on another.
+   *  Content larger than the viewport at 75% simply overflows and pans. */
+  const fitDefaultZoom = useCallback((bounds: Bounds, r: Rect) => centerAtScale(bounds, r, DEFAULT_ZOOM), []);
 
   const computeFit = useCallback(
     (
@@ -1184,15 +1162,16 @@ export function useWorkspace(
       previews: CanvasUploadPreview[],
     ) => {
       const r = rect();
+      const frames = stateRef.current.frames;
       if (view === "neural") {
         const bounds = neuralGalleryFor(allPhotos, overrides, previews).bounds;
-        return fitCapped(bounds, r);
+        return fitDefaultZoom(bounds, r);
       }
-      if (view === "map") return fitCapped(computeMapLayout(allPhotos, overrides.map).bounds, r);
-      if (view === "sense") return fitCapped(computeTopicLayout(allPhotos, overrides.topic).bounds, r);
-      return fitView(view, r);
+      if (view === "map") return fitDefaultZoom(computeMapLayout(allPhotos, overrides.map, frames).bounds, r);
+      if (view === "sense") return fitDefaultZoom(computeTopicLayout(allPhotos, overrides.topic, frames).bounds, r);
+      return fitDefaultZoom(computeTimelineLayout(allPhotos, overrides.timeline, frames).bounds, r);
     },
-    [rect, neuralGalleryFor, fitCapped],
+    [rect, neuralGalleryFor, fitDefaultZoom],
   );
 
   const doFit = useCallback(() => {
@@ -1216,11 +1195,17 @@ export function useWorkspace(
 
   const setView = useCallback(
     (v: ViewMode) => {
+      const s = stateRef.current;
+      if (v === s.view) return;
+      // Turn on the glide, then re-fit and re-sort in the same commit so the
+      // tiles and the viewport animate together — the sort feels like the page
+      // reflowing in place, not a page swap (ADR 0020). Selection is kept: a tile
+      // stays selected as it flies to its new cluster.
       setState({
         view: v,
         marquee: null,
-        selectedIds: [],
         bulkPanelOpen: false,
+        tilesAnimating: true,
         // View changes retire the right-side source browser so it cannot
         // overlap the AI chat panel that lives in the same slot.
         sidebarTabs: [],
@@ -1228,11 +1213,10 @@ export function useWorkspace(
         sidebarSelectedIds: [],
         sidebarSearchText: "",
         sidebarAddOpen: false,
+        ...computeFit(v, s.photos, s.galleryOverrides, s.uploadPreviews),
       });
-      setTimeout(() => {
-        const s = stateRef.current;
-        setState(computeFit(v, s.photos, s.galleryOverrides, s.uploadPreviews));
-      }, 0);
+      if (animTimer.current) clearTimeout(animTimer.current);
+      animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
     },
     [setState, computeFit],
   );
@@ -1248,12 +1232,12 @@ export function useWorkspace(
     if (r.width > 0 && r.height > 0) {
       const s = stateRef.current;
       const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
-      setState(fitCapped(bounds, r));
+      setState(fitDefaultZoom(bounds, r));
       didFitRef.current = true;
       return true;
     }
     return false;
-  }, [rect, setState, neuralGalleryFor, fitCapped]);
+  }, [rect, setState, neuralGalleryFor, fitDefaultZoom]);
 
   // ── Chat = Smart Search (#16) — the assistant's answers ARE search results ─
 
@@ -1855,6 +1839,73 @@ export function useWorkspace(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Persist canvas arrangement per project (edit #2) ──────────────────────
+  // Load once on mount (before the rAF fit reads bounds), so tile drags, frames
+  // and sticky notes are exactly where they were left. localStorage only — this
+  // is UI state, never a backend concern.
+  useEffect(() => {
+    if (currentProjectId === "all") return;
+    try {
+      const raw = localStorage.getItem(canvasStoreKey(currentProjectId));
+      if (!raw) return;
+      const saved = JSON.parse(raw) as PersistedCanvas;
+      setState({
+        galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
+        frames: saved.frames ?? [],
+        stickyNotes: saved.stickyNotes ?? [],
+      });
+    } catch {
+      // corrupt JSON or storage unavailable (private mode) — start clean
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced save whenever the arrangement changes — dragging fires overrides
+  // on every pointermove, so a 400 ms debounce keeps writes off the drag path.
+  useEffect(() => {
+    if (currentProjectId === "all") return;
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          canvasStoreKey(currentProjectId),
+          JSON.stringify({
+            galleryOverrides: state.galleryOverrides,
+            frames: state.frames,
+            stickyNotes: state.stickyNotes,
+          } satisfies PersistedCanvas),
+        );
+      } catch {
+        // over quota / unavailable — arrangement just won't persist this time
+      }
+    }, 400);
+    return () => {
+      if (persistTimer.current) clearTimeout(persistTimer.current);
+    };
+  }, [currentProjectId, state.galleryOverrides, state.frames, state.stickyNotes]);
+
+  // Flush the latest arrangement on unmount too, so navigating away right after
+  // a drag (before the debounce fires) still saves it.
+  useEffect(() => {
+    return () => {
+      if (currentProjectId === "all") return;
+      try {
+        const s = stateRef.current;
+        localStorage.setItem(
+          canvasStoreKey(currentProjectId),
+          JSON.stringify({
+            galleryOverrides: s.galleryOverrides,
+            frames: s.frames,
+            stickyNotes: s.stickyNotes,
+          } satisfies PersistedCanvas),
+        );
+      } catch {
+        // ignore
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -1894,6 +1945,7 @@ export function useWorkspace(
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (copyTimer.current) clearTimeout(copyTimer.current);
+      if (animTimer.current) clearTimeout(animTimer.current);
       for (const url of objectUrls.values()) URL.revokeObjectURL(url);
       objectUrls.clear();
     };
@@ -1929,7 +1981,9 @@ export function useWorkspace(
   const showViewTabs = state.projCurrent !== "all";
   const allFilesMode = state.projCurrent === "all";
   const projectMode = !allFilesMode;
-  const showAddToProject = isNeural && selectedIds.size > 0;
+  // Selection + add-to-project work the same in every project view now, not just
+  // Canvas — the views differ only in how tiles are sorted (ADR 0020).
+  const showAddToProject = projectMode && selectedIds.size > 0;
 
   const projectPhotos = useMemo(
     () => filteredPhotos(state.photos),
@@ -1955,18 +2009,18 @@ export function useWorkspace(
   const sidebarSelectedIds = useMemo(() => new Set(state.sidebarSelectedIds), [state.sidebarSelectedIds]);
 
   const timelineLayoutResult = useMemo(
-    () => computeTimelineLayout(projectPhotos, state.tlOverrides),
-    [projectPhotos, state.tlOverrides],
+    () => computeTimelineLayout(projectPhotos, state.galleryOverrides.timeline, state.frames),
+    [projectPhotos, state.galleryOverrides.timeline, state.frames],
   );
 
   const mapLayoutResult = useMemo(
-    () => computeMapLayout(projectPhotos, state.galleryOverrides.map),
-    [projectPhotos, state.galleryOverrides.map],
+    () => computeMapLayout(projectPhotos, state.galleryOverrides.map, state.frames),
+    [projectPhotos, state.galleryOverrides.map, state.frames],
   );
 
   const topicLayoutResult = useMemo(
-    () => computeTopicLayout(projectPhotos, state.galleryOverrides.topic),
-    [projectPhotos, state.galleryOverrides.topic],
+    () => computeTopicLayout(projectPhotos, state.galleryOverrides.topic, state.frames),
+    [projectPhotos, state.galleryOverrides.topic, state.frames],
   );
 
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
@@ -1979,6 +2033,18 @@ export function useWorkspace(
   }, [state.photos, selectedIds]);
 
   const frameDraft = state.frameDraftRect;
+
+  // The active view's canonical-photo positions (Canvas grid or a cloud sort),
+  // plus the cloud backdrop/edges/labels for the grouping views. Both drive one
+  // persistent tile set so switching a sort just reflows the same tiles.
+  const cloudDecor: CloudLayout | null = isTimelineView
+    ? timelineLayoutResult
+    : isMapView
+      ? mapLayoutResult
+      : isSenseView
+        ? topicLayoutResult
+        : null;
+  const activePositions = cloudDecor ? cloudDecor.tiles : neuralGalleryPos;
 
   const canUndo = state.history.length > 0;
   const canRedo = state.future.length > 0;
@@ -1993,15 +2059,20 @@ export function useWorkspace(
     (sidebarOpenForMinimap ? 380 : 0) +
     (state.drawerId ? 410 : 0);
 
+  // Minimap dots are derived from exactly what the canvas renders (edit #3):
+  // the active view's canonical tile centers, plus any pending uploads (which
+  // render at the neutral grid in every view). Using activePositions — the same
+  // map ProjectAssetView draws — guarantees the minimap can't drift from the grid.
   const minimapPoints = useMemo(() => {
-    if (isNeural) return Object.values(neuralGalleryPos).map((p) => ({ x: p.cx, y: p.cy }));
-    if (isTimelineView) {
-      return Object.values(timelineLayoutResult.tiles).map((t) => ({ x: t.x + t.w / 2, y: t.y + t.h / 2 }));
+    const pts = Object.values(activePositions).map((t) => ({ x: t.cx, y: t.cy }));
+    for (const preview of state.uploadPreviews) {
+      const id = preview.assetId ?? preview.clientId;
+      if (activePositions[id]) continue;
+      const p = neuralGalleryPos[id];
+      if (p) pts.push({ x: p.cx, y: p.cy });
     }
-    if (isSenseView) return Object.values(topicLayoutResult.tiles).map((t) => ({ x: t.cx, y: t.cy }));
-    if (isMapView) return Object.values(mapLayoutResult.tiles).map((t) => ({ x: t.cx, y: t.cy }));
-    return [];
-  }, [isMapView, isNeural, isTimelineView, isSenseView, neuralGalleryPos, timelineLayoutResult, topicLayoutResult, mapLayoutResult]);
+    return pts;
+  }, [activePositions, state.uploadPreviews, neuralGalleryPos]);
 
   const minimap = useMemo(
     () =>
@@ -2072,7 +2143,7 @@ export function useWorkspace(
     setCanvasRef,
     onCanvasDown,
     onGalleryNodeDown,
-    onAssetDown,
+    onTileDown,
     setHover,
     openDrawer,
     closeDrawer,
@@ -2182,13 +2253,9 @@ export function useWorkspace(
     onUploadBatchStart,
     onUploadBatchSettled,
 
-    timelineLayout: timelineLayoutResult,
-    onTlDown,
-
-    mapLayout: mapLayoutResult,
-    topicLayout: topicLayoutResult,
-    onMapAssetDown,
-    onTopicAssetDown,
+    activePositions,
+    cloudDecor,
+    tilesAnimating: state.tilesAnimating,
 
     bulkPanelOpen: state.bulkPanelOpen,
     toggleBulkPanel,
