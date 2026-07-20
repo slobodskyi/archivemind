@@ -16,6 +16,9 @@ import {
   jobTypeSchema,
   memberRoleSchema,
   presignUploadRequestSchema,
+  searchParseSchema,
+  searchResponseSchema,
+  searchResultSchema,
 } from "./index";
 
 /**
@@ -192,5 +195,50 @@ describe("caption contracts", () => {
     for (const lang of captionLangSchema.options) {
       expect(CAPTION_LANG_NAMES[lang].length).toBeGreaterThan(2);
     }
+  });
+});
+
+describe("search contracts", () => {
+  const id = "4df136fe-a1a4-49c1-ab22-1f1713a1c53c";
+
+  it("degrades sloppy model output field-by-field instead of failing", () => {
+    const p = searchParseSchema.parse({
+      semantic_text: 42,
+      date_from: 7,
+      place_terms: "kyiv",
+      tag_terms: null,
+      kinds: ["photo", "video"],
+    });
+    expect(p.semantic_text).toBe("");
+    expect(p.date_from).toBeNull();
+    expect(p.place_terms).toEqual([]);
+    expect(p.tag_terms).toEqual([]);
+    expect(p.kinds).toEqual([]); // one bad member degrades the whole list, not the request
+  });
+
+  it("round-trips a full parse through searchResponseSchema", () => {
+    const parsed = {
+      semantic_text: "flooded street rescue",
+      date_from: "2026-06-01",
+      date_to: null,
+      place_terms: ["kyiv"],
+      tag_terms: ["rescue"],
+      kinds: [],
+    };
+    const resp = searchResponseSchema.parse({
+      parsed,
+      results: [
+        { assetId: id, similarity: 0.87, matchedTags: ["rescue"], matchedPlace: "Kyiv, Ukraine", takenAt: null },
+      ],
+    });
+    expect(resp.results[0].matchedTags).toEqual(["rescue"]);
+    expect(resp.parsed.semantic_text).toBe("flooded street rescue");
+  });
+
+  it("rejects malformed result rows", () => {
+    expect(
+      searchResultSchema.safeParse({ assetId: "nope", similarity: 1, matchedTags: [], matchedPlace: null, takenAt: null })
+        .success,
+    ).toBe(false);
   });
 });

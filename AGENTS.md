@@ -8,8 +8,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 AI-powered creator archive workspace — infinite-canvas photo archive UI.
 A **pnpm + turborepo monorepo**, live in production (Phases 0–2 shipped 2026-07-10,
-plus Phase 5's homepage + real projects pulled forward; **Phase 3 — Captions — is
-in flight**: the worker handler shipped (#79), the web wiring (#14) is next.
+plus Phase 5's homepage + real projects pulled forward and Phase 3 — Captions —
+done 2026-07-17; **Phase 4 — Search — is in flight**: the search API PR (#15) is
+in review, the chat-panel wiring (#16) is next.
 `docs/PLAN.md` is canonical for phase status — trust it over this line):
 - `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
   real auth (email+password), drag-and-drop upload to R2, a real homepage of project
@@ -21,8 +22,8 @@ in flight**: the worker handler shipped (#79), the web wiring (#14) is next.
   canned surface in `lib/chat.ts`.
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
   HEIC + RAW paths), analyze (Gemini tags/facts + embeddings; user-triggered
-  only — never automatic) and caption (styled multilingual captions — handler
-  live, user-facing wiring lands with #14).
+  only — never automatic) and caption (styled multilingual captions — live
+  end-to-end since #82: drawer Regenerate/edit/Save per lang × style).
 - `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),

@@ -12,8 +12,8 @@ email+password auth, drag-and-drop upload to R2, and a canvas that renders the
 caller's own assets. `apps/worker` (Railway) processes `ai_jobs`: ingest
 (sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths),
 analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only) and
-caption (styled multilingual captions per spec §8.3 — handler live, `POST
-/api/jobs` wiring lands with #14).
+caption (styled multilingual captions per spec §8.3 — live end-to-end since #82:
+drawer Regenerate/edit/Save, `is_edited` guard + confirmed-overwrite unlock).
 `packages/shared` holds the zod contracts both sides parse. Projects and all four
 canvas views now run on the caller's real assets; Map and Topic cluster by
 `country`/`group`, which `lib/assets.ts` still fills with inert defaults, so they
@@ -45,6 +45,8 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
   app/api/projects/[id]/assets                 M:N add
   app/api/assets/[id]                          soft delete (status='deleted')
   app/api/assets/[id]/medium                   lazy presigned preview
+  app/api/captions/[id]                        caption edit (is_edited) / resetEdited
+  app/api/search                               GET §8.4: parse → embed → search_assets()
 
 hooks/useJobProgress.ts     its own Supabase Realtime channel → job progress
 ```

@@ -201,6 +201,45 @@ export const addProjectAssetsRequestSchema = z.object({
 });
 export type AddProjectAssetsRequest = z.infer<typeof addProjectAssetsRequestSchema>;
 
+// ── Search (spec §8.4; issue #15) — GET /api/search ──────────────────────────
+
+/** Gemini's structured parse of a free-text archive query. Every field is
+ *  .catch()-guarded: a sloppy model answer degrades to "just semantic search",
+ *  never a 500. `kinds` is parsed but unused until non-photo assets ship. */
+export const searchParseSchema = z.object({
+  semantic_text: z.string().catch(""),
+  date_from: z.string().nullish().catch(null),
+  date_to: z.string().nullish().catch(null),
+  place_terms: z.array(z.string()).catch([]),
+  tag_terms: z.array(z.string()).catch([]),
+  kinds: z.array(assetKindSchema).catch([]),
+});
+export type SearchParse = z.infer<typeof searchParseSchema>;
+
+export const SEARCH_PARSE_PROMPT = `You translate a photo-archive search query into structured filters.
+Return JSON only. Fields:
+- semantic_text: what to match visually/semantically, reworded as a dense noun phrase (keep the query's language). Empty string if the query is pure filters.
+- date_from / date_to: ISO dates (YYYY-MM-DD) when the query names a period ("last June", "2026", "18.06"), else null. Resolve relative periods against today's date given below.
+- place_terms: place names mentioned (city/country/venue), lowercase, in both the query's language and English if obvious.
+- tag_terms: concrete nouns worth matching against tags (objects/scenes/events), lowercase English singular.
+- kinds: subset of ["photo","pdf","document","other"] only when the query names a type.
+Never invent filters the query does not state.`;
+
+export const searchResultSchema = z.object({
+  assetId: uuidSchema,
+  similarity: z.number(),
+  matchedTags: z.array(z.string()),
+  matchedPlace: z.string().nullable(),
+  takenAt: z.string().nullable(),
+});
+export type SearchResult = z.infer<typeof searchResultSchema>;
+
+export const searchResponseSchema = z.object({
+  parsed: searchParseSchema,
+  results: z.array(searchResultSchema),
+});
+export type SearchResponse = z.infer<typeof searchResponseSchema>;
+
 export const tagCategorySchema = z.enum(["object", "scene", "place", "attribute", "event", "other"]);
 export type TagCategory = z.infer<typeof tagCategorySchema>;
 
