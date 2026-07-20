@@ -6,10 +6,10 @@ For the **target backend** (schema, worker, AI pipeline, security), `docs/TECH_S
 duplicate those here.
 
 ## What this is (today)
-A pnpm + turborepo monorepo, live in production (Phases 0–1 shipped, Phase 2 in
-progress). `apps/web` (Vercel) is the ported Claude Design canvas UI with real
-email+password auth, drag-and-drop upload to R2, and a canvas that renders the
-caller's own assets. `apps/worker` (Railway) processes `ai_jobs`: ingest
+A pnpm + turborepo monorepo, live in production (Phases 0–4 shipped: upload →
+analyze → captions → search). `apps/web` (Vercel) is the ported Claude Design
+canvas UI with real email+password auth, drag-and-drop upload to R2, and a
+canvas that renders the caller's own assets. `apps/worker` (Railway) processes `ai_jobs`: ingest
 (sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths),
 analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only) and
 caption (styled multilingual captions per spec §8.3 — live end-to-end since #82:
@@ -26,6 +26,7 @@ select-on-canvas; `lib/chat.ts` keeps only static help/greeting copy.
 ```
 Supabase Postgres (RLS)  ⇄  apps/worker (Railway): ai_jobs queue —
         |                    ingest → previews/EXIF → R2 · analyze → tags/embeddings
+        |                    caption → captions rows (is_edited-guarded upserts)
         |                    retention.ts → sweep_trashed_projects() on boot + 6h
         v
 lib/assets.ts · lib/projects.ts · lib/bootstrap.ts
@@ -41,7 +42,7 @@ READ PATH (Server Components import these and await them directly):
 
 WRITE PATH (client → HTTP → route handlers; nothing client-side touches the DB):
   app/api/uploads/presign · uploads/complete   drag-drop → R2 → ingest job
-  app/api/jobs                                 user-triggered analyze
+  app/api/jobs                                 user-triggered analyze / caption
   app/api/projects · projects/[id]             create · rename/archive/trash
   app/api/projects/[id]/assets                 M:N add
   app/api/assets/[id]                          soft delete (status='deleted')
@@ -86,7 +87,7 @@ These are the mockup's shapes. The **target** model differs — see the note bel
 > Google Drive / Dropbox integrations (no iCloud in MVP). The rename lands during the
 > build phases — see the spec, don't reshape the mockup ahead of it.
 
-## Stack (Phases 0–2 shipped; Phase 3 — Captions — next)
+## Stack (Phases 0–4 shipped; Phase 5 remainder — canvas at scale — next)
 See `docs/TECH_SPEC.md` §2–§3, and `docs/PLAN.md` for live phase status. In brief:
 monorepo `apps/web` (Vercel) + `apps/worker` (Railway) + `packages/shared` +
 `supabase/`; Supabase Postgres (+ Auth, pgvector, Realtime); Cloudflare R2 for all
