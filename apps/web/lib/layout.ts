@@ -340,11 +340,11 @@ export function centerAtScale(bounds: Bounds, rect: Rect, scale: number): Transf
 export const DEFAULT_ZOOM = 0.75;
 
 // ── Timeline: real-capture-date grouping ────────────────────────────────────
-// Timeline groups photos by their real capture month ("Mon YYYY"); those groups
-// render as freeform "clouds" via buildCloudLayout below, exactly like Map and
-// Topic (ADR 0022). Only the month bucketing/ordering helpers live here.
+// Timeline groups photos by their exact capture *day*; the horizontal axis
+// layout below (timelineAxisLayout) lays those days out as evenly-spaced,
+// labeled date columns (ADR 0024).
 
-const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const pad2 = (n: number) => String(n).padStart(2, "0");
 
 /** `exif.dateTaken` is always `"YYYY-MM-DD HH:mm"` (lib/assets.ts's toExifData) —
  *  never absent, so an unparseable value only happens for malformed test data. */
@@ -353,14 +353,16 @@ function capturedAt(photo: Photo): Date {
   return Number.isNaN(d.getTime()) ? new Date(0) : d;
 }
 
-export function monthOf(photo: Photo): string {
+/** Sortable day key "YYYY-MM-DD" from a photo's capture date. */
+function dayKeyOf(photo: Photo): string {
   const d = capturedAt(photo);
-  return `${MONTH_ABBR[d.getMonth()]} ${d.getFullYear()}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-function monthSortValue(key: string): number {
-  const [abbr, yearStr] = key.split(" ");
-  return parseInt(yearStr, 10) * 12 + MONTH_ABBR.indexOf(abbr);
+/** "YYYY-MM-DD" → the on-axis label "DD/MM/YYYY". */
+function dayLabel(key: string): string {
+  const [y, m, d] = key.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 // ── Timeline / Map / Topic: freeform clusters ("clouds") connected by lines ─
@@ -410,6 +412,10 @@ export interface CloudEdge {
   y2: number;
   op: number;
   w: number;
+  /** The cloud a same-cloud (tag) edge belongs to; undefined for cross-cloud
+   *  bridges. Lets the renderer keep the focused cloud's lines bright and fade
+   *  the rest only halfway (ADR 0024). */
+  cloudKey?: string;
 }
 
 export interface CloudLayout {
@@ -417,6 +423,12 @@ export interface CloudLayout {
   tiles: Record<string, TilePos>;
   edges: CloudEdge[];
   bounds: Bounds;
+  /** Which cloud each tile belongs to (tile id → cloud key) — lets the renderer
+   *  fade non-focused clouds and drag a whole cloud by its label (ADR 0024). */
+  tileCloud: Record<string, string>;
+  /** Present only for the Timeline view: a horizontal date axis to draw, with a
+   *  tick at each cloud's `labelX`. Map/Topic leave this undefined. */
+  axis?: { y: number; x1: number; x2: number };
 }
 
 export const UNSORTED_CLOUD_KEY = "Unsorted";
@@ -508,8 +520,8 @@ function topicCloudColor(key: string): string {
   return GROUPS[key as PhotoGroup]?.color ?? MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
 }
 
-/** A stable color per "Mon YYYY" month key, drawn from the same palette Map uses. */
-function monthCloudColor(key: string): string {
+/** A stable color per Timeline date key, drawn from the same palette Map uses. */
+function timelineCloudColor(key: string): string {
   return MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
 }
 
@@ -695,6 +707,7 @@ function buildCloudLayout(
       y2: tb.cy,
       op: Math.min(0.16 + (n - 1) * 0.05, 0.34),
       w: 1.1,
+      cloudKey: tileCluster[a],
     });
   });
   strongestCross.forEach(({ a, b }) => {
@@ -716,7 +729,7 @@ function buildCloudLayout(
     });
   });
 
-  return { clouds, tiles, edges, bounds: positionsBounds(tiles) };
+  return { clouds, tiles, edges, tileCloud: tileCluster, bounds: positionsBounds(tiles) };
 }
 
 /** Map: clouds are countries — real per-asset `country` data is still pending
@@ -755,24 +768,115 @@ export function topicCloudLayout(
   );
 }
 
-/** Timeline: clouds are the distinct "Mon YYYY" capture months actually present
- *  in `photo.exif.dateTaken`, ordered chronologically. Same freeform cloud
- *  layout as Map/Topic (ADR 0022) — the tab is a grouping filter, not a
- *  different canvas. Lines are shared-AI-tag relations (ADR 0022). */
-export function timelineCloudLayout(
+// Timeline is a real horizontal date axis (ADR 0024): every distinct capture
+// *day* is a fixed, evenly-spaced column with its own "DD/MM/YYYY" label on
+// the axis. That day's files fill a grid centered on the label and split above
+// *and* below the axis line (so even 500–1000 files from one day stay in that
+// day's column, growing up and down symmetrically), each day keeping its
+// colored cloud band pinned behind it. No connecting lines here — the axis and
+// the per-day bands carry the structure; the tag web lives in Map/Topic.
+const TL_LEFT = 160;
+const TL_AXIS_Y = 0;
+const TL_DATE_GAP = 420; // fixed horizontal spacing between date labels (equal for all)
+const TL_COLS = 3; // files per row within one day's column
+const TL_CELL_W = 128;
+const TL_CELL_H = 136;
+const TL_AXIS_GAP = 50; // clear half-band around the axis for the line + label
+
+/** Timeline: evenly-spaced date columns. Each distinct capture day gets a fixed
+ *  x (equal gap between labels, independent of the real time between them); its
+ *  files grid out from the axis, half above and half below, so a busy day grows
+ *  symmetrically. Drag overrides win over the computed slot, like every view,
+ *  but x is clamped into the tile's own day column — files can't cross dates. */
+export function timelineAxisLayout(
   photos: readonly Photo[],
   timelineOverrides: Record<string, CanvasPoint>,
-  frames: readonly Frame[] = [],
 ): CloudLayout {
-  return buildCloudLayout(
-    photos,
-    (p) => monthOf(p),
-    monthCloudColor,
-    (key) => key,
-    timelineOverrides,
-    frames,
-    (a, b) => monthSortValue(a) - monthSortValue(b),
-  );
+  const items = [...photos];
+  if (items.length === 0) {
+    return { clouds: [], tiles: {}, edges: [], tileCloud: {}, bounds: { xl: 0, yt: 0, xr: 1000, yb: 700 } };
+  }
+
+  const byDay: Record<string, Photo[]> = {};
+  items.forEach((p) => {
+    const k = dayKeyOf(p);
+    (byDay[k] = byDay[k] || []).push(p);
+  });
+  const dayKeys = Object.keys(byDay).sort(); // "YYYY-MM-DD" sorts chronologically
+
+  const tiles: Record<string, TilePos> = {};
+  const clouds: CloudNode[] = [];
+  const tileCloud: Record<string, string> = {};
+
+  dayKeys.forEach((k, di) => {
+    const dateX = TL_LEFT + di * TL_DATE_GAP;
+    // Fixed borders between dates: a dragged tile is clamped to its own day's
+    // column (± half the gap), so files can't cross into an adjacent date.
+    const colMinCx = dateX - TL_DATE_GAP / 2;
+    const colMaxCx = dateX + TL_DATE_GAP / 2;
+    // Chronological within the day, stable hash tiebreak. Odd counts put the
+    // extra tile above so the axis stays clear.
+    const day = byDay[k]
+      .slice()
+      .sort((a, b) => capturedAt(a).getTime() - capturedAt(b).getTime() || hash(a.id) - hash(b.id));
+    const aboveCount = Math.ceil(day.length / 2);
+
+    let xl = Infinity,
+      yt = Infinity,
+      xr = -Infinity,
+      yb = -Infinity;
+    day.forEach((p, i) => {
+      const size = assetTileSize(p);
+      const above = i < aboveCount;
+      const li = above ? i : i - aboveCount;
+      const col = li % TL_COLS;
+      const row = Math.floor(li / TL_COLS);
+      const slotX = dateX + (col - (TL_COLS - 1) / 2) * TL_CELL_W;
+      // Uniform rows keyed off the cell, not the tile, so rows align regardless
+      // of each tile's aspect. Above grows up from the band, below grows down.
+      const slotY = above
+        ? TL_AXIS_Y - TL_AXIS_GAP - (row + 0.5) * TL_CELL_H
+        : TL_AXIS_Y + TL_AXIS_GAP + (row + 0.5) * TL_CELL_H;
+      const ov = timelineOverrides[p.id];
+      // Clamp the (possibly dragged) x into this day's column; y is free.
+      const cx = ov ? Math.min(colMaxCx - size.w / 2, Math.max(colMinCx + size.w / 2, ov.x)) : slotX;
+      const cy = ov ? ov.y : slotY;
+      const t: TilePos = { x: cx - size.w / 2, y: cy - size.h / 2, w: size.w, h: size.h, cx, cy };
+      tiles[p.id] = t;
+      tileCloud[p.id] = k;
+      xl = Math.min(xl, t.x);
+      yt = Math.min(yt, t.y);
+      xr = Math.max(xr, t.x + t.w);
+      yb = Math.max(yb, t.y + t.h);
+    });
+
+    // The colored cloud is pinned to the date: a fixed-width band centered on
+    // the label's x (not the shifting file bbox), spanning the day's files.
+    const bandW = TL_DATE_GAP - 40;
+    clouds.push({
+      key: k,
+      label: dayLabel(k),
+      color: timelineCloudColor(k),
+      count: day.length,
+      labelX: dateX, // labels are fixed on the axis at the evenly-spaced column
+      labelY: TL_AXIS_Y,
+      bx: dateX - bandW / 2,
+      by: yt,
+      bw: bandW,
+      bh: yb - yt,
+    });
+  });
+
+  const bounds = positionsBounds(tiles);
+  bounds.yt = Math.min(bounds.yt, TL_AXIS_Y - 44); // include the axis line + labels
+  return {
+    clouds,
+    tiles,
+    edges: [],
+    tileCloud,
+    bounds,
+    axis: { y: TL_AXIS_Y, x1: TL_LEFT - TL_DATE_GAP / 2, x2: TL_LEFT + (dayKeys.length - 1) * TL_DATE_GAP + TL_DATE_GAP / 2 },
+  };
 }
 
 // ── Minimap: orientation aid for pannable canvas views ──────────────────────
