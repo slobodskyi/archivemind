@@ -6,6 +6,9 @@ import {
   fitBounds,
   hitTestTiles,
   mapCloudLayout,
+  SAME_CLOUD_LINKS_PER_FILE,
+  TAG_LINK_MEMBER_CAP,
+  timelineCloudLayout,
   topicCloudLayout,
   type Bounds,
   type Frame,
@@ -249,11 +252,80 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     const cross = layout.edges.filter((e) => e.id.startsWith("x-"));
     expect(cross).toHaveLength(1);
     // Strongest pair: ua1↔pl1 share two tags, everything else shares one.
+    // (Cross-cloud is asserted via the id prefix, NOT strokeStart !== strokeEnd:
+    // the 6-color hash palette can legitimately collide across clouds.)
     expect(cross[0].id).toBe("x-pl1-ua1");
-    expect(cross[0].strokeStart).not.toBe(cross[0].strokeEnd); // gradient between the clouds
     // The same-cloud webs still exist on both sides.
     expect(layout.edges.some((e) => e.id === "tag-ua1-ua2")).toBe(true);
     expect(layout.edges.some((e) => e.id === "tag-pl1-pl2")).toBe(true);
+  });
+
+  it("ignores ambient tags attached to more files than TAG_LINK_MEMBER_CAP", () => {
+    const crowd = Array.from({ length: TAG_LINK_MEMBER_CAP + 1 }, (_, i) =>
+      photo(`p${String(i).padStart(2, "0")}`, { tags: ["everything"] }),
+    );
+    expect(topicCloudLayout(crowd, {}).edges).toHaveLength(0);
+
+    // At exactly the cap the tag still links.
+    const atCap = topicCloudLayout(crowd.slice(0, TAG_LINK_MEMBER_CAP), {});
+    expect(atCap.edges.length).toBeGreaterThan(0);
+  });
+
+  it("bounds same-cloud links at SAME_CLOUD_LINKS_PER_FILE per endpoint budget", () => {
+    const n = 10;
+    const crowd = Array.from({ length: n }, (_, i) =>
+      photo(`p${String(i).padStart(2, "0")}`, { tags: ["shared"] }),
+    );
+    const layout = topicCloudLayout(crowd, {});
+    // Complete graph would be C(10,2) = 45; the per-file budget keeps ≤ 4·n.
+    expect(layout.edges.length).toBeLessThan((n * (n - 1)) / 2);
+    expect(layout.edges.length).toBeLessThanOrEqual(SAME_CLOUD_LINKS_PER_FILE * n);
+    // The weakest-ranked pair (between the two last ids) is one that gets dropped.
+    expect(layout.edges.some((e) => e.id === "tag-p08-p09")).toBe(false);
+  });
+
+  it("never fabricates self-loops or double weight from duplicated tag names", () => {
+    // The same tag NAME can be two DB rows (name+category unique key), so a
+    // photo's tags array can legitimately contain duplicates.
+    const solo = topicCloudLayout([photo("solo", { tags: ["kyiv", "kyiv"] })], {});
+    expect(solo.edges).toHaveLength(0);
+
+    const pair = topicCloudLayout(
+      [photo("a", { tags: ["kyiv", "kyiv"] }), photo("b", { tags: ["kyiv"] })],
+      {},
+    );
+    expect(pair.edges).toHaveLength(1);
+    expect(pair.edges[0].op).toBeCloseTo(0.16); // one shared tag, not d1·d2 = 2
+  });
+
+  it("gives the Unsorted cloud real tag links too (lines mean relations now)", () => {
+    const layout = mapCloudLayout(
+      [
+        photo("a", { country: "Atlantis", tags: ["myth"] }),
+        photo("b", { country: "Lemuria", tags: ["myth"] }),
+      ],
+      {},
+    );
+    // Both unrecognized countries land in one Unsorted cloud; the shared tag
+    // still links them — in the Unsorted gray (ADR 0022 supersedes 0018's
+    // "no lines" rule; unanalyzed files are the ones with no lines).
+    expect(layout.clouds.map((c) => c.key)).toEqual(["Unsorted"]);
+    expect(layout.edges).toHaveLength(1);
+    expect(layout.edges[0].strokeStart).toBe("#8a8f98");
+  });
+
+  it("timeline clouds bucket by real capture month and bridge months by tags", () => {
+    const layout = timelineCloudLayout(
+      [
+        photo("apr1", { tags: ["evac"], exif: { ...photo("x").exif, dateTaken: "2026-04-10 09:00" } }),
+        photo("apr2", { tags: ["evac"], exif: { ...photo("x").exif, dateTaken: "2026-04-22 10:00" } }),
+        photo("jul1", { tags: ["evac"], exif: { ...photo("x").exif, dateTaken: "2026-07-03 11:00" } }),
+      ],
+      {},
+    );
+    expect(layout.clouds.map((c) => c.key)).toEqual(["Apr 2026", "Jul 2026"]);
+    expect(layout.edges.some((e) => e.id === "tag-apr1-apr2")).toBe(true);
+    expect(layout.edges.filter((e) => e.id.startsWith("x-"))).toHaveLength(1);
   });
 
   it("detaches a file dropped onto an artboard from the web", () => {

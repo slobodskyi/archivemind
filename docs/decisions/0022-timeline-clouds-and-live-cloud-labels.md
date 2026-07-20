@@ -47,8 +47,8 @@ Two problems also surfaced with the existing cloud labels:
   `ColumnGridLayout`/`ColumnTilePos`/`LayoutColumn` types, the `tl` drag mode /
   `onTlDown` / `tlOverrides` / `TlBounds`, and Timeline's special-cases in
   `wheel` / `fitView` / `computeFit` / `showZoomControl` all go. Timeline is now
-  a bounds-fit, real-zoom view like the others (75% cap via `fitCapped`), so
-  `fitView` (whose only remaining job was Timeline's fixed transform) is gone.
+  a real-zoom view like the others (fixed 75% via `fitDefaultZoom` — see the
+  zoom bullet below; `fitCapped` was deleted along with `fitView`).
 - **One persistent tile set for every view — the views differ only by sort.**
   All four views (Canvas / Timeline / Map / Topic) render their photo tiles
   through the single shared `ProjectAssetView`, positioned by the active view's
@@ -98,6 +98,19 @@ Two problems also surfaced with the existing cloud labels:
   0018's cross-cloud restraint). Unanalyzed files have no tags, hence no lines —
   the web itself shows what AI has processed and how it relates. `buildMst` is
   gone; determinism holds (no `Math.random`, insertion-ordered maps only).
+  Two caps keep the web O(n) — on real data Map/Topic are a single cloud
+  (ADR 0018's inert `country`/`group` defaults), where an uncapped rule would
+  mean ~125k SVG paths at the 500-asset read limit whenever Gemini stamps a
+  near-universal tag: **(1)** a tag attached to more than
+  `TAG_LINK_MEMBER_CAP` (24) linkable files is ambient vocabulary and draws no
+  lines; **(2)** each file keeps only its `SAME_CLOUD_LINKS_PER_FILE` (4)
+  strongest same-cloud links (a link survives if either endpoint keeps it).
+  Tag names are de-duplicated per photo before indexing — the DB's unique key
+  is (name, category), so one name can be two rows, which would otherwise
+  fabricate self-loops and double-counted weights. This also supersedes 0018's
+  "the Unsorted cloud has no lines": lines mean relations now, so tagged files
+  in Unsorted do link (in the Unsorted gray) — it's *unanalyzed* files that
+  have none.
 - **A file on an artboard is detached from the web.** Any tile whose center lands
   inside a frame is dropped from the cluster's connecting lines (both intra- and
   cross-cluster); `buildCloudLayout` takes the current `frames` and computes the
@@ -112,6 +125,11 @@ Two problems also surfaced with the existing cloud labels:
   frames and sticky notes are saved to `localStorage` (keyed by project id,
   debounced + flushed on unmount) and restored on mount, so leaving and reopening
   a project keeps everything where it was left. UI-only state — no backend/schema.
+  The store carries a version stamp (`CANVAS_STORE_VERSION`); a mismatch discards
+  the saved arrangement, so coordinates laid out against clouds that no longer
+  exist (e.g. the design branch's DEMO_CLOUDS test builds) can't strand tiles or
+  balloon a cloud's backdrop. This is the interim client-side half of Phase 5's
+  #22 — the planned server-side `PUT /api/canvas/layout` remains open.
 - **The minimap is derived from the rendered tiles.** `minimapPoints` reads the
   active view's `activePositions` (the exact map `ProjectAssetView` draws) plus any
   pending uploads, so the minimap dots can't drift from what's on the grid.
@@ -136,3 +154,9 @@ Two problems also surfaced with the existing cloud labels:
   tags in every grouping view.
 - The lines only appear after "Analyze with AI" has run — an unanalyzed archive
   shows clouds without a web. That is intentional signal, not a bug.
+- Known cost, deferred to Phase 5 ("canvas at scale"): dragging a tile in a
+  grouping view re-runs the full cloud layout (including `packCircles`) every
+  pointermove, because labels/backdrops/lines track live positions. With the
+  edge caps this is fine at today's archive size, but a single 500-file cloud
+  still packs in O(n²) per pass — memoizing the pack separately from drag
+  overrides (or virtualizing, #18) is the Phase 5 fix.

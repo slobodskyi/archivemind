@@ -25,6 +25,7 @@ import type {
 import {
   assetGallery,
   centerAtScale,
+  DEFAULT_ZOOM,
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
@@ -45,16 +46,20 @@ import {
 import type { SearchResponse } from "@archivemind/shared";
 import { CHAT_GREETING } from "@/lib/chat";
 
-const DEFAULT_ZOOM = 0.75;
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
 
 /** Per-project canvas arrangement (tile drags, frames, sticky notes) is kept in
- *  localStorage so it survives leaving and re-opening the project (edit #2).
+ *  localStorage so it survives leaving and re-opening the project (ADR 0022).
  *  Positions are UI-only, so the browser is the right home — no backend/schema. */
 const CANVAS_STORE_PREFIX = "archivemind:canvas:";
 const canvasStoreKey = (projectId: string) => `${CANVAS_STORE_PREFIX}${projectId}`;
+/** Saved arrangements from a different version are discarded on load — their
+ *  coordinates were laid out against clouds that no longer exist. v2: everything
+ *  saved by the design-branch DEMO_CLOUDS builds (fake Poland/Italy/topic clouds). */
+const CANVAS_STORE_VERSION = 2;
 
 interface PersistedCanvas {
+  v?: number;
   galleryOverrides?: Partial<GalleryOverrides>;
   frames?: Frame[];
   stickyNotes?: StickyNote[];
@@ -464,7 +469,7 @@ export function useWorkspace(
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
     // Start at the 75% default so the first paint matches every view's fit,
-    // even in the brief window before tryFit centers on the real content (edit #3).
+    // even in the brief window before tryFit centers on the real content (ADR 0022).
     scale: DEFAULT_ZOOM,
     tx: 200,
     ty: 120,
@@ -711,6 +716,16 @@ export function useWorkspace(
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
           dy0 = e.clientY - r.top;
+        // Marquee hit-tests canonical photos ONLY. The Canvas position map also
+        // carries pending upload previews (keyed by "<batchId>:<index>" client
+        // ids) so they render — but those must never enter selectedIds: every
+        // selection consumer (bulk jobs, add-to-project, Delete) sends the ids
+        // to APIs that validate them as asset UUIDs and reject the whole batch.
+        const canonicalIds = new Set(s.photos.map((p) => p.id));
+        const assetPositions: Record<string, TilePos> = {};
+        for (const [id, tile] of Object.entries(activeTilePositions(s))) {
+          if (canonicalIds.has(id)) assetPositions[id] = tile;
+        }
         dragRef.current = {
           mode: "marquee",
           startContent: c,
@@ -719,7 +734,7 @@ export function useWorkspace(
           x1: dx0,
           y1: dy0,
           moved: false,
-          assetPositions: activeTilePositions(s),
+          assetPositions,
           initialSelection: s.selectedIds,
           additive: e.shiftKey || e.metaKey || e.ctrlKey,
         };
@@ -1149,7 +1164,7 @@ export function useWorkspace(
   );
 
   /** Every view opens at a fixed DEFAULT_ZOOM (75%), centered on its content —
-   *  the same default zoom across Canvas / Timeline / Map / Topic (edit #3), so
+   *  the same default zoom across Canvas / Timeline / Map / Topic (ADR 0022), so
    *  a big archive no longer shrinks to 40–60% on one view and 75% on another.
    *  Content larger than the viewport at 75% simply overflows and pans. */
   const fitDefaultZoom = useCallback((bounds: Bounds, r: Rect) => centerAtScale(bounds, r, DEFAULT_ZOOM), []);
@@ -1223,8 +1238,8 @@ export function useWorkspace(
 
   // Fit once on first mount, but only after the canvas has a real size — a
   // zero-size rect (background tab / not-yet-painted) would produce a bad fit.
-  // Small canvases start at 75%; large project grids use a true fit so every
-  // tile remains reachable without an initial manual zoom-out.
+  // Every view opens centered at the fixed 75% default; oversized content
+  // overflows and pans — there is no fit-to-content pass anymore (ADR 0022).
   const didFitRef = useRef(false);
   const tryFit = useCallback(() => {
     if (didFitRef.current) return true;
@@ -1839,7 +1854,7 @@ export function useWorkspace(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Persist canvas arrangement per project (edit #2) ──────────────────────
+  // ── Persist canvas arrangement per project (ADR 0022) ──────────────────────
   // Load once on mount (before the rAF fit reads bounds), so tile drags, frames
   // and sticky notes are exactly where they were left. localStorage only — this
   // is UI state, never a backend concern.
@@ -1849,6 +1864,7 @@ export function useWorkspace(
       const raw = localStorage.getItem(canvasStoreKey(currentProjectId));
       if (!raw) return;
       const saved = JSON.parse(raw) as PersistedCanvas;
+      if (saved.v !== CANVAS_STORE_VERSION) return; // stale layout generation — start clean
       setState({
         galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
         frames: saved.frames ?? [],
@@ -1870,6 +1886,7 @@ export function useWorkspace(
         localStorage.setItem(
           canvasStoreKey(currentProjectId),
           JSON.stringify({
+            v: CANVAS_STORE_VERSION,
             galleryOverrides: state.galleryOverrides,
             frames: state.frames,
             stickyNotes: state.stickyNotes,
@@ -1894,6 +1911,7 @@ export function useWorkspace(
         localStorage.setItem(
           canvasStoreKey(currentProjectId),
           JSON.stringify({
+            v: CANVAS_STORE_VERSION,
             galleryOverrides: s.galleryOverrides,
             frames: s.frames,
             stickyNotes: s.stickyNotes,
@@ -2008,19 +2026,23 @@ export function useWorkspace(
   const sidebarOpen = state.sidebarTabs.length > 0;
   const sidebarSelectedIds = useMemo(() => new Set(state.sidebarSelectedIds), [state.sidebarSelectedIds]);
 
+  // Each grouping layout is computed only while its view is active — the cloud
+  // pack + tag-edge pass is the expensive part of a render, and running all
+  // three on every photos/overrides/frames change tripled that cost for
+  // nothing (only one decor layer can be on screen).
   const timelineLayoutResult = useMemo(
-    () => computeTimelineLayout(projectPhotos, state.galleryOverrides.timeline, state.frames),
-    [projectPhotos, state.galleryOverrides.timeline, state.frames],
+    () => (isTimelineView ? computeTimelineLayout(projectPhotos, state.galleryOverrides.timeline, state.frames) : null),
+    [isTimelineView, projectPhotos, state.galleryOverrides.timeline, state.frames],
   );
 
   const mapLayoutResult = useMemo(
-    () => computeMapLayout(projectPhotos, state.galleryOverrides.map, state.frames),
-    [projectPhotos, state.galleryOverrides.map, state.frames],
+    () => (isMapView ? computeMapLayout(projectPhotos, state.galleryOverrides.map, state.frames) : null),
+    [isMapView, projectPhotos, state.galleryOverrides.map, state.frames],
   );
 
   const topicLayoutResult = useMemo(
-    () => computeTopicLayout(projectPhotos, state.galleryOverrides.topic, state.frames),
-    [projectPhotos, state.galleryOverrides.topic, state.frames],
+    () => (isSenseView ? computeTopicLayout(projectPhotos, state.galleryOverrides.topic, state.frames) : null),
+    [isSenseView, projectPhotos, state.galleryOverrides.topic, state.frames],
   );
 
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
@@ -2059,7 +2081,7 @@ export function useWorkspace(
     (sidebarOpenForMinimap ? 380 : 0) +
     (state.drawerId ? 410 : 0);
 
-  // Minimap dots are derived from exactly what the canvas renders (edit #3):
+  // Minimap dots are derived from exactly what the canvas renders (ADR 0022):
   // the active view's canonical tile centers, plus any pending uploads (which
   // render at the neutral grid in every view). Using activePositions — the same
   // map ProjectAssetView draws — guarantees the minimap can't drift from the grid.

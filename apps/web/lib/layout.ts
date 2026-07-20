@@ -334,8 +334,9 @@ export function centerAtScale(bounds: Bounds, rect: Rect, scale: number): Transf
   };
 }
 
-/** Default zoom everywhere is 75% — every view is now a real content-bounds
- *  cloud/grid, so all of them apply this as a cap via fitCapped in useWorkspace. */
+/** Default zoom everywhere is 75% — every view opens *centered at this fixed
+ *  scale* (fitDefaultZoom in useWorkspace → centerAtScale); oversized content
+ *  overflows and pans (ADR 0022). Not a cap: nothing shrinks below it. */
 export const DEFAULT_ZOOM = 0.75;
 
 // ── Timeline: real-capture-date grouping ────────────────────────────────────
@@ -372,9 +373,9 @@ function monthSortValue(key: string): number {
 // pair of clouds so the canvas never becomes a tangle. Unanalyzed (untagged)
 // files simply have no lines — the web itself shows what AI has processed. A
 // tile dropped onto an artboard (frame) is detached from the web — its lines
-// are removed (edit #4). Tiles are freely draggable — a drag override simply
+// are removed (ADR 0022). Tiles are freely draggable — a drag override simply
 // wins over the packed position, and those overrides persist per project
-// (edit #2).
+// (ADR 0022).
 
 export interface CloudNode {
   key: string;
@@ -397,8 +398,10 @@ export interface CloudNode {
 export interface CloudEdge {
   id: string;
   d: string;
-  /** Equal to strokeEnd for a same-cloud (hub) edge — a solid color. Distinct
-   *  colors mean a cross-cloud edge, rendered as a gradient between them. */
+  /** Same-cloud edges always carry strokeStart === strokeEnd (solid color).
+   *  Cross-cloud edges carry each cloud's color — usually distinct (rendered
+   *  as a gradient) but the 6-color hash palette CAN collide, so equal colors
+   *  do NOT imply same-cloud; classify by the id prefix (`tag-` vs `x-`). */
   strokeStart: string;
   strokeEnd: string;
   x1: number;
@@ -418,6 +421,14 @@ export interface CloudLayout {
 
 export const UNSORTED_CLOUD_KEY = "Unsorted";
 const UNSORTED_CLOUD_COLOR = "#8a8f98";
+
+/** Cap 1 (ADR 0022): a tag attached to more linkable files than this is treated
+ *  as ambient vocabulary, not a relation, and draws no lines. Keeps candidate
+ *  pairs bounded even when Gemini stamps a near-universal tag on the archive. */
+export const TAG_LINK_MEMBER_CAP = 24;
+/** Cap 2 (ADR 0022): per-file budget of same-cloud links (strongest kept, a
+ *  link survives if either endpoint keeps it) — bounds edges at O(n), not O(n²). */
+export const SAME_CLOUD_LINKS_PER_FILE = 4;
 
 /** Fixed visual gutter enforced between every pair of tiles, on top of their
  *  own bounding-circle radius — this is what makes "same space between each
@@ -506,7 +517,7 @@ function buildCloudLayout(
   labelOf: (key: string) => string,
   overrides: Record<string, CanvasPoint>,
   /** Frames (artboards) on the canvas — any tile whose center lands inside one
-   *  is detached from the connecting-line web (edit #4). */
+   *  is detached from the connecting-line web (ADR 0022). */
   frames: readonly Frame[],
   /** Optional cluster-ordering comparator — defaults to largest-first. Timeline
    *  passes a chronological one so months pack in a stable time order. */
@@ -590,20 +601,30 @@ function buildCloudLayout(
     }
   }
 
-  // Edges are real relations (ADR 0022): a pair of files is linked iff it
-  // shares ≥1 AI tag. An inverted index (tag → linkable photo ids) turns that
-  // into candidate pairs; counting how many tags each pair shares drives the
-  // line's weight. Untagged (unanalyzed) and artboard-detached files never
-  // enter the index, so they have no lines — by design, not by omission.
+  // Edges are real relations (ADR 0022): a pair of files is linked when it
+  // shares a *discriminative* AI tag. An inverted index (tag → linkable photo
+  // ids) turns that into candidate pairs; counting how many tags each pair
+  // shares drives the line's weight. Untagged (unanalyzed) and artboard-
+  // detached files never enter the index, so they have no lines — by design,
+  // not by omission. Two caps keep the web O(n) instead of O(n²) — on real
+  // data Map/Topic are a single cloud (ADR 0018), so without them a common
+  // tag at the 500-asset read limit means ~125k SVG paths and a frozen tab:
   const byTag: Record<string, string[]> = {};
   photos.forEach((p) => {
     if (detached.has(p.id) || !p.tags) return;
-    for (const tag of p.tags) (byTag[tag] = byTag[tag] || []).push(p.id);
+    // De-dupe per photo: the same tag NAME can be two DB rows (unique key is
+    // name+category, and re-analyze can drift the category), and a duplicate
+    // here would fabricate self-pairs and double-count pair weights.
+    for (const tag of new Set(p.tags)) (byTag[tag] = byTag[tag] || []).push(p.id);
   });
   // Pair key is id-ordered so (a,b) and (b,a) accumulate into one entry; Map
   // iteration is insertion-ordered, so edge order stays deterministic.
   const sharedTags = new Map<string, { a: string; b: string; n: number }>();
   Object.values(byTag).forEach((ids) => {
+    // Cap 1: a tag attached to more files than this is ambient vocabulary
+    // ("photo", the archive's home city…), not a relation — linking every
+    // pair it touches would draw a quadratic number of lines that say nothing.
+    if (ids.length > TAG_LINK_MEMBER_CAP) return;
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
         const [a, b] = ids[i] < ids[j] ? [ids[i], ids[j]] : [ids[j], ids[i]];
@@ -615,36 +636,62 @@ function buildCloudLayout(
     }
   });
 
-  // Same-cloud pairs each get their own line; cross-cloud pairs are reduced to
-  // the strongest link per pair of clouds (most shared tags, id-ordered
-  // tie-break) so inter-cloud relations read as one clear bridge, not a tangle.
+  // Cross-cloud pairs reduce to the strongest link per pair of clouds (most
+  // shared tags, id-ordered tie-break) so inter-cloud relations read as one
+  // clear bridge, not a tangle. Same-cloud pairs get Cap 2 below.
+  const samePairs: { a: string; b: string; n: number }[] = [];
   const strongestCross = new Map<string, { a: string; b: string; n: number }>();
-  sharedTags.forEach(({ a, b, n }) => {
-    const clusterA = tileCluster[a],
-      clusterB = tileCluster[b];
+  sharedTags.forEach((pair) => {
+    const clusterA = tileCluster[pair.a],
+      clusterB = tileCluster[pair.b];
     if (clusterA === clusterB) {
-      const ta = tiles[a],
-        tb = tiles[b];
-      const color = colorOf(clusterA);
-      edges.push({
-        id: `tag-${a}-${b}`,
-        d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(a + b), 0.32),
-        strokeStart: color,
-        strokeEnd: color,
-        x1: ta.cx,
-        y1: ta.cy,
-        x2: tb.cx,
-        y2: tb.cy,
-        op: Math.min(0.16 + (n - 1) * 0.05, 0.34),
-        w: 1.1,
-      });
-    } else {
-      const key = clusterA < clusterB ? `${clusterA}|${clusterB}` : `${clusterB}|${clusterA}`;
-      const current = strongestCross.get(key);
-      if (!current || n > current.n || (n === current.n && `${a}|${b}` < `${current.a}|${current.b}`)) {
-        strongestCross.set(key, { a, b, n });
-      }
+      samePairs.push(pair);
+      return;
     }
+    const key = clusterA < clusterB ? `${clusterA}|${clusterB}` : `${clusterB}|${clusterA}`;
+    const current = strongestCross.get(key);
+    if (
+      !current ||
+      pair.n > current.n ||
+      (pair.n === current.n && `${pair.a}|${pair.b}` < `${current.a}|${current.b}`)
+    ) {
+      strongestCross.set(key, pair);
+    }
+  });
+
+  // Cap 2: each file keeps only its strongest same-cloud links (most shared
+  // tags, id-ordered tie-break); a link survives if either endpoint keeps it.
+  // Total same-cloud edges are therefore ≤ SAME_CLOUD_LINKS_PER_FILE × n while
+  // the strongest relations — the ones worth reading — always stay visible.
+  const byNode: Record<string, { a: string; b: string; n: number }[]> = {};
+  samePairs.forEach((pair) => {
+    (byNode[pair.a] = byNode[pair.a] || []).push(pair);
+    (byNode[pair.b] = byNode[pair.b] || []).push(pair);
+  });
+  const kept = new Set<string>();
+  Object.values(byNode).forEach((list) => {
+    [...list]
+      .sort((x, y) => y.n - x.n || (`${x.a}|${x.b}` < `${y.a}|${y.b}` ? -1 : 1))
+      .slice(0, SAME_CLOUD_LINKS_PER_FILE)
+      .forEach((pair) => kept.add(`${pair.a}|${pair.b}`));
+  });
+  samePairs.forEach(({ a, b, n }) => {
+    if (!kept.has(`${a}|${b}`)) return;
+    const ta = tiles[a],
+      tb = tiles[b];
+    const color = colorOf(tileCluster[a]);
+    edges.push({
+      id: `tag-${a}-${b}`,
+      d: mkBez(ta.cx, ta.cy, tb.cx, tb.cy, hash(a + b), 0.32),
+      strokeStart: color,
+      strokeEnd: color,
+      x1: ta.cx,
+      y1: ta.cy,
+      x2: tb.cx,
+      y2: tb.cy,
+      op: Math.min(0.16 + (n - 1) * 0.05, 0.34),
+      w: 1.1,
+    });
   });
   strongestCross.forEach(({ a, b }) => {
     const ta = tiles[a],

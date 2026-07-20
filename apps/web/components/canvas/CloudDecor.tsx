@@ -7,7 +7,7 @@ const BLOB_PAD = 60;
 interface CloudDecorProps {
   layout: CloudLayout;
   /** The colored clouds (blobs) render immediately with the grouping so the
-   *  backdrop appears the same instant the tiles start reflowing (edit #1). Only
+   *  backdrop appears the same instant the tiles start reflowing (ADR 0022). Only
    *  the connecting lines wait for `edgesReady` — they're drawn between final
    *  tile centers, so showing them mid-glide would leave lines floating to empty
    *  space; they fade in once the tiles have settled. */
@@ -72,7 +72,7 @@ function CloudDecor({ layout, edgesReady }: CloudDecorProps) {
 /** The cloud group labels (month / country / topic), rendered *on top* of the
  *  tiles and anchored to the top-center of each cloud's backdrop so they stay
  *  attached to the colored cloud and never sit hidden under the files. Shown
- *  immediately with the backdrop (edit #1). */
+ *  immediately with the backdrop (ADR 0022). */
 function CloudLabelsBase({ layout }: { layout: CloudLayout }) {
   return (
     <>

@@ -67,7 +67,7 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 - Import flow (#63): a fresh empty project auto-opens an **import modal** (left source picker — Local active, Drive/Dropbox `SOON` — right drop/browse zone) that uploads and links assets to the project; shared `lib/upload-client.ts` backs both the modal and the global drag-drop.
 - Sidebar + canvas views on real data (**#74**, 2026-07-14): homepage sidebar overhaul (search, data sources, recents, Archived/Trash); Timeline buckets on the real capture date, retiring the id-hash quirk of [ADR 0003](decisions/0003-preserve-source-quirks.md) (closes **#19**); Map/Topic become connected "cloud" clusters on live data (**#20**/**#21**) — the **Leaflet geo map is removed** (ADR [0016](decisions/0016-real-timeline-topic-map-views.md)→[0017](decisions/0017-column-grid-map-topic-photo-delete.md)→[0018](decisions/0018-cloud-clusters-map-topic-default-zoom.md); product decision — revisit a real map later if wanted). Project rename/archive/trash via `PATCH /api/projects/[id]`; photo delete from any view via `DELETE /api/assets/[id]` (soft delete per §12, part of **#26**). Migration `20260713000001` (`projects.archived_at`/`deleted_at`) — **on prod 2026-07-14**.
 - Trash retention (**#75**, merged): `sweep_trashed_projects()` + partial index (migration `20260714000001`, **on prod 2026-07-14**), scheduled by the worker next to the reaper; enforces the 30-day window #74's UI already promised. [ADR 0019](decisions/0019-project-archive-trash-retention.md); pgTAP `002_retention.sql` — in CI as the required `db-tests` check since 2026-07-17 ([ADR 0020](decisions/0020-pgtap-in-ci.md)).
-- **Remaining #17/Phase-5:** `caption_prompt` field, project members; canvas at scale (#18 virtualize, #22 layout persistence/undo-redo). **Figma pixel-pass** on homepage + modal is a pending fast-follow.
+- **Remaining #17/Phase-5:** `caption_prompt` field, project members; canvas at scale (#18 virtualize; #22 — client interim shipped with #93, server-side layout store open). **Figma pixel-pass** on homepage + modal is a pending fast-follow.
 
 ### Phase 3 — Captions — ✅ DONE 2026-07-17 (#79 #82)
 
@@ -85,11 +85,27 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 
 **MVP core loop is complete as of 2026-07-20: upload → ingest → analyze → captions → search.**
 
+### Canvas UX unification (GG's design branch, merged 2026-07-20, #93)
+
+- Timeline/Map/Topic became grouping sorts over ONE canvas (shared `ProjectAssetView`;
+  tiles glide between views; `CloudDecor`/`CloudLabels` backdrops; the column grid and
+  `CloudView` deleted); every tool works on every view; fixed 75% default zoom; homepage
+  "+ New project" also on Recents ([ADR 0022](decisions/0022-timeline-clouds-and-live-cloud-labels.md)).
+- Connecting lines went **real** at merge time: shared-AI-tag relations (capped to stay
+  O(n) — ambient tags and per-file link budgets), replacing the branch's demo complete
+  graph; the branch's `DEMO_CLOUDS` scaffold was removed before landing.
+- **Part of #22 shipped as an interim:** per-project canvas arrangement (tile drags,
+  frames, sticky notes) persists client-side in versioned `localStorage`; undo/redo for
+  drags already existed (ADR 0012's `Snapshot` history). Still open from #22: the
+  server-side `PUT /api/canvas/layout`. Still open for #18: virtualization — and the
+  known drag-relayout cost on large single clouds is deferred to that work (ADR 0022
+  Consequences).
+
 ### Phase 5 — Projects + canvas at scale (~weeks 6–7)
 
 - Projects CRUD + M:N (`POST /api/projects`, `.../assets` — membership is asset-based per §4/ADR 0011), add-to-project from selection/search (replaces in-memory `addToProject`).
 - `GET /api/canvas` aggregates (sources → folders → counts + first-K previews); Neural view consumes aggregates, materializes tiles only for expanded folders/viewport, caps ~300 mounted tiles, virtualizes (mockup renders 235; real archives 10k–30k — this is the riskiest frontend task, spike early with 20k synthetic rows).
-- `PUT /api/canvas/layout` persistence of `overrides` (hub/folder/asset levels per §4) / organize mode; organize modes `source|date|place` (similarity post-MVP per spec §13). Client-side **undo/redo** for drags (journey requirement; doesn't exist in the mockup — new work).
+- `PUT /api/canvas/layout` persistence of `overrides` (hub/folder/asset levels per §4) / organize mode; organize modes `source|date|place` (similarity post-MVP per spec §13). Client-side **undo/redo** for drags and a versioned `localStorage` interim of layout persistence already shipped with #93 (see "Canvas UX unification" above) — what remains here is the server-side layout store.
 - **Views:** Timeline + Neural are MVP gates. **Map + Sense are fast-follow** (built on live data, but not gating a milestone — Map depends on GPS and Sense on rich tags, both of which real pro archives often lack). This matches the `fast-follow` label on those issues.
 - Replace mock quirks with real data: timeline bucketing `hash(id)%6` → real `taken_at`; per-asset EXIF; per-asset titles.
 

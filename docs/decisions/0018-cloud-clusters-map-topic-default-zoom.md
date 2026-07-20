@@ -2,9 +2,15 @@
 
 Date: 2026-07-13
 
-Status: Accepted · **Extended by [0022](0022-timeline-clouds-and-live-cloud-labels.md):
-Timeline joins the clouds, labels/backdrops track live tile positions, and the
-connecting lines became real shared-AI-tag relations — read 0022 for what ships today.**
+Status: Accepted · **Extended and partly superseded by
+[0022](0022-timeline-clouds-and-live-cloud-labels.md) — read 0022 for what ships today.**
+Specifically, 0022 changed four things this document still states in its body:
+Timeline joined the clouds; the zoom regime in this ADR's own title is replaced
+(no more `fitCapped` cap-fit — every view opens *fixed* at 75% and oversized
+content overflows); background drag no longer pans on Map/Topic (marquee-select
+works on every view, panning is the hand tool); and the "Unsorted cloud has no
+lines" rule is gone — lines are shared-AI-tag relations now, so tagged Unsorted
+files do link, while *unanalyzed* files have no lines.
 
 Supersedes the Map/Topic parts of [0017](0017-column-grid-map-topic-photo-delete.md)
 (Timeline's column grid is unaffected and unchanged).
