@@ -12,8 +12,14 @@ plus Phase 5's homepage + real projects pulled forward and Phases 3–4 (caption
 search) done 2026-07-17/20.
 `docs/PLAN.md` is canonical for phase status — trust it over this line):
 - `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
-  real auth (email+password), drag-and-drop upload to R2, a real homepage of project
-  cards, and Canvas/Timeline/Map/Topic all rendering the caller's real assets.
+  real auth (email+password **and Google OAuth** — #89, 2026-07-20), drag-and-drop
+  upload to R2, a real homepage of project cards, and Canvas/Timeline/Map/Topic all
+  rendering the caller's real assets. **Auth is a hardened surface, not a stub:**
+  `/auth/callback` runs the PKCE exchange for both email links and Google, validates
+  `?next=` through `lib/safe-redirect.ts` (open redirect, #90), and reports failures
+  to `/login` as a *code only* — never the provider's own text. Read
+  `docs/decisions/0021` before touching it; the obvious "improvement" of rendering
+  `error_description` is the vulnerability that ADR exists to prevent.
   **Trap worth knowing:** Map and Topic cluster by `country`/`group`, but
   `lib/assets.ts` fills both with inert defaults (`"Ukraine"`/`"archive"`) because no
   backend owns them yet — so on real data both views correctly render exactly one

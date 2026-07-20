@@ -8,8 +8,9 @@ duplicate those here.
 ## What this is (today)
 A pnpm + turborepo monorepo, live in production (Phases 0–4 shipped: upload →
 analyze → captions → search). `apps/web` (Vercel) is the ported Claude Design
-canvas UI with real email+password auth, drag-and-drop upload to R2, and a
-canvas that renders the caller's own assets. `apps/worker` (Railway) processes `ai_jobs`: ingest
+canvas UI with real auth — email+password **or Google OAuth** (#89) — drag-and-drop
+upload to R2, and a canvas that renders the caller's own assets. `apps/worker`
+(Railway) processes `ai_jobs`: ingest
 (sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths),
 analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only) and
 caption (styled multilingual captions per spec §8.3 — live end-to-end since #82:
@@ -49,6 +50,17 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
   app/api/assets/[id]/medium                   lazy presigned preview
   app/api/captions/[id]                        caption edit (is_edited) / resetEdited
   app/api/search                               GET §8.4: parse → embed → search_assets()
+
+AUTH PATH (public — proxy.ts lets the whole /auth/* subtree through):
+  components/auth/AuthForm.tsx   signInWithPassword · signUp · signInWithOAuth("google")
+  app/auth/callback              PKCE exchange for BOTH email links and Google;
+                                 ?next= validated by lib/safe-redirect.ts (#90);
+                                 failures → /login?auth_error=<code> (code only)
+  app/login/page.tsx             async Server Component: reads searchParams and maps
+                                 the code through lib/auth-errors.ts to our own copy
+                                 (never the provider's text — ADR 0021). Dynamic, not
+                                 prerendered, because of that read.
+  app/auth/signout · auth/reset  sign out · dead-session escape hatch
 
 hooks/useJobProgress.ts     its own Supabase Realtime channel → job progress
 ```
@@ -95,8 +107,9 @@ binaries; Gemini (`gemini-3.1-flash-lite` + `gemini-embedding-2`) for AI.
 
 **All of this is real, not aspirational.** `apps/worker` runs the ingest + analyze
 handlers and the retention sweeper; `packages/shared` holds live zod contracts both
-sides parse; `apps/web` has real auth (`proxy.ts` guard + `lib/supabase/`), route
-handlers under `app/api/`, and RLS-scoped reads via `lib/assets.ts` / `lib/projects.ts`.
+sides parse; `apps/web` has real auth (`proxy.ts` guard + `lib/supabase/` + the
+`lib/safe-redirect.ts` / `lib/auth-errors.ts` guards on the callback), route handlers
+under `app/api/`, and RLS-scoped reads via `lib/assets.ts` / `lib/projects.ts`.
 Network calls, auth and a database client are **expected** here — an earlier version of
 this file forbade them, which was true only before Phase 0.
 
