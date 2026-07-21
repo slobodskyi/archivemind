@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ingestJobPayloadSchema } from "@archivemind/shared";
 import type pg from "pg";
 import { extractExif } from "../services/exif";
+import { DropboxFileError, downloadDropboxLink } from "../services/dropbox";
 import { DriveFileError, downloadDriveFile, getDriveFileMeta } from "../services/gdrive";
 import { heicToRaw } from "../services/heic";
 import { makePreviews, previewKey, type PreviewInput } from "../services/previews";
@@ -77,7 +78,9 @@ async function decodeBytes(buf: Buffer, mime: string | null, filename: string): 
 }
 
 export async function ingestHandler({ pool, job, progress }: HandlerContext): Promise<void> {
-  const { asset_ids } = ingestJobPayloadSchema.parse(job.payload);
+  const payload = ingestJobPayloadSchema.parse(job.payload);
+  const { asset_ids } = payload;
+  const dropboxByAsset = new Map((payload.dropbox ?? []).map((d) => [d.asset_id, d]));
 
   const { rows } = await pool.query<AssetRow>(
     `select a.id as asset_id, a.workspace_id, a.title,
@@ -103,16 +106,47 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
 
     let buf: Buffer;
     if (!row.r2_key) {
-      if (row.origin !== "gdrive" || !row.source_connection_id || !row.source_file_id) {
-        done += 1; // unknown cloud origin — nothing to stream from yet
-        continue;
-      }
-      // Resume guard: a re-run (retry after partial failure, or an explicit
-      // re-ingest) must not re-download files that already made it through.
+      // Resume guard (both cloud origins): a re-run — retry after partial
+      // failure, or an explicit re-ingest — must not re-fetch files that
+      // already made it through.
       if (row.content_hash && row.preview_count >= 2) {
         done += 1;
         continue;
       }
+      if (row.origin === "dropbox") {
+        // ADR 0008: fetch the ~4 h Chooser link ONCE, store the original in
+        // R2 exactly like an upload; from then on the asset is R2-backed.
+        const pick = dropboxByAsset.get(row.asset_id);
+        try {
+          // A retried/re-enqueued job without a usable link (payload from an
+          // expired window) behaves like the link expiring: re-pick heals.
+          if (!pick) throw new DropboxFileError("dropbox_link_expired");
+          buf = await downloadDropboxLink(pick.link, MAX_IMPORT_BYTES);
+          const key = dropboxOriginalKey(row.workspace_id, pick.name);
+          await putObject(key, buf, row.mime_type ?? "application/octet-stream");
+          await pool.query(`update files set r2_key = $2, byte_size = $3 where id = $1`, [
+            row.file_id,
+            key,
+            buf.length,
+          ]);
+          row.r2_key = key; // the dedup branch below may delete this fresh object
+        } catch (err) {
+          if (err instanceof DropboxFileError && err.code === "dropbox_file_too_large") {
+            // Final state, like an undecodable upload: kept, but no previews/AI.
+            await pool.query(`update assets set kind='other' where id = $1`, [row.asset_id]);
+            console.log(`[ingest] ${label}: over MAX_IMPORT_BYTES → kind='other'`);
+          } else {
+            const code = err instanceof DropboxFileError ? err.code : "dropbox_download_failed";
+            console.log(`[ingest] ${label}: ${code} — skipped this run`);
+            failed += 1;
+          }
+          done += 1;
+          continue;
+        }
+      } else if (row.origin !== "gdrive" || !row.source_connection_id || !row.source_file_id) {
+        done += 1; // unknown cloud origin — nothing to stream from yet
+        continue;
+      } else {
       try {
         buf = await downloadWithTokenRetry(tokens, row.source_connection_id, row.source_file_id);
         if (buf.length !== 0) {
@@ -141,6 +175,7 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
         }
         done += 1;
         continue;
+      }
       }
     } else {
       buf = await getObjectBuffer(row.r2_key);
@@ -259,6 +294,14 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
       [job.workspace_id, job.user_id, JSON.stringify({ asset_ids: analyzeIds }), analyzeIds.length],
     );
   }
+}
+
+/** ADR 0008: Dropbox originals land in R2 under the same layout uploads use
+ *  (spec §6, mirrors apps/web/lib/r2.ts originalKey — keep the sanitize rules
+ *  in sync). */
+function dropboxOriginalKey(workspaceId: string, filename: string): string {
+  const safe = filename.replace(/[^\w.\-()+ ]+/g, "_").slice(0, 200) || "file";
+  return `${workspaceId}/originals/${randomUUID()}/${safe}`;
 }
 
 /** Drive bytes with a size guard (metadata first — 5 units beats a wasted
