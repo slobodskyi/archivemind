@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { CaptionStyle, Language, Photo } from "@/types";
-import { FACT_STATUS_COLOR, getCaptionText, statusMeta } from "@/lib/format";
+import { FACT_STATUS_COLOR, formatGps, getCaptionText, statusMeta } from "@/lib/format";
 import { photoSrcMedium, isRealSource } from "@/lib/img";
 import {
   ChevronLeftIcon,
@@ -308,9 +308,7 @@ export default function PhotoDrawer({
               <span style={{ color: "var(--t3)" }}>Date</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.dateTaken}</span>
               <span style={{ color: "var(--t3)" }}>GPS</span>
-              <span style={{ color: "var(--t2)" }}>
-                {photo.exif.gpsLat}, {photo.exif.gpsLon} · {photo.exif.gpsLabel}
-              </span>
+              <span style={{ color: "var(--t2)" }}>{formatGps(photo.exif)}</span>
               <span style={{ color: "var(--t3)" }}>ISO</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.iso}</span>
               <span style={{ color: "var(--t3)" }}>Aperture</span>

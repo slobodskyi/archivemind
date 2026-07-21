@@ -44,8 +44,12 @@ export interface ExifData {
   camera: string;
   lens: string;
   dateTaken: string;
-  gpsLat: number;
-  gpsLon: number;
+  /** null = the file carries no GPS at all (messengers strip EXIF, most pro
+   *  bodies have no receiver). Distinct from 0, which is a real place in the
+   *  Gulf of Guinea — the Map view must plot one and skip the other. */
+  gpsLat: number | null;
+  gpsLon: number | null;
+  /** Reverse-geocoded place, e.g. "Odesa, Ukraine"; "" until the worker fills it. */
   gpsLabel: string;
   iso: number;
   aperture: string;
