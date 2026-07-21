@@ -14,6 +14,16 @@ We're in a mockup phase now (no backend); the real backend (Supabase) is planned
 next — see `docs/PLAN.md` (Phase 0–7). We want that migration to touch as little UI
 code as possible.
 
+> **Superseded in practice by the real topology — see ARCHITECTURE.md.** `lib/api.ts`
+> is no longer the single UI→data seam: Server Components await `lib/api.ts`
+> (`getPhotos`), `lib/projects.ts` and `lib/bootstrap.ts` directly, while client
+> components never touch the database and go over HTTP to the route handlers in
+> `app/api/*` — that is the client seam, and every write lives there (the cloud-import
+> work added `app/api/imports` and `app/api/integrations/google[/connect]`).
+> `getPhoto`/`getProjects`/`getGroups`/`getSources` survive as dead mocks with zero
+> callers. The rule below still holds in spirit: **no component reads mock data or the
+> database directly.**
+
 ## Decision
 
 All mock/demo data (photos, captions, tags, EXIF, projects, groups, sources) lives
@@ -31,8 +41,10 @@ in-memory read) pays for itself when the backend lands — the swap is contained
 `lib/api.ts`'s function bodies, with zero UI changes required. No exceptions to
 this rule going forward, including for new mock data added later.
 
-**Known debt (as of the mockup):** five modules predating this rule still import
-`lib/mock-data.ts` directly (`lib/format.ts`, `lib/layout.ts`,
-`hooks/useWorkspace.ts`, `components/map/MapCanvas.tsx`,
-`components/toolbar/AddToProjectPopover.tsx`). PLAN Phase 1 cleans them as those
-features go real; don't add new direct imports in the meantime.
+**Known debt (verified 2026-07-21):** three modules still import `lib/mock-data.ts`
+directly — `lib/format.ts` (STATUS_META), `lib/layout.ts`
+(GROUPS/SOURCES) and `components/sidebar/SourceBrowserSidebar.tsx`
+(SOURCES). (`lib/api.ts` imports it too — that is the seam doing its job, not debt.)
+`hooks/useWorkspace.ts` and `components/toolbar/AddToProjectPopover.tsx` are clean
+now, and `components/map/` no longer exists (ADR 0016→0022). They're cleaned as
+their features go real; don't add new direct imports in the meantime.

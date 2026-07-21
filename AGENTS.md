@@ -9,14 +9,17 @@ This version has breaking changes — APIs, conventions, and file structure may 
 AI-powered creator archive workspace — infinite-canvas photo archive UI.
 A **pnpm + turborepo monorepo**, live in production (Phases 0–2 shipped 2026-07-10,
 plus Phase 5's homepage + real projects pulled forward, Phases 3–4 (captions,
-search) done 2026-07-17/20, and Phase 6's **Google Drive import** done 2026-07-21
-(#97–#103 — ADR 0025; Dropbox #24 remains).
+search) done 2026-07-17/20, and Phase 6's **cloud imports** done 2026-07-21 —
+Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
 `docs/PLAN.md` is canonical for phase status — trust it over this line):
 - `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
   real auth (email+password **and Google OAuth** — #89, 2026-07-20), drag-and-drop
   upload to R2, **Google Drive import** (connect → Picker → `POST /api/imports`;
   popup code flow with NO public callback, tokens AES-GCM in `source_connections`,
-  worker streams the bytes — ADR 0025, #97–#103), a real homepage of project cards,
+  worker streams the bytes — ADR 0025, #97–#103) and **Dropbox import** (Chooser
+  drop-in → the same `POST /api/imports`; **zero OAuth** — no connection row, the
+  ~4 h direct links ride in the ingest payload and the worker fetches each original
+  once into R2 — ADR 0008, #105–#107), a real homepage of project cards,
   and Canvas/Timeline/Map/Topic all rendering the caller's real assets. **Auth is a hardened surface, not a stub:**
   `/auth/callback` runs the PKCE exchange for both email links and Google, validates
   `?next=` through `lib/safe-redirect.ts` (open redirect, #90), and reports failures

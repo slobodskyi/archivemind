@@ -402,7 +402,9 @@ create policy assets_write  on assets for all
 ## 6. Storage layout (R2)
 
 ```
-{workspace_id}/originals/{file_id}/{filename}     -- per FILE (physical); uploads AND Dropbox
+{workspace_id}/originals/{uuid}/{filename}        -- per FILE (physical); uploads AND Dropbox
+                                                  -- (uuid is minted at presign/fetch time,
+                                                  --  before the files row exists — NOT files.id)
 {workspace_id}/previews/{asset_id}/thumb.webp     -- per ASSET; 256px long edge
 {workspace_id}/previews/{asset_id}/medium.webp    -- per ASSET; 1024px long edge
 {workspace_id}/exports/{job_id}.zip               -- export bundles (presigned GET, cleanup later)
@@ -433,7 +435,7 @@ returning *;
 - **Reaper:** every 5 min, `running` jobs with `claimed_at < now() - interval '15 min'` → back to `queued` (crash recovery).
 - **Retention sweeper:** on boot, then every 6 h, `select sweep_trashed_projects()` — hard-deletes projects past the 30-day trash window (§12). Not an `ai_jobs` type: it's neither user-triggered nor per-asset. Failures are logged and retried on the next tick. See ADR 0019.
 - **Idempotency:** handlers upsert by natural keys (`asset_previews` PK, `captions (asset_id,lang,style)`, `embeddings (asset_id,kind,chunk_index)`) — safe to re-run.
-- **Rate limiting:** worker-side concurrency cap on Gemini calls (start: 5 parallel) + exponential backoff on 429.
+- **Rate limiting:** exponential backoff on 429/5xx around every Gemini call (`services/gemini.ts`) — shipped. A worker-side parallelism cap is **not** implemented: analyze (like ingest) runs sequentially by design, so there is nothing to cap yet.
 - Graceful shutdown: finish current item, release job back to `queued`.
 
 ---
@@ -544,20 +546,28 @@ New pieces: Supabase auth screens/guard; upload flow (presign → PUT → comple
 ```
 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY            # server-only routes
-R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET
-GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_PICKER_API_KEY
-DROPBOX_APP_KEY / DROPBOX_APP_SECRET
+R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET / R2_S3_ENDPOINT
+NEXT_PUBLIC_GOOGLE_CLIENT_ID         # browser: GIS code/token clients (ADR 0025)
+NEXT_PUBLIC_GOOGLE_PICKER_API_KEY    # browser: Picker developer key (referrer-restricted)
+NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER    # browser: Picker setAppId — the Cloud project NUMBER, not the client id
+GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET   # server-only: the import OAuth client (separate from the login client)
+NEXT_PUBLIC_DROPBOX_APP_KEY          # Chooser drop-in key, public by design — Chooser is zero-OAuth, so there is NO app secret
 GEMINI_API_KEY                       # search-time parse + query embedding — service-account AUTH key, not a standard API key (see note below)
 GEMINI_ANALYZE_MODEL                 # default gemini-3.1-flash-lite (see §8.2, ADR 0010)
-TOKEN_ENC_KEY                        # if app-level token encryption
+TOKEN_ENC_KEY                        # AES-256-GCM key for source_connections tokens (ADR 0025); identical value on Railway
 ```
+Exact list: [`apps/web/.env.example`](../apps/web/.env.example) is kept in sync with what the code reads.
 
 **Railway (`apps/worker`)** — Dockerfile `node:22-slim` (`perl-base` suffices for ExifTool; add `poppler-utils` only if `pdf-parse` v2 falls short):
 ```
 DATABASE_URL                         # Supabase SESSION POOLER (not direct 5432, not the 6543 transaction pooler)
-R2_* (same) · GEMINI_API_KEY (service-account AUTH key) · GEMINI_ANALYZE_MODEL · GOOGLE_CLIENT_ID/SECRET · DROPBOX_APP_KEY/SECRET
-TOKEN_ENC_KEY · WORKER_ID · GEMINI_CONCURRENCY=5
+R2_* (same) · GEMINI_API_KEY (service-account AUTH key) · GEMINI_ANALYZE_MODEL
+GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET   # Drive access-token refresh only (ADR 0025)
+TOKEN_ENC_KEY                        # same value as Vercel — decrypts the stored refresh tokens
+WORKER_ID
+optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2000) · ANALYZE_ON_INGEST
 ```
+**Dropbox needs no worker credentials** — the Chooser direct link IS the credential and it rides in the job payload (ADR 0008). There is no `GEMINI_CONCURRENCY` (nothing runs Gemini in parallel — see §7).
 
 - **Gemini credentials:** use a **service-account-bound AUTH key** (not a standard API key) for `GEMINI_API_KEY` on both web and worker — scopes access to the billing project and keeps user photos off the free tier. Billing enabled from day 1 (Tier 1+).
 - Environments: `dev` (local supabase or separate project) + `prod`. Migrations: Supabase CLI, applied by the **single migrations owner**, PR-gated.
