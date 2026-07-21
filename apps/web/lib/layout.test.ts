@@ -8,7 +8,7 @@ import {
   mapCloudLayout,
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
-  timelineCloudLayout,
+  timelineAxisLayout,
   topicCloudLayout,
   type Bounds,
   type Frame,
@@ -314,18 +314,44 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(layout.edges[0].strokeStart).toBe("#8a8f98");
   });
 
-  it("timeline clouds bucket by real capture month and bridge months by tags", () => {
-    const layout = timelineCloudLayout(
-      [
-        photo("apr1", { tags: ["evac"], exif: { ...photo("x").exif, dateTaken: "2026-04-10 09:00" } }),
-        photo("apr2", { tags: ["evac"], exif: { ...photo("x").exif, dateTaken: "2026-04-22 10:00" } }),
-        photo("jul1", { tags: ["evac"], exif: { ...photo("x").exif, dateTaken: "2026-07-03 11:00" } }),
-      ],
-      {},
-    );
-    expect(layout.clouds.map((c) => c.key)).toEqual(["Apr 2026", "Jul 2026"]);
-    expect(layout.edges.some((e) => e.id === "tag-apr1-apr2")).toBe(true);
-    expect(layout.edges.filter((e) => e.id.startsWith("x-"))).toHaveLength(1);
+  it("timeline is a chronological per-day axis: even columns, no lines, clamped drag", () => {
+    const at = (d: string) => ({ ...photo("x").exif, dateTaken: d });
+    const photos = [
+      photo("jul1", { exif: at("2026-07-03 11:00") }),
+      photo("apr1", { exif: at("2026-04-10 09:00") }),
+      photo("apr2", { exif: at("2026-04-10 15:00") }),
+    ];
+    const layout = timelineAxisLayout(photos, {});
+
+    // Day clouds in chronological order with DD/MM/YYYY labels and an axis.
+    expect(layout.clouds.map((c) => c.key)).toEqual(["2026-04-10", "2026-07-03"]);
+    expect(layout.clouds.map((c) => c.label)).toEqual(["10/04/2026", "03/07/2026"]);
+    expect(layout.axis).toBeDefined();
+    expect(layout.edges).toHaveLength(0); // the axis carries the structure, no tag web here
+    // Evenly spaced columns: label x positions differ by the fixed gap.
+    expect(layout.clouds[1].labelX - layout.clouds[0].labelX).toBe(420);
+    // Same-day files stay inside their day's column; the odd file sits above the axis.
+    expect(layout.tileCloud.apr1).toBe("2026-04-10");
+    expect(layout.tileCloud.apr2).toBe("2026-04-10");
+    expect(layout.tiles.apr1.cy).toBeLessThan(0); // above the axis (y=0)
+    expect(layout.tiles.apr2.cy).toBeGreaterThan(0); // below
+
+    // A drag override cannot pull a tile across its date border: x clamps
+    // into the day's column, y stays free.
+    const dragged = timelineAxisLayout(photos, { apr1: { x: 5000, y: -300 } });
+    const col = dragged.clouds[0].labelX;
+    expect(dragged.tiles.apr1.cx).toBeLessThanOrEqual(col + 210);
+    expect(dragged.tiles.apr1.cy).toBe(-300);
+  });
+
+  it("timeline layout is deterministic for equivalent inputs", () => {
+    const at = (d: string) => ({ ...photo("x").exif, dateTaken: d });
+    const photos = [
+      photo("a", { exif: at("2026-05-01 10:00") }),
+      photo("b", { exif: at("2026-05-01 10:00") }),
+      photo("c", { exif: at("2026-06-02 10:00") }),
+    ];
+    expect(timelineAxisLayout(photos, {})).toEqual(timelineAxisLayout([...photos].reverse(), {}));
   });
 
   it("detaches a file dropped onto an artboard from the web", () => {

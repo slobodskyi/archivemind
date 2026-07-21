@@ -46,9 +46,10 @@ design from this file:**
   architecture, schema, models, and security. Single source of truth.
 - `docs/PLAN.md` — the phase-by-phase build order (Phase 0–7).
 - `docs/decisions/` — the "why" behind each call. Some ADRs supersede earlier ones in
-  part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 — read
-  **0022** (unified cloud canvas + tag-driven connecting lines) and **0023**
-  (tag-derived Topic clouds) for what ships today.
+  part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 → 0024 —
+  read **0022** (unified cloud canvas + tag-driven connecting lines), **0023**
+  (tag-derived Topic clouds) and **0024** (Timeline as a per-day date axis;
+  cloud focus/whole-cloud drag) for what ships today.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.
