@@ -151,10 +151,17 @@ export const patchCaptionRequestSchema = z
 export type PatchCaptionRequest = z.infer<typeof patchCaptionRequestSchema>;
 
 /** POST /api/jobs — the user-triggered AI entry point (analyze #12, caption
- *  #14; export joins with its phase). */
+ *  #14, ingest re-runs #23; export joins with its phase). The ingest variant
+ *  exists to heal Drive-linked assets whose download failed or whose
+ *  connection was revoked mid-import — the worker's resume guard skips
+ *  already-complete files, so re-enqueueing is cheap and idempotent. */
 export const createJobRequestSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("analyze"),
+    assetIds: z.array(uuidSchema).min(1).max(500),
+  }),
+  z.object({
+    type: z.literal("ingest"),
     assetIds: z.array(uuidSchema).min(1).max(500),
   }),
   z.object({
