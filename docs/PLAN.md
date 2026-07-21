@@ -133,12 +133,12 @@ Phases 1–2). What actually remains:
   ADR 0022).
 - **Remaining #17:** per-project `caption_prompt`, project members.
 
-### Phase 6 — Cloud imports (~week 7)
+### Phase 6 — Cloud imports (~week 7) — Drive half ✅ DONE 2026-07-21 (#97–#101, #103; pulled ahead of Phase 5's remainder at the owner's call)
 
-- **Drive:** OAuth (`drive.file`) + token encryption (`TOKEN_ENC_KEY`, AES-GCM) → Picker per §9 (multi-file, MIME-filtered, LIST mode, `setAppId`) → `POST /api/imports` → ingest (worker streams `files.get?alt=media`).
-- **Dropbox:** Chooser (direct links, no OAuth — ADR 0008) → `POST /api/imports` → worker streams bytes within the 4 h window; originals → R2 (ADR 0008); 429/`Retry-After` handling; stale-link (410) re-request guard.
+- **Drive — ✅ shipped:** popup code flow (`drive.file`, GIS `initCodeClient` — NO public callback route, ADR 0025) + AES-GCM token encryption (`TOKEN_ENC_KEY`, crypto lives once in `packages/shared/token-crypto`) → hand-rolled Picker (multi-file, MIME-filtered, LIST mode, `setAppId`, `login_hint`) → chunked `POST /api/imports` (status-aware dedupe: re-picks link into the project or reactivate soft-deleted/`source_missing` assets) → existing `ingest` job type (worker streams `files.get?alt=media`; originals never in R2 per §6). Day-1 spike 2026-07-21 verified the scope model on the real Cloud project (folder grants don't cascade; per-file grants are project-keyed and persistent; `alt=media` is byte-identical to Drive's own md5). Follow-ups: #102 (`schema:` unique indexes), spike step 5 (24–48 h grant persistence re-check).
+- **Dropbox (#24, still open):** Chooser (direct links, no OAuth — ADR 0008) → `POST /api/imports` → worker streams bytes within the 4 h window; originals → R2 (ADR 0008); 429/`Retry-After` handling; stale-link (410) re-request guard.
 
-**✅ Deploy checkpoint 3:** full journey — connect Drive, pick 200 files, they ingest, analyze, and are searchable.
+**✅ Deploy checkpoint 3 — CLOSED 2026-07-21 (Drive path):** full journey verified on prod — connect Drive, pick files, they ingest (byte-identical originals streamed from Drive), analyze, and are searchable.
 
 ### Phase 7 — Export + hardening (~week 8)
 

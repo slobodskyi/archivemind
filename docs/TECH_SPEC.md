@@ -502,7 +502,7 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `DELETE /api/assets/:id` | **shipped** — soft delete (`status='deleted'`, §12). Callable from any canvas view. Note this overlaps the status half of the PATCH row above; the two want reconciling. |
 | `GET  /api/canvas?projectId=` | aggregates for neural view (workspace-wide, or scoped to a project — matches the `canvas_layouts.scope` = `'all'` \| project uuid): sources → folders → counts + first-K tile previews (lazy-load the rest) |
 | `PUT  /api/canvas/layout` | persist `canvas_layouts` (scope, overrides, organize_mode) |
-| `GET/POST /api/sources/:provider/oauth` | OAuth start + callback; store encrypted tokens |
+| `POST /api/integrations/google/connect` · `GET/DELETE /api/integrations/google` | **shipped shape (ADR 0025)** — popup code flow: the browser POSTs the one-time code (no public OAuth callback route exists); GET = status, DELETE = revoke + neuter. Tokens AES-GCM-encrypted via `packages/shared/token-crypto`. (Supersedes the sketched `GET/POST /api/sources/:provider/oauth` redirect flow.) |
 | `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `assets` + `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
 | `POST /api/projects` · `GET /api/projects` · `PATCH /api/projects/:id` | CRUD incl. `caption_prompt`. **Shipped:** `GET` takes `?scope=active\|archived\|trash`; `PATCH` does rename **and** archive/trash (`{name}` / `{archived}` / `{deleted}` → `archived_at`/`deleted_at`, ADR 0019). `caption_prompt` is not wired yet (Phase 3). |
 | `POST /api/projects/:id/assets` · `DELETE .../assets/:assetId` | M:N add/remove |
