@@ -23,10 +23,16 @@ search) done 2026-07-17/20, and Phase 6's **Google Drive import** done 2026-07-2
   to `/login` as a *code only* — never the provider's own text. Read
   `docs/decisions/0021` before touching it; the obvious "improvement" of rendering
   `error_description` is the vulnerability that ADR exists to prevent.
-  **Trap worth knowing:** Map clusters by `country`, which `lib/assets.ts` still
-  fills with the inert `"Ukraine"` default — so on real data Map correctly renders
-  exactly one cloud; that's the data, not a bug in the view (ADR 0018). Topic no
-  longer shares this trap: `group` is DERIVED from AI tags (`lib/topics.ts`,
+  **Map is a real geographic map now, not `country` clouds:** MapLibre GL over
+  OpenStreetMap vector tiles (OpenFreeMap dark, recoloured) with supercluster over
+  each photo's EXIF GPS — thumbnail markers, click a cluster to zoom to its
+  expansion, a chip counts the photos with no location (ADR 0027, supersedes the
+  Map half of 0018). `photo.country` is now read by no view; it survives only as
+  the inert `"Ukraine"` default in `lib/assets.ts`. GPS reaches the map because the
+  worker fills `asset_exif.gps_label` offline (GeoNames index + kdbush, ADR 0026)
+  and — critically — reads iPhone HEIC EXIF at all: `exifr` throws on those, so
+  ingest falls back to `exiftool-vendored` (#113). Topic clusters by `group`,
+  DERIVED from AI tags (`lib/topics.ts`,
   ADR 0023) — real multi-cloud, but only for analyzed assets (unanalyzed →
   Unsorted). The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders ranked
@@ -49,10 +55,12 @@ design from this file:**
   architecture, schema, models, and security. Single source of truth.
 - `docs/PLAN.md` — the phase-by-phase build order (Phase 0–7).
 - `docs/decisions/` — the "why" behind each call. Some ADRs supersede earlier ones in
-  part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 → 0024 —
-  read **0022** (unified cloud canvas + tag-driven connecting lines), **0023**
-  (tag-derived Topic clouds) and **0024** (Timeline as a per-day date axis;
-  cloud focus/whole-cloud drag) for what ships today.
+  part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 → 0024,
+  with **0027** now superseding the Map half — read **0022** (unified cloud canvas +
+  tag-driven connecting lines, now Topic-only), **0023** (tag-derived Topic clouds),
+  **0024** (Timeline as a per-day date axis; cloud focus/whole-cloud drag) and
+  **0027** (Map as a real MapLibre geographic map over EXIF GPS; ADR 0026 for the
+  offline reverse geocoding that labels it) for what ships today.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.
@@ -90,7 +98,7 @@ when you touch `supabase/**`, not the only line of defence anymore.
   help/greeting copy — the canned replies retired with #84). **Known debt:**
   three modules still import `lib/mock-data.ts`
   directly — `lib/format.ts` (STATUS_META), `lib/layout.ts`
-  (COUNTRY_LATLON/GROUPS/SOURCES), `components/sidebar/SourceBrowserSidebar.tsx`
+  (GROUPS/SOURCES), `components/sidebar/SourceBrowserSidebar.tsx`
   (SOURCES). They're cleaned as their features go real; untracked, no issue yet.
   Don't add new direct imports. (`lib/api.ts` imports it too — that's the seam
   doing its job, not debt.)

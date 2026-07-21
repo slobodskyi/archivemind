@@ -441,7 +441,7 @@ returning *;
 ## 8. AI pipeline
 
 ### 8.1 Ingest (`type='ingest'`, payload: asset_ids)
-Per file: stream bytes → sha256 (dedup check) → EXIF (`exifr`; for RAW use `exiftool-vendored`) → decode:
+Per file: stream bytes → sha256 (dedup check) → EXIF (`exifr`, falling back to `exiftool-vendored` whenever `exifr` yields nothing storable — RAW, **and** real iPhone HEIC, on which `exifr` throws "Unknown file format"; #113) → reverse-geocode GPS to `gps_label` offline ([ADR 0026](decisions/0026-offline-reverse-geocoding.md)) → decode:
 - JPEG/PNG/TIFF/WebP → `sharp` previews (thumb 256 / medium 1024, webp).
 - **HEIC:** `sharp` prebuilt binaries exclude HEIC (patents) → decode via **`heic-decode`** (maintained) to raw RGBA → `sharp(buf, {raw})`. ~1–3 s / up to ~200 MB per iPhone HEIC → cap decode concurrency to 1–2. Native fallback if throughput hurts: `@myunisoft/heif-converter`.
 - **RAW (NEF/CR2/ARW):** extract embedded JPEG via `exiftool-vendored` cascade `extractJpgFromRaw → extractPreview → extractThumbnail` (no full RAW decode in MVP) → sharp. NEF/CR2 give full-res; **Sony ARW usually only ~1616×1080** (fine for grid, not full-res display). If extraction fails → mark file `kind='other'`, skip AI.
