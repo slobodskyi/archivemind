@@ -30,7 +30,6 @@ import {
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
-  mapCloudLayout as computeMapLayout,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
   timelineAxisLayout as computeTimelineLayout,
@@ -675,7 +674,6 @@ export function useWorkspace(
   const activeTilePositions = useCallback(
     (s: WorkspaceState): Record<string, TilePos> => {
       if (s.view === "timeline") return computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles;
-      if (s.view === "map") return computeMapLayout(s.photos, s.galleryOverrides.map, s.frames).tiles;
       if (s.view === "sense") return computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles;
       return assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
     },
@@ -848,7 +846,7 @@ export function useWorkspace(
       e.preventDefault();
       e.stopPropagation();
       const s = stateRef.current;
-      const bucket = s.view === "timeline" ? "timeline" : s.view === "map" ? "map" : s.view === "sense" ? "topic" : null;
+      const bucket = s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
       const layout = cloudDecorRef.current;
       if (!bucket || !layout) return;
       const origCenters: Record<string, { x: number; y: number }> = {};
@@ -1277,7 +1275,6 @@ export function useWorkspace(
         const bounds = neuralGalleryFor(allPhotos, overrides, previews).bounds;
         return fitDefaultZoom(bounds, r);
       }
-      if (view === "map") return fitDefaultZoom(computeMapLayout(allPhotos, overrides.map, frames).bounds, r);
       if (view === "sense") return fitDefaultZoom(computeTopicLayout(allPhotos, overrides.topic, frames).bounds, r);
       return fitDefaultZoom(computeTimelineLayout(allPhotos, overrides.timeline).bounds, r);
     },
@@ -2131,11 +2128,6 @@ export function useWorkspace(
     [isTimelineView, projectPhotos, state.galleryOverrides.timeline],
   );
 
-  const mapLayoutResult = useMemo(
-    () => (isMapView ? computeMapLayout(projectPhotos, state.galleryOverrides.map, state.frames) : null),
-    [isMapView, projectPhotos, state.galleryOverrides.map, state.frames],
-  );
-
   const topicLayoutResult = useMemo(
     () => (isSenseView ? computeTopicLayout(projectPhotos, state.galleryOverrides.topic, state.frames) : null),
     [isSenseView, projectPhotos, state.galleryOverrides.topic, state.frames],
@@ -2155,13 +2147,13 @@ export function useWorkspace(
   // The active view's canonical-photo positions (Canvas grid or a cloud sort),
   // plus the cloud backdrop/edges/labels for the grouping views. Both drive one
   // persistent tile set so switching a sort just reflows the same tiles.
+  // Map is excluded on purpose: it is no longer a cloud sort of the canvas
+  // tiles but a real geographic map rendered over them (ADR 0027).
   const cloudDecor: CloudLayout | null = isTimelineView
     ? timelineLayoutResult
-    : isMapView
-      ? mapLayoutResult
-      : isSenseView
-        ? topicLayoutResult
-        : null;
+    : isSenseView
+      ? topicLayoutResult
+      : null;
   const activePositions = cloudDecor ? cloudDecor.tiles : neuralGalleryPos;
 
   // Committed after every render so pointer-down handlers (onCloudLabelDown)
