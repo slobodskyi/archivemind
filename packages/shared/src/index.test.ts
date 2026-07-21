@@ -11,6 +11,10 @@ import {
   completeUploadRequestSchema,
   createJobRequestSchema,
   createProjectRequestSchema,
+  driveFileIdSchema,
+  importItemSchema,
+  importRequestSchema,
+  importResponseSchema,
   patchCaptionRequestSchema,
   jobStatusSchema,
   jobTypeSchema,
@@ -239,6 +243,80 @@ describe("search contracts", () => {
     expect(
       searchResultSchema.safeParse({ assetId: "nope", similarity: 1, matchedTags: [], matchedPlace: null, takenAt: null })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("drive import contracts (ADR 0025)", () => {
+  const item = {
+    fileId: "1SX3tiZm22Tb-0ZWHYBY7GdU847VoZC3V",
+    name: "DSC06528.jpg",
+    mimeType: "image/jpeg",
+    sizeBytes: 31509586,
+  };
+  const req = {
+    provider: "gdrive",
+    connectionId: "8f7a1c2e-0000-4000-8000-1234567890ab",
+    items: [item],
+  };
+
+  it("accepts a real Picker doc shape (sizeBytes optional)", () => {
+    expect(importItemSchema.parse(item).fileId).toBe(item.fileId);
+    const { sizeBytes: _omitted, ...noSize } = item;
+    expect(importItemSchema.safeParse(noSize).success).toBe(true);
+  });
+
+  it("rejects fileIds that could redirect the Bearer-authorized Drive URL", () => {
+    for (const evil of [
+      "../files?q=trashed=false&", // path traversal into files.list
+      "abc/def0123456", // path separator
+      "abc?alt=media00", // query injection
+      "abc#fragment000", // fragment
+      "id with space0", // whitespace
+      "short", // < 10 chars
+      "x".repeat(257), // > 256 chars
+      "",
+    ]) {
+      expect(driveFileIdSchema.safeParse(evil).success).toBe(false);
+    }
+  });
+
+  it("accepts only gdrive as provider until #24", () => {
+    expect(importRequestSchema.safeParse(req).success).toBe(true);
+    expect(importRequestSchema.safeParse({ ...req, provider: "dropbox" }).success).toBe(false);
+  });
+
+  it("caps items at 500 (client chunks, same as uploads) and requires ≥1", () => {
+    expect(
+      importRequestSchema.safeParse({ ...req, items: Array(501).fill(item) }).success,
+    ).toBe(false);
+    expect(importRequestSchema.safeParse({ ...req, items: [] }).success).toBe(false);
+  });
+
+  it("projectId is optional but must be a uuid when present", () => {
+    expect(
+      importRequestSchema.safeParse({ ...req, projectId: "8f7a1c2e-0000-4000-8000-1234567890ab" })
+        .success,
+    ).toBe(true);
+    expect(importRequestSchema.safeParse({ ...req, projectId: "all" }).success).toBe(false);
+  });
+
+  it("response carries jobId=null for the all-duplicates case", () => {
+    expect(
+      importResponseSchema.safeParse({
+        assetIds: [],
+        jobId: null,
+        skippedDuplicates: 3,
+        linkedExisting: 2,
+      }).success,
+    ).toBe(true);
+    expect(
+      importResponseSchema.safeParse({
+        assetIds: [],
+        jobId: null,
+        skippedDuplicates: -1,
+        linkedExisting: 0,
+      }).success,
     ).toBe(false);
   });
 });
