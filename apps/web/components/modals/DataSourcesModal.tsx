@@ -10,7 +10,7 @@ export interface GdriveConnectionState {
 interface DataSourcesModalProps {
   open: boolean;
   onClose: () => void;
-  /** Dropbox only (still a coming-soon stub); gdrive has its own handlers. */
+  /** Dropbox only (points at Add files — Chooser needs no connection); gdrive has its own handlers. */
   onConnect: (name: string) => void;
   gdrive: GdriveConnectionState;
   onGdriveConnect: () => void;
@@ -19,7 +19,7 @@ interface DataSourcesModalProps {
 
 const CONNECTABLE = [
   { key: "gdrive", label: "Google Drive", desc: "Import photos from your Drive.", Icon: GDriveIcon },
-  { key: "dropbox", label: "Dropbox", desc: "Import photos from your Dropbox folders.", Icon: DropboxIcon },
+  { key: "dropbox", label: "Dropbox", desc: "No account link needed — pick files in Add files.", Icon: DropboxIcon },
 ] as const;
 
 export default function DataSourcesModal({

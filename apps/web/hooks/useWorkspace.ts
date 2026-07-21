@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import { CAPTION_LANG_DB, CAPTION_STYLE_DB, getCaptionRow } from "@/lib/format";
+import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
 import type {
   CaptionStyle,
@@ -1862,7 +1863,7 @@ export function useWorkspace(
         ...(terminalStatus !== "done"
           ? { uploadPreviews: previous.uploadPreviews.map((preview) =>
             preview.jobId === job.id
-              ? { ...preview, localUrl: null, stage: "error", message: job.error ?? `Processing ${terminalStatus}` }
+              ? { ...preview, localUrl: null, stage: "error", message: (cloudErrorCopy(job.error) ?? job.error) ?? `Processing ${terminalStatus}` }
               : preview,
           ) }
           : {}),
@@ -1897,7 +1898,7 @@ export function useWorkspace(
       router.refresh(); // pulls fresh tags/facts/captions into the server payload
     } else {
       const verb = job.type === "caption" ? "Caption" : "Analyze";
-      flashToast(`${verb} ${job.status}${job.error ? ` — ${job.error}` : ""}`);
+      flashToast(`${verb} ${job.status}${job.error ? ` — ${cloudErrorCopy(job.error) ?? job.error}` : ""}`);
     }
   });
 
