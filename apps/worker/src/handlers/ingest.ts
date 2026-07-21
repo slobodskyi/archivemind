@@ -219,7 +219,7 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     await pool.query(`update files set content_hash = $2 where id = $1`, [row.file_id, hash]);
 
     // EXIF describes the shot → hangs off the ASSET (ADR 0011)
-    const exif = await extractExif(buf);
+    const exif = await extractExif(buf, row.title ?? "");
     if (exif) {
       // Offline reverse geocode (ADR 0026) — no network, and null rather than
       // a guess, so an unlabelled asset is always "we don't know" and never
