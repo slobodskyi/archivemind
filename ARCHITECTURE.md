@@ -9,7 +9,8 @@ duplicate those here.
 A pnpm + turborepo monorepo, live in production (Phases 0–4 shipped: upload →
 analyze → captions → search). `apps/web` (Vercel) is the ported Claude Design
 canvas UI with real auth — email+password **or Google OAuth** (#89) — drag-and-drop
-upload to R2, and a canvas that renders the caller's own assets. `apps/worker`
+upload to R2, **Google Drive import** (#99–#101: connect + Picker + `/api/imports`,
+ADR 0025), and a canvas that renders the caller's own assets. `apps/worker`
 (Railway) processes `ai_jobs`: ingest
 (sha256 dedup / EXIF / webp previews, incl. HEIC + RAW-embedded-JPEG paths),
 analyze (Gemini tags/facts + 768-dim image embeddings — user-triggered only) and
@@ -52,6 +53,14 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
   app/api/assets/[id]/medium                   lazy presigned preview
   app/api/captions/[id]                        caption edit (is_edited) / resetEdited
   app/api/search                               GET §8.4: parse → embed → search_assets()
+  app/api/integrations/google · /connect       Drive connect: status/revoke · popup-code
+                                               exchange → AES-GCM tokens (ADR 0025;
+                                               token custody: lib/integrations/*, the
+                                               ONLY importer of lib/supabase/admin —
+                                               ESLint-fenced)
+  app/api/imports                              Picker docs → assets+files(origin=gdrive,
+                                               r2_key null) → ingest job (worker streams
+                                               Drive bytes; originals never in R2)
 
 AUTH PATH (public — proxy.ts lets the whole /auth/* subtree through):
   components/auth/AuthForm.tsx   signInWithPassword · signUp · signInWithOAuth("google")
@@ -89,7 +98,7 @@ These are the mockup's shapes. The **target** model differs — see the note bel
 - **Photo** — a single archived image (`types/photo.ts`). Carries EXIF, tags, facts, captions, and a project field.
 - **Project** ("archive" in the UI copy) — a real, user-created collection stored as a DB row (`ProjectKey = string` in `types/photo.ts`; frontline / travel / client survive only as mock seeds in `PROJECTS_META`). Selecting one navigates to `/projects/[id]` (ADR 0014); the server scopes assets through the `project_assets` M:N join and the canvas renders them directly (ADR 0015). Projects can be renamed, archived or trashed (`PATCH /api/projects/[id]`; trashed ones are hard-deleted after 30 days — ADR 0019). The `all` scope is **not** a project — it's the read-only workspace-wide grid of every active asset.
 - **Group** — the Topic view's cloud key. For real assets it is DERIVED from the asset's AI tags (`lib/topics.ts`, ADR 0023): the most-shared viable tag in event → scene → object priority, ambient tags skipped (but an asset whose only thematic tags are ambient keeps one rather than falling to `Other`), top-6 topics keep their name, the rest fold into `Other`, unanalyzed assets → `Unsorted`. Result-set-relative and re-derived on every read (counts run over the current project's newest ≤500 rows) — the same asset can carry different topics in different projects, and topics can move as the corpus grows; the stable replacement is the post-MVP embedding-clustering job (spec §13). The old fixed keys (rescue, aid, urban…) survive only as mock seeds with curated `GROUPS` colors.
-- **Source** — where a photo originated. The type union is `gdrive | icloud | dropbox | upload` (`types/photo.ts:1`), but `upload` is the only real one — `lib/assets.ts` stamps it on every real asset. No Drive/Dropbox integration exists (`DataSourcesModal`'s Connect only toasts "coming soon"); no iCloud in MVP. The Neural source-hub/folder drill-down is gone (ADR 0015).
+- **Source** — where a photo originated. The type union is `gdrive | icloud | dropbox | upload` (`types/photo.ts:1`); `upload` **and `gdrive` are real** — `lib/assets.ts` stamps them from `files.origin`, and `lib/img.ts`'s `isRealSource` is the real-vs-mock gate. Google Drive is a full integration since 2026-07-21 (#99–#101: popup code flow + encrypted tokens in `source_connections`, Picker multiselect → `POST /api/imports`, worker streams bytes — ADR 0025). Dropbox is still a stub (`DataSourcesModal` toast, #24); no iCloud in MVP. The Neural source-hub/folder drill-down is gone (ADR 0015).
 - **View** — one of four, all rendered from `components/canvas/` (the old `components/map/` and the Leaflet dep are gone — ADR 0016→0017→0018→0022→0023→0024). **The internal id and the on-screen label disagree — trust `types/view.ts`, not the screen:** `neural` = "CANVAS", `timeline` = "TIMELINE", `map` = "MAP", `sense` = "TOPIC". All four views render their tiles through one shared `ProjectAssetView` (tiles persist across views and *glide* to new positions when you switch sort). Map/Topic re-sort the same files into `CloudDecor`/`CloudLabels` cloud clusters (by country / topic — not a geo map, ADR 0022); Timeline is a horizontal per-day **date axis** (evenly-spaced `DD/MM/YYYY` columns, files split above/below the axis, drag clamped to the tile's own date column — ADR 0024). Clicking a cloud's label focuses that cloud (others fade; their lines only halfway) and dragging a label moves the whole cloud (ADR 0024). The connecting lines between tiles (Map/Topic; Timeline has none — the axis carries its structure) are real relations: files link by shared AI tags (`photo.tags`, from the analyze job) — unanalyzed files have no lines, and the web is deliberately sparse: ambient tags (>24 files) don't link, each file keeps only its 4 strongest same-cloud links, cross-cloud pairs reduce to one strongest bridge per cloud pair, and tiles dropped on an artboard detach (ADR 0022). Timeline/Map/Topic only render inside a project — in all-files mode only `neural` renders and the tabs hide.
 - **Drawer** — the right-side photo detail panel.
 
