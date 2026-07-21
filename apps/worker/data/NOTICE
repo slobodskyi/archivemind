@@ -1,0 +1,13 @@
+places.bin.gz is compiled from GeoNames data.
+
+  Source:  https://download.geonames.org/export/dump/ (cities1000,
+           admin1CodesASCII, countryInfo)
+  License: Creative Commons Attribution 4.0 (CC BY 4.0)
+           https://creativecommons.org/licenses/by/4.0/
+  Credit:  "This work is based on data from GeoNames (www.geonames.org)."
+
+Rebuild with `node apps/worker/scripts/build-geo-index.mjs`, which pins the
+sha256 of every input file into the artifact's header.
+
+Attribution is also required where the derived place labels are shown to
+users — see the credit in the web app's help modal, not just this file.

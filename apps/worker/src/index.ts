@@ -11,6 +11,7 @@ import {
   updateProgress,
   type Job,
 } from "./queue";
+import { backfillGeoLabels } from "./geo-backfill";
 import { sweepTrashedProjects } from "./retention";
 
 /** Poll loop + graceful shutdown (TECH_SPEC §7).
@@ -18,6 +19,7 @@ import { sweepTrashedProjects } from "./retention";
  *  - reaper: every 5 min requeue stale 'running' jobs (crash recovery)
  *  - heartbeat: refresh claimed_at every 60 s while a job runs
  *  - sweeper: on start, then every 6 h, hard-delete expired trashed projects
+ *  - geo backfill: on start, then every 6 h, label pre-ADR-0026 coordinates
  *  - SIGTERM/SIGINT: stop claiming; release the in-flight job back to queued */
 
 const POLL_MS = Number(process.env.POLL_MS ?? 2000);
@@ -78,6 +80,16 @@ async function main(): Promise<void> {
   void runSweep();
   const sweeper = setInterval(() => void runSweep(), SWEEP_EVERY_MS);
 
+  // Same cadence for the geo backfill (ADR 0026): assets ingested before
+  // reverse geocoding existed have coordinates but no place label. It settles
+  // to a no-op once every row is labelled.
+  const runGeoBackfill = () =>
+    backfillGeoLabels(pool)
+      .then((n) => n > 0 && log(`geo backfill labelled ${n} asset(s)`))
+      .catch((e: unknown) => log(`geo backfill failed: ${String(e)}`));
+  void runGeoBackfill();
+  const geoBackfiller = setInterval(() => void runGeoBackfill(), SWEEP_EVERY_MS);
+
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -105,6 +117,7 @@ async function main(): Promise<void> {
 
   clearInterval(reaper);
   clearInterval(sweeper);
+  clearInterval(geoBackfiller);
   if (currentJob) {
     await releaseJob(pool, currentJob.id);
     log(`released in-flight job ${currentJob.id} back to queue`);
