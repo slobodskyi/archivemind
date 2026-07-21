@@ -13,6 +13,7 @@ import {
 } from "./queue";
 import { backfillGeoLabels } from "./geo-backfill";
 import { sweepTrashedProjects } from "./retention";
+import { checkExifToolAvailable } from "./services/exif";
 
 /** Poll loop + graceful shutdown (TECH_SPEC §7).
  *  - idle: poll every POLL_MS (default 2 s)
@@ -64,6 +65,10 @@ async function processJob(pool: ReturnType<typeof createPool>, job: Job): Promis
 async function main(): Promise<void> {
   const pool = createPool();
   log(`started (poll ${POLL_MS}ms, pool max ${process.env.WORKER_POOL_MAX ?? 3})`);
+  // Probed once at boot: ExifTool is a spawned Perl process, so a container
+  // without a working one would otherwise present as every HEIC and RAW
+  // quietly arriving with no metadata at all.
+  void checkExifToolAvailable();
 
   const reaper = setInterval(() => {
     reapStaleJobs(pool)
