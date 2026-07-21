@@ -19,7 +19,7 @@ export async function GET() {
   // A connection is personal (ADR 0025): filter by user_id, not just workspace.
   const { data, error } = await supabase
     .from("source_connections")
-    .select("provider_account_email, status")
+    .select("id, provider_account_email, status")
     .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
     .eq("provider", "gdrive")
@@ -28,9 +28,12 @@ export async function GET() {
   if (error) return NextResponse.json({ error: "drive_connect_failed" }, { status: 500 });
 
   const row = data?.[0];
+  const connected = row?.status === "active";
   return NextResponse.json({
-    connected: row?.status === "active",
+    connected,
     email: row?.provider_account_email ?? null,
+    // the id feeds POST /api/imports; only meaningful while active
+    connectionId: connected ? (row?.id ?? null) : null,
   });
 }
 

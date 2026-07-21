@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { photoSrc } from "@/lib/img";
+import { photoSrc, isRealSource } from "@/lib/img";
 import type { TilePos } from "@/lib/layout";
 import type { CanvasPoint, CanvasUploadPreview, Photo } from "@/types";
 import PhotoTile from "./PhotoTile";
@@ -54,7 +54,7 @@ function ProjectAssetView({
         const pos = positions[photo.id];
         if (!pos) return null;
         const preview = previewByAsset.get(photo.id);
-        const src = photo.src ?? preview?.localUrl ?? (photo.source === "upload" ? null : photoSrc(photo, pos.w * 2, pos.h * 2));
+        const src = photo.src ?? preview?.localUrl ?? (isRealSource(photo.source) ? null : photoSrc(photo, pos.w * 2, pos.h * 2));
         const stage = photo.src || photo.source !== "upload"
           ? "ready"
           : preview?.stage ?? "ready";

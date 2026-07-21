@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { FACT_STATUS_COLOR, getCaptionText, statusMeta } from "@/lib/format";
-import { photoSrcMedium } from "@/lib/img";
+import { photoSrcMedium, isRealSource } from "@/lib/img";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -55,7 +55,7 @@ export default function PhotoDrawer({
   // when its URL lands (stale responses are ignored by id).
   const [medium, setMedium] = useState<{ id: string; url: string } | null>(null);
   useEffect(() => {
-    if (!photo || photo.source !== "upload" || photo.srcMedium) return;
+    if (!photo || !isRealSource(photo.source) || photo.srcMedium) return;
     const id = photo.id;
     let alive = true;
     fetch(`/api/assets/${id}/medium`)

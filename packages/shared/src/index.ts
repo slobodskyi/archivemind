@@ -215,11 +215,13 @@ export const googleConnectRequestSchema = z.object({
 });
 export type GoogleConnectRequest = z.infer<typeof googleConnectRequestSchema>;
 
-/** GET /api/integrations/google — connection status for the sources modal.
- *  Errors travel as first-party codes ({ error: string }), never this shape. */
+/** GET /api/integrations/google — connection status for the sources modal
+ *  and the ImportModal Drive pane (the id feeds POST /api/imports). Errors
+ *  travel as first-party codes ({ error: string }), never this shape. */
 export const googleConnectionStatusSchema = z.object({
   connected: z.boolean(),
   email: z.string().nullable(),
+  connectionId: uuidSchema.nullish(),
 });
 export type GoogleConnectionStatus = z.infer<typeof googleConnectionStatusSchema>;
 

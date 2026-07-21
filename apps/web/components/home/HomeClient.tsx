@@ -3,12 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { createProjectResponseSchema, googleConnectionStatusSchema } from "@archivemind/shared";
+import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import Toast from "@/components/modals/Toast";
-import DataSourcesModal, { type GdriveConnectionState } from "@/components/modals/DataSourcesModal";
-import { requestDriveCode, DriveAuthError } from "@/lib/google-identity";
-import { driveErrorMessage } from "@/lib/drive-errors";
+import DataSourcesModal from "@/components/modals/DataSourcesModal";
+import { useGdriveConnection } from "@/hooks/useGdriveConnection";
 import RenameModal from "@/components/modals/RenameModal";
 import ConfirmModal from "@/components/modals/ConfirmModal";
 import AccountMenu from "@/components/home/AccountMenu";
@@ -87,11 +86,6 @@ export default function HomeClient({
   const [query, setQuery] = useState("");
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [gdrive, setGdrive] = useState<GdriveConnectionState>({
-    connected: false,
-    email: null,
-    busy: false,
-  });
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [activeProjects, setActiveProjects] = useState<ProjectCard[]>(projects);
   const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
@@ -104,64 +98,13 @@ export default function HomeClient({
     setTimeout(() => setToast(null), 3200); // same duration as the workspace toast
   };
 
-  /** Refresh the caller's gdrive connection state (fired on modal open — the
-   *  modal renders instantly from the last known state, then corrects). */
-  const refreshGdrive = async () => {
-    try {
-      const res = await fetch("/api/integrations/google");
-      if (!res.ok) return;
-      const parsed = googleConnectionStatusSchema.safeParse(await res.json());
-      if (!parsed.success) return;
-      // busy-guard: a slow GET must never overwrite the outcome of a connect/
-      // disconnect that finished while it was in flight.
-      setGdrive((g) =>
-        g.busy ? g : { ...g, connected: parsed.data.connected, email: parsed.data.email },
-      );
-    } catch {
-      // Status is cosmetic here; connect/disconnect surface their own errors.
-    }
-  };
-
-  const connectGdrive = async () => {
-    setGdrive((g) => ({ ...g, busy: true }));
-    try {
-      const code = await requestDriveCode();
-      const res = await fetch("/api/integrations/google/connect", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const raw: unknown = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err = raw as { error?: unknown };
-        return flash(driveErrorMessage(err.error));
-      }
-      const parsed = googleConnectionStatusSchema.safeParse(raw);
-      const email = parsed.success ? parsed.data.email : null;
-      setGdrive((g) => ({ ...g, connected: true, email }));
-      flash(email ? `Google Drive connected as ${email}` : "Google Drive connected");
-    } catch (err) {
-      // DriveAuthError carries a first-party code; anything else → generic copy.
-      flash(driveErrorMessage(err instanceof DriveAuthError ? err.code : undefined));
-    } finally {
-      setGdrive((g) => ({ ...g, busy: false }));
-    }
-  };
-
-  const disconnectGdrive = async () => {
-    setGdrive((g) => ({ ...g, busy: true }));
-    try {
-      const res = await fetch("/api/integrations/google", { method: "DELETE" });
-      const body: { error?: string } = await res.json().catch(() => ({}));
-      if (!res.ok) return flash(driveErrorMessage(body.error ?? "drive_disconnect_failed"));
-      setGdrive((g) => ({ ...g, connected: false, email: null }));
-      flash("Google Drive disconnected");
-    } catch {
-      flash(driveErrorMessage("drive_disconnect_failed"));
-    } finally {
-      setGdrive((g) => ({ ...g, busy: false }));
-    }
-  };
+  // Shared gdrive lifecycle (also drives the ImportModal pane) — ADR 0025.
+  const {
+    gdrive,
+    refresh: refreshGdrive,
+    connect: connectGdrive,
+    disconnect: disconnectGdrive,
+  } = useGdriveConnection(flash);
 
   const openRecents = () => {
     try {

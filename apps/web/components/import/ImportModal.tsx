@@ -2,7 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useGdriveConnection } from "@/hooks/useGdriveConnection";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
+import { driveErrorMessage } from "@/lib/drive-errors";
+import { runDriveImport, type DriveImportResult } from "@/lib/drive-import";
+import { DriveAuthError, openDrivePicker, requestPickerToken } from "@/lib/google-identity";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import {
   createUploadBatchId,
@@ -21,6 +25,7 @@ import type { UploadBatchResult, UploadBatchStart, UploadResult } from "@/types"
 
 type Source = "local" | "gdrive" | "dropbox";
 type Phase = "idle" | "uploading" | "done";
+type DrivePhase = "idle" | "picking" | "importing" | "done";
 
 export default function ImportModal({
   open,
@@ -48,19 +53,68 @@ export default function ImportModal({
   const smooth = useSmoothProgress(prog.progress, phase === "uploading");
   const pct = Math.round(smooth * 100);
 
+  // ── Google Drive pane state (ADR 0025) ─────────────────────────────────
+  const [driveMsg, setDriveMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  const notifyDrive = (text: string, kind: "ok" | "error" = "error") => setDriveMsg({ text, kind });
+  const [drivePhase, setDrivePhase] = useState<DrivePhase>("idle");
+  const [driveProg, setDriveProg] = useState<{ submitted: number; total: number }>({ submitted: 0, total: 0 });
+  const [driveResult, setDriveResult] = useState<DriveImportResult | null>(null);
+  const { gdrive, refresh: refreshGdrive, connect: connectGdrive } = useGdriveConnection(notifyDrive);
+
+  const busyDrive = drivePhase === "picking" || drivePhase === "importing";
+  const blocked = phase === "uploading" || busyDrive;
+
+  useEffect(() => {
+    if (open && source === "gdrive" && !gdrive.loaded) void refreshGdrive();
+  }, [open, source, gdrive.loaded, refreshGdrive]);
+
   // Esc closes like every other modal — owned here (not the global handler in
-  // useWorkspace) because closing must be blocked while an upload is in flight,
-  // and only this component knows the phase.
+  // useWorkspace) because closing must be blocked while an upload/import is in
+  // flight, and only this component knows the phase.
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && phase !== "uploading") onClose();
+      if (e.key === "Escape" && !blocked) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, phase, onClose]);
+  }, [open, blocked, onClose]);
 
   if (!open) return null;
+
+  async function pickFromDrive() {
+    if (busyDrive || !gdrive.connectionId) return;
+    setDriveMsg(null);
+    setDrivePhase("picking");
+    try {
+      const token = await requestPickerToken();
+      const picked = await openDrivePicker(token);
+      if (picked.length === 0) {
+        setDrivePhase("idle"); // user cancelled the picker
+        return;
+      }
+      setDriveProg({ submitted: 0, total: picked.length });
+      setDrivePhase("importing");
+      const res = await runDriveImport({
+        items: picked.map((p) => ({
+          fileId: p.fileId,
+          name: p.name,
+          mimeType: p.mimeType,
+          sizeBytes: p.sizeBytes,
+        })),
+        connectionId: gdrive.connectionId,
+        projectId: isProject ? projectId : undefined,
+        onProgress: (submitted, total) => setDriveProg({ submitted, total }),
+      });
+      setDriveResult(res);
+      if (res.failedChunks.length > 0) notifyDrive(driveErrorMessage(res.failedChunks[0]));
+      if (res.assetIds.length > 0 || res.linkedExisting > 0) router.refresh();
+      setDrivePhase("done");
+    } catch (err) {
+      notifyDrive(driveErrorMessage(err instanceof DriveAuthError ? err.code : undefined));
+      setDrivePhase("idle");
+    }
+  }
 
   async function handleFiles(files: File[]) {
     if (files.length === 0 || busyRef.current) return;
@@ -104,7 +158,7 @@ export default function ImportModal({
 
   return (
     <div
-      onClick={phase === "uploading" ? undefined : onClose}
+      onClick={blocked ? undefined : onClose}
       style={{
         position: "fixed",
         inset: 0,
@@ -138,7 +192,7 @@ export default function ImportModal({
             Source
           </div>
           <SourceItem label="Local files" active={source === "local"} onClick={() => setSource("local")} icon={<UploadIcon />} />
-          <SourceItem label="Google Drive" soon active={source === "gdrive"} onClick={() => setSource("gdrive")} icon={<CloudIcon />} />
+          <SourceItem label="Google Drive" active={source === "gdrive"} onClick={() => setSource("gdrive")} icon={<CloudIcon />} />
           <SourceItem label="Dropbox" soon active={source === "dropbox"} onClick={() => setSource("dropbox")} icon={<CloudIcon />} />
           <div style={{ flex: 1 }} />
           <div style={{ fontSize: 10.5, color: "var(--tm)", padding: "0 6px", lineHeight: 1.5 }}>
@@ -153,20 +207,100 @@ export default function ImportModal({
               {source === "local" ? "Local files" : source === "gdrive" ? "Google Drive" : "Dropbox"}
             </span>
             <button
-              onClick={phase === "uploading" ? undefined : onClose}
-              disabled={phase === "uploading"}
+              onClick={blocked ? undefined : onClose}
+              disabled={blocked}
               aria-label="Close"
-              style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", color: "var(--t2b)", cursor: phase === "uploading" ? "default" : "pointer", opacity: phase === "uploading" ? 0.45 : 1, borderRadius: 2 }}
+              style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", color: "var(--t2b)", cursor: blocked ? "default" : "pointer", opacity: blocked ? 0.45 : 1, borderRadius: 2 }}
             >
               <CloseIcon />
             </button>
           </div>
 
-          {source !== "local" ? (
+          {source === "dropbox" ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--tm)", textAlign: "center", padding: 20 }}>
               <CloudIcon large />
-              <div style={{ fontSize: 13, color: "var(--t2)" }}>{source === "gdrive" ? "Google Drive" : "Dropbox"} import — coming soon</div>
+              <div style={{ fontSize: 13, color: "var(--t2)" }}>Dropbox import — coming soon</div>
               <div style={{ fontSize: 11.5 }}>Pick files from the cloud without leaving ArchiveMind. Lands in a later phase.</div>
+            </div>
+          ) : source === "gdrive" ? (
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--tm)", textAlign: "center", padding: 20, border: "2px dashed var(--bdh)", borderRadius: 3, background: "var(--bg)" }}>
+              <CloudIcon large />
+              {!gdrive.loaded ? (
+                <div style={{ fontSize: 12.5, color: "var(--t3)" }}>Checking connection…</div>
+              ) : drivePhase === "importing" ? (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--t1)" }}>
+                    Submitting {driveProg.submitted}/{driveProg.total}…
+                  </div>
+                  <div style={{ width: 220, height: 3, background: "var(--bg-el)", borderRadius: 999 }}>
+                    <div style={{ height: 3, width: `${driveProg.total ? Math.round((driveProg.submitted / driveProg.total) * 100) : 0}%`, background: "var(--ac)", borderRadius: 999, transition: "width .15s linear" }} />
+                  </div>
+                </>
+              ) : drivePhase === "done" && driveResult ? (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 700 }}>
+                    {driveResult.assetIds.length} file{driveResult.assetIds.length === 1 ? "" : "s"} imported
+                  </div>
+                  {driveResult.linkedExisting > 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                      {driveResult.linkedExisting} already imported — added to this project
+                    </div>
+                  )}
+                  {driveResult.skippedDuplicates - driveResult.linkedExisting > 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                      {driveResult.skippedDuplicates - driveResult.linkedExisting} duplicate{driveResult.skippedDuplicates - driveResult.linkedExisting === 1 ? "" : "s"} skipped
+                    </div>
+                  )}
+                  {driveResult.assetIds.length > 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Streaming previews from Drive — they’ll appear on the canvas shortly.</div>
+                  )}
+                  {driveMsg && <div style={{ fontSize: 10.5, color: driveMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{driveMsg.text}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    <button
+                      onClick={() => { setDrivePhase("idle"); setDriveResult(null); setDriveMsg(null); }}
+                      style={{ padding: "7px 12px", background: "var(--bg-el)", color: "var(--t2)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      Pick more
+                    </button>
+                    <button
+                      onClick={onClose}
+                      style={{ padding: "7px 14px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </>
+              ) : !gdrive.connected ? (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--t2)" }}>Connect your Google Drive to pick files</div>
+                  <div style={{ fontSize: 11.5 }}>One-time approval in a Google popup; you stay in control of exactly which files ArchiveMind can see.</div>
+                  {driveMsg && <div style={{ fontSize: 10.5, color: driveMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{driveMsg.text}</div>}
+                  <button
+                    onClick={() => void connectGdrive()}
+                    disabled={gdrive.busy}
+                    style={{ marginTop: 4, padding: "8px 16px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: gdrive.busy ? "default" : "pointer", opacity: gdrive.busy ? 0.6 : 1, fontFamily: "inherit" }}
+                  >
+                    {gdrive.busy ? "…" : "Connect Google Drive"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--t1)" }}>
+                    Connected{gdrive.email ? ` as ${gdrive.email}` : ""}
+                  </div>
+                  <div style={{ fontSize: 11.5 }}>
+                    Google grants access only to files you explicitly pick — open a folder and shift-select.
+                  </div>
+                  {driveMsg && <div style={{ fontSize: 10.5, color: driveMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{driveMsg.text}</div>}
+                  <button
+                    onClick={() => void pickFromDrive()}
+                    disabled={busyDrive}
+                    style={{ marginTop: 4, padding: "8px 16px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: busyDrive ? "default" : "pointer", opacity: busyDrive ? 0.6 : 1, fontFamily: "inherit" }}
+                  >
+                    {drivePhase === "picking" ? "Opening picker…" : "Pick files from Drive"}
+                  </button>
+                </>
+              )}
             </div>
           ) : (
             <>

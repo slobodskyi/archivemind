@@ -27,12 +27,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { email } = await exchangeCodeAndStore({
+    const { email, connectionId } = await exchangeCodeAndStore({
       code: parsed.data.code,
       workspaceId,
       userId: user.id,
     });
-    return NextResponse.json({ connected: true, email });
+    return NextResponse.json({ connected: true, email, connectionId });
   } catch (err) {
     if (err instanceof DriveTokenError) {
       return NextResponse.json({ error: err.code }, { status: err.httpStatus });
