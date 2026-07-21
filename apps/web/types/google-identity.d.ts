@@ -37,6 +37,8 @@ interface GsiTokenClientConfig {
   client_id: string;
   scope: string;
   prompt: "" | "consent" | "select_account";
+  /** email of the account to mint for — skips the account chooser */
+  login_hint?: string;
   callback: (response: GsiTokenResponse) => void;
   error_callback?: (error: GsiClientError) => void;
 }
