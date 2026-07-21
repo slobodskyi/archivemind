@@ -34,6 +34,7 @@ interface AssetRow {
   source_file_id: string | null;
   content_hash: string | null;
   preview_count: number;
+  has_exif: boolean;
 }
 
 /** Drive originals we refuse to pull into worker RAM (whole-file Buffer). */
@@ -87,7 +88,8 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     `select a.id as asset_id, a.workspace_id, a.title,
             f.id as file_id, f.r2_key, f.mime_type,
             f.origin, f.source_connection_id, f.source_file_id, f.content_hash,
-            (select count(*)::int from asset_previews ap where ap.asset_id = a.id) as preview_count
+            (select count(*)::int from asset_previews ap where ap.asset_id = a.id) as preview_count,
+            exists (select 1 from asset_exif ae where ae.asset_id = a.id) as has_exif
      from assets a
      join files f on f.asset_id = a.id
      where a.id = any($1::uuid[])
@@ -110,7 +112,13 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
       // Resume guard (both cloud origins): a re-run — retry after partial
       // failure, or an explicit re-ingest — must not re-fetch files that
       // already made it through.
-      if (row.content_hash && row.preview_count >= 2) {
+      //
+      // "Made it through" has to include metadata, not just bytes. Without
+      // the asset_exif check, a Drive-origin file whose EXIF extraction
+      // failed was skipped here before extraction was even retried — so the
+      // iPhone HEIC bug (#113) was permanent for exactly those files, and no
+      // amount of re-ingesting could heal them.
+      if (row.content_hash && row.preview_count >= 2 && row.has_exif) {
         done += 1;
         continue;
       }
