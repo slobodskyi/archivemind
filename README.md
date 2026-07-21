@@ -10,12 +10,16 @@ with AI content understanding (what) — e.g. *"mustached men I shot in Odesa."*
 ## Status
 
 **Live in production** (Phases 0–4 shipped, plus the homepage + real projects pulled
-forward from Phase 5; Phase 5 — canvas at scale — next; see [`docs/PLAN.md`](docs/PLAN.md)):
+forward from Phase 5 and Phase 6's cloud imports — Google Drive and Dropbox — shipped
+2026-07-21; Phase 5's remainder, canvas at scale, is next; see
+[`docs/PLAN.md`](docs/PLAN.md)):
 [`apps/web`](apps/web) on Vercel (auth by email+password or Google, drag-and-drop upload
-to R2, a homepage of real projects, and all four canvas views rendering your actual
-archive), [`apps/worker`](apps/worker) on Railway (ingest: dedup/EXIF/previews incl.
-HEIC/RAW; analyze: Gemini tags + embeddings, user-triggered; caption: styled
-multilingual captions; plus the trashed-project retention sweep),
+to R2, **import straight from Google Drive or Dropbox**, a homepage of real projects, and
+all four canvas views rendering your actual archive), [`apps/worker`](apps/worker) on
+Railway (ingest: dedup/EXIF/previews incl. HEIC/RAW, with originals streamed from Google
+Drive and fetched once from Dropbox Chooser links; analyze: Gemini tags + embeddings,
+user-triggered; caption: styled multilingual captions; plus the trashed-project retention
+sweep),
 [`packages/shared`](packages/shared) (zod contracts). Chat is a real semantic search
 surface — text query → embedding → `search_assets` over your analyzed photos.
 
