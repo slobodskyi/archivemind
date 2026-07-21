@@ -5,13 +5,16 @@ import { getRealPhotos } from "./assets";
 import { createClient } from "./supabase/server";
 
 /**
- * The single data-access layer. Every component/hook reads domain records
- * through these functions — never from `lib/mock-data.ts` directly.
+ * getPhotos() is the LIVE Server-Component reader for assets (real since
+ * Phase 1, #6): the caller's own rows with presigned preview URLs, mapped into
+ * the mockup's Photo shape (server-only — it presigns R2 URLs).
  *
- * getPhotos() is REAL as of Phase 1 (issue #6): the caller's own assets with
- * presigned preview URLs, mapped into the mockup's Photo shape (server-only —
- * it presigns R2 URLs). The remaining functions swap in with their phases
- * (projects #17, canvas aggregates #18).
+ * Everything else here — getPhoto/getProjects/getGroups/getSources — is a
+ * retained DEAD MOCK with zero callers (tracked in #34), kept until its
+ * feature's phase replaces or deletes it. This file is NOT the single data
+ * seam anymore (ADR 0002 no longer holds): other reads live in
+ * lib/projects.ts / lib/bootstrap.ts, and every write goes through the
+ * app/api/* route handlers — see ARCHITECTURE.md "Seams".
  */
 
 /** Pass the page's own RLS-scoped `supabase` when it has already auth-guarded

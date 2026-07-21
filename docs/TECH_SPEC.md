@@ -534,7 +534,7 @@ New pieces: Supabase auth screens/guard; upload flow (presign → PUT → comple
 
 **Canvas at scale (mandatory):** the mockup renders 235 nodes; real archives are 10k–30k. Neural view must consume `GET /api/canvas` aggregates — render hubs/folders with counts, materialize individual tiles only for expanded folders / current viewport, cap simultaneously-mounted tiles (~300) and virtualize. "Organize" modes (`source|date|place|similarity`) recluster client-side from aggregate data; `similarity` uses server-provided cluster ids (post-MVP: k-means over embeddings; MVP may ship `source|date|place` only).
 
-**Mockup quirks to replace with real data:** timeline bucketing by `hash(id)%6` → real `asset_exif.taken_at`; identical EXIF block → real per-asset EXIF; cosmetic bulk toggles → real job options; no-op Regenerate → real caption job. The mockup `Photo` type becomes `Asset`.
+**Mockup quirks to replace with real data** *(status 2026-07-21 — most are done)*: ~~timeline bucketing by `hash(id)%6` → real `asset_exif.taken_at`~~ (shipped #74, now a per-day date axis — ADR 0024); ~~identical EXIF block → real per-asset EXIF~~ (shipped Phase 2); ~~no-op Regenerate → real caption job~~ (shipped #82). Still open: cosmetic bulk toggles → real job options (#87 — `runBulk` always enqueues plain analyze); the mockup `Photo` type becomes `Asset` (the v1.2 rename, lands during the build phases).
 
 ---
 

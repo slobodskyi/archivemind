@@ -2,9 +2,10 @@ import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { COUNTRY_LATLON, GROUPS, SOURCES } from "./mock-data";
 
 /**
- * Pure, deterministic layout algorithms ported verbatim from the source.
- * No randomness anywhere — every position is a function of the fixed mock data
- * plus user drag overrides.
+ * Pure, deterministic layout algorithms — no randomness anywhere; every
+ * position is a function of the input photos plus user drag overrides.
+ * Part original mockup ports (asset grid, scatter, minimap), part new code:
+ * the cloud canvas (ADR 0022) and the timeline date axis (ADR 0024).
  */
 
 export interface Frame {
@@ -537,17 +538,15 @@ function buildCloudLayout(
   /** Frames (artboards) on the canvas — any tile whose center lands inside one
    *  is detached from the connecting-line web (ADR 0022). */
   frames: readonly Frame[],
-  /** Optional cluster-ordering comparator — defaults to largest-first. Timeline
-   *  passes a chronological one so months pack in a stable time order. */
-  orderKeys?: (a: string, b: string) => number,
 ): CloudLayout {
   const byPrimary: Record<string, Photo[]> = {};
   photos.forEach((p) => {
     const k = primaryOf(p);
     (byPrimary[k] = byPrimary[k] || []).push(p);
   });
+  // Largest cluster first (name tie-break) — packs the dominant cloud centrally.
   const primaryKeys = Object.keys(byPrimary).sort(
-    orderKeys ?? ((a, b) => byPrimary[b].length - byPrimary[a].length || a.localeCompare(b)),
+    (a, b) => byPrimary[b].length - byPrimary[a].length || a.localeCompare(b),
   );
 
   // Enclosing-circle estimate for N packed circles of known radii: the area
@@ -625,9 +624,10 @@ function buildCloudLayout(
   // shares drives the line's weight. Untagged (unanalyzed) and artboard-
   // detached files never enter the index, so they have no lines — by design,
   // not by omission. Two caps keep the web O(n) instead of O(n²) — real data
-  // routinely concentrates in one big cloud (Map's inert country, ADR 0018;
-  // one shoot's month), so without them a common tag at the 500-asset read
-  // limit means ~125k SVG paths and a frozen tab:
+  // routinely concentrates in one big cloud (Map's inert country, ADR 0018; a
+  // dominant Topic when one theme covers most of a project), so without them a
+  // common tag at the 500-asset read limit means ~125k SVG paths and a frozen
+  // tab:
   const byTag: Record<string, string[]> = {};
   photos.forEach((p) => {
     if (detached.has(p.id) || !p.tags) return;
@@ -736,9 +736,11 @@ function buildCloudLayout(
 }
 
 /** Map: clouds are countries — real per-asset `country` data is still pending
- *  its own backend phase (ADR 0015/0016), so an unrecognized/default country
- *  lands in the Unsorted cloud rather than being silently mislabeled. Lines
- *  are shared-AI-tag relations (ADR 0022), same as every grouping view. */
+ *  its own backend phase, and the inert `"Ukraine"` default (lib/assets.ts) IS
+ *  a recognized COUNTRY_LATLON key, so real data renders one labeled Ukraine
+ *  cloud (ADR 0018 — the data, not a bug). Only values outside COUNTRY_LATLON
+ *  fall to Unsorted. Lines are shared-AI-tag relations (ADR 0022), same as
+ *  Topic — Timeline draws none (ADR 0024). */
 export function mapCloudLayout(
   photos: readonly Photo[],
   mapOverrides: Record<string, CanvasPoint>,
@@ -754,8 +756,10 @@ export function mapCloudLayout(
   );
 }
 
-/** Topic: clouds are `photo.group`, labeled with its friendly name
- *  (GROUPS[key].label). Lines are shared-AI-tag relations (ADR 0022). */
+/** Topic: clouds are `photo.group` — for real assets a tag-derived topic
+ *  (ADR 0023) labeled by its own key (the tag name; `Other`/`Unsorted` for the
+ *  buckets); only retired mock seed groups still resolve through GROUPS.
+ *  Lines are shared-AI-tag relations (ADR 0022). */
 export function topicCloudLayout(
   photos: readonly Photo[],
   topicOverrides: Record<string, CanvasPoint>,

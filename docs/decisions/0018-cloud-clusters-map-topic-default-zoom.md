@@ -3,9 +3,15 @@
 Date: 2026-07-13
 
 Status: Accepted · **Extended and partly superseded by
-[0022](0022-timeline-clouds-and-live-cloud-labels.md) — read 0022 for what ships today.**
+[0022](0022-timeline-clouds-and-live-cloud-labels.md), then
+[0023](0023-topic-clouds-derived-from-tags.md)/[0024](0024-timeline-date-axis-cloud-focus.md)
+— read 0022 + 0023 + 0024 for what ships today.**
 Specifically, 0022 changed four things this document still states in its body:
-Timeline joined the clouds; the zoom regime in this ADR's own title is replaced
+Timeline joined the clouds (itself superseded since: 0024 made Timeline a per-day
+horizontal *date axis*, not a cloud — and 0024 also retired this document's
+free-drag rule for Timeline: tile drags clamp to their date column there, and
+the drag-session kinds this body names, `onMapAssetDown`/`onTopicAssetDown`,
+are gone — one `onTileDown` routes every view); the zoom regime in this ADR's own title is replaced
 (no more `fitCapped` cap-fit — every view opens *fixed* at 75% and oversized
 content overflows); background drag no longer pans on Map/Topic (marquee-select
 works on every view, panning is the hand tool); and the "Unsorted cloud has no
