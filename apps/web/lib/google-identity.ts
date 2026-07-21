@@ -88,7 +88,7 @@ function loadPicker(): Promise<void> {
  *  (connect flow), so prompt:'' keeps this silent — the stored server-side
  *  tokens NEVER travel to the browser; this token is the browser's own and is
  *  never stored (ADR 0025). */
-export async function requestPickerToken(): Promise<string> {
+export async function requestPickerToken(loginHint?: string): Promise<string> {
   await loadGsi();
   const oauth2 = window.google?.accounts?.oauth2;
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -98,6 +98,9 @@ export async function requestPickerToken(): Promise<string> {
       client_id: clientId,
       scope: PICKER_SCOPE,
       prompt: "",
+      // The connected account is known — hint it so a multi-account browser
+      // session doesn't show the account chooser on every single pick.
+      ...(loginHint ? { login_hint: loginHint } : {}),
       callback: (response) => {
         if (response.access_token) resolve(response.access_token);
         else reject(new DriveAuthError(mapGsiError(response.error)));

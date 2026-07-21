@@ -87,7 +87,7 @@ export default function ImportModal({
     setDriveMsg(null);
     setDrivePhase("picking");
     try {
-      const token = await requestPickerToken();
+      const token = await requestPickerToken(gdrive.email ?? undefined);
       const picked = await openDrivePicker(token);
       if (picked.length === 0) {
         setDrivePhase("idle"); // user cancelled the picker
