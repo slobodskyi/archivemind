@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { ingestJobPayloadSchema } from "@archivemind/shared";
 import type pg from "pg";
 import { extractExif } from "../services/exif";
+import { reverseGeocode } from "../services/geocode";
 import { DropboxFileError, downloadDropboxLink } from "../services/dropbox";
 import { DriveFileError, downloadDriveFile, getDriveFileMeta } from "../services/gdrive";
 import { heicToRaw } from "../services/heic";
@@ -220,15 +221,21 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     // EXIF describes the shot → hangs off the ASSET (ADR 0011)
     const exif = await extractExif(buf);
     if (exif) {
+      // Offline reverse geocode (ADR 0026) — no network, and null rather than
+      // a guess, so an unlabelled asset is always "we don't know" and never
+      // "somewhere plausible". "" records that we looked and found nothing,
+      // which is what keeps the backfill from re-scanning it forever.
+      const place = reverseGeocode(exif.gps_lat, exif.gps_lon);
       await pool.query(
         `insert into asset_exif (asset_id, taken_at, camera_make, camera_model, lens,
-                                 gps_lat, gps_lon, location_source, iso, aperture, shutter,
-                                 focal_length, raw)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                                 gps_lat, gps_lon, gps_label, location_source, iso, aperture,
+                                 shutter, focal_length, raw)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          on conflict (asset_id) do update set
            taken_at=excluded.taken_at, camera_make=excluded.camera_make,
            camera_model=excluded.camera_model, lens=excluded.lens,
            gps_lat=excluded.gps_lat, gps_lon=excluded.gps_lon,
+           gps_label=excluded.gps_label,
            location_source=excluded.location_source, iso=excluded.iso,
            aperture=excluded.aperture, shutter=excluded.shutter,
            focal_length=excluded.focal_length, raw=excluded.raw`,
@@ -240,6 +247,7 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
           exif.lens,
           exif.gps_lat,
           exif.gps_lon,
+          exif.gps_lat != null && exif.gps_lon != null ? (place?.label ?? "") : null,
           exif.gps_lat != null ? "gps" : null,
           exif.iso,
           exif.aperture,

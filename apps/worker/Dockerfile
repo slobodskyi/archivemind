@@ -18,6 +18,9 @@ WORKDIR /app
 # tsup bundles @archivemind/shared; pg and friends stay external → copy deps.
 COPY --from=build /repo/apps/worker/dist ./dist
 COPY --from=build /repo/apps/worker/package.json ./package.json
+# Reverse-geocoding index (ADR 0026). Resolved relative to dist/, so it must
+# sit beside it; without it the worker still runs, just without place labels.
+COPY --from=build /repo/apps/worker/data ./data
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/apps/worker/node_modules ./apps/worker/node_modules
 CMD ["node", "dist/index.js"]
