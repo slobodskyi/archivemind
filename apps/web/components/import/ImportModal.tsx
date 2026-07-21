@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { useGdriveConnection } from "@/hooks/useGdriveConnection";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import { driveErrorMessage } from "@/lib/drive-errors";
-import { runDriveImport, type DriveImportResult } from "@/lib/drive-import";
+import { runCloudImport, type DriveImportResult } from "@/lib/drive-import";
+import { DropboxUiError, openDropboxChooser } from "@/lib/dropbox-chooser";
 import { DriveAuthError, openDrivePicker, requestPickerToken } from "@/lib/google-identity";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import {
@@ -62,7 +63,12 @@ export default function ImportModal({
   const { gdrive, refresh: refreshGdrive, connect: connectGdrive } = useGdriveConnection(notifyDrive);
 
   const busyDrive = drivePhase === "picking" || drivePhase === "importing";
-  const blocked = phase === "uploading" || busyDrive;
+  const [dbxMsg, setDbxMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  const [dbxPhase, setDbxPhase] = useState<DrivePhase>("idle");
+  const [dbxProg, setDbxProg] = useState<{ submitted: number; total: number }>({ submitted: 0, total: 0 });
+  const [dbxResult, setDbxResult] = useState<DriveImportResult | null>(null);
+  const dbxBusy = dbxPhase === "picking" || dbxPhase === "importing";
+  const blocked = phase === "uploading" || busyDrive || dbxBusy;
 
   useEffect(() => {
     if (open && source === "gdrive" && !gdrive.loaded) void refreshGdrive();
@@ -95,7 +101,8 @@ export default function ImportModal({
       }
       setDriveProg({ submitted: 0, total: picked.length });
       setDrivePhase("importing");
-      const res = await runDriveImport({
+      const res = await runCloudImport({
+        provider: "gdrive",
         items: picked.map((p) => ({
           fileId: p.fileId,
           name: p.name,
@@ -113,6 +120,34 @@ export default function ImportModal({
     } catch (err) {
       notifyDrive(driveErrorMessage(err instanceof DriveAuthError ? err.code : undefined));
       setDrivePhase("idle");
+    }
+  }
+
+  async function pickFromDropbox() {
+    if (dbxBusy) return;
+    setDbxMsg(null);
+    setDbxPhase("picking");
+    try {
+      const picked = await openDropboxChooser();
+      if (picked.length === 0) {
+        setDbxPhase("idle"); // user cancelled the chooser
+        return;
+      }
+      setDbxProg({ submitted: 0, total: picked.length });
+      setDbxPhase("importing");
+      const res = await runCloudImport({
+        provider: "dropbox",
+        items: picked,
+        projectId: isProject ? projectId : undefined,
+        onProgress: (submitted, total) => setDbxProg({ submitted, total }),
+      });
+      setDbxResult(res);
+      if (res.failedChunks.length > 0) setDbxMsg({ text: driveErrorMessage(res.failedChunks[0]), kind: "error" });
+      if (res.assetIds.length > 0 || res.linkedExisting > 0) router.refresh();
+      setDbxPhase("done");
+    } catch (err) {
+      setDbxMsg({ text: driveErrorMessage(err instanceof DropboxUiError ? err.code : undefined), kind: "error" });
+      setDbxPhase("idle");
     }
   }
 
@@ -193,7 +228,7 @@ export default function ImportModal({
           </div>
           <SourceItem label="Local files" active={source === "local"} onClick={() => setSource("local")} icon={<UploadIcon />} />
           <SourceItem label="Google Drive" active={source === "gdrive"} onClick={() => setSource("gdrive")} icon={<CloudIcon />} />
-          <SourceItem label="Dropbox" soon active={source === "dropbox"} onClick={() => setSource("dropbox")} icon={<CloudIcon />} />
+          <SourceItem label="Dropbox" active={source === "dropbox"} onClick={() => setSource("dropbox")} icon={<CloudIcon />} />
           <div style={{ flex: 1 }} />
           <div style={{ fontSize: 10.5, color: "var(--tm)", padding: "0 6px", lineHeight: 1.5 }}>
             {isProject ? `Files are added to “${projectName}”.` : "Files are added to your archive."}
@@ -217,10 +252,67 @@ export default function ImportModal({
           </div>
 
           {source === "dropbox" ? (
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--tm)", textAlign: "center", padding: 20 }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--tm)", textAlign: "center", padding: 20, border: "2px dashed var(--bdh)", borderRadius: 3, background: "var(--bg)" }}>
               <CloudIcon large />
-              <div style={{ fontSize: 13, color: "var(--t2)" }}>Dropbox import — coming soon</div>
-              <div style={{ fontSize: 11.5 }}>Pick files from the cloud without leaving ArchiveMind. Lands in a later phase.</div>
+              {dbxPhase === "importing" ? (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--t1)" }}>
+                    Submitting {dbxProg.submitted}/{dbxProg.total}…
+                  </div>
+                  <div style={{ width: 220, height: 3, background: "var(--bg-el)", borderRadius: 999 }}>
+                    <div style={{ height: 3, width: `${dbxProg.total ? Math.round((dbxProg.submitted / dbxProg.total) * 100) : 0}%`, background: "var(--ac)", borderRadius: 999, transition: "width .15s linear" }} />
+                  </div>
+                </>
+              ) : dbxPhase === "done" && dbxResult ? (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 700 }}>
+                    {dbxResult.assetIds.length} file{dbxResult.assetIds.length === 1 ? "" : "s"} imported
+                  </div>
+                  {dbxResult.linkedExisting > 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                      {dbxResult.linkedExisting} already imported — added to this project
+                    </div>
+                  )}
+                  {dbxResult.skippedDuplicates - dbxResult.linkedExisting > 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                      {dbxResult.skippedDuplicates - dbxResult.linkedExisting} duplicate{dbxResult.skippedDuplicates - dbxResult.linkedExisting === 1 ? "" : "s"} skipped
+                    </div>
+                  )}
+                  {dbxResult.assetIds.length > 0 && (
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Fetching originals from Dropbox — they’ll appear on the canvas shortly.</div>
+                  )}
+                  {dbxMsg && <div style={{ fontSize: 10.5, color: dbxMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{dbxMsg.text}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                    <button
+                      onClick={() => { setDbxPhase("idle"); setDbxResult(null); setDbxMsg(null); }}
+                      style={{ padding: "7px 12px", background: "var(--bg-el)", color: "var(--t2)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      Pick more
+                    </button>
+                    <button
+                      onClick={onClose}
+                      style={{ padding: "7px 14px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 13, color: "var(--t1)" }}>Pick files straight from Dropbox</div>
+                  <div style={{ fontSize: 11.5 }}>
+                    No account link needed — Dropbox opens its own picker and shares only the files you choose. Links are fetched right away.
+                  </div>
+                  {dbxMsg && <div style={{ fontSize: 10.5, color: dbxMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{dbxMsg.text}</div>}
+                  <button
+                    onClick={() => void pickFromDropbox()}
+                    disabled={dbxBusy}
+                    style={{ marginTop: 4, padding: "8px 16px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: dbxBusy ? "default" : "pointer", opacity: dbxBusy ? 0.6 : 1, fontFamily: "inherit" }}
+                  >
+                    {dbxPhase === "picking" ? "Opening Dropbox…" : "Pick files from Dropbox"}
+                  </button>
+                </>
+              )}
             </div>
           ) : source === "gdrive" ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--tm)", textAlign: "center", padding: 20, border: "2px dashed var(--bdh)", borderRadius: 3, background: "var(--bg)" }}>

@@ -384,9 +384,9 @@ export default function HomeClient({
       <DataSourcesModal
         open={sourcesOpen}
         onClose={() => setSourcesOpen(false)}
-        onConnect={(name) => {
+        onConnect={() => {
           setSourcesOpen(false);
-          flash(`${name} — connect flow coming soon`);
+          flash("Dropbox needs no connection — open a project and use Add files");
         }}
         gdrive={gdrive}
         onGdriveConnect={() => void connectGdrive()}

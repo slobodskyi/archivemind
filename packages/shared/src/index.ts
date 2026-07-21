@@ -58,6 +58,20 @@ export const dropboxDirectLinkSchema = z
 /** One picked Chooser file. `sourceId` is Chooser's stable file id — the
  *  dedupe key (never interpolated into any URL; the link is what gets
  *  fetched, and it expires after ~4 h). */
+/** Chooser returns no MIME type — infer from the extension so asset kind,
+ *  files.mime_type and the worker's decode routing behave like uploads.
+ *  Unknown extensions fall to octet-stream (RAW decode keys off the FILENAME,
+ *  so NEF/CR2/… still route correctly). */
+const EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+  gif: "image/gif", avif: "image/avif", tif: "image/tiff", tiff: "image/tiff",
+  heic: "image/heic", heif: "image/heif", bmp: "image/bmp", pdf: "application/pdf",
+};
+export function mimeFromFilename(name: string): string {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  return EXT_MIME[ext] ?? "application/octet-stream";
+}
+
 export const dropboxImportItemSchema = z.object({
   sourceId: z.string().min(1).max(256),
   name: z.string().trim().min(1).max(512),
@@ -252,14 +266,24 @@ export const importItemSchema = z.object({
 });
 export type ImportItem = z.infer<typeof importItemSchema>;
 
-/** POST /api/imports — the client chunks Picker results to ≤500 per request
- *  (same cap as completeUploadRequestSchema; one ingest job per request). */
-export const importRequestSchema = z.object({
-  provider: z.literal("gdrive"), // widens to an enum when Dropbox (#24) lands
-  connectionId: uuidSchema,
-  projectId: uuidSchema.optional(), // link via project_assets, like uploads
-  items: z.array(importItemSchema).min(1).max(500),
-});
+/** POST /api/imports — the client chunks picked docs to ≤500 per request
+ *  (same cap as completeUploadRequestSchema; one ingest job per request).
+ *  gdrive needs the caller's personal connection (worker re-reads via its
+ *  refresh token); dropbox is connection-less (ADR 0008) — the ~4 h direct
+ *  links themselves are the credential and ride into the job payload. */
+export const importRequestSchema = z.discriminatedUnion("provider", [
+  z.object({
+    provider: z.literal("gdrive"),
+    connectionId: uuidSchema,
+    projectId: uuidSchema.optional(), // link via project_assets, like uploads
+    items: z.array(importItemSchema).min(1).max(500),
+  }),
+  z.object({
+    provider: z.literal("dropbox"),
+    projectId: uuidSchema.optional(),
+    items: z.array(dropboxImportItemSchema).min(1).max(500),
+  }),
+]);
 export type ImportRequest = z.infer<typeof importRequestSchema>;
 
 /** POST /api/integrations/google/connect — the popup code flow's server half.

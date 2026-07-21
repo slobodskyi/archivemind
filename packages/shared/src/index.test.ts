@@ -19,6 +19,7 @@ import {
   googleConnectRequestSchema,
   googleConnectionStatusSchema,
   importItemSchema,
+  mimeFromFilename,
   importRequestSchema,
   importResponseSchema,
   patchCaptionRequestSchema,
@@ -424,5 +425,31 @@ describe("dropbox import contracts (ADR 0008, #24)", () => {
         dropbox: [{ asset_id: base.asset_ids[0], link: "https://evil.com/x", name: "x" }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("importRequestSchema provider union + mimeFromFilename (#24)", () => {
+  it("keeps the gdrive shape and adds the connection-less dropbox shape", () => {
+    expect(
+      importRequestSchema.safeParse({
+        provider: "dropbox",
+        items: [{ sourceId: "id:abc", name: "a.jpg", link: "https://dl.dropboxusercontent.com/1/x/a.jpg" }],
+      }).success,
+    ).toBe(true);
+    // dropbox never takes a connectionId; gdrive still requires one
+    expect(
+      importRequestSchema.safeParse({
+        provider: "gdrive",
+        items: [{ fileId: "1SX3tiZm22Tb-0ZWHYBY7GdU847VoZC3V", name: "a.jpg", mimeType: "image/jpeg" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("infers mime from extension; RAW/unknown fall to octet-stream", () => {
+    expect(mimeFromFilename("DSC01.JPG")).toBe("image/jpeg");
+    expect(mimeFromFilename("scan.tiff")).toBe("image/tiff");
+    expect(mimeFromFilename("IMG_1.HEIC")).toBe("image/heic");
+    expect(mimeFromFilename("shot.NEF")).toBe("application/octet-stream");
+    expect(mimeFromFilename("noext")).toBe("application/octet-stream");
   });
 });

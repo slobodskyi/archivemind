@@ -1,4 +1,9 @@
-import { importResponseSchema, type ImportItem, type ImportResponse } from "@archivemind/shared";
+import {
+  importResponseSchema,
+  type DropboxImportItem,
+  type ImportItem,
+  type ImportResponse,
+} from "@archivemind/shared";
 
 /** Client side of POST /api/imports (ADR 0025). The Picker can return
  *  thousands of docs; the API caps 500 items/request, so the caller's list is
@@ -23,9 +28,11 @@ export interface DriveImportResult {
   failedChunks: string[];
 }
 
-export async function runDriveImport(input: {
-  items: ImportItem[];
-  connectionId: string;
+export type CloudImportSource =
+  | { provider: "gdrive"; connectionId: string; items: ImportItem[] }
+  | { provider: "dropbox"; items: DropboxImportItem[] };
+
+export async function runCloudImport(input: CloudImportSource & {
   projectId?: string;
   onProgress?: (submitted: number, total: number) => void;
 }): Promise<DriveImportResult> {
@@ -36,7 +43,8 @@ export async function runDriveImport(input: {
     linkedExisting: 0,
     failedChunks: [],
   };
-  const chunks = chunkImportItems(input.items);
+  const allItems: (ImportItem | DropboxImportItem)[] = input.items;
+  const chunks = chunkImportItems(allItems);
   let submitted = 0;
   for (const chunk of chunks) {
     try {
@@ -44,8 +52,8 @@ export async function runDriveImport(input: {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          provider: "gdrive",
-          connectionId: input.connectionId,
+          provider: input.provider,
+          ...(input.provider === "gdrive" ? { connectionId: input.connectionId } : {}),
           projectId: input.projectId,
           items: chunk,
         }),

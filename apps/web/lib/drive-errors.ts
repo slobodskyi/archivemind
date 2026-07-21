@@ -27,6 +27,13 @@ const MESSAGES: Record<string, string> = Object.assign(Object.create(null), {
   // Self-healing re-consent loop (see google-tokens.server.ts): we revoked a
   // refresh-token-less grant so the next attempt shows the full consent screen.
   drive_reconsent_required: "Google needs you to approve access once more. Click Connect again.",
+  // Dropbox (Chooser — ADR 0008): connection-less, so everything is per-pick.
+  dropbox_unavailable: "Dropbox import isn't configured yet.",
+  dropbox_chooser_failed: "Couldn't open the Dropbox chooser. Reload and try again.",
+  dropbox_link_expired: "Those Dropbox links expired (they live 4 hours). Pick the files again.",
+  dropbox_download_failed: "Couldn't fetch some files from Dropbox. Pick them again to retry.",
+  dropbox_rate_limited: "Dropbox is rate-limiting us — some files were skipped; pick them again to retry.",
+  dropbox_file_too_large: "That file is over the import size limit.",
   // Picker/import surface.
   drive_picker_failed: "Couldn't open the Google Drive picker. Reload and try again.",
   import_backlog: "Imports are queued up — wait for the current ones to finish, then retry.",
@@ -45,4 +52,12 @@ const MESSAGES: Record<string, string> = Object.assign(Object.create(null), {
 export function driveErrorMessage(code: unknown): string {
   if (typeof code !== "string") return GENERIC;
   return MESSAGES[code] ?? GENERIC;
+}
+
+/** No-fallback lookup for surfaces that show NON-cloud errors too (job-error
+ *  toasts): returns copy when the string is one of our cloud codes, null
+ *  otherwise so the caller keeps its existing text. */
+export function cloudErrorCopy(code: unknown): string | null {
+  if (typeof code !== "string") return null;
+  return MESSAGES[code] ?? null;
 }

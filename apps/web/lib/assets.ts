@@ -136,6 +136,7 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   // asset has exactly one (dedup merges rather than attaching); [0] is it.
   const origin = a.files[0]?.origin;
   const gdrive = origin === "gdrive";
+  const dropbox = origin === "dropbox";
 
   const photo: Photo = {
     id: a.id,
@@ -158,8 +159,8 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
     group: topic,
     country: "Ukraine",
-    source: gdrive ? "gdrive" : "upload",
-    folder: gdrive ? (a.files[0]?.source_path ?? "Google Drive") : "Uploads",
+    source: gdrive ? "gdrive" : dropbox ? "dropbox" : "upload",
+    folder: gdrive ? (a.files[0]?.source_path ?? "Google Drive") : dropbox ? "Dropbox" : "Uploads",
     project: "",
     exif: toExifData(a.asset_exif, created),
   };

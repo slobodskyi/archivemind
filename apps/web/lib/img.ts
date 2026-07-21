@@ -8,9 +8,9 @@ import type { Photo } from "@/types";
 type PhotoLike = Pick<Photo, "src" | "srcMedium" | "seed" | "source">;
 
 /** Sources that exist as REAL file origins (files.origin enum) — assets whose
- *  previews are pending must show the neutral tile, never picsum. icloud (and
- *  dropbox until #24) survive only as mock seeds. */
-const REAL_SOURCES: ReadonlySet<string> = new Set(["upload", "gdrive"]);
+ *  previews are pending must show the neutral tile, never picsum. icloud alone
+ *  survives as a mock seed. */
+const REAL_SOURCES: ReadonlySet<string> = new Set(["upload", "gdrive", "dropbox"]);
 export function isRealSource(source: string): boolean {
   return REAL_SOURCES.has(source);
 }
