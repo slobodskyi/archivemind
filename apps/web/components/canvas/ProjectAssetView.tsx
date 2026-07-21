@@ -10,12 +10,16 @@ interface ProjectAssetViewProps {
   /** Positions for canonical photos in the active view (grid or cloud). */
   positions: Record<string, TilePos>;
   /** Positions for pending uploads — always the neutral grid, since a file has
-   *  no month/country/topic to sort by until the worker processes it. */
+   *  no capture date/country/topic to sort by until the worker processes it. */
   previewPositions: Record<string, TilePos>;
   selectedIds: Set<string>;
   hoveredId: string | null;
   /** True while a view/sort switch reflows every tile — enables the glide. */
   animating: boolean;
+  /** When a cloud is focused (its label clicked), tiles in other clouds fade. */
+  focusedCloudKey: string | null;
+  /** Tile id → cloud key, for the fade above. Empty on the unsorted Canvas. */
+  tileCloud: Record<string, string>;
   onTileDown: (event: React.PointerEvent, id: string, center: CanvasPoint) => void;
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
@@ -30,6 +34,8 @@ function ProjectAssetView({
   selectedIds,
   hoveredId,
   animating,
+  focusedCloudKey,
+  tileCloud,
   onTileDown,
   setHover,
   openDrawer,
@@ -64,6 +70,7 @@ function ProjectAssetView({
             hovered={hoveredId === photo.id}
             interactive
             animating={animating}
+            dimmed={!!focusedCloudKey && tileCloud[photo.id] !== focusedCloudKey}
             onDown={(event) => onTileDown(event, photo.id, { x: pos.cx, y: pos.cy })}
             onEnter={() => setHover(photo.id)}
             onLeave={() => setHover(null)}

@@ -105,6 +105,14 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
   Other, unanalyzed → Unsorted; [ADR 0023](decisions/0023-topic-clouds-derived-from-tags.md)).
   Interim until the post-MVP embedding-clustering job (spec §13); Map's `country`
   stays inert (ADR 0018).
+- GG's next design iteration (2026-07-21, cherry-picked from
+  `feat/timeline-date-axis-cloud-focus` — the branch was stacked on the pre-#93
+  base, so only its delta landed): **Timeline = horizontal per-day date axis**
+  (evenly-spaced DD/MM/YYYY columns, files split above/below the axis, drag
+  clamped to the date column, no tag lines there), **cloud focus** (click a
+  label — others fade) + **whole-cloud drag** (drag a label) on all grouping
+  views, sparkle/move icon refresh
+  ([ADR 0024](decisions/0024-timeline-date-axis-cloud-focus.md)).
 
 ### Phase 5 — Projects + canvas at scale (~weeks 6–7)
 

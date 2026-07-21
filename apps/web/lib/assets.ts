@@ -84,7 +84,10 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
   const camera = [e?.camera_make, e?.camera_model].filter(Boolean).join(" ") || "—";
-  const taken = e?.taken_at ? new Date(e.taken_at) : fallbackDate;
+  // Guard unparseable DB values: an invalid taken_at would otherwise format as
+  // "NaN-NaN-NaN NaN:NaN" and dump the photo on the Timeline's epoch day.
+  const parsed = e?.taken_at ? new Date(e.taken_at) : null;
+  const taken = parsed && !Number.isNaN(parsed.getTime()) ? parsed : fallbackDate;
   return {
     camera,
     lens: e?.lens ?? "—",

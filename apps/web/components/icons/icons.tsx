@@ -30,11 +30,12 @@ export function SearchIcon({ width = 16, height = 16, ...props }: IconProps) {
 }
 
 export function ChatIcon({ width = 16, height = 16, ...props }: IconProps) {
+  // AI assistant → a sparkle (a big 4-point star + a small one), the common
+  // "AI" glyph, filled to sit alongside the toolbar's line icons.
   return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z" />
-      <path d="M12 8v4" />
-      <path d="M12 15h.01" />
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="currentColor" stroke="none" {...props}>
+      <path d="M10.5 5.5 L12.5 11 L18 13 L12.5 15 L10.5 20.5 L8.5 15 L3 13 L8.5 11 Z" />
+      <path d="M18 3.4 L18.9 5.1 L20.6 6 L18.9 6.9 L18 8.6 L17.1 6.9 L15.4 6 L17.1 5.1 Z" />
     </svg>
   );
 }
@@ -111,13 +112,17 @@ export function SelectToolIcon({ width = 16, height = 16, ...props }: IconProps)
   );
 }
 
-export function HandToolIcon({ width = 17, height = 17, ...props }: IconProps) {
+export function HandToolIcon({ width = 16, height = 16, ...props }: IconProps) {
+  // Pan → the standard 4-way move icon (crosshair of arrows), clearer than a
+  // grabbing hand and consistent with the other line tools.
   return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10" />
-      <path d="M11 10V4.5a1.5 1.5 0 0 1 3 0V10" />
-      <path d="M14 10V5.5a1.5 1.5 0 0 1 3 0V12" />
-      <path d="M17 11a1.5 1.5 0 0 1 3 0v3c0 3.5-2.5 6-6.5 6S8 18.5 6.5 16l-1.7-3a1.5 1.5 0 0 1 2.6-1.5L8 13" />
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 4v16" />
+      <path d="M4 12h16" />
+      <path d="M9 7l3-3 3 3" />
+      <path d="M9 17l3 3 3-3" />
+      <path d="M7 9l-3 3 3 3" />
+      <path d="M17 9l3 3-3 3" />
     </svg>
   );
 }

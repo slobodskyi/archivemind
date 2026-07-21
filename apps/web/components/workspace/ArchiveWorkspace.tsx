@@ -81,7 +81,7 @@ export default function ArchiveWorkspace({
         {/* Grouping views draw their colored backdrop + connecting lines behind
             the tiles; the tiles themselves are the same persistent set in every
             view, so switching a sort just reflows (animates) their positions. */}
-        {ws.cloudDecor && <CloudDecor layout={ws.cloudDecor} edgesReady={!ws.tilesAnimating} />}
+        {ws.cloudDecor && <CloudDecor layout={ws.cloudDecor} edgesReady={!ws.tilesAnimating} focusedCloudKey={ws.focusedCloudKey} />}
         <ProjectAssetView
           photos={ws.projectPhotos}
           previews={ws.uploadPreviews}
@@ -90,12 +90,14 @@ export default function ArchiveWorkspace({
           selectedIds={ws.selectedIds}
           hoveredId={ws.hoveredId}
           animating={ws.tilesAnimating}
+          focusedCloudKey={ws.focusedCloudKey}
+          tileCloud={ws.tileCloud}
           onTileDown={ws.onTileDown}
           setHover={ws.setHover}
           openDrawer={ws.openDrawer}
           deletePhoto={ws.deletePhoto}
         />
-        {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} />}
+        {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} focusedCloudKey={ws.focusedCloudKey} onCloudLabelDown={ws.onCloudLabelDown} />}
       </PanZoomCanvas>
 
       {/* Empty state — a project emptied after creation used to render a bare

@@ -4,7 +4,11 @@ Date: 2026-07-16 (authored on the design branch as "0020"; renumbered and
 amended 2026-07-20 at merge time — 0020/0021 were taken by then, and the
 connecting lines shipped tag-driven, see the amendment below)
 
-Status: Accepted
+Status: Accepted · **Timeline part superseded by
+[0024](0024-timeline-date-axis-cloud-focus.md)** (Timeline became a horizontal
+per-day date axis, not a month cloud; no connecting lines there). The unified
+canvas, Map/Topic clouds, glide, live labels/backdrops and tag-driven lines
+decided here still ship.
 
 Supersedes the Timeline parts of [0016](0016-real-timeline-topic-map-views.md)
 and [0017](0017-column-grid-map-topic-photo-delete.md) (Timeline was the last

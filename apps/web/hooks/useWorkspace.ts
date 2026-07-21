@@ -32,7 +32,7 @@ import {
   mapCloudLayout as computeMapLayout,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
-  timelineCloudLayout as computeTimelineLayout,
+  timelineAxisLayout as computeTimelineLayout,
   topicCloudLayout as computeTopicLayout,
   type Bounds,
   type CloudLayout,
@@ -47,6 +47,9 @@ import type { SearchResponse } from "@archivemind/shared";
 import { CHAT_GREETING } from "@/lib/chat";
 
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
+/** Stable empty tile→cloud map (Canvas / all-files mode) so the value identity
+ *  doesn't change each render and defeat ProjectAssetView's memo. */
+const EMPTY_TILE_CLOUD: Record<string, string> = {};
 
 /** Per-project canvas arrangement (tile drags, frames, sticky notes) is kept in
  *  localStorage so it survives leaving and re-opening the project (ADR 0022).
@@ -176,6 +179,9 @@ interface WorkspaceState {
    *  position and the viewport re-fits — gates the CSS glide (never on during
    *  drag/pan, which must stay 1:1 with the pointer). */
   tilesAnimating: boolean;
+  /** Cloud whose label was clicked — it stays prominent while the others fade
+   *  (grouping views only). Null = nothing focused. */
+  focusedCloudKey: string | null;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -200,6 +206,18 @@ type DragSession =
       sx: number;
       sy: number;
       orig: { x: number; y: number };
+      moved: boolean;
+      historyPushed: boolean;
+    }
+  | {
+      // Dragging a cloud's label moves every tile in that cloud together; a
+      // click (no move) focuses the cloud instead (ADR 0024).
+      mode: "cloudDrag";
+      cloudKey: string;
+      bucket: "map" | "topic" | "timeline";
+      sx: number;
+      sy: number;
+      origCenters: Record<string, { x: number; y: number }>;
       moved: boolean;
       historyPushed: boolean;
     }
@@ -437,6 +455,12 @@ export interface Workspace {
   activePositions: Record<string, TilePos>;
   cloudDecor: CloudLayout | null;
   tilesAnimating: boolean;
+  /** Cloud focus (ADR 0024): the focused cloud's key, the tile→cloud map used to
+   *  fade the rest, and the label pointer-down handler (drag whole cloud / click
+   *  to focus). */
+  focusedCloudKey: string | null;
+  tileCloud: Record<string, string>;
+  onCloudLabelDown: (e: React.PointerEvent, cloudKey: string) => void;
 
   // Bulk AI
   bulkPanelOpen: boolean;
@@ -517,6 +541,7 @@ export function useWorkspace(
     future: [],
     zoomMenuOpen: false,
     tilesAnimating: false,
+    focusedCloudKey: null,
   });
 
   // Mirror of committed state, kept current for window-level event handlers.
@@ -527,6 +552,9 @@ export function useWorkspace(
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The layout the canvas currently renders (committed post-render) — read by
+   *  pointer-down handlers so they never recompute a pack/edge pass. */
+  const cloudDecorRef = useRef<CloudLayout | null>(null);
   const activeJobId = useRef<string | null>(null);
   const objectUrlsRef = useRef(new Map<string, string>());
 
@@ -645,7 +673,7 @@ export function useWorkspace(
    *  tile layout stay identical across Canvas / Timeline / Map / Topic. */
   const activeTilePositions = useCallback(
     (s: WorkspaceState): Record<string, TilePos> => {
-      if (s.view === "timeline") return computeTimelineLayout(s.photos, s.galleryOverrides.timeline, s.frames).tiles;
+      if (s.view === "timeline") return computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles;
       if (s.view === "map") return computeMapLayout(s.photos, s.galleryOverrides.map, s.frames).tiles;
       if (s.view === "sense") return computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles;
       return assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
@@ -679,6 +707,7 @@ export function useWorkspace(
       if (s.imp.open) patch.imp = { open: false };
       if (s.acctOpen) patch.acctOpen = false;
       if (s.projOpen) patch.projOpen = false;
+      if (s.focusedCloudKey) patch.focusedCloudKey = null; // click empty canvas clears cloud focus
       if (Object.keys(patch).length) setState(patch);
       const r = rect();
       // Every view behaves like Canvas now (ADR 0022): the frame and select
@@ -807,6 +836,38 @@ export function useWorkspace(
     [onGalleryAssetDown],
   );
 
+  /** Pointer-down on a cloud's label (ADR 0024): a drag moves the whole cloud (all
+   *  its tiles) together into the active view's override bucket; a click without
+   *  a drag focuses that cloud so the others fade. Reads the layout the canvas
+   *  is already rendering (via cloudDecorRef) — the layouts are deterministic,
+   *  so recomputing here would burn a full pack/edge pass for identical output. */
+  const onCloudLabelDown = useCallback(
+    (e: React.PointerEvent, cloudKey: string) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const s = stateRef.current;
+      const bucket = s.view === "timeline" ? "timeline" : s.view === "map" ? "map" : s.view === "sense" ? "topic" : null;
+      const layout = cloudDecorRef.current;
+      if (!bucket || !layout) return;
+      const origCenters: Record<string, { x: number; y: number }> = {};
+      for (const id of Object.keys(layout.tiles)) {
+        if (layout.tileCloud[id] === cloudKey) origCenters[id] = { x: layout.tiles[id].cx, y: layout.tiles[id].cy };
+      }
+      dragRef.current = {
+        mode: "cloudDrag",
+        cloudKey,
+        bucket,
+        sx: e.clientX,
+        sy: e.clientY,
+        origCenters,
+        moved: false,
+        historyPushed: false,
+      };
+    },
+    [],
+  );
+
   const onStickyDown = useCallback(
     (e: React.PointerEvent, id: string, orig: { x: number; y: number }) => {
       e.stopPropagation();
@@ -878,6 +939,33 @@ export function useWorkspace(
             [d.kind]: { ...s.galleryOverrides[d.kind], [d.key]: { x: d.orig.x + dx, y: d.orig.y + dy } },
           },
         });
+      } else if (d.mode === "cloudDrag") {
+        // Timeline's whole-cloud drag is VERTICAL-only (ADR 0024): the label,
+        // tick and band are pinned to the date column and every tile's x is
+        // clamped into it, so horizontal movement could only smear raw x
+        // overrides past the clamp — a saturating write that permanently
+        // collapses the day's grid once re-anchored. Vertical drag threshold
+        // only, too, so a horizontal wiggle on a date label stays a click
+        // (focus) instead of silently overriding the whole day.
+        const timelineBucket = d.bucket === "timeline";
+        const movedNow = timelineBucket
+          ? Math.abs(e.clientY - d.sy) > 3
+          : Math.abs(e.clientX - d.sx) > 3 || Math.abs(e.clientY - d.sy) > 3;
+        if (movedNow) {
+          d.moved = true;
+          if (!d.historyPushed) {
+            pushHistory();
+            d.historyPushed = true;
+          }
+        }
+        if (!d.moved) return;
+        const dx = timelineBucket ? 0 : (e.clientX - d.sx) / s.scale,
+          dy = (e.clientY - d.sy) / s.scale;
+        const bucketOv = { ...s.galleryOverrides[d.bucket] };
+        for (const id of Object.keys(d.origCenters)) {
+          bucketOv[id] = { x: d.origCenters[id].x + dx, y: d.origCenters[id].y + dy };
+        }
+        setState({ galleryOverrides: { ...s.galleryOverrides, [d.bucket]: bucketOv } });
       } else if (d.mode === "sticky") {
         if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
         const dx = (e.clientX - d.sx) / s.scale,
@@ -950,6 +1038,12 @@ export function useWorkspace(
     dragRef.current = null;
     if (d.mode === "pan") {
       setState({ panning: false });
+    } else if (d.mode === "cloudDrag") {
+      // A click (no drag) on a label toggles focus on that cloud.
+      if (!d.moved) {
+        const s = stateRef.current;
+        setState({ focusedCloudKey: s.focusedCloudKey === d.cloudKey ? null : d.cloudKey });
+      }
     } else if (d.mode === "marquee") {
       if (!d.moved) {
         setState({
@@ -1184,7 +1278,7 @@ export function useWorkspace(
       }
       if (view === "map") return fitDefaultZoom(computeMapLayout(allPhotos, overrides.map, frames).bounds, r);
       if (view === "sense") return fitDefaultZoom(computeTopicLayout(allPhotos, overrides.topic, frames).bounds, r);
-      return fitDefaultZoom(computeTimelineLayout(allPhotos, overrides.timeline, frames).bounds, r);
+      return fitDefaultZoom(computeTimelineLayout(allPhotos, overrides.timeline).bounds, r);
     },
     [rect, neuralGalleryFor, fitDefaultZoom],
   );
@@ -1221,6 +1315,7 @@ export function useWorkspace(
         marquee: null,
         bulkPanelOpen: false,
         tilesAnimating: true,
+        focusedCloudKey: null,
         // View changes retire the right-side source browser so it cannot
         // overlap the AI chat panel that lives in the same slot.
         sidebarTabs: [],
@@ -2031,8 +2126,8 @@ export function useWorkspace(
   // three on every photos/overrides/frames change tripled that cost for
   // nothing (only one decor layer can be on screen).
   const timelineLayoutResult = useMemo(
-    () => (isTimelineView ? computeTimelineLayout(projectPhotos, state.galleryOverrides.timeline, state.frames) : null),
-    [isTimelineView, projectPhotos, state.galleryOverrides.timeline, state.frames],
+    () => (isTimelineView ? computeTimelineLayout(projectPhotos, state.galleryOverrides.timeline) : null),
+    [isTimelineView, projectPhotos, state.galleryOverrides.timeline],
   );
 
   const mapLayoutResult = useMemo(
@@ -2067,6 +2162,20 @@ export function useWorkspace(
         ? topicLayoutResult
         : null;
   const activePositions = cloudDecor ? cloudDecor.tiles : neuralGalleryPos;
+
+  // Committed after every render so pointer-down handlers (onCloudLabelDown)
+  // read the exact layout the canvas is showing instead of recomputing it.
+  useEffect(() => {
+    cloudDecorRef.current = cloudDecor;
+  }, [cloudDecor]);
+
+  // A focused cloud can disappear under the user (photo deleted, topics
+  // re-derived on refresh, timeline day emptied). A key that matches no
+  // current cloud must not dim the entire canvas — it reads as no focus.
+  const focusedCloudKey =
+    state.focusedCloudKey && cloudDecor?.clouds.some((c) => c.key === state.focusedCloudKey)
+      ? state.focusedCloudKey
+      : null;
 
   const canUndo = state.history.length > 0;
   const canRedo = state.future.length > 0;
@@ -2278,6 +2387,9 @@ export function useWorkspace(
     activePositions,
     cloudDecor,
     tilesAnimating: state.tilesAnimating,
+    focusedCloudKey,
+    tileCloud: cloudDecor?.tileCloud ?? EMPTY_TILE_CLOUD,
+    onCloudLabelDown,
 
     bulkPanelOpen: state.bulkPanelOpen,
     toggleBulkPanel,

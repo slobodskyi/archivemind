@@ -14,6 +14,8 @@ interface PhotoTileProps {
   /** When true, the tile glides to a new position instead of snapping — used
    *  while a sort/view change reflows every tile at once (not during drag). */
   animating?: boolean;
+  /** Faded back when another cloud is focused (a label was clicked). */
+  dimmed?: boolean;
   onDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
   onEnter?: () => void;
   onLeave?: () => void;
@@ -39,6 +41,7 @@ export default function PhotoTile({
   hovered,
   interactive,
   animating,
+  dimmed,
   onDown,
   onEnter,
   onLeave,
@@ -47,6 +50,7 @@ export default function PhotoTile({
 }: PhotoTileProps) {
   const zIndex = hovered ? 30 : selected ? 12 : 2;
   const status = stage === "ready" ? "" : `, ${STAGE_LABEL[stage]}`;
+  const posTransition = animating ? "left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1)" : "";
 
   return (
     <div
@@ -56,7 +60,8 @@ export default function PhotoTile({
         top: pos.y,
         width: pos.w,
         zIndex,
-        transition: animating ? "left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1)" : undefined,
+        opacity: dimmed ? 0.22 : 1,
+        transition: [posTransition, "opacity .2s ease"].filter(Boolean).join(", "),
       }}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
