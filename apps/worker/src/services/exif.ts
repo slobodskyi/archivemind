@@ -154,11 +154,41 @@ async function viaExifTool(buf: Buffer, filename: string): Promise<ParsedExif | 
     dir = await mkdtemp(path.join(os.tmpdir(), "am-exif-"));
     const file = path.join(dir, `input.${ext}`);
     await writeFile(file, buf);
-    return fromExifToolTags(await exiftool.read(file));
-  } catch {
-    return null; // same contract as exifr: metadata problems never fail ingest
+    const tags = await exiftool.read(file);
+    // ExifTool reports many failures in-band rather than by throwing. Mapping
+    // such a result would produce a well-formed row of nulls, which now reads
+    // as "metadata landed" to the ingest resume guard — permanently, since
+    // that guard is what decides whether to try again.
+    if (typeof tags.Error === "string" && tags.Error.trim()) {
+      console.warn(`[exif] ExifTool reported: ${tags.Error}`);
+      return null;
+    }
+    return fromExifToolTags(tags);
+  } catch (e) {
+    // Metadata problems never fail ingest — but they must not be silent
+    // either. ExifTool is a spawned Perl process, so "works on the dev's Mac,
+    // dies in the container" is a real failure mode, and swallowing it makes
+    // the whole fallback look like a file with no metadata.
+    console.warn(`[exif] ExifTool fallback failed: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
   } finally {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** One-shot probe so a broken ExifTool is visible at boot rather than as a
+ *  archive-wide absence of metadata nobody can explain. */
+export async function checkExifToolAvailable(): Promise<string | null> {
+  try {
+    const version = await exiftool.version();
+    console.log(`[exif] ExifTool ${version} available`);
+    return version;
+  } catch (e) {
+    console.error(
+      `[exif] ExifTool UNAVAILABLE (${e instanceof Error ? e.message : String(e)}) — ` +
+        `HEIC and RAW files will lose their metadata`,
+    );
+    return null;
   }
 }
 
@@ -169,5 +199,9 @@ export async function extractExif(buf: Buffer, filename = ""): Promise<ParsedExi
   if (isUseful(fast)) return fast;
   // exifr came back empty — which for HEIC means it refused the file entirely.
   const thorough = await viaExifTool(buf, filename);
-  return isUseful(thorough) ? thorough : (fast ?? thorough);
+  if (isUseful(thorough)) {
+    console.log(`[exif] ${filename || "file"}: exifr found nothing, ExifTool recovered it`);
+    return thorough;
+  }
+  return fast ?? thorough;
 }

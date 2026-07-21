@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { reverseGeocode } from "./services/geocode";
+import { isGeocodeIndexAvailable, reverseGeocode } from "./services/geocode";
 
 /** Fills `asset_exif.gps_label` for assets ingested before reverse geocoding
  *  existed (ADR 0026). Coordinates have been stored since day one, so this
@@ -24,6 +24,13 @@ interface ExifCoordRow {
 }
 
 export async function backfillGeoLabels(pool: pg.Pool): Promise<number> {
+  // Without this the sweep stamps "" on every row it looks at and, since its
+  // own queue is `gps_label is null`, permanently deletes its own work —
+  // turning one bad deploy into unrecoverable data loss.
+  if (!isGeocodeIndexAvailable()) {
+    console.warn("[geo-backfill] index unavailable — skipping the pass rather than marking rows done");
+    return 0;
+  }
   let labelled = 0;
   for (let processed = 0; processed < MAX_PER_RUN; processed += BATCH) {
     const { rows } = await pool.query<ExifCoordRow>(
