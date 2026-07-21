@@ -8,6 +8,7 @@ import FrameOverlay from "@/components/canvas/FrameOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
+import GeoMapPane from "@/components/map/GeoMapPane";
 import AppHeader from "@/components/header/AppHeader";
 import ViewTabs from "@/components/header/ViewTabs";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
@@ -99,6 +100,18 @@ export default function ArchiveWorkspace({
         />
         {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} focusedCloudKey={ws.focusedCloudKey} onCloudLabelDown={ws.onCloudLabelDown} />}
       </PanZoomCanvas>
+
+      {/* MAP is the one view that is not a sort of the canvas tiles — it is a
+          real geographic map over its own basemap (ADR 0027), so it covers the
+          canvas rather than reflowing it. */}
+      {ws.isMapView && (
+        <GeoMapPane
+          photos={ws.projectPhotos}
+          selectedIds={ws.selectedIds}
+          onOpenAsset={ws.openDrawer}
+          onSelectAssets={ws.selectSearchResults}
+        />
+      )}
 
       {/* Empty state — a project emptied after creation used to render a bare
           grid with no affordance (the import modal auto-opens only for fresh

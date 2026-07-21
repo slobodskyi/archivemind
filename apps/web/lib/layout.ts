@@ -1,5 +1,5 @@
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
-import { COUNTRY_LATLON, GROUPS, SOURCES } from "./mock-data";
+import { GROUPS, SOURCES } from "./mock-data";
 
 /**
  * Pure, deterministic layout algorithms — no randomness anywhere; every
@@ -513,9 +513,6 @@ export function packCircles(
 
 const MAP_CLOUD_COLORS = ["#39ff6a", "#5b9bff", "#ff7a5c", "#ffd166", "#c084fc", "#4fd1c5"];
 
-function mapCloudColor(key: string): string {
-  return key === UNSORTED_CLOUD_KEY ? UNSORTED_CLOUD_COLOR : MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
-}
 
 function topicCloudColor(key: string): string {
   if (key === UNSORTED_CLOUD_KEY) return UNSORTED_CLOUD_COLOR;
@@ -733,27 +730,6 @@ function buildCloudLayout(
   });
 
   return { clouds, tiles, edges, tileCloud: tileCluster, bounds: positionsBounds(tiles) };
-}
-
-/** Map: clouds are countries — real per-asset `country` data is still pending
- *  its own backend phase, and the inert `"Ukraine"` default (lib/assets.ts) IS
- *  a recognized COUNTRY_LATLON key, so real data renders one labeled Ukraine
- *  cloud (ADR 0018 — the data, not a bug). Only values outside COUNTRY_LATLON
- *  fall to Unsorted. Lines are shared-AI-tag relations (ADR 0022), same as
- *  Topic — Timeline draws none (ADR 0024). */
-export function mapCloudLayout(
-  photos: readonly Photo[],
-  mapOverrides: Record<string, CanvasPoint>,
-  frames: readonly Frame[] = [],
-): CloudLayout {
-  return buildCloudLayout(
-    photos,
-    (p) => (COUNTRY_LATLON[p.country] ? p.country : UNSORTED_CLOUD_KEY),
-    mapCloudColor,
-    (key) => key,
-    mapOverrides,
-    frames,
-  );
 }
 
 /** Topic: clouds are `photo.group` — for real assets a tag-derived topic
