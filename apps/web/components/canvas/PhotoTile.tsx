@@ -20,6 +20,8 @@ interface PhotoTileProps {
   onEnter?: () => void;
   onLeave?: () => void;
   onOpen?: () => void;
+  /** Right-click on the tile — opens the grid context menu at the cursor. */
+  onContext?: (e: React.MouseEvent) => void;
   /** Shown as a small hover button, top-right of the tile — every view that
    *  renders a PhotoTile gets file deletion for free (issue: delete on any view). */
   onDelete?: (e: React.MouseEvent) => void;
@@ -46,6 +48,7 @@ export default function PhotoTile({
   onEnter,
   onLeave,
   onOpen,
+  onContext,
   onDelete,
 }: PhotoTileProps) {
   const zIndex = hovered ? 30 : selected ? 12 : 2;
@@ -65,6 +68,7 @@ export default function PhotoTile({
       }}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      onContextMenu={interactive ? onContext : undefined}
     >
     <button
       type="button"

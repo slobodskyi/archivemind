@@ -4,9 +4,6 @@ import {
   ShareIcon,
   UndoIcon,
   RedoIcon,
-  LogsIcon,
-  HelpIcon,
-  PrivacyIcon,
 } from "@/components/icons/icons";
 
 interface AppHeaderProps {
@@ -20,35 +17,9 @@ interface AppHeaderProps {
   canRedo?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
-  onOpenHelp?: () => void;
   onFlashToast?: (text: string) => void;
   onOpenAcct?: () => void;
   viewTabs?: ReactNode;
-}
-
-function UtilButton({ label, icon, onClick }: { label: string; icon: ReactNode; onClick?: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      className="tw"
-      style={{
-        display: "flex",
-        width: 30,
-        height: 30,
-        alignItems: "center",
-        justifyContent: "center",
-        border: 0,
-        borderRadius: 2,
-        background: "transparent",
-        color: "var(--t2)",
-        cursor: "pointer",
-      }}
-    >
-      {icon}
-      <span className="tip">{label}</span>
-    </button>
-  );
 }
 
 export default function AppHeader({
@@ -62,7 +33,6 @@ export default function AppHeader({
   canRedo = false,
   onUndo,
   onRedo,
-  onOpenHelp,
   onFlashToast,
   onOpenAcct,
   viewTabs,
@@ -204,10 +174,6 @@ export default function AppHeader({
             <ChevronDownIcon width={10} height={10} stroke="currentColor" />
           </button>
         )}
-        <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
-        <UtilButton label="Logs" icon={<LogsIcon />} onClick={() => onFlashToast?.("Activity log coming soon")} />
-        <UtilButton label="Help" icon={<HelpIcon />} onClick={onOpenHelp} />
-        <UtilButton label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => onFlashToast?.("Privacy Policy coming soon")} />
         <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
         <button
           onClick={() => onFlashToast?.("Sharing coming soon")}

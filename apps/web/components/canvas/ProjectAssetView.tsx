@@ -24,6 +24,7 @@ interface ProjectAssetViewProps {
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
   deletePhoto: (id: string) => void;
+  openContextMenu: (x: number, y: number, targetId: string | null) => void;
 }
 
 function ProjectAssetView({
@@ -40,6 +41,7 @@ function ProjectAssetView({
   setHover,
   openDrawer,
   deletePhoto,
+  openContextMenu,
 }: ProjectAssetViewProps) {
   const previewByAsset = useMemo(
     () => new Map(previews.flatMap((preview) => preview.assetId ? [[preview.assetId, preview]] : [])),
@@ -75,6 +77,11 @@ function ProjectAssetView({
             onEnter={() => setHover(photo.id)}
             onLeave={() => setHover(null)}
             onOpen={() => openDrawer(photo.id)}
+            onContext={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openContextMenu(event.clientX, event.clientY, photo.id);
+            }}
             onDelete={(e) => {
               e.stopPropagation();
               deletePhoto(photo.id);

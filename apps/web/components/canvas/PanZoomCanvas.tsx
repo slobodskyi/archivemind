@@ -4,6 +4,8 @@ import MarqueeOverlay from "./MarqueeOverlay";
 interface PanZoomCanvasProps {
   setCanvasRef: (el: HTMLDivElement | null) => void;
   onCanvasDown: (e: React.PointerEvent) => void;
+  /** Right-click on empty canvas (tiles stop propagation and handle their own). */
+  onCanvasContext?: (e: React.MouseEvent) => void;
   canvasCursor: string;
   canvasTransform: string;
   /** True only while a view/sort switch re-fits the viewport — glides the pan/zoom
@@ -17,6 +19,7 @@ interface PanZoomCanvasProps {
 export default function PanZoomCanvas({
   setCanvasRef,
   onCanvasDown,
+  onCanvasContext,
   canvasCursor,
   canvasTransform,
   animating,
@@ -27,6 +30,7 @@ export default function PanZoomCanvas({
     <div
       ref={setCanvasRef}
       onPointerDown={onCanvasDown}
+      onContextMenu={onCanvasContext}
       style={{
         position: "absolute",
         inset: 0,

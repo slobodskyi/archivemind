@@ -359,6 +359,21 @@ export interface Workspace {
   deleteFrame: (id: string) => void;
   renameFrame: (id: string, label: string) => void;
 
+  // Selection actions (bottom action bar + right-click menu)
+  deleteSelected: () => void;
+  copyFiles: () => void;
+  duplicateFiles: () => void;
+  exportFiles: () => void;
+  groupFiles: () => void;
+  archiveFiles: () => void;
+  addToNewArtboard: () => void;
+  addToExistingArtboard: (frameId: string) => void;
+
+  // Right-click grid menu
+  contextMenu: { x: number; y: number; targetId: string | null } | null;
+  openContextMenu: (x: number, y: number, targetId: string | null) => void;
+  closeContextMenu: () => void;
+
   // Sticky notes
   stickyNotes: StickyNote[];
   addStickyNote: () => void;
@@ -555,6 +570,10 @@ export function useWorkspace(
     tilesAnimating: false,
     focusedCloudKey: null,
   });
+
+  // Right-click menu on the grid — a lightweight overlay, kept out of the main
+  // reducer state since it never needs undo/persist and closes on any action.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; targetId: string | null } | null>(null);
 
   // Mirror of committed state, kept current for window-level event handlers.
   const stateRef = useRef(state);
@@ -1386,6 +1405,99 @@ export function useWorkspace(
     },
     [setState, computeFit],
   );
+
+  // ── Selection actions (bottom action bar + right-click menu) ───────────────
+  // Delete is real (soft-delete via deletePhoto); the rest are stubs pending
+  // their backends, matching the app's "coming soon" pattern (Share, Connect).
+
+  const deleteSelected = useCallback(() => {
+    const ids = stateRef.current.selectedIds.slice();
+    if (ids.length === 0) return flashToast("Select files to delete");
+    ids.forEach((id) => deletePhoto(id));
+    setContextMenu(null);
+  }, [deletePhoto, flashToast]);
+
+  const copyFiles = useCallback(() => { setContextMenu(null); flashToast("Copy — coming soon"); }, [flashToast]);
+  const duplicateFiles = useCallback(() => { setContextMenu(null); flashToast("Duplicate — coming soon"); }, [flashToast]);
+  const exportFiles = useCallback(() => { setContextMenu(null); flashToast("Export — coming soon"); }, [flashToast]);
+  const groupFiles = useCallback(() => { setContextMenu(null); flashToast("Group — coming soon"); }, [flashToast]);
+  const archiveFiles = useCallback(() => { setContextMenu(null); flashToast("Archive — coming soon"); }, [flashToast]);
+
+  /** New function: wrap the current selection in an artboard (frame). Artboards
+   *  live on the Workspace, so the bounding box is computed in neural (grid)
+   *  coordinates and — if invoked from a sorting view — we switch back first so
+   *  the frame lands where the tiles rest. */
+  const addToNewArtboard = useCallback(() => {
+    const s = stateRef.current;
+    const ids = s.selectedIds;
+    if (ids.length === 0) return flashToast("Select files to add to an artboard");
+    const pos = activeTilePositions({ ...s, view: "neural" });
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const id of ids) {
+      const p = pos[id];
+      if (!p) continue;
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + p.w);
+      maxY = Math.max(maxY, p.y + p.h);
+    }
+    if (!Number.isFinite(minX)) return flashToast("Select files to add to an artboard");
+    const pad = 28;
+    pushHistory();
+    const n = s.frames.length + 1;
+    const frame = {
+      id: "frame" + Date.now(),
+      x: minX - pad,
+      y: minY - pad,
+      w: Math.max(40, maxX - minX + pad * 2),
+      h: Math.max(40, maxY - minY + pad * 2),
+      label: "Frame " + n,
+    };
+    if (s.view !== "neural") setView("neural");
+    setState((prev) => ({ frames: [...prev.frames, frame] }));
+    setContextMenu(null);
+    flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to a new artboard`);
+  }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
+
+  /** New function: pack the current selection into an existing artboard by
+   *  overriding each tile's Workspace center to a grid inside the frame bounds. */
+  const addToExistingArtboard = useCallback((frameId: string) => {
+    const s = stateRef.current;
+    const ids = s.selectedIds;
+    if (ids.length === 0) return flashToast("Select files to add to an artboard");
+    const frame = s.frames.find((f) => f.id === frameId);
+    if (!frame) return;
+    const pos = activeTilePositions({ ...s, view: "neural" });
+    const pad = 24, gap = 16, cell = 120;
+    const cols = Math.max(1, Math.floor((frame.w - pad * 2 + gap) / (cell + gap)));
+    pushHistory();
+    const asset = { ...s.galleryOverrides.asset };
+    ids.forEach((id, i) => {
+      const p = pos[id];
+      const w = p?.w ?? cell, h = p?.h ?? cell;
+      const col = i % cols, row = Math.floor(i / cols);
+      asset[id] = {
+        x: frame.x + pad + col * (cell + gap) + w / 2,
+        y: frame.y + pad + row * (cell + gap) + h / 2,
+      };
+    });
+    if (s.view !== "neural") setView("neural");
+    setState((prev) => ({ galleryOverrides: { ...prev.galleryOverrides, asset } }));
+    setContextMenu(null);
+    flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to "${frame.label}"`);
+  }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
+
+  /** Open the grid context menu at the cursor. A right-click on an unselected
+   *  tile selects it first (matching desktop file-manager behaviour) so the menu
+   *  acts on what you clicked. */
+  const openContextMenu = useCallback((x: number, y: number, targetId: string | null) => {
+    if (targetId && !stateRef.current.selectedIds.includes(targetId)) {
+      setState({ selectedIds: [targetId], drawerId: null });
+    }
+    setContextMenu({ x, y, targetId });
+  }, [setState]);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
   // Fit once on first mount, but only after the canvas has a real size — a
   // zero-size rect (background tab / not-yet-painted) would produce a bad fit.
@@ -2410,6 +2522,19 @@ export function useWorkspace(
     frameDraft,
     deleteFrame,
     renameFrame,
+
+    deleteSelected,
+    copyFiles,
+    duplicateFiles,
+    exportFiles,
+    groupFiles,
+    archiveFiles,
+    addToNewArtboard,
+    addToExistingArtboard,
+
+    contextMenu,
+    openContextMenu,
+    closeContextMenu,
 
     stickyNotes: state.stickyNotes,
     addStickyNote,
