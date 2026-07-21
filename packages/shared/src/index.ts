@@ -170,6 +170,50 @@ export const createJobRequestSchema = z.discriminatedUnion("type", [
 ]);
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
 
+// ── Drive import (spec §9 POST /api/imports; ADR 0025; issue #23) ────────────
+
+/** Real Drive file ids are URL-safe [A-Za-z0-9_-]. The regex is load-bearing,
+ *  not cosmetic: the id is later interpolated into a Bearer-authorized Drive
+ *  URL server-side, so a permissive string like `../files?q=…` would redirect
+ *  that GET to other Drive endpoints under the connection owner's token. */
+export const driveFileIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{10,256}$/, "invalid Drive file id");
+
+/** One picked Picker doc. The Picker returns id/name/mimeType/sizeBytes only —
+ *  md5Checksum/imageMediaMetadata are NOT available client-side; the worker
+ *  fetches them itself via files.get. */
+export const importItemSchema = z.object({
+  fileId: driveFileIdSchema,
+  name: z.string().trim().min(1).max(512),
+  mimeType: z.string().min(1).max(255),
+  sizeBytes: z.number().int().nonnegative().optional(),
+});
+export type ImportItem = z.infer<typeof importItemSchema>;
+
+/** POST /api/imports — the client chunks Picker results to ≤500 per request
+ *  (same cap as completeUploadRequestSchema; one ingest job per request). */
+export const importRequestSchema = z.object({
+  provider: z.literal("gdrive"), // widens to an enum when Dropbox (#24) lands
+  connectionId: uuidSchema,
+  projectId: uuidSchema.optional(), // link via project_assets, like uploads
+  items: z.array(importItemSchema).min(1).max(500),
+});
+export type ImportRequest = z.infer<typeof importRequestSchema>;
+
+export const importResponseSchema = z.object({
+  /** newly created assets (order not guaranteed to match items) */
+  assetIds: z.array(uuidSchema),
+  /** the enqueued ingest job — null when every item was a duplicate */
+  jobId: uuidSchema.nullable(),
+  /** re-picks of an already-imported (connection, source_file_id) pair… */
+  skippedDuplicates: z.number().int().nonnegative(),
+  /** …of which, when projectId was given, this many existing assets were
+   *  linked to the project instead of silently skipped (M:N, ADR 0011) */
+  linkedExisting: z.number().int().nonnegative(),
+});
+export type ImportResponse = z.infer<typeof importResponseSchema>;
+
 // ── Projects (spec §9; issue #17) — homepage CRUD + M:N asset membership ─────
 
 export const createProjectRequestSchema = z.object({
