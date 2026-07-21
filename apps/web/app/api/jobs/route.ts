@@ -4,8 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
 /** POST /api/jobs (spec §9) — the user-triggered AI entry point: analyze
- *  (#12) and caption (#14); export joins with its phase. RLS scopes the
- *  asset check and the insert to the caller's workspace. */
+ *  (#12), caption (#14), and ingest re-runs (#23 — heals Drive-linked assets
+ *  after a failed download or a reconnect; the worker's resume guard makes
+ *  repeats cheap). Export joins with its phase. RLS scopes the asset check
+ *  and the insert to the caller's workspace. */
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -33,7 +35,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "no matching assets" }, { status: 404 });
   }
 
-  // Caption progress counts asset × lang units; analyze counts assets.
+  // Caption progress counts asset × lang units; analyze/ingest count assets.
+  // (analyze and ingest share the {asset_ids} payload shape — see shared.)
   const payload =
     parsed.data.type === "caption"
       ? captionJobPayloadSchema.parse({ asset_ids: assetIds, langs: parsed.data.langs, style: parsed.data.style })

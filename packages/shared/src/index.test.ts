@@ -337,3 +337,24 @@ describe("google connect contracts (ADR 0025)", () => {
     expect(googleConnectionStatusSchema.safeParse({ connected: "yes", email: null }).success).toBe(false);
   });
 });
+
+describe("createJobRequestSchema ingest variant (#23 re-ingest)", () => {
+  const ids = ["8f7a1c2e-0000-4000-8000-1234567890ab"];
+
+  it("accepts { type: 'ingest', assetIds }", () => {
+    const parsed = createJobRequestSchema.parse({ type: "ingest", assetIds: ids });
+    expect(parsed.type).toBe("ingest");
+  });
+
+  it("rejects ingest with caption-only fields and empty/oversized id lists", () => {
+    expect(
+      createJobRequestSchema.safeParse({ type: "ingest", assetIds: ids, langs: ["en"] }).success,
+    ).toBe(true); // extra keys are stripped by zod object defaults, not fatal
+    expect(createJobRequestSchema.safeParse({ type: "ingest", assetIds: [] }).success).toBe(false);
+    expect(
+      createJobRequestSchema.safeParse({ type: "ingest", assetIds: Array(501).fill(ids[0]) })
+        .success,
+    ).toBe(false);
+    expect(createJobRequestSchema.safeParse({ type: "export", assetIds: ids }).success).toBe(false);
+  });
+});

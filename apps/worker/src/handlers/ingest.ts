@@ -2,16 +2,23 @@ import { createHash } from "node:crypto";
 import { ingestJobPayloadSchema } from "@archivemind/shared";
 import type pg from "pg";
 import { extractExif } from "../services/exif";
+import { DriveFileError, downloadDriveFile, getDriveFileMeta } from "../services/gdrive";
 import { heicToRaw } from "../services/heic";
 import { makePreviews, previewKey, type PreviewInput } from "../services/previews";
 import { deleteObject, getObjectBuffer, putObject } from "../services/r2";
 import { isRawFilename, rawToJpeg } from "../services/raw";
+import { DriveTokenError, DriveTokenSource } from "../services/tokens";
 import type { HandlerContext } from "./index";
 
 /** Ingest (spec §8.1), per asset: stream bytes → sha256 dedup → EXIF →
  *  decode (sharp / heic-decode / RAW cascade) → previews to R2 →
  *  asset_exif + asset_previews rows → auto-enqueue analyze for the batch.
- *  Sequential on purpose: HEIC decode can take ~200 MB RAM per file. */
+ *  Sequential on purpose: HEIC decode can take ~200 MB RAM per file.
+ *
+ *  Byte sources (ADR 0025): uploads and Dropbox originals come from R2
+ *  (r2_key); Drive-linked files (origin='gdrive', r2_key null) are streamed
+ *  from Drive at processing time and their originals are NEVER stored —
+ *  TECH_SPEC §6. */
 
 interface AssetRow {
   asset_id: string;
@@ -20,7 +27,15 @@ interface AssetRow {
   file_id: string;
   r2_key: string | null;
   mime_type: string | null;
+  origin: string;
+  source_connection_id: string | null;
+  source_file_id: string | null;
+  content_hash: string | null;
+  preview_count: number;
 }
+
+/** Drive originals we refuse to pull into worker RAM (whole-file Buffer). */
+const MAX_IMPORT_BYTES = Number(process.env.MAX_IMPORT_BYTES ?? 200 * 1024 * 1024);
 
 const SHARP_MIMES = /^image\/(jpeg|png|webp|tiff|gif|avif)$/;
 const HEIC_MIMES = /^image\/(heic|heif)$/;
@@ -66,7 +81,9 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
 
   const { rows } = await pool.query<AssetRow>(
     `select a.id as asset_id, a.workspace_id, a.title,
-            f.id as file_id, f.r2_key, f.mime_type
+            f.id as file_id, f.r2_key, f.mime_type,
+            f.origin, f.source_connection_id, f.source_file_id, f.content_hash,
+            (select count(*)::int from asset_previews ap where ap.asset_id = a.id) as preview_count
      from assets a
      join files f on f.asset_id = a.id
      where a.id = any($1::uuid[])
@@ -74,19 +91,60 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     [asset_ids],
   );
 
+  const tokens = new DriveTokenSource(pool);
   const analyzeIds: string[] = [];
   let done = 0;
+  let failed = 0;
+  let deduped = 0;
 
   for (const row of rows) {
     const label = row.title ?? row.asset_id;
     await progress(Math.round((done / rows.length) * 100), `Processing ${label}`, done, rows.length);
 
+    let buf: Buffer;
     if (!row.r2_key) {
-      done += 1; // cloud-linked files stream at Phase 6; nothing to do yet
-      continue;
+      if (row.origin !== "gdrive" || !row.source_connection_id || !row.source_file_id) {
+        done += 1; // unknown cloud origin — nothing to stream from yet
+        continue;
+      }
+      // Resume guard: a re-run (retry after partial failure, or an explicit
+      // re-ingest) must not re-download files that already made it through.
+      if (row.content_hash && row.preview_count >= 2) {
+        done += 1;
+        continue;
+      }
+      try {
+        buf = await downloadWithTokenRetry(tokens, row.source_connection_id, row.source_file_id);
+        if (buf.length !== 0) {
+          await pool.query(`update files set byte_size = $2 where id = $1`, [
+            row.file_id,
+            buf.length,
+          ]);
+        }
+      } catch (err) {
+        if (err instanceof DriveTokenError) throw err; // whole connection is dead — fail the job
+        if (err instanceof DriveFileError && err.code === "drive_file_not_found") {
+          // Spec §12: the source no longer has the file (or the grant is gone).
+          await pool.query(`update assets set status='source_missing' where id = $1`, [
+            row.asset_id,
+          ]);
+          console.log(`[ingest] ${label}: drive_file_not_found → source_missing`);
+          failed += 1;
+        } else if (err instanceof DriveFileError && err.code === "drive_file_too_large") {
+          // Final state, like an undecodable upload: kept, but no previews/AI.
+          await pool.query(`update assets set kind='other' where id = $1`, [row.asset_id]);
+          console.log(`[ingest] ${label}: over MAX_IMPORT_BYTES → kind='other'`);
+        } else {
+          const code = err instanceof DriveFileError ? err.code : "drive_download_failed";
+          console.log(`[ingest] ${label}: ${code} — skipped this run`);
+          failed += 1;
+        }
+        done += 1;
+        continue;
+      }
+    } else {
+      buf = await getObjectBuffer(row.r2_key);
     }
-
-    const buf = await getObjectBuffer(row.r2_key);
 
     // sha256 + dedup. files_dedup_idx is UNIQUE (workspace_id, content_hash) —
     // the schema allows exactly ONE file row per distinct content, so a
@@ -100,14 +158,25 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
       [row.workspace_id, hash, row.file_id],
     );
     if (dupes.length > 0) {
+      // The doomed asset's project links move to the survivor FIRST — a Drive
+      // copy of an already-uploaded photo was just imported into a project,
+      // and "silently vanishes from that project" is not acceptable dedup UX
+      // (assets are M:N to projects, ADR 0011).
+      await pool.query(
+        `insert into project_assets (project_id, asset_id)
+         select pa.project_id, $2 from project_assets pa where pa.asset_id = $1
+         on conflict do nothing`,
+        [row.asset_id, dupes[0].asset_id],
+      );
       await pool.query(`delete from files where id = $1`, [row.file_id]);
       await pool.query(
         `delete from assets a where a.id = $1
            and not exists (select 1 from files f where f.asset_id = a.id)`,
         [row.asset_id],
       );
-      await deleteObject(row.r2_key).catch(() => {}); // best-effort cleanup
-      console.log(`[ingest] ${label}: duplicate of asset ${dupes[0].asset_id} — dropped`);
+      if (row.r2_key) await deleteObject(row.r2_key).catch(() => {}); // best-effort cleanup
+      console.log(`[ingest] ${label}: duplicate of asset ${dupes[0].asset_id} — merged into it`);
+      deduped += 1;
       done += 1;
       continue;
     }
@@ -171,7 +240,13 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     done += 1;
   }
 
-  await progress(100, `Processed ${done} file(s)`, done, rows.length);
+  const tail = [
+    deduped > 0 ? `${deduped} deduped` : null,
+    failed > 0 ? `${failed} failed` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  await progress(100, `Processed ${done} file(s)${tail ? ` (${tail})` : ""}`, done, rows.length);
 
   // Analyze is an EXPLICIT user action (selection → POST /api/jobs) — product
   // decision 2026-07-10: every analyze call costs money, so the user stays in
@@ -183,5 +258,30 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
        values ($1, $2, 'analyze', $3, $4, 0)`,
       [job.workspace_id, job.user_id, JSON.stringify({ asset_ids: analyzeIds }), analyzeIds.length],
     );
+  }
+}
+
+/** Drive bytes with a size guard (metadata first — 5 units beats a wasted
+ *  200-unit oversize download) and a single re-mint on a token that expired
+ *  mid-batch (long serial batches CAN outlive the ~1h access token). */
+async function downloadWithTokenRetry(
+  tokens: DriveTokenSource,
+  connectionId: string,
+  sourceFileId: string,
+): Promise<Buffer> {
+  const token = await tokens.getAccessToken(connectionId);
+  try {
+    const meta = await getDriveFileMeta(sourceFileId, token);
+    if (meta.size != null && meta.size > MAX_IMPORT_BYTES) {
+      throw new DriveFileError("drive_file_too_large");
+    }
+    return await downloadDriveFile(sourceFileId, token);
+  } catch (err) {
+    if (err instanceof DriveFileError && err.code === "drive_token_expired") {
+      tokens.invalidate(connectionId);
+      const fresh = await tokens.getAccessToken(connectionId);
+      return await downloadDriveFile(sourceFileId, fresh);
+    }
+    throw err;
   }
 }
