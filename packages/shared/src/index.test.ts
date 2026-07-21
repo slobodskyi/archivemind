@@ -12,6 +12,8 @@ import {
   createJobRequestSchema,
   createProjectRequestSchema,
   driveFileIdSchema,
+  googleConnectRequestSchema,
+  googleConnectionStatusSchema,
   importItemSchema,
   importRequestSchema,
   importResponseSchema,
@@ -318,5 +320,20 @@ describe("drive import contracts (ADR 0025)", () => {
         linkedExisting: 0,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("google connect contracts (ADR 0025)", () => {
+  it("accepts an opaque authorization code and rejects empties/oversize", () => {
+    expect(googleConnectRequestSchema.safeParse({ code: "4/0AVMBs…example" }).success).toBe(true);
+    expect(googleConnectRequestSchema.safeParse({ code: "" }).success).toBe(false);
+    expect(googleConnectRequestSchema.safeParse({ code: "x".repeat(4097) }).success).toBe(false);
+    expect(googleConnectRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("status is a boolean + nullable email — never an error string", () => {
+    expect(googleConnectionStatusSchema.safeParse({ connected: true, email: "a@b.c" }).success).toBe(true);
+    expect(googleConnectionStatusSchema.safeParse({ connected: false, email: null }).success).toBe(true);
+    expect(googleConnectionStatusSchema.safeParse({ connected: "yes", email: null }).success).toBe(false);
   });
 });

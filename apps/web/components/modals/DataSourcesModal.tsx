@@ -1,18 +1,35 @@
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import { CloseIcon, GDriveIcon, DropboxIcon } from "@/components/icons/icons";
 
+export interface GdriveConnectionState {
+  connected: boolean;
+  email: string | null;
+  busy: boolean;
+}
+
 interface DataSourcesModalProps {
   open: boolean;
   onClose: () => void;
+  /** Dropbox only (still a coming-soon stub); gdrive has its own handlers. */
   onConnect: (name: string) => void;
+  gdrive: GdriveConnectionState;
+  onGdriveConnect: () => void;
+  onGdriveDisconnect: () => void;
 }
 
 const CONNECTABLE = [
-  { key: "gdrive", label: "Google Drive", desc: "Import photos from your Drive folders.", Icon: GDriveIcon },
+  { key: "gdrive", label: "Google Drive", desc: "Import photos from your Drive.", Icon: GDriveIcon },
   { key: "dropbox", label: "Dropbox", desc: "Import photos from your Dropbox folders.", Icon: DropboxIcon },
 ] as const;
 
-export default function DataSourcesModal({ open, onClose, onConnect }: DataSourcesModalProps) {
+export default function DataSourcesModal({
+  open,
+  onClose,
+  onConnect,
+  gdrive,
+  onGdriveConnect,
+  onGdriveDisconnect,
+}: DataSourcesModalProps) {
   if (!open) return null;
   return (
     <div
@@ -43,26 +60,61 @@ export default function DataSourcesModal({ open, onClose, onConnect }: DataSourc
           </button>
         </div>
         <div style={{ padding: "16px 20px 20px" }}>
-          {CONNECTABLE.map(({ key, label, desc, Icon }) => (
-            <div
-              key={key}
-              style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 4px", borderBottom: "1px solid var(--bd)" }}
-            >
-              <span style={{ display: "flex", width: 32, height: 32, flex: "0 0 auto", alignItems: "center", justifyContent: "center", borderRadius: 2, background: "var(--bg-el)" }}>
-                <Icon />
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>{label}</div>
-                <div style={{ fontSize: 11.5, color: "var(--tm)", marginTop: 1 }}>{desc}</div>
-              </div>
-              <button
-                onClick={() => onConnect(label)}
-                style={{ flex: "0 0 auto", height: 28, padding: "0 12px", background: "var(--bg-el)", border: "1px solid var(--bdh)", borderRadius: 2, color: "var(--t1)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+          {CONNECTABLE.map(({ key, label, desc, Icon }) => {
+            const isGdrive = key === "gdrive";
+            const connected = isGdrive && gdrive.connected;
+            const busy = isGdrive && gdrive.busy;
+            return (
+              <div
+                key={key}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 4px", borderBottom: "1px solid var(--bd)" }}
               >
-                Connect
-              </button>
-            </div>
-          ))}
+                <span style={{ display: "flex", width: 32, height: 32, flex: "0 0 auto", alignItems: "center", justifyContent: "center", borderRadius: 2, background: "var(--bg-el)" }}>
+                  <Icon />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>{label}</div>
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      color: connected ? "var(--ac)" : "var(--tm)",
+                      marginTop: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {connected ? `Connected${gdrive.email ? ` as ${gdrive.email}` : ""}` : desc}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!isGdrive) return onConnect(label);
+                    if (busy) return;
+                    if (connected) onGdriveDisconnect();
+                    else onGdriveConnect();
+                  }}
+                  disabled={busy}
+                  style={{
+                    flex: "0 0 auto",
+                    height: 28,
+                    padding: "0 12px",
+                    background: "var(--bg-el)",
+                    border: "1px solid var(--bdh)",
+                    borderRadius: 2,
+                    color: connected ? "var(--t2b)" : "var(--t1)",
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    cursor: busy ? "default" : "pointer",
+                    opacity: busy ? 0.6 : 1,
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {busy ? "…" : connected ? "Disconnect" : "Connect"}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

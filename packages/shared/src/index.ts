@@ -201,6 +201,21 @@ export const importRequestSchema = z.object({
 });
 export type ImportRequest = z.infer<typeof importRequestSchema>;
 
+/** POST /api/integrations/google/connect — the popup code flow's server half.
+ *  Google authorization codes are opaque; cap length, nothing more. */
+export const googleConnectRequestSchema = z.object({
+  code: z.string().min(1).max(4096),
+});
+export type GoogleConnectRequest = z.infer<typeof googleConnectRequestSchema>;
+
+/** GET /api/integrations/google — connection status for the sources modal.
+ *  Errors travel as first-party codes ({ error: string }), never this shape. */
+export const googleConnectionStatusSchema = z.object({
+  connected: z.boolean(),
+  email: z.string().nullable(),
+});
+export type GoogleConnectionStatus = z.infer<typeof googleConnectionStatusSchema>;
+
 export const importResponseSchema = z.object({
   /** newly created assets (order not guaranteed to match items) */
   assetIds: z.array(uuidSchema),
