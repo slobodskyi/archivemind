@@ -27,6 +27,45 @@ export type JobType = z.infer<typeof jobTypeSchema>;
 export const jobStatusSchema = z.enum(["queued", "running", "done", "failed", "canceled"]);
 export type JobStatus = z.infer<typeof jobStatusSchema>;
 
+// ── Dropbox import (ADR 0008: Chooser direct links, no OAuth; #24) ───────────
+
+/** SSRF gate for Chooser direct links, shared by the imports route (parse
+ *  time) and the worker (fetch time, defense in depth): the link is fed to a
+ *  server-side fetch, so ONLY Dropbox's direct-content host is acceptable —
+ *  https, no credentials, no port games. Exported for tests + the worker. */
+export function isDropboxDirectLink(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === "https:" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.port === "" &&
+    (url.hostname === "dl.dropboxusercontent.com" ||
+      url.hostname.endsWith(".dl.dropboxusercontent.com"))
+  );
+}
+
+export const dropboxDirectLinkSchema = z
+  .string()
+  .max(2048)
+  .refine(isDropboxDirectLink, "not a Dropbox direct link");
+
+/** One picked Chooser file. `sourceId` is Chooser's stable file id — the
+ *  dedupe key (never interpolated into any URL; the link is what gets
+ *  fetched, and it expires after ~4 h). */
+export const dropboxImportItemSchema = z.object({
+  sourceId: z.string().min(1).max(256),
+  name: z.string().trim().min(1).max(512),
+  link: dropboxDirectLinkSchema,
+  sizeBytes: z.number().int().nonnegative().optional(),
+});
+export type DropboxImportItem = z.infer<typeof dropboxImportItemSchema>;
+
 // ── Upload path (TECH_SPEC §6, §9) — web routes ↔ browser, later the worker ──
 
 export const assetKindSchema = z.enum(["photo", "pdf", "document", "other"]);
@@ -88,9 +127,24 @@ export const completeUploadResponseSchema = z.object({
 export type CompleteUploadResponse = z.infer<typeof completeUploadResponseSchema>;
 
 /** ai_jobs.payload for type='ingest' (spec §8.1) — produced by the web
- *  complete-route, consumed by the worker handler. */
+ *  complete/imports routes, consumed by the worker handler.
+ *
+ *  `dropbox` (#24, ADR 0008): Chooser direct links live ~4 h and cannot be
+ *  re-minted, so they ride in the job payload (broadcast reaches workspace
+ *  members only — the same people who will see the photos) and the worker
+ *  fetches each once into R2. A retry after expiry per-file-fails with
+ *  `dropbox_link_expired`; a re-pick brings a fresh link in a fresh job. */
 export const ingestJobPayloadSchema = z.object({
   asset_ids: z.array(uuidSchema).min(1),
+  dropbox: z
+    .array(
+      z.object({
+        asset_id: uuidSchema,
+        link: dropboxDirectLinkSchema,
+        name: z.string().min(1).max(512),
+      }),
+    )
+    .optional(),
 });
 export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
 
