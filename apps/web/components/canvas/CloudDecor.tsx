@@ -107,9 +107,11 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey }: CloudDecorProps) {
             strokeOpacity={e.op}
             strokeLinecap="round"
             fill="none"
-            // When a cloud is focused, keep its own lines bright and fade the
-            // rest — but only halfway, so cross-cloud connections stay readable
-            // (less faded than the inactive clouds themselves).
+            // When a cloud is focused, its own same-cloud lines stay bright;
+            // everything else — other clouds' lines AND every cross-cloud
+            // bridge (cloudKey is undefined on bridges, including the focused
+            // cloud's own) — fades only halfway, so cross-cloud connections
+            // stay readable (less faded than the inactive clouds themselves).
             opacity={focusedCloudKey && e.cloudKey !== focusedCloudKey ? 0.5 : 1}
             style={{ transition: "opacity .2s ease" }}
           />

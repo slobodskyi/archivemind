@@ -32,8 +32,10 @@ same glide).
   on a horizontal axis line with a colored tick per date.
 - **Files fill a grid centered on their date, split above and below the axis**
   (odd counts put the extra tile above), so a busy day grows symmetrically and
-  even hundreds of files stay in their day's column. Within a day files order
-  chronologically (stable hash tie-break — deterministic, SSR-safe).
+  even hundreds of files stay in their day's column. Partial rows re-center on
+  the date (a 1-file day sits exactly under its tick, not left-filled into a
+  3-slot grid). Within a day files order chronologically (stable hash
+  tie-break — deterministic, SSR-safe).
 - **Drag is clamped to the date column**: a tile's override x is clamped into
   its own day's ± half-gap range (y stays free) — files can never visually
   cross onto another date. The colored day cloud is a stronger **band pinned
@@ -43,16 +45,25 @@ same glide).
   structure; the shared-tag web (0022) stays on Map/Topic. `CloudLayout` gains
   an optional `axis` field only Timeline sets.
 - **Cloud focus (all grouping views):** clicking a cloud's label focuses that
-  cloud — other clouds' backdrops, tiles and labels fade to 22%, while their
-  *lines* fade only halfway (50%) so cross-cloud links stay readable. Clicking
-  the label again, clicking empty canvas, or switching views clears focus.
-  Implemented via `CloudLayout.tileCloud` (tile → cloud) and a `cloudKey` on
-  same-cloud edges; focus state is UI-only (`focusedCloudKey`), never
-  persisted.
+  cloud — other clouds' backdrops, tiles and labels fade to 22%, while *lines*
+  fade only halfway (50%) so cross-cloud links stay readable. The halfway fade
+  applies to every cross-cloud bridge, including the focused cloud's own —
+  bridges carry no `cloudKey`, only same-cloud lines do, and only the focused
+  cloud's same-cloud lines stay at full opacity. Clicking the label again,
+  clicking empty canvas, or switching views clears focus; a focus key whose
+  cloud no longer exists (photo deleted, topics re-derived) reads as no focus
+  rather than dimming the whole canvas. Focus state is UI-only
+  (`focusedCloudKey`), never persisted.
 - **Whole-cloud drag:** dragging a cloud's label moves every tile of that
   cloud together (one history entry, one override write per tile into the
-  active view's bucket). A click without movement is what focuses; >3px of
-  movement is a drag.
+  active view's bucket; the origin positions come from the exact layout the
+  canvas is rendering — no recompute in the pointer-down handler). A click
+  without movement is what focuses; >3px of movement is a drag. **On Timeline
+  the whole-cloud drag is vertical-only** (and only vertical movement counts
+  as a drag): the label, tick and band are pinned to the date column and tile
+  x is clamped into it, so a horizontal component could only write raw
+  overrides past the clamp — a saturating write that would permanently
+  collapse the day's 3-column grid into a line once re-anchored.
 - **Icon refresh:** AI assistant → sparkle, Pan → 4-way move, from the design
   system's line/fill set.
 
@@ -62,8 +73,13 @@ same glide).
   while staying the same persistent-tile canvas (tiles still glide when
   switching views).
 - Day-level bucketing means a no-EXIF file falls to its `created_at` day, and
-  malformed dates land on the epoch day (1970) — visible at the far left, an
-  honest signal rather than a hidden bug (same `capturedAt` fallback as 0016).
+  malformed dates land on the epoch day — *local* midnight Jan 1 1970, so the
+  bucket is `1970-01-01` in every timezone — visible at the far left, an honest
+  signal rather than a hidden bug. (`lib/assets.ts` also guards an unparseable
+  `asset_exif.taken_at` DB value back to `created_at`, so the epoch bucket is
+  reserved for truly malformed `dateTaken` strings.) The layout's bounds
+  include the axis line, ticks and labels on all sides, so fit/centering keeps
+  the axis with the tiles even when a day has no below-axis files.
 - Timeline drag overrides persist per project (0022's store) but are now
   clamped on read — stale coordinates from the cloud era can shift a tile
   within its day, never across days.

@@ -23,7 +23,7 @@ export const HELP_FAQ: FaqItem[] = [
   },
   {
     q: "How do project views differ?",
-    a: "Timeline groups files by month in a scrollable grid. Map plots files by location. Sense clusters files by AI-detected theme.",
+    a: "Timeline lays files out on a horizontal date axis — one column per capture day. Map plots files by location. Topic clusters files by AI-detected theme; click a cloud's label to focus it, drag the label to move the whole cloud.",
   },
   {
     q: "Is my data private?",

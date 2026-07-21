@@ -335,13 +335,57 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(layout.tileCloud.apr2).toBe("2026-04-10");
     expect(layout.tiles.apr1.cy).toBeLessThan(0); // above the axis (y=0)
     expect(layout.tiles.apr2.cy).toBeGreaterThan(0); // below
+    // A single-file day centers exactly under its tick, above the axis (ceil).
+    expect(layout.tiles.jul1.cx).toBe(layout.clouds[1].labelX);
+    expect(layout.tiles.jul1.cy).toBeLessThan(0);
+    // Partial rows re-center on the date: the two apr files straddle the tick.
+    const aprX = layout.clouds[0].labelX;
+    expect(layout.tiles.apr1.cx).toBe(aprX);
+    expect(layout.tiles.apr2.cx).toBe(aprX);
+    // Bounds cover the axis line and labels, not just the tile bbox.
+    expect(layout.bounds.xl).toBeLessThanOrEqual(layout.axis!.x1);
+    expect(layout.bounds.xr).toBeGreaterThanOrEqual(layout.axis!.x2);
+    expect(layout.bounds.yb).toBeGreaterThanOrEqual(layout.axis!.y);
 
-    // A drag override cannot pull a tile across its date border: x clamps
-    // into the day's column, y stays free.
-    const dragged = timelineAxisLayout(photos, { apr1: { x: 5000, y: -300 } });
-    const col = dragged.clouds[0].labelX;
-    expect(dragged.tiles.apr1.cx).toBeLessThanOrEqual(col + 210);
-    expect(dragged.tiles.apr1.cy).toBe(-300);
+    // A drag override cannot pull a tile across its date border in EITHER
+    // direction: the tile's EDGE clamps inside the column, y stays free.
+    const w = layout.tiles.apr1.w;
+    const right = timelineAxisLayout(photos, { apr1: { x: 5000, y: -300 } });
+    expect(right.tiles.apr1.cx + w / 2).toBeLessThanOrEqual(aprX + 210);
+    expect(right.tiles.apr1.cy).toBe(-300);
+    const left = timelineAxisLayout(photos, { apr1: { x: -5000, y: 40 } });
+    expect(left.tiles.apr1.cx - w / 2).toBeGreaterThanOrEqual(aprX - 210);
+    expect(left.tiles.apr1.cy).toBe(40);
+  });
+
+  it("splits an odd day 2-above/1-below with each partial row centered on the tick", () => {
+    const at = (d: string) => ({ ...photo("x").exif, dateTaken: d });
+    const layout = timelineAxisLayout(
+      [
+        photo("a", { exif: at("2026-05-01 09:00") }),
+        photo("b", { exif: at("2026-05-01 12:00") }),
+        photo("c", { exif: at("2026-05-01 18:00") }),
+      ],
+      {},
+    );
+    const x = layout.clouds[0].labelX;
+    // ceil(3/2) = 2 above (a, b — chronological), 1 below (c).
+    expect(layout.tiles.a.cy).toBeLessThan(0);
+    expect(layout.tiles.b.cy).toBeLessThan(0);
+    expect(layout.tiles.c.cy).toBeGreaterThan(0);
+    // Above row of 2 straddles the tick; the below single sits exactly on it.
+    expect(layout.tiles.a.cx).toBe(x - 64);
+    expect(layout.tiles.b.cx).toBe(x + 64);
+    expect(layout.tiles.c.cx).toBe(x);
+  });
+
+  it("buckets malformed capture dates on the local 1970-01-01 epoch day", () => {
+    const layout = timelineAxisLayout(
+      [photo("bad", { exif: { ...photo("x").exif, dateTaken: "not a date" } })],
+      {},
+    );
+    expect(layout.clouds.map((c) => c.key)).toEqual(["1970-01-01"]);
+    expect(layout.clouds[0].label).toBe("01/01/1970");
   });
 
   it("timeline layout is deterministic for equivalent inputs", () => {

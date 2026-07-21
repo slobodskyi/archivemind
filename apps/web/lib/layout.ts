@@ -347,10 +347,13 @@ export const DEFAULT_ZOOM = 0.75;
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
 /** `exif.dateTaken` is always `"YYYY-MM-DD HH:mm"` (lib/assets.ts's toExifData) —
- *  never absent, so an unparseable value only happens for malformed test data. */
+ *  never absent, so an unparseable value only happens for malformed data. The
+ *  fallback is LOCAL midnight Jan 1 1970 (not `new Date(0)` = UTC midnight):
+ *  dayKeyOf reads local getters, so the UTC epoch would bucket as 1969-12-31
+ *  in any timezone west of UTC. Local-midnight keys "1970-01-01" everywhere. */
 function capturedAt(photo: Photo): Date {
   const d = new Date(photo.exif.dateTaken.replace(" ", "T"));
-  return Number.isNaN(d.getTime()) ? new Date(0) : d;
+  return Number.isNaN(d.getTime()) ? new Date(1970, 0, 1) : d;
 }
 
 /** Sortable day key "YYYY-MM-DD" from a photo's capture date. */
@@ -831,7 +834,12 @@ export function timelineAxisLayout(
       const li = above ? i : i - aboveCount;
       const col = li % TL_COLS;
       const row = Math.floor(li / TL_COLS);
-      const slotX = dateX + (col - (TL_COLS - 1) / 2) * TL_CELL_W;
+      // Center each row on the date: a partial row (1–2 files) spreads around
+      // dateX instead of left-filling the 3-slot grid — the tick always points
+      // at the day's files, not at empty canvas.
+      const halfCount = above ? aboveCount : day.length - aboveCount;
+      const rowCount = Math.min(TL_COLS, halfCount - row * TL_COLS);
+      const slotX = dateX + (col - (rowCount - 1) / 2) * TL_CELL_W;
       // Uniform rows keyed off the cell, not the tile, so rows align regardless
       // of each tile's aspect. Above grows up from the band, below grows down.
       const slotY = above
@@ -867,16 +875,20 @@ export function timelineAxisLayout(
     });
   });
 
-  const bounds = positionsBounds(tiles);
-  bounds.yt = Math.min(bounds.yt, TL_AXIS_Y - 44); // include the axis line + labels
-  return {
-    clouds,
-    tiles,
-    edges: [],
-    tileCloud,
-    bounds,
-    axis: { y: TL_AXIS_Y, x1: TL_LEFT - TL_DATE_GAP / 2, x2: TL_LEFT + (dayKeys.length - 1) * TL_DATE_GAP + TL_DATE_GAP / 2 },
+  const axis = {
+    y: TL_AXIS_Y,
+    x1: TL_LEFT - TL_DATE_GAP / 2,
+    x2: TL_LEFT + (dayKeys.length - 1) * TL_DATE_GAP + TL_DATE_GAP / 2,
   };
+  // Bounds cover the axis line, ticks and date labels on every side — not just
+  // the top — so fit/centering keeps the axis with the tiles (e.g. a project of
+  // single-photo days has no below-axis tiles at all).
+  const bounds = positionsBounds(tiles);
+  bounds.xl = Math.min(bounds.xl, axis.x1);
+  bounds.xr = Math.max(bounds.xr, axis.x2);
+  bounds.yt = Math.min(bounds.yt, TL_AXIS_Y - 44);
+  bounds.yb = Math.max(bounds.yb, TL_AXIS_Y + 10);
+  return { clouds, tiles, edges: [], tileCloud, bounds, axis };
 }
 
 // ── Minimap: orientation aid for pannable canvas views ──────────────────────

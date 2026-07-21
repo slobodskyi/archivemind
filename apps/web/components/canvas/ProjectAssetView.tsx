@@ -10,7 +10,7 @@ interface ProjectAssetViewProps {
   /** Positions for canonical photos in the active view (grid or cloud). */
   positions: Record<string, TilePos>;
   /** Positions for pending uploads — always the neutral grid, since a file has
-   *  no month/country/topic to sort by until the worker processes it. */
+   *  no capture date/country/topic to sort by until the worker processes it. */
   previewPositions: Record<string, TilePos>;
   selectedIds: Set<string>;
   hoveredId: string | null;
