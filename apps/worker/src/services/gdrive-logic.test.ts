@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { classifyDropboxStatus, dropboxRetryDelayMs } from "./dropbox";
 import { backoffMs, classifyDriveStatus } from "./gdrive";
 import { parseRefreshResponse } from "./tokens";
 
@@ -64,5 +65,29 @@ describe("parseRefreshResponse", () => {
     });
     // 200 with no token is still a failure, never an ok with undefined
     expect(parseRefreshResponse(200, {}).ok).toBe(false);
+  });
+});
+
+describe("dropbox: classifyDropboxStatus / dropboxRetryDelayMs", () => {
+  it("maps the 4h-window closure (410) and deleted files (404) to expired", () => {
+    expect(classifyDropboxStatus(410)).toBe("expired");
+    expect(classifyDropboxStatus(404)).toBe("expired");
+  });
+
+  it("retries 429 and 5xx, passes 2xx, treats the rest as fatal", () => {
+    expect(classifyDropboxStatus(429)).toBe("retry");
+    expect(classifyDropboxStatus(503)).toBe("retry");
+    expect(classifyDropboxStatus(200)).toBe("ok");
+    expect(classifyDropboxStatus(403)).toBe("fatal");
+  });
+
+  it("honors Retry-After seconds (capped) and falls back to backoff", () => {
+    expect(dropboxRetryDelayMs("7", 0)).toBe(7000);
+    expect(dropboxRetryDelayMs("999", 0)).toBe(64_000); // cap
+    expect(dropboxRetryDelayMs("0", 3)).toBe(0); // namespace-lock flavor
+    const fallback = dropboxRetryDelayMs(null, 0);
+    expect(fallback).toBeGreaterThanOrEqual(1500);
+    expect(fallback).toBeLessThan(2000);
+    expect(dropboxRetryDelayMs("not-a-number", 20)).toBe(64_000);
   });
 });
