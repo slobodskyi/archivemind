@@ -46,7 +46,58 @@ const HIDDEN_LAYERS = [
   "water_name",
   "place_other",
   "place_suburb",
+  // The grey veil over Europe at country zoom: thousands of residential
+  // polygons, drawn from z0 to z9. Nothing at that scale is legible as land
+  // use — it reads only as a haze laid over the map.
+  "landuse_residential",
+  // The overview road network. Both exist purely to keep motorways visible
+  // when zoomed out, which is exactly the scale at which a photo map wants
+  // an empty continent.
+  "highway_motorway_subtle",
+  "highway_major_subtle",
+  // Road casings draw the same geometry a second time to outline it. That
+  // reads as depth on a light basemap and as a doubled line on a near-black
+  // one — 735 major roads became 1 470 strokes at z13, which is most of what
+  // "too noisy" was pointing at.
+  "highway_major_casing",
+  "highway_motorway_casing",
+  // Green fills and pier outlines: texture with nothing to say here.
+  "landuse_park",
+  "landcover_wood",
+  "road_area_pier",
+  "road_pier",
 ];
+
+/** Explicit zoom windows, replacing the upstream style's. Almost every place
+ *  layer ships as z0–something, so oblast and town names pile up over a whole
+ *  continent — the "too noisy" complaint. Each label tier now appears only at
+ *  the scale where it is the useful unit of geography, and roads hold off
+ *  until the map is close enough for a street to mean anything. */
+const ZOOM_RANGES: Record<string, [number, number]> = {
+  place_country_major: [0, 7],
+  place_country_minor: [2, 8],
+  place_country_other: [3, 8],
+  place_state: [6, 12], // was z0 — the oblast labels blanketing Europe
+  place_city_large: [4, 13],
+  place_city: [6, 14],
+  place_town: [9, 15],
+  place_village: [11, 15],
+  boundary_state: [6, 24],
+  highway_motorway_inner: [7, 24],
+  highway_minor: [14, 24],
+  waterway: [7, 24],
+};
+
+/** One name, not two. Upstream stacks the Latin and non-Latin names on two
+ *  lines (`VOLYN OBLAST` above `ВОЛИНСЬКА ОБЛАСТЬ`), which doubles the ink of
+ *  every label on the map — the single largest source of clutter.
+ *
+ *  English first, because `name:latin` is not a translation: for Latin-script
+ *  countries it is simply the local name, so a map labelled that way reads
+ *  "UKRAINE" beside "POLSKA" and "MAGYARORSZÁG". English also matches the
+ *  place labels the geocoder writes ("Kyiv, Ukraine", ADR 0026), so the map
+ *  and the drawer agree. Local name is the last resort. */
+const ENGLISH_LABEL = ["coalesce", ["get", "name:en"], ["get", "name:latin"], ["get", "name"]];
 
 const LAND = "#080808"; // --bg
 const WATER = "#101013"; // barely lifted: coastline reads by shape, not brightness
@@ -64,19 +115,10 @@ const PAINT_OVERRIDES: Record<string, Record<string, unknown>> = {
   background: { "background-color": LAND },
   water: { "fill-color": WATER },
   waterway: { "line-color": WATER },
-  landcover_wood: { "fill-color": "#0c0c0c" },
-  landuse_park: { "fill-color": "#0c0c0c" },
-  landuse_residential: { "fill-color": "#0a0a0a", "fill-opacity": 0.5 },
   building: { "fill-color": "#0b0b0b", "fill-outline-color": "rgba(255,255,255,0.03)" },
-  road_area_pier: { "fill-color": LAND },
-  road_pier: { "line-color": LAND },
   highway_minor: { "line-color": ROAD },
   highway_major_inner: { "line-color": ROAD_HI },
-  highway_major_casing: { "line-color": "rgba(255,255,255,0.03)" },
-  highway_major_subtle: { "line-color": ROAD },
   highway_motorway_inner: { "line-color": ROAD_HI },
-  highway_motorway_casing: { "line-color": "rgba(255,255,255,0.03)" },
-  highway_motorway_subtle: { "line-color": ROAD },
   boundary_state: { "line-color": HAIRLINE },
   "boundary_country_z0-4": { "line-color": HAIRLINE_HI },
   "boundary_country_z5-": { "line-color": HAIRLINE_HI },
@@ -109,8 +151,11 @@ const LAYOUT_OVERRIDES: Record<string, Record<string, unknown>> = {
 
 interface StyleLayer {
   id: string;
+  type?: string;
   paint?: Record<string, unknown>;
   layout?: Record<string, unknown>;
+  minzoom?: number;
+  maxzoom?: number;
 }
 interface StyleDoc {
   layers?: StyleLayer[];
@@ -132,6 +177,15 @@ export function applyArchiveMindTheme<T>(style: T): T {
     if (paint) layer.paint = { ...layer.paint, ...paint };
     const layout = LAYOUT_OVERRIDES[layer.id];
     if (layout) layer.layout = { ...layer.layout, ...layout };
+    const zoom = ZOOM_RANGES[layer.id];
+    if (zoom) {
+      layer.minzoom = zoom[0];
+      layer.maxzoom = zoom[1];
+    }
+    // Every place label, whatever its tier, drops to a single script.
+    if (layer.type === "symbol" && layer.id.startsWith("place_")) {
+      layer.layout = { ...layer.layout, "text-field": ENGLISH_LABEL };
+    }
   }
 
   for (const source of Object.values(doc.sources ?? {})) {
@@ -142,4 +196,17 @@ export function applyArchiveMindTheme<T>(style: T): T {
 
 /** Exported for the test that guards against overriding a layer that the
  *  upstream style no longer has — a silent no-op otherwise. */
-export const THEMED_LAYER_IDS = [...HIDDEN_LAYERS, ...Object.keys(PAINT_OVERRIDES), ...Object.keys(LAYOUT_OVERRIDES)];
+export const HIDDEN_LAYER_IDS: readonly string[] = HIDDEN_LAYERS;
+/** Layers we actively style, as opposed to remove. */
+export const STYLED_LAYER_IDS: readonly string[] = [
+  ...Object.keys(PAINT_OVERRIDES),
+  ...Object.keys(LAYOUT_OVERRIDES),
+  ...Object.keys(ZOOM_RANGES),
+];
+
+export const THEMED_LAYER_IDS = [
+  ...HIDDEN_LAYERS,
+  ...Object.keys(PAINT_OVERRIDES),
+  ...Object.keys(LAYOUT_OVERRIDES),
+  ...Object.keys(ZOOM_RANGES),
+];

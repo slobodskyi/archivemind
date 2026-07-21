@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyArchiveMindTheme, BASEMAP_ATTRIBUTION, THEMED_LAYER_IDS } from "./map-style";
+import {
+  applyArchiveMindTheme,
+  BASEMAP_ATTRIBUTION,
+  HIDDEN_LAYER_IDS,
+  STYLED_LAYER_IDS,
+  THEMED_LAYER_IDS,
+} from "./map-style";
 
 /** The layer ids OpenFreeMap's `dark` style shipped when this theme was
  *  written (fetched 2026-07-21, 47 layers). It exists to catch a typo in a
@@ -67,5 +73,80 @@ describe("map theme", () => {
   it("survives a style shaped differently than expected instead of throwing", () => {
     expect(() => applyArchiveMindTheme({} as { layers?: never })).not.toThrow();
     expect(() => applyArchiveMindTheme({ layers: [{ id: "unknown_layer" }], sources: {} })).not.toThrow();
+  });
+});
+
+describe("map theme — restraint", () => {
+  interface TestLayer {
+    id: string;
+    type: string;
+    layout?: Record<string, unknown>;
+    minzoom?: number;
+    maxzoom?: number;
+  }
+
+  const themed = (): { layers: TestLayer[] } =>
+    applyArchiveMindTheme<{ layers: TestLayer[]; sources: Record<string, unknown> }>({
+      layers: UPSTREAM_LAYER_IDS.map((id) => ({
+        id,
+        type: id.startsWith("place_") ? "symbol" : "line",
+        layout: id.startsWith("place_")
+          ? { "text-field": ["case", ["has", "name:nonlatin"], ["concat", ["get", "name:latin"], "\n", ["get", "name:nonlatin"]], ["get", "name:latin"]] }
+          : undefined,
+      })),
+      sources: {},
+    });
+
+  it("drops more than half the upstream layers", () => {
+    // 47 layers of a general-purpose basemap, of which a photo map needs a
+    // fraction; the rest is texture competing with the thumbnails.
+    expect(themed().layers.length).toBeLessThan(UPSTREAM_LAYER_IDS.length / 2);
+  });
+
+  it("removes the grey veil and the road casings", () => {
+    const ids = themed().layers.map((l) => l.id);
+    // Residential fills drew from z0 and read as a haze over whole countries.
+    expect(ids).not.toContain("landuse_residential");
+    // Casings redraw the same geometry to outline it — invisible as depth on
+    // near-black, plainly visible as a doubled line.
+    expect(ids).not.toContain("highway_major_casing");
+    expect(ids).not.toContain("highway_motorway_casing");
+    expect(ids).not.toContain("highway_motorway_subtle");
+  });
+
+  it("collapses every place label to a single name", () => {
+    for (const layer of themed().layers) {
+      if (!layer.id.startsWith("place_")) continue;
+      const field = JSON.stringify(layer.layout?.["text-field"]);
+      expect(field, layer.id).toContain("name:en");
+      // The upstream two-line concat is what doubled the ink of every label.
+      expect(field, layer.id).not.toContain("concat");
+      expect(field, layer.id).not.toContain("nonlatin");
+    }
+  });
+
+  it("holds each label tier back to the zoom where it is the useful unit", () => {
+    const byId = new Map(themed().layers.map((l) => [l.id, l]));
+    const minzoom = (id: string) => byId.get(id)?.minzoom;
+    // Oblast names blanketing a continent was the reported complaint.
+    expect(minzoom("place_state")).toBeGreaterThanOrEqual(6);
+    // And the tiers stay in order: countries, then cities, then towns.
+    expect(minzoom("place_city")).toBeGreaterThan(minzoom("place_city_large") as number);
+    expect(minzoom("place_town")).toBeGreaterThan(minzoom("place_city") as number);
+    expect(minzoom("place_village")).toBeGreaterThan(minzoom("place_town") as number);
+    // Minor streets are meaningless until the map is genuinely close in.
+    expect(minzoom("highway_minor")).toBeGreaterThanOrEqual(14);
+  });
+
+  it("never styles a layer it has already removed", () => {
+    // A paint or zoom rule for a hidden layer is a silent no-op, and reads as
+    // an intention the map does not actually honour. This fails the moment
+    // the two lists drift apart.
+    const hidden = new Set(HIDDEN_LAYER_IDS);
+    expect(STYLED_LAYER_IDS.filter((id) => hidden.has(id))).toEqual([]);
+  });
+
+  it("keeps every themed id real", () => {
+    expect(THEMED_LAYER_IDS.filter((id) => !UPSTREAM_LAYER_IDS.includes(id))).toEqual([]);
   });
 });
