@@ -48,12 +48,18 @@ interface CaptionDbRow {
   is_edited: boolean;
 }
 
+interface FileOriginRow {
+  origin: string;
+  source_path: string | null;
+}
+
 interface AssetRow {
   id: string;
   title: string | null;
   status: string;
   ai_processed_at: string | null;
   created_at: string;
+  files: FileOriginRow[];
   asset_previews: PreviewRow[];
   asset_exif: ExifRow | null;
   asset_tags: TagRow[];
@@ -126,6 +132,11 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
         ? []
         : [{ text: "Analyze to extract facts", status: "unknown" as const }];
 
+  // Representative file: assets are 1:N to files by schema, but today every
+  // asset has exactly one (dedup merges rather than attaching); [0] is it.
+  const origin = a.files[0]?.origin;
+  const gdrive = origin === "gdrive";
+
   const photo: Photo = {
     id: a.id,
     seed: a.id,
@@ -147,8 +158,8 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
     group: topic,
     country: "Ukraine",
-    source: "upload",
-    folder: "Uploads",
+    source: gdrive ? "gdrive" : "upload",
+    folder: gdrive ? (a.files[0]?.source_path ?? "Google Drive") : "Uploads",
     project: "",
     exif: toExifData(a.asset_exif, created),
   };
@@ -156,6 +167,7 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
 }
 
 const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,
+       files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
        asset_tags ( tags ( name, category ) ),

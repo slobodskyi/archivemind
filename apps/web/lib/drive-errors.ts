@@ -27,8 +27,14 @@ const MESSAGES: Record<string, string> = Object.assign(Object.create(null), {
   // Self-healing re-consent loop (see google-tokens.server.ts): we revoked a
   // refresh-token-less grant so the next attempt shows the full consent screen.
   drive_reconsent_required: "Google needs you to approve access once more. Click Connect again.",
+  // Picker/import surface.
+  drive_picker_failed: "Couldn't open the Google Drive picker. Reload and try again.",
+  import_backlog: "Imports are queued up — wait for the current ones to finish, then retry.",
+  drive_import_failed: "Some files couldn't be submitted. Try again.",
   // Server-side exchange failures.
   drive_code_invalid: "That connection attempt expired. Try again.",
+  drive_connection_revoked:
+    "Google Drive access was revoked. Reconnect it in Data sources and try again.",
   drive_not_connected: "Google Drive isn't connected yet.",
   drive_disconnect_failed: "Couldn't disconnect Google Drive. Please try again.",
   drive_connect_failed: GENERIC,

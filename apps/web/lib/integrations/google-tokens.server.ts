@@ -41,12 +41,13 @@ async function googleTokenPost(url: string, params: Record<string, string>) {
 }
 
 /** Exchange the popup's authorization code, encrypt tokens, persist the
- *  connection. Returns the connected account email (may be null). */
+ *  connection. Returns the account email (may be null) + the row id the
+ *  imports API needs. */
 export async function exchangeCodeAndStore(input: {
   code: string;
   workspaceId: string;
   userId: string;
-}): Promise<{ email: string | null }> {
+}): Promise<{ email: string | null; connectionId: string }> {
   const key = parseTokenKey(process.env.TOKEN_ENC_KEY);
   const { status, body } = await googleTokenPost(TOKEN_URL, {
     client_id: requiredEnv("GOOGLE_CLIENT_ID"),
@@ -139,17 +140,30 @@ export async function exchangeCodeAndStore(input: {
   };
   // No unique index on (workspace_id, user_id, provider) yet (schema: issue),
   // so select-then-write; concurrency here is one human clicking Connect.
-  const { error: writeErr } = existing
-    ? await admin.from("source_connections").update(record).eq("id", existing.id)
-    : await admin.from("source_connections").insert({
+  let connectionId: string;
+  if (existing) {
+    const { error: writeErr } = await admin
+      .from("source_connections")
+      .update(record)
+      .eq("id", existing.id);
+    if (writeErr) throw new DriveTokenError("drive_connect_failed");
+    connectionId = existing.id as string;
+  } else {
+    const { data: inserted, error: writeErr } = await admin
+      .from("source_connections")
+      .insert({
         workspace_id: input.workspaceId,
         user_id: input.userId,
         provider: "gdrive",
         ...record,
-      });
-  if (writeErr) throw new DriveTokenError("drive_connect_failed");
+      })
+      .select("id")
+      .single();
+    if (writeErr || !inserted) throw new DriveTokenError("drive_connect_failed");
+    connectionId = inserted.id as string;
+  }
 
-  return { email };
+  return { email, connectionId };
 }
 
 /** Revoke the Google-side grant, then neuter the stored row. The order and
