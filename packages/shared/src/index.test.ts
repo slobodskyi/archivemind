@@ -12,6 +12,10 @@ import {
   createJobRequestSchema,
   createProjectRequestSchema,
   driveFileIdSchema,
+  dropboxDirectLinkSchema,
+  dropboxImportItemSchema,
+  isDropboxDirectLink,
+  ingestJobPayloadSchema,
   googleConnectRequestSchema,
   googleConnectionStatusSchema,
   importItemSchema,
@@ -356,5 +360,69 @@ describe("createJobRequestSchema ingest variant (#23 re-ingest)", () => {
         .success,
     ).toBe(false);
     expect(createJobRequestSchema.safeParse({ type: "export", assetIds: ids }).success).toBe(false);
+  });
+});
+
+describe("dropbox import contracts (ADR 0008, #24)", () => {
+  it("accepts real Chooser direct links (dl.dropboxusercontent.com + subdomains)", () => {
+    for (const ok of [
+      "https://dl.dropboxusercontent.com/1/view/abc123/photo.jpg",
+      "https://uc1234abcd.dl.dropboxusercontent.com/cd/0/get/XYZ/file",
+    ]) {
+      expect(isDropboxDirectLink(ok)).toBe(true);
+      expect(dropboxDirectLinkSchema.safeParse(ok).success).toBe(true);
+    }
+  });
+
+  it("rejects every SSRF shape — the link feeds a server-side fetch", () => {
+    for (const evil of [
+      "http://dl.dropboxusercontent.com/x", // no TLS
+      "https://dl.dropboxusercontent.com.evil.com/x", // suffix spoof
+      "https://evil.com/dl.dropboxusercontent.com", // host in path
+      "https://user:pass@dl.dropboxusercontent.com/x", // credentials
+      "https://dl.dropboxusercontent.com:8443/x", // port games
+      "https://169.254.169.254/latest/meta-data", // cloud metadata
+      "https://localhost/x",
+      "https://www.dropbox.com/s/abc/photo.jpg?dl=1", // share link, not direct
+      "ftp://dl.dropboxusercontent.com/x",
+      "not-a-url",
+      "",
+    ]) {
+      expect(isDropboxDirectLink(evil)).toBe(false);
+      expect(dropboxDirectLinkSchema.safeParse(evil).success).toBe(false);
+    }
+  });
+
+  it("parses a Chooser file shape (sourceId is a dedupe key, not a URL part)", () => {
+    const item = {
+      sourceId: "id:a4ayc_80_OEAAAAAAAAAXw",
+      name: "DSC01.jpg",
+      link: "https://dl.dropboxusercontent.com/1/view/abc/DSC01.jpg",
+      sizeBytes: 123,
+    };
+    expect(dropboxImportItemSchema.parse(item).sourceId).toBe(item.sourceId);
+    expect(dropboxImportItemSchema.safeParse({ ...item, link: "https://evil.com/x" }).success).toBe(false);
+  });
+
+  it("ingest payload carries optional dropbox links keyed by asset", () => {
+    const base = { asset_ids: ["8f7a1c2e-0000-4000-8000-1234567890ab"] };
+    expect(ingestJobPayloadSchema.parse(base).dropbox).toBeUndefined();
+    const withLinks = ingestJobPayloadSchema.parse({
+      ...base,
+      dropbox: [
+        {
+          asset_id: base.asset_ids[0],
+          link: "https://dl.dropboxusercontent.com/1/view/abc/x.jpg",
+          name: "x.jpg",
+        },
+      ],
+    });
+    expect(withLinks.dropbox).toHaveLength(1);
+    expect(
+      ingestJobPayloadSchema.safeParse({
+        ...base,
+        dropbox: [{ asset_id: base.asset_ids[0], link: "https://evil.com/x", name: "x" }],
+      }).success,
+    ).toBe(false);
   });
 });
