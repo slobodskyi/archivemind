@@ -5,7 +5,6 @@ import {
   droppedAssetCenters,
   fitBounds,
   hitTestTiles,
-  mapCloudLayout,
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
   timelineAxisLayout,
@@ -239,12 +238,12 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   });
 
   it("reduces cross-cloud links to one strongest bridge per pair of clouds", () => {
-    const layout = mapCloudLayout(
+    const layout = topicCloudLayout(
       [
-        photo("ua1", { country: "Ukraine", tags: ["evac", "train"] }),
-        photo("ua2", { country: "Ukraine", tags: ["evac"] }),
-        photo("pl1", { country: "Poland", tags: ["evac", "train"] }),
-        photo("pl2", { country: "Poland", tags: ["evac"] }),
+        photo("ua1", { group: "rescue", tags: ["evac", "train"] }),
+        photo("ua2", { group: "rescue", tags: ["evac"] }),
+        photo("pl1", { group: "aid", tags: ["evac", "train"] }),
+        photo("pl2", { group: "aid", tags: ["evac"] }),
       ],
       {},
     );
@@ -299,16 +298,16 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   });
 
   it("gives the Unsorted cloud real tag links too (lines mean relations now)", () => {
-    const layout = mapCloudLayout(
+    const layout = topicCloudLayout(
       [
-        photo("a", { country: "Atlantis", tags: ["myth"] }),
-        photo("b", { country: "Lemuria", tags: ["myth"] }),
+        photo("a", { group: "Unsorted", tags: ["myth"] }),
+        photo("b", { group: "Unsorted", tags: ["myth"] }),
       ],
       {},
     );
-    // Both unrecognized countries land in one Unsorted cloud; the shared tag
-    // still links them — in the Unsorted gray (ADR 0022 supersedes 0018's
-    // "no lines" rule; unanalyzed files are the ones with no lines).
+    // Unanalyzed assets share the one Unsorted cloud; the shared tag still
+    // links them — in the Unsorted gray (ADR 0022 supersedes 0018's "no
+    // lines" rule; files with no tags at all are the ones with no lines).
     expect(layout.clouds.map((c) => c.key)).toEqual(["Unsorted"]);
     expect(layout.edges).toHaveLength(1);
     expect(layout.edges[0].strokeStart).toBe("#8a8f98");
@@ -411,9 +410,9 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     const photos = [
       photo("a", { tags: ["t1", "t2"] }),
       photo("b", { tags: ["t2"] }),
-      photo("c", { tags: ["t1"], country: "Poland" }),
+      photo("c", { tags: ["t1"], group: "aid" }),
     ];
-    expect(mapCloudLayout(photos, {})).toEqual(mapCloudLayout(photos.map((p) => ({ ...p })), {}));
+    expect(topicCloudLayout(photos, {})).toEqual(topicCloudLayout(photos.map((p) => ({ ...p })), {}));
   });
 });
 
