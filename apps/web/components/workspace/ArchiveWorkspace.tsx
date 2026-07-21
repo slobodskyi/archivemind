@@ -123,7 +123,7 @@ export default function ArchiveWorkspace({
         <div
           style={{
             position: "absolute",
-            inset: `${ws.projectMode ? 90 : 52}px 0 0 0`,
+            inset: "52px 0 0 0",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -176,34 +176,12 @@ export default function ArchiveWorkspace({
         onFlashToast={ws.flashToast}
         onOpenAcct={ws.openAcct}
         viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
+        afterProject={
+          ws.projectMode ? (
+            <WorkspaceToggle active={ws.view === "neural"} onSelect={() => ws.setView("neural")} />
+          ) : undefined
+        }
       />
-
-      {/* Subheader — the Workspace entry point, kept visually distinct from the
-          sorting tabs (Timeline/Map/Topic) that stay in the header above. Only
-          inside a real project; the all-files grid is always the Workspace. */}
-      {ws.projectMode && (
-        <div
-          style={{
-            position: "absolute",
-            top: 52,
-            left: 0,
-            right: 0,
-            height: 38,
-            background: "var(--bg-nb)",
-            borderBottom: "1px solid var(--bd)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            padding: "0 14px",
-            zIndex: 39,
-          }}
-        >
-          <WorkspaceToggle active={ws.view === "neural"} onSelect={() => ws.setView("neural")} />
-          <span style={{ fontSize: 11, color: "var(--t3)", letterSpacing: "0.02em" }}>
-            {ws.view === "neural" ? "Your working canvas" : "Sorting view — pick files to work with"}
-          </span>
-        </div>
-      )}
 
       <ZoomDropdown
         open={ws.zoomMenuOpen}
@@ -280,6 +258,15 @@ export default function ArchiveWorkspace({
         onClose={ws.closeAddProj}
         onSelect={ws.addToProject}
         onCreateNew={ws.createNewProject}
+        artboards={ws.frames.map((f) => ({ key: f.id, label: f.label }))}
+        onSelectArtboard={(id) => {
+          ws.closeAddProj();
+          ws.addToExistingArtboard(id);
+        }}
+        onCreateArtboard={() => {
+          ws.closeAddProj();
+          ws.addToNewArtboard();
+        }}
       />
 
       <SourceBrowserSidebar
@@ -349,18 +336,17 @@ export default function ArchiveWorkspace({
 
       <CanvasContextMenu
         menu={ws.contextMenu}
-        frames={ws.frames}
+        allFilesMode={ws.allFilesMode}
         onClose={ws.closeContextMenu}
-        onOpen={ws.openDrawer}
-        onAddToProject={ws.toggleAddProj}
-        onAddToNewArtboard={ws.addToNewArtboard}
-        onAddToExistingArtboard={ws.addToExistingArtboard}
-        onCopy={ws.copyFiles}
-        onDuplicate={ws.duplicateFiles}
-        onExport={ws.exportFiles}
-        onGroup={ws.groupFiles}
-        onArchive={ws.archiveFiles}
-        onDelete={ws.deleteSelected}
+        onSelectTool={ws.toolSelect}
+        onHandTool={ws.toolHand}
+        onOpenSearch={ws.openSearch}
+        onToggleChat={ws.toggleChat}
+        onToggleBulkPanel={ws.toggleBulkPanel}
+        onExtractExif={ws.extractExif}
+        onAdd={ws.addToolbar}
+        onAddStickyNote={ws.addStickyNote}
+        onFit={ws.onFit}
       />
 
       <PhotoDrawer

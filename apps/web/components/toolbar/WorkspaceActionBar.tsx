@@ -39,7 +39,7 @@ function Btn({
   return (
     <button
       onClick={onClick}
-      className="am-tb tw"
+      className="am-tb tw-top"
       title={title}
       aria-label={title}
       style={{

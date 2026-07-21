@@ -107,6 +107,39 @@ textarea {
   transform: translateY(-50%) translateX(0);
 }
 
+/* Tooltip variant for horizontal bars (e.g. the Workspace bottom action bar):
+   the hint sits ABOVE the button instead of to its right, so it never overlaps
+   the neighbouring button. Same visual style as .tw .tip. */
+.tw-top {
+  position: relative;
+}
+.tw-top .tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%) translateY(4px);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  background: var(--bg-el);
+  color: var(--t1);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 2px;
+  border: 1px solid var(--bdh);
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
+  z-index: 85; /* lib/ui.ts Z.tooltip */
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.8);
+}
+.tw-top:hover .tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .am-tb {
   transition:
     background 0.15s,

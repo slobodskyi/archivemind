@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import {
   ChevronDownIcon,
+  ChevronRightIcon,
   ShareIcon,
   UndoIcon,
   RedoIcon,
@@ -20,6 +21,8 @@ interface AppHeaderProps {
   onFlashToast?: (text: string) => void;
   onOpenAcct?: () => void;
   viewTabs?: ReactNode;
+  /** Rendered in the breadcrumb, right of the project name (e.g. the Workspace toggle). */
+  afterProject?: ReactNode;
 }
 
 export default function AppHeader({
@@ -36,6 +39,7 @@ export default function AppHeader({
   onFlashToast,
   onOpenAcct,
   viewTabs,
+  afterProject,
 }: AppHeaderProps) {
   return (
     <div
@@ -54,7 +58,7 @@ export default function AppHeader({
         zIndex: 40,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 380, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 520, minWidth: 0 }}>
         <button
           onClick={onHome}
           aria-label="Home"
@@ -106,6 +110,12 @@ export default function AppHeader({
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
           <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />
         </button>
+        {afterProject && (
+          <>
+            <ChevronRightIcon width={12} height={12} stroke="var(--t3)" style={{ flex: "0 0 auto", opacity: 0.6 }} />
+            {afterProject}
+          </>
+        )}
       </div>
 
       {viewTabs}
