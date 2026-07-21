@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reverseGeocode } from "./geocode";
+import { isGeocodeIndexAvailable, reverseGeocode } from "./geocode";
 
 /** Runs against the real data/places.bin.gz — the point of these tests is that
  *  the shipped artifact answers correctly, so a fixture would test nothing. */
@@ -107,5 +107,20 @@ describe("reverseGeocode — determinism", () => {
     ]) {
       expect(reverseGeocode(lat, lon)).toEqual(reverseGeocode(lat, lon));
     }
+  });
+});
+
+describe("index availability", () => {
+  it("reports the shipped index as loadable", () => {
+    expect(isGeocodeIndexAvailable()).toBe(true);
+  });
+
+  it("distinguishes 'nothing near here' from 'could not look'", () => {
+    // With the index up, a null is a real answer about the world — which is
+    // what lets ingest persist the "" sentinel. Callers must not persist it
+    // when this returns false, or the backfill queue (gps_label is null)
+    // loses those rows permanently.
+    expect(isGeocodeIndexAvailable()).toBe(true);
+    expect(reverseGeocode(43.5, 33.0)).toBeNull();
   });
 });

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { ingestJobPayloadSchema } from "@archivemind/shared";
 import type pg from "pg";
 import { extractExif } from "../services/exif";
-import { reverseGeocode } from "../services/geocode";
+import { isGeocodeIndexAvailable, reverseGeocode } from "../services/geocode";
 import { DropboxFileError, downloadDropboxLink } from "../services/dropbox";
 import { DriveFileError, downloadDriveFile, getDriveFileMeta } from "../services/gdrive";
 import { heicToRaw } from "../services/heic";
@@ -255,7 +255,14 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
           exif.lens,
           exif.gps_lat,
           exif.gps_lon,
-          exif.gps_lat != null && exif.gps_lon != null ? (place?.label ?? "") : null,
+          // "" records "we looked and found nothing" — the sentinel the
+          // backfill uses to stop re-examining wilderness shots. It must NOT
+          // be written when the index simply failed to load, or every asset
+          // ingested during that outage is permanently marked done and the
+          // backfill (queue: gps_label is null) can never revisit it.
+          exif.gps_lat != null && exif.gps_lon != null
+            ? (place?.label ?? (isGeocodeIndexAvailable() ? "" : null))
+            : null,
           exif.gps_lat != null ? "gps" : null,
           exif.iso,
           exif.aperture,

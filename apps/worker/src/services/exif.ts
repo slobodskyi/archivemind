@@ -154,7 +154,16 @@ async function viaExifTool(buf: Buffer, filename: string): Promise<ParsedExif | 
     dir = await mkdtemp(path.join(os.tmpdir(), "am-exif-"));
     const file = path.join(dir, `input.${ext}`);
     await writeFile(file, buf);
-    return fromExifToolTags(await exiftool.read(file));
+    const tags = await exiftool.read(file);
+    // ExifTool reports many failures in-band rather than by throwing. Mapping
+    // such a result would produce a well-formed row of nulls, which now reads
+    // as "metadata landed" to the ingest resume guard — permanently, since
+    // that guard is what decides whether to try again.
+    if (typeof tags.Error === "string" && tags.Error.trim()) {
+      console.warn(`[exif] ExifTool reported: ${tags.Error}`);
+      return null;
+    }
+    return fromExifToolTags(tags);
   } catch (e) {
     // Metadata problems never fail ingest — but they must not be silent
     // either. ExifTool is a spawned Perl process, so "works on the dev's Mac,

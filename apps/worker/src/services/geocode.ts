@@ -141,6 +141,15 @@ function getIndex(): PlaceIndex | null {
   return index;
 }
 
+/** Whether a null from `reverseGeocode` means "nowhere near a settlement" or
+ *  "we could not look". Callers that persist a "checked, found nothing"
+ *  sentinel MUST consult this: recording that sentinel while the index is
+ *  down marks the asset permanently done and hides it from the backfill,
+ *  whose whole queue is `gps_label is null`. */
+export function isGeocodeIndexAvailable(): boolean {
+  return getIndex() != null;
+}
+
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = Math.PI / 180;
   const dLat = (lat2 - lat1) * toRad;
