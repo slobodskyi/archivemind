@@ -4,8 +4,10 @@ Date: 2026-07-13
 
 Status: Accepted · **Map/Topic parts superseded by
 [0018](0018-cloud-clusters-map-topic-default-zoom.md), the column grid itself (Timeline's
-too) by [0022](0022-timeline-clouds-and-live-cloud-labels.md), and Topic's grouping field by
-[0023](0023-topic-clouds-derived-from-tags.md) — read 0022 + 0023 for what ships today.**
+too) by [0022](0022-timeline-clouds-and-live-cloud-labels.md) — whose Timeline part
+[0024](0024-timeline-date-axis-cloud-focus.md) then replaced with the per-day date axis —
+and Topic's grouping field by [0023](0023-topic-clouds-derived-from-tags.md) — read
+0022 + 0023 + 0024 for what ships today.**
 The delete-on-any-view decision made here is unchanged and still current.
 
 Supersedes the Map/Topic parts of [0016](0016-real-timeline-topic-map-views.md).

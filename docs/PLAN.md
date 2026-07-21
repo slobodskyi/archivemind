@@ -116,11 +116,22 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 
 ### Phase 5 — Projects + canvas at scale (~weeks 6–7)
 
-- Projects CRUD + M:N (`POST /api/projects`, `.../assets` — membership is asset-based per §4/ADR 0011), add-to-project from selection/search (replaces in-memory `addToProject`).
-- `GET /api/canvas` aggregates (sources → folders → counts + first-K previews); Neural view consumes aggregates, materializes tiles only for expanded folders/viewport, caps ~300 mounted tiles, virtualizes (mockup renders 235; real archives 10k–30k — this is the riskiest frontend task, spike early with 20k synthetic rows).
-- `PUT /api/canvas/layout` persistence of `overrides` (hub/folder/asset levels per §4) / organize mode; organize modes `source|date|place` (similarity post-MVP per spec §13). Client-side **undo/redo** for drags and a versioned `localStorage` interim of layout persistence already shipped with #93 (see "Canvas UX unification" above) — what remains here is the server-side layout store.
-- **Views:** Timeline + Neural are MVP gates. **Map + Sense are fast-follow** (built on live data, but not gating a milestone — Map depends on GPS and Sense on rich tags, both of which real pro archives often lack). This matches the `fast-follow` label on those issues.
-- Replace mock quirks with real data: timeline bucketing `hash(id)%6` → real `taken_at`; per-asset EXIF; per-asset titles.
+Much of the original Phase-5 list shipped early (projects CRUD + M:N and
+add-to-project with #62 on 2026-07-10; all four views on real data via
+#74/#93/#94/#95; real capture-date bucketing, per-asset EXIF and titles since
+Phases 1–2). What actually remains:
+
+- **Canvas at scale (#18)** — virtualization: cap mounted tiles, materialize
+  only the viewport (real archives 10k–30k vs the ≤500-row read today; the
+  riskiest frontend task — spike early with 20k synthetic rows). The known
+  drag-relayout cost on large single clouds (ADR 0022 Consequences) lands
+  here too. The old `GET /api/canvas` sources→folders aggregate design
+  predates #74's removal of the source-hub drill-down — re-scope it to the
+  flat project canvas before building.
+- **Server-side layout persistence (#22 remainder)** — `PUT /api/canvas/layout`;
+  the client half (versioned `localStorage` + undo/redo) already ships (#93,
+  ADR 0022).
+- **Remaining #17:** per-project `caption_prompt`, project members.
 
 ### Phase 6 — Cloud imports (~week 7)
 
@@ -145,29 +156,27 @@ Export handler (ZIP: owned originals else medium previews + note; `captions.csv`
 
 ---
 
-## 4. Open items to schedule (not yet ticketed)
+## 4. Open items from the 2026-07-06 setup audit (status as of 2026-07-21)
 
-Gaps surfaced in the 2026-07-06 setup audit. Fold each into a GitHub issue (via
-`scripts/setup-issues.sh`) when its phase starts:
+Most items got ticketed and several are done — kept here for the audit trail:
 
-- **Test strategy + CI wiring (decided 2026-07-10, issue #31).** Vitest workspace-wide;
-  layers in value order: `packages/shared` zod contract tests → worker pure-logic
-  unit tests (mocked services) → RLS policy suites via `supabase test db` (gate for
-  migration PRs) → API route contract tests from Phase 1. `turbo run test` joins the
-  CI `checks` job. No E2E/coverage gates in MVP (Playwright smoke ≈ Phase 2
-  fast-follow). ADR lands with the wiring PR.
-- **Source real sample corpora (Phase 1).** M2, and the Phase-1/Phase-7 QA issues,
-  all gate on real dirty files (500+ mixed, real-iPhone HEIC, NEF/CR2/ARW, no-EXIF).
-  Someone must actually gather these from target users — an unowned dependency that
-  can block a milestone.
-- **Seam-leak cleanup as a tracked task.** Three direct `mock-data` importers remain
-  (`lib/format.ts`, `lib/layout.ts`, `components/sidebar/SourceBrowserSidebar.tsx`) —
-  covered in prose but mapped to no issue. Related dead mocks with zero callers:
-  `lib/api.ts`'s `getPhoto`/`getProjects`/`getGroups`/`getSources`,
+- **Test strategy + CI wiring — ✅ DONE** (issue #31 closed; ADR 0013 → ADR 0020:
+  Vitest across the workspace in the `checks` job, pgTAP as the required
+  `db-tests` check).
+- **Source real sample corpora — OPEN, issue #33, still unowned.** M2 and the
+  Phase-1/Phase-7 QA issues gate on real dirty files (500+ mixed, real-iPhone
+  HEIC, NEF/CR2/ARW, no-EXIF). Still the dependency most likely to block a
+  milestone.
+- **Seam-leak cleanup — tracked as issue #34.** Three direct `mock-data`
+  importers remain (`lib/format.ts`, `lib/layout.ts`,
+  `components/sidebar/SourceBrowserSidebar.tsx`). Related dead mocks with zero
+  callers: `lib/api.ts`'s `getPhoto`/`getProjects`/`getGroups`/`getSources`,
   `lib/projects.ts::getAllAssetsCount`, `lib/layout.ts::sourcesGallery`.
-- **Phase-2 analyze-model re-verify (Phase 2).** Spec §14 item 3 / §3 above — confirm
-  `gemini-3.1-flash-lite` id+price and the `generateContent` shape, evaluate
-  `gemini-3.5-flash`. Currently in no issue (issue #9 covers only HEIC/RAW QA).
-- **dev vs prod environments (decided 2026-07-10, issue #32).** Local Supabase for
-  dev; one EU cloud project as prod (doubles as shared testing until first external
-  users); staging added at Phase 7. Provisioning itself stays issue #4.
+- **Phase-2 analyze-model re-verify — ✅ DONE 2026-07-17** (was issue #35, closed:
+  pins re-confirmed against official docs; `generateContent` now branded
+  "Legacy" with no sunset; cross-modal embedding search pre-answered the
+  Phase-4 spike). Re-check the deprecation table early 2027.
+- **dev vs prod environments (decided 2026-07-10, issue #32 closed).** Local
+  Supabase for dev; one EU cloud project as prod (doubles as shared testing
+  until first external users); staging added at Phase 7. Provisioning itself
+  stays issue #4.
