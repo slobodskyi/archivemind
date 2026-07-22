@@ -154,6 +154,31 @@ Phases 1–2). What actually remains:
   ledger + empty `db diff`). End-to-end verified live: a cluster job over an
   11-asset workspace produced two discriminative-labelled clouds covering all 11,
   stable (same ids/labels, no duplicates) across a re-run.
+- **Image editing — Tier 0 (crop / rotate 90° / straighten / flip) — ✅ DONE
+  2026-07-22 (#126; live-refresh fix #128), LIVE on prod** — **non-destructive**
+  ([ADR 0030](decisions/0030-non-destructive-image-editing.md)): a stored,
+  resolution-independent `recipe` + rendered edited previews in a new
+  `asset_edits` table; `asset_previews` (the originals) are **never** overwritten,
+  so reset is just dropping the row (instant, free). The worker renders edited
+  previews from the asset's own **medium preview** — which R2 already holds for
+  *every* source (upload / gdrive / dropbox alike) — so editing needs no original
+  bytes and no source-specific path, and the ADR 0025 "Drive originals never in
+  R2" invariant is untouched. The client only builds the recipe (live CSS preview
+  + crop overlay); the `edit` worker job (sharp) is authoritative, and shared
+  geometry in `packages/shared` (`workingDimensions` / `resolveCropRect` /
+  `inscribedCropForStraighten`) keeps preview and render pixel-consistent. Drawer
+  **Edit** button → `POST /api/assets/[id]/edit` (GET recipe · DELETE reset); the
+  read path prefers the edited previews so every view reflects the edit. Migration
+  `20260722000003` (`asset_edits` + `edit` job type + RLS; pgTAP `005`) — **on prod
+  2026-07-22** (owner runbook; the ledger needed a `migration repair` reconciliation
+  after a parallel branch had pushed a colliding `20260722000003` timestamp — a
+  reminder that two branches must never reuse a migration number — verified via
+  ledger + empty `db diff`). Edit jobs render fast (local sharp, no Gemini), so
+  #128 refreshes the canvas on **any** edit completing (like `cluster`) rather than
+  through the activeJobId-gated path, so edited previews appear without a manual
+  reload. Follow-up: re-editing the same asset reuses a stable R2 key, so a second
+  edit can be browser-cached inside the 30-min presign window (cache-bust when it
+  surfaces).
 
 ### Phase 6 — Cloud imports (~week 7) — ✅ DONE 2026-07-21 (Drive: #97–#101, #103 · Dropbox: #105–#107; pulled ahead of Phase 5's remainder at the owner's call)
 
