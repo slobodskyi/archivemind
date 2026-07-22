@@ -10,6 +10,8 @@ export interface ChatResult {
   tier: "strong" | "weak";
   matchedTags: string[];
   matchedPlace: string | null;
+  /** The query text hit this asset's AI description or facts (ADR 0031). */
+  matchedText: boolean;
 }
 
 export interface ChatMessage {

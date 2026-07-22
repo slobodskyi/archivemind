@@ -1,11 +1,12 @@
 -- search_assets() suite (pgTAP) — run: `supabase test db`
 -- Covers: function presence, RLS-invoker workspace isolation, date filter,
 -- tag matching surfaced for the UI's "why it matched" explanation (incl. the
--- word-of-multi-word rule and tag-first ordering from 20260722000002), and
--- the members' usage_events INSERT policy.
+-- word-of-multi-word rule and tag-first ordering from 20260722000002), the
+-- lexical hybrid over description + facts and the EXIF filters from
+-- 20260722000004, and the members' usage_events INSERT policy.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(9);
+select plan(14);
 
 -- ── fixtures (as superuser) ─────────────────────────────────────────────
 insert into auth.users (id, email) values
@@ -24,25 +25,32 @@ insert into public.assets (id, workspace_id, kind, title) values
   ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-00000000aaaa', 'photo', 'A-old'),
   ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000aaaa', 'photo', 'A-new'),
   ('00000000-0000-0000-0000-0000000000f3', '00000000-0000-0000-0000-00000000bbbb', 'photo', 'B-photo');
-insert into public.asset_exif (asset_id, taken_at, gps_label) values
-  ('00000000-0000-0000-0000-0000000000f1', '2026-01-10', 'Kyiv, Ukraine'),
-  ('00000000-0000-0000-0000-0000000000f2', '2026-06-18', null);
+-- EXIF incl. camera/iso/aperture for the 20260722000004 filters: f1 = an
+-- iPhone at low ISO wide open, f2 = a Sony at high ISO.
+insert into public.asset_exif (asset_id, taken_at, gps_label, camera_make, camera_model, iso, aperture) values
+  ('00000000-0000-0000-0000-0000000000f1', '2026-01-10', 'Kyiv, Ukraine', 'Apple', 'iPhone 13 Pro', 320, 'f/1.5'),
+  ('00000000-0000-0000-0000-0000000000f2', '2026-06-18', null, 'SONY', 'ILCE-7M4', 2000, 'f/2.8');
 insert into public.tags (id, workspace_id, name, category) values
   ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-00000000aaaa', 'rescue', 'event'),
   ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-00000000aaaa', 'flood rescue', 'event');
 insert into public.asset_tags (asset_id, tag_id, source) values
   ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000e001', 'ai'),
   ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000e002', 'ai');
+-- Lexical corpus: f2's AI description carries "protest"; f1's does not, but f1
+-- has a suggested fact carrying "evacuation" — so the two lexical paths
+-- (embeddings.content and facts.text) can be told apart.
+insert into public.facts (asset_id, text, status, source) values
+  ('00000000-0000-0000-0000-0000000000f1', 'photographed during the winter flood evacuation', 'needs_check', 'ai');
 -- Unit vectors: f1 sits exactly on axis 1, f2 nearby (cos 0.8 to axis 1), f3
 -- on axis 2 — so an axis-1 query ranks f1 > f2 by cosine alone and B's asset
 -- at 0, letting the tag-first ordering test observe a genuine reorder.
-insert into public.embeddings (workspace_id, asset_id, kind, chunk_index, embedding) values
+insert into public.embeddings (workspace_id, asset_id, kind, chunk_index, content, embedding) values
   ('00000000-0000-0000-0000-00000000aaaa', '00000000-0000-0000-0000-0000000000f1', 'image', 0,
-   ('[1' || repeat(',0', 767) || ']')::vector),
+   'a snowy riverbank at dusk', ('[1' || repeat(',0', 767) || ']')::vector),
   ('00000000-0000-0000-0000-00000000aaaa', '00000000-0000-0000-0000-0000000000f2', 'image', 0,
-   ('[0.8,0.6' || repeat(',0', 766) || ']')::vector),
+   'a protest crowd waving flags', ('[0.8,0.6' || repeat(',0', 766) || ']')::vector),
   ('00000000-0000-0000-0000-00000000bbbb', '00000000-0000-0000-0000-0000000000f3', 'image', 0,
-   ('[0,1' || repeat(',0', 766) || ']')::vector);
+   null, ('[0,1' || repeat(',0', 766) || ']')::vector);
 
 select has_function('public', 'search_assets', 'search_assets() exists');
 
@@ -92,6 +100,49 @@ select is(
      ('[1' || repeat(',0', 767) || ']')::vector, '00000000-0000-0000-0000-00000000aaaa',
      null, null, null, array['kyiv'], null)),
   1, 'place term matches gps_label case-insensitively');
+
+-- ── lexical hybrid (20260722000004) ──────────────────────────────────────
+-- text_query is a match signal, not a filter: all workspace rows still return,
+-- but matched_text flags which ones the text hit. f2's description has
+-- "protest"; f1's does not.
+select results_eq(
+  $$select matched_text from public.search_assets(
+      query_embedding := ('[1' || repeat(',0', 767) || ']')::vector,
+      ws := '00000000-0000-0000-0000-00000000aaaa',
+      text_query := 'protest') order by asset_id$$,
+  $$values (false::boolean), (true::boolean)$$,
+  'text_query hits the AI description (matched_text); f2 has "protest", f1 does not');
+
+-- The other lexical path: f1's suggested fact carries "evacuation".
+select results_eq(
+  $$select matched_text from public.search_assets(
+      query_embedding := ('[1' || repeat(',0', 767) || ']')::vector,
+      ws := '00000000-0000-0000-0000-00000000aaaa',
+      text_query := 'evacuation') order by asset_id$$,
+  $$values (true::boolean), (false::boolean)$$,
+  'text_query hits suggested facts too, not only the description');
+
+-- ── EXIF filters (20260722000004) ────────────────────────────────────────
+select is(
+  (select count(*)::int from public.search_assets(
+     query_embedding := ('[1' || repeat(',0', 767) || ']')::vector,
+     ws := '00000000-0000-0000-0000-00000000aaaa',
+     camera_terms := array['iphone'])),
+  1, 'camera_terms narrows to the iPhone shot (matches camera_model ILIKE)');
+
+select is(
+  (select count(*)::int from public.search_assets(
+     query_embedding := ('[1' || repeat(',0', 767) || ']')::vector,
+     ws := '00000000-0000-0000-0000-00000000aaaa',
+     iso_min := 1000)),
+  1, 'iso_min keeps only the high-ISO Sony frame; a null-ISO row would drop too');
+
+select is(
+  (select count(*)::int from public.search_assets(
+     query_embedding := ('[1' || repeat(',0', 767) || ']')::vector,
+     ws := '00000000-0000-0000-0000-00000000aaaa',
+     aperture_term := 'f/1.5')),
+  1, 'aperture_term matches the wide-open iPhone frame');
 
 select lives_ok(
   $$insert into public.usage_events (workspace_id, user_id, event_type, units, model)

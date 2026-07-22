@@ -1446,18 +1446,25 @@ export function useWorkspace(
             tier: r.tier,
             matchedTags: r.matchedTags,
             matchedPlace: r.matchedPlace,
+            matchedText: r.matchedText,
           };
         });
 
-        // Honest filter note (ADR 0029): dates/places genuinely filter in SQL
-        // and may be echoed from the parse; tags only rank, so name just the
-        // tags that actually matched a result — never the parsed wish-list.
+        // Honest filter note (ADR 0029/0031): name only what actually filtered
+        // or matched a result — never the parsed wish-list. Dates/places/EXIF
+        // genuinely filter in SQL; tags and description text only rank, so they
+        // appear only when a returned result carries the match.
         const filters: string[] = [];
         if (data.parsed.date_from || data.parsed.date_to)
           filters.push(`dates ${data.parsed.date_from ?? "…"} – ${data.parsed.date_to ?? "…"}`);
         if (data.parsed.place_terms.length) filters.push(`place: ${data.parsed.place_terms.join(", ")}`);
+        if (data.parsed.camera_terms.length) filters.push(`camera: ${data.parsed.camera_terms.join(", ")}`);
+        if (data.parsed.iso_min || data.parsed.iso_max)
+          filters.push(`ISO ${data.parsed.iso_min ?? "…"}–${data.parsed.iso_max ?? "…"}`);
+        if (data.parsed.aperture) filters.push(`aperture ${data.parsed.aperture}`);
         const hitTags = [...new Set(results.flatMap((r) => r.matchedTags))];
         if (hitTags.length) filters.push(`tagged: ${hitTags.join(", ")}`);
+        if (results.some((r) => r.matchedText)) filters.push("in description");
         const filterNote = filters.length ? ` (${filters.join("; ")})` : "";
 
         const strong = results.filter((r) => r.tier === "strong").length;

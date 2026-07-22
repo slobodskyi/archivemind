@@ -31,12 +31,16 @@ const SEARCH_PARSE_RESPONSE_SCHEMA = {
     date_to: { type: Type.STRING, nullable: true },
     place_terms: { type: Type.ARRAY, items: { type: Type.STRING } },
     tag_terms: { type: Type.ARRAY, items: { type: Type.STRING } },
+    camera_terms: { type: Type.ARRAY, items: { type: Type.STRING } },
+    iso_min: { type: Type.NUMBER, nullable: true },
+    iso_max: { type: Type.NUMBER, nullable: true },
+    aperture: { type: Type.STRING, nullable: true },
     kinds: {
       type: Type.ARRAY,
       items: { type: Type.STRING, enum: ["photo", "pdf", "document", "other"] },
     },
   },
-  required: ["semantic_text", "place_terms", "tag_terms", "kinds"],
+  required: ["semantic_text", "place_terms", "tag_terms", "camera_terms", "kinds"],
 };
 
 export async function parseSearchQuery(q: string, today: string): Promise<SearchParse> {

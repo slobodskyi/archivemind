@@ -46,7 +46,7 @@ function ThumbGrid({ rows, dim, onOpenResult }: { rows: ChatResult[]; dim?: bool
         <button
           key={r.assetId}
           onClick={() => onOpenResult(r.assetId)}
-          title={`${r.filename}${r.matchedTags.length ? ` · ${r.matchedTags.join(", ")}` : ""}${r.matchedPlace ? ` · ${r.matchedPlace}` : ""}`}
+          title={`${r.filename}${r.matchedTags.length ? ` · ${r.matchedTags.join(", ")}` : ""}${r.matchedPlace ? ` · ${r.matchedPlace}` : ""}${r.matchedText ? " · in description" : ""}`}
           aria-label={`Open ${r.filename}`}
           style={{
             width: 38,
@@ -54,7 +54,7 @@ function ThumbGrid({ rows, dim, onOpenResult }: { rows: ChatResult[]; dim?: bool
             padding: 0,
             // A term-matched thumb wears the accent — the "why it matched"
             // signal has to survive touch screens, not just hover tooltips.
-            border: `1px solid ${r.matchedTags.length || r.matchedPlace ? "var(--ac)" : "var(--bd)"}`,
+            border: `1px solid ${r.matchedTags.length || r.matchedPlace || r.matchedText ? "var(--ac)" : "var(--bd)"}`,
             borderRadius: 2,
             background: "var(--bg-in)",
             cursor: "pointer",

@@ -26,6 +26,14 @@ describe("assignTiers", () => {
     expect(tiers([row(0.9), row(0.1, [], "Kyiv, Ukraine")])).toEqual(["strong", "strong"]);
   });
 
+  it("lexical (description/facts) matches are strong regardless of similarity", () => {
+    const withText = { similarity: 0.1, matchedTags: [], matchedPlace: null, matchedText: true };
+    const noText = { similarity: 0.1, matchedTags: [], matchedPlace: null, matchedText: false };
+    // High-similarity row holds the delta; the distant text-matched row is still
+    // strong, the distant non-match is weak.
+    expect(assignTiers([row(0.9), withText, noText]).map((r) => r.tier)).toEqual(["strong", "strong", "weak"]);
+  });
+
   it("cosine-only rows split on the delta gap from the best similarity", () => {
     const rows = [row(0.5), row(0.5 - STRONG_DELTA), row(0.5 - STRONG_DELTA - 0.001)];
     expect(tiers(rows)).toEqual(["strong", "strong", "weak"]);
