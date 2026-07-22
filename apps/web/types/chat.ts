@@ -5,6 +5,9 @@ export interface ChatResult {
   assetId: string;
   src?: string;
   filename: string;
+  /** Relevance tier from the search route (ADR 0029): "strong" renders as the
+   *  answer, "weak" stays collapsed behind a "show more" toggle. */
+  tier: "strong" | "weak";
   matchedTags: string[];
   matchedPlace: string | null;
 }

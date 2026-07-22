@@ -1,4 +1,5 @@
-import type { ChatMessage } from "@/types";
+import { useState } from "react";
+import type { ChatMessage, ChatResult } from "@/types";
 import { SparkleIcon, CloseIcon } from "@/components/icons/icons";
 
 interface ChatPanelProps {
@@ -35,6 +36,84 @@ function ChevronRight() {
     <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="var(--tm)" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" style={{ flex: "0 0 auto" }}>
       <path d="M9 6l6 6-6 6" />
     </svg>
+  );
+}
+
+function ThumbGrid({ rows, dim, onOpenResult }: { rows: ChatResult[]; dim?: boolean; onOpenResult: (id: string) => void }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8, opacity: dim ? 0.55 : 1 }}>
+      {rows.slice(0, 12).map((r) => (
+        <button
+          key={r.assetId}
+          onClick={() => onOpenResult(r.assetId)}
+          title={`${r.filename}${r.matchedTags.length ? ` · ${r.matchedTags.join(", ")}` : ""}${r.matchedPlace ? ` · ${r.matchedPlace}` : ""}`}
+          aria-label={`Open ${r.filename}`}
+          style={{
+            width: 38,
+            height: 38,
+            padding: 0,
+            // A term-matched thumb wears the accent — the "why it matched"
+            // signal has to survive touch screens, not just hover tooltips.
+            border: `1px solid ${r.matchedTags.length || r.matchedPlace ? "var(--ac)" : "var(--bd)"}`,
+            borderRadius: 2,
+            background: "var(--bg-in)",
+            cursor: "pointer",
+            overflow: "hidden",
+          }}
+        >
+          {r.src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={r.src} alt={r.filename} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          ) : (
+            <span style={{ fontSize: 8, color: "var(--tm)" }}>…</span>
+          )}
+        </button>
+      ))}
+      {rows.length > 12 && <span style={{ alignSelf: "center", fontSize: 10, color: "var(--tm)" }}>+{rows.length - 12}</span>}
+    </div>
+  );
+}
+
+const smallBtn: React.CSSProperties = {
+  marginTop: 7,
+  height: 24,
+  padding: "0 10px",
+  border: "1px solid var(--bd)",
+  borderRadius: 2,
+  background: "var(--bg-in)",
+  color: "var(--t2)",
+  fontSize: 11,
+  fontFamily: "inherit",
+  cursor: "pointer",
+};
+
+/** Search hits split by tier (ADR 0029): strong ones ARE the answer; weak
+ *  ones stay behind a toggle so "everything, reordered" reads as what it is. */
+function ResultStrip({ results, onOpenResult, onSelectResults }: { results: ChatResult[]; onOpenResult: (id: string) => void; onSelectResults: (ids: string[]) => void }) {
+  const [showWeak, setShowWeak] = useState(false);
+  const strong = results.filter((r) => r.tier === "strong");
+  const weak = results.filter((r) => r.tier === "weak");
+
+  return (
+    <>
+      <ThumbGrid rows={strong} onOpenResult={onOpenResult} />
+      {showWeak && <ThumbGrid rows={weak} dim onOpenResult={onOpenResult} />}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+        <button onClick={() => onSelectResults(strong.map((r) => r.assetId))} style={smallBtn}>
+          Select {strong.length} on canvas
+        </button>
+        {weak.length > 0 && (
+          <button onClick={() => setShowWeak((v) => !v)} style={{ ...smallBtn, color: "var(--tm)" }}>
+            {showWeak ? "Hide" : "Show"} {weak.length} more distant
+          </button>
+        )}
+        {showWeak && weak.length > 0 && (
+          <button onClick={() => onSelectResults(results.map((r) => r.assetId))} style={{ ...smallBtn, color: "var(--tm)" }}>
+            Select all {results.length}
+          </button>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -113,55 +192,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
               >
                 {m.text}
                 {m.results && m.results.length > 0 && (
-                  <>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
-                      {m.results.slice(0, 12).map((r) => (
-                        <button
-                          key={r.assetId}
-                          onClick={() => onOpenResult(r.assetId)}
-                          title={`${r.filename}${r.matchedTags.length ? ` · ${r.matchedTags.join(", ")}` : ""}${r.matchedPlace ? ` · ${r.matchedPlace}` : ""}`}
-                          aria-label={`Open ${r.filename}`}
-                          style={{
-                            width: 38,
-                            height: 38,
-                            padding: 0,
-                            border: "1px solid var(--bd)",
-                            borderRadius: 2,
-                            background: "var(--bg-in)",
-                            cursor: "pointer",
-                            overflow: "hidden",
-                          }}
-                        >
-                          {r.src ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={r.src} alt={r.filename} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                          ) : (
-                            <span style={{ fontSize: 8, color: "var(--tm)" }}>…</span>
-                          )}
-                        </button>
-                      ))}
-                      {m.results.length > 12 && (
-                        <span style={{ alignSelf: "center", fontSize: 10, color: "var(--tm)" }}>+{m.results.length - 12}</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => onSelectResults(m.results?.map((r) => r.assetId) ?? [])}
-                      style={{
-                        marginTop: 7,
-                        height: 24,
-                        padding: "0 10px",
-                        border: "1px solid var(--bd)",
-                        borderRadius: 2,
-                        background: "var(--bg-in)",
-                        color: "var(--t2)",
-                        fontSize: 11,
-                        fontFamily: "inherit",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Select {m.results.length} on canvas
-                    </button>
-                  </>
+                  <ResultStrip results={m.results} onOpenResult={onOpenResult} onSelectResults={onSelectResults} />
                 )}
               </div>
             </div>

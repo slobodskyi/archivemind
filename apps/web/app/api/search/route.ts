@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { searchResponseSchema, uuidSchema, type SearchParse } from "@archivemind/shared";
 import { analyzeModel, embedText, parseSearchQuery } from "@/lib/gemini";
+import { assignTiers } from "@/lib/search-tiers";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
@@ -71,17 +72,18 @@ export async function GET(request: Request) {
     model: analyzeModel(),
   });
 
+  // The RPC returns a ranked list with no cutoff; the tier annotation (ADR
+  // 0029) is what keeps a small archive from answering every query with all
+  // of itself. Order is preserved — tag-matched rows already rank first.
   const rows = (data ?? []) as SearchRow[];
-  return NextResponse.json(
-    searchResponseSchema.parse({
-      parsed,
-      results: rows.map((r) => ({
-        assetId: r.asset_id,
-        similarity: r.similarity,
-        matchedTags: r.matched_tags ?? [],
-        matchedPlace: r.matched_place,
-        takenAt: r.taken_at,
-      })),
-    }),
+  const results = assignTiers(
+    rows.map((r) => ({
+      assetId: r.asset_id,
+      similarity: r.similarity,
+      matchedTags: r.matched_tags ?? [],
+      matchedPlace: r.matched_place,
+      takenAt: r.taken_at,
+    })),
   );
+  return NextResponse.json(searchResponseSchema.parse({ parsed, results }));
 }

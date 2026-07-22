@@ -1385,21 +1385,28 @@ export function useWorkspace(
             assetId: r.assetId,
             src: p ? photoSrc(p, 76, 76) : undefined,
             filename: p?.filename ?? "outside this view",
+            tier: r.tier,
             matchedTags: r.matchedTags,
             matchedPlace: r.matchedPlace,
           };
         });
 
+        // Honest filter note (ADR 0029): dates/places genuinely filter in SQL
+        // and may be echoed from the parse; tags only rank, so name just the
+        // tags that actually matched a result — never the parsed wish-list.
         const filters: string[] = [];
         if (data.parsed.date_from || data.parsed.date_to)
           filters.push(`dates ${data.parsed.date_from ?? "…"} – ${data.parsed.date_to ?? "…"}`);
         if (data.parsed.place_terms.length) filters.push(`place: ${data.parsed.place_terms.join(", ")}`);
-        if (data.parsed.tag_terms.length) filters.push(`tags: ${data.parsed.tag_terms.join(", ")}`);
-        const filterNote = filters.length ? ` (filters — ${filters.join("; ")})` : "";
+        const hitTags = [...new Set(results.flatMap((r) => r.matchedTags))];
+        if (hitTags.length) filters.push(`tagged: ${hitTags.join(", ")}`);
+        const filterNote = filters.length ? ` (${filters.join("; ")})` : "";
 
+        const strong = results.filter((r) => r.tier === "strong").length;
+        const weak = results.length - strong;
         patchLastChatMsg(
           results.length
-            ? `Found ${results.length} photo(s)${filterNote}. Tap a thumb to open it, or select them all on the canvas.`
+            ? `${strong} best match${strong === 1 ? "" : "es"}${filterNote}${weak ? ` — plus ${weak} more distant below` : ""}. Tap a thumb to open it.`
             : `No matches${filterNote}. Only analyzed photos are searchable — run "Analyze with AI" first, or try different wording.`,
           results,
         );
