@@ -103,7 +103,9 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
 - Same-day follow-up: **Topic clouds went real** — `group` derived from AI tags at
   read time (`lib/topics.ts`: event→scene→object priority, ambient-tag skip, top-6 +
   Other, unanalyzed → Unsorted; [ADR 0023](decisions/0023-topic-clouds-derived-from-tags.md)).
-  Interim until the post-MVP embedding-clustering job (spec §13); Map's `country`
+  The tag heuristic was an interim; the embedding-clustering job (spec §13) has since
+  landed and demoted it to the fallback — see the Phase-5 entry below and
+  [ADR 0028](decisions/0028-topic-clusters-from-embedding-kmeans.md). Map's `country`
   default stays inert but is now **unread** — Map became a real MapLibre geo map
   over EXIF GPS ([ADR 0027](decisions/0027-map-view-is-a-real-geographic-map.md),
   superseding the Map half of 0018; reverse-geocoded labels via
@@ -135,6 +137,15 @@ Phases 1–2). What actually remains:
   the client half (versioned `localStorage` + undo/redo) already ships (#93,
   ADR 0022).
 - **Remaining #17:** per-project `caption_prompt`, project members.
+- **Topic embedding clustering — ✅ DONE 2026-07-22 (PR__PR_NUMBER__)** — the
+  stable replacement for the read-time tag heuristic (ADR 0023): a deterministic
+  k-means `cluster` worker job over the image embeddings writes `topic_clusters`
+  + `assets.cluster_id`, labelled from each cluster's most discriminative tags,
+  matched across runs so ids/labels stay stable; enqueued automatically after
+  analyze with **zero Gemini calls** (pure CPU — the "AI only by button" rule
+  holds). `lib/topics.ts` reads the stored label first, tag heuristic as
+  fallback ([ADR 0028](decisions/0028-topic-clusters-from-embedding-kmeans.md);
+  migration `20260722000001`, pgTAP `004`).
 
 ### Phase 6 — Cloud imports (~week 7) — ✅ DONE 2026-07-21 (Drive: #97–#101, #103 · Dropbox: #105–#107; pulled ahead of Phase 5's remainder at the owner's call)
 
