@@ -88,6 +88,9 @@ export interface Photo {
   group: PhotoGroup;
   country: string;
   source: PhotoSource;
+  /** True when a non-destructive edit (ADR 0030) is applied — `src`/`srcMedium`
+   *  then point at the edited previews, and the drawer offers Reset. */
+  edited?: boolean;
   /** Folder name within `source`'s own filesystem — real per-source browsing hierarchy. */
   folder: string;
   project: ProjectKey;

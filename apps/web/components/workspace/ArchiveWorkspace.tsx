@@ -21,6 +21,7 @@ import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
 import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
+import ImageEditor from "@/components/editor/ImageEditor";
 import SearchModal from "@/components/modals/SearchModal";
 import HelpModal from "@/components/modals/HelpModal";
 import ImportModal from "@/components/import/ImportModal";
@@ -320,6 +321,16 @@ export default function ArchiveWorkspace({
         onCopy={ws.copyCap}
         onGenSingle={() => ws.drawerPhoto && ws.genSingle(ws.drawerPhoto.id)}
         onSaveCaption={ws.saveCaption}
+        onEditImage={() => ws.drawerPhoto && ws.openEditor(ws.drawerPhoto.id)}
+      />
+
+      <ImageEditor
+        open={ws.editorOpen}
+        photo={ws.editorPhoto}
+        busy={ws.editBusy}
+        onClose={ws.closeEditor}
+        onSave={ws.saveEdit}
+        onReset={ws.resetEdit}
       />
 
       <Toast show={ws.toast.show} text={ws.toast.text} />

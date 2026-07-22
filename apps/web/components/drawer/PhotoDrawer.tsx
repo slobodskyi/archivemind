@@ -29,6 +29,7 @@ interface PhotoDrawerProps {
   onCopy: () => void;
   onGenSingle: () => void;
   onSaveCaption: (text: string) => void;
+  onEditImage: () => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -49,6 +50,7 @@ export default function PhotoDrawer({
   onCopy,
   onGenSingle,
   onSaveCaption,
+  onEditImage,
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
@@ -128,6 +130,14 @@ export default function PhotoDrawer({
             <button onClick={onClose} aria-label="Close" style={navBtn("close")}>
               <CloseIcon width={13} height={13} strokeWidth={1.8} />
             </button>
+            {isRealSource(photo.source) && photo.src && (
+              <button onClick={onEditImage} style={editPill} title="Crop, rotate, straighten or flip">
+                {photo.edited && (
+                  <span style={{ width: 5, height: 5, borderRadius: 999, background: "var(--ac)" }} />
+                )}
+                {photo.edited ? "Edited" : "Edit"}
+              </button>
+            )}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
@@ -360,6 +370,25 @@ const smallBtn: React.CSSProperties = {
   fontSize: 11.5,
   fontFamily: "inherit",
   cursor: "pointer",
+};
+
+const editPill: React.CSSProperties = {
+  position: "absolute",
+  left: 8,
+  bottom: 8,
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  height: 26,
+  padding: "0 12px",
+  border: "1px solid var(--bd)",
+  background: "rgba(10,10,10,.65)",
+  color: "#fff",
+  borderRadius: 2,
+  fontSize: 11.5,
+  fontFamily: "inherit",
+  cursor: "pointer",
+  backdropFilter: "blur(8px)",
 };
 
 function navBtn(kind: "left" | "right" | "close"): React.CSSProperties {

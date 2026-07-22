@@ -23,7 +23,9 @@ export type MemberRole = z.infer<typeof memberRoleSchema>;
 // format between web (enqueue via POST /api/jobs) and the worker (claim loop).
 // `cluster` (ADR 0028) is worker-only: enqueued at the tail of analyze, never
 // via POST /api/jobs (deliberately absent from createJobRequestSchema).
-export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export", "cluster"]);
+// `edit` (ADR 0030) is enqueued by the dedicated POST /api/assets/[id]/edit
+// route (not POST /api/jobs) — the worker renders the edited previews.
+export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export", "cluster", "edit"]);
 export type JobType = z.infer<typeof jobTypeSchema>;
 
 export const jobStatusSchema = z.enum(["queued", "running", "done", "failed", "canceled"]);
@@ -445,3 +447,145 @@ Analyze the image and return strict JSON:
 - tags: up to 20 short lowercase tags. category one of: object, scene, place, attribute, event, other. "attribute" covers visible person attributes (e.g. "mustache", "military uniform") — NEVER identity, names, or ethnicity.
 - ocr_text: text visible in the image, verbatim ("" if none).
 - suggested_facts: up to 6 short checkable statements grounded in what is visible (basis "visual") or in provided metadata (basis "exif").`;
+
+// ── Image editing (ADR 0030) — Tier 0 geometry ───────────────────────────────
+//
+// A NON-DESTRUCTIVE recipe. The stored source of truth is this resolution-
+// independent recipe (asset_edits.recipe); the worker renders edited previews
+// from the ORIGINAL medium preview (in R2 for every source — upload/gdrive/
+// dropbox alike), so editing needs NO original bytes and NO source-specific
+// path, and asset_previews (the originals) are never overwritten. Reset =
+// dropping the recipe row → instant revert.
+//
+// The recipe is applied to the EXIF-oriented image in a FIXED order that the
+// web preview (CSS transforms) and the worker (sharp) both honour, so the two
+// stay pixel-consistent: flip → rotate90 → straighten → crop.
+
+/** Fine-rotation clamp for the straighten slider (degrees, clockwise). */
+export const EDIT_STRAIGHTEN_MAX_DEG = 45;
+
+/** Crop rectangle, normalized [0,1] within the WORKING image (i.e. after
+ *  flip + rotate90 + straighten). A small epsilon absorbs float slop from the
+ *  browser's overlay math. */
+export const editCropSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    w: z.number().min(0).max(1),
+    h: z.number().min(0).max(1),
+  })
+  .refine((c) => c.w > 0 && c.h > 0 && c.x + c.w <= 1.0001 && c.y + c.h <= 1.0001, {
+    message: "crop out of bounds",
+  });
+export type EditCrop = z.infer<typeof editCropSchema>;
+
+export const editRecipeSchema = z.object({
+  /** Clockwise quarter-turns. */
+  rotate: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).default(0),
+  /** Mirror left↔right. */
+  flipH: z.boolean().default(false),
+  /** Mirror top↔bottom. */
+  flipV: z.boolean().default(false),
+  /** Fine clockwise rotation in degrees, [-45, 45]. */
+  straighten: z.number().min(-EDIT_STRAIGHTEN_MAX_DEG).max(EDIT_STRAIGHTEN_MAX_DEG).default(0),
+  /** Null = keep the whole (straightened) frame. */
+  crop: editCropSchema.nullable().default(null),
+});
+export type EditRecipe = z.infer<typeof editRecipeSchema>;
+
+/** POST /api/assets/[id]/edit body. */
+export const editAssetRequestSchema = z.object({ recipe: editRecipeSchema });
+export type EditAssetRequest = z.infer<typeof editAssetRequestSchema>;
+
+/** ai_jobs.payload for type='edit' (single asset). */
+export const editJobPayloadSchema = z.object({
+  asset_id: uuidSchema,
+  recipe: editRecipeSchema,
+});
+export type EditJobPayload = z.infer<typeof editJobPayloadSchema>;
+
+/** A recipe that changes nothing — the UI should refuse to enqueue it. */
+export function isIdentityRecipe(r: EditRecipe): boolean {
+  return r.rotate === 0 && !r.flipH && !r.flipV && r.straighten === 0 && r.crop === null;
+}
+
+const toRad = (deg: number): number => (deg * Math.PI) / 180;
+
+/** Dimensions of the WORKING image (the frame the crop is normalized against):
+ *  the EXIF-oriented `w`×`h`, after rotate90 (swaps axes on a quarter-turn) and
+ *  straighten (grows the bounding box to hold the tilted content). Flip never
+ *  changes size. Pure — the web layout and the worker's fallback both call it. */
+export function workingDimensions(
+  w: number,
+  h: number,
+  recipe: Pick<EditRecipe, "rotate" | "straighten">,
+): { w: number; h: number } {
+  const quarterSwaps = recipe.rotate === 90 || recipe.rotate === 270;
+  const w1 = quarterSwaps ? h : w;
+  const h1 = quarterSwaps ? w : h;
+  if (!recipe.straighten) return { w: w1, h: h1 };
+  const a = toRad(recipe.straighten);
+  const sin = Math.abs(Math.sin(a));
+  const cos = Math.abs(Math.cos(a));
+  return {
+    w: Math.round(w1 * cos + h1 * sin),
+    h: Math.round(w1 * sin + h1 * cos),
+  };
+}
+
+/** Largest axis-aligned rectangle (same orientation as `w`×`h`) that fits
+ *  inside a `w`×`h` rectangle rotated by `angleRad` — the classic
+ *  rotatedRectWithMaxArea. Returns {w,h} in the rotated image's own units. */
+function rotatedRectWithMaxArea(w: number, h: number, angleRad: number): { w: number; h: number } {
+  if (w <= 0 || h <= 0) return { w: 0, h: 0 };
+  const sin = Math.abs(Math.sin(angleRad));
+  const cos = Math.abs(Math.cos(angleRad));
+  const longSide = Math.max(w, h);
+  const shortSide = Math.min(w, h);
+  if (shortSide <= 2 * sin * cos * longSide || Math.abs(sin - cos) < 1e-10) {
+    // Half-constrained case (fully constrained by the shorter side).
+    const x = 0.5 * shortSide;
+    const [wr, hr] = w >= h ? [x / sin, x / cos] : [x / cos, x / sin];
+    return { w: wr, h: hr };
+  }
+  const cos2 = cos * cos - sin * sin;
+  return { w: (w * cos - h * sin) / cos2, h: (h * cos - w * sin) / cos2 };
+}
+
+/** Auto-crop for a straighten: the largest centered rectangle with no exposed
+ *  (background-filled) corners, expressed as a normalized crop in WORKING-image
+ *  space. The editor applies this by default when the user only straightens, so
+ *  a tilt never reveals empty triangles. Identity (full frame) when straighten
+ *  is 0. `w`/`h` are the EXIF-oriented source dims. */
+export function inscribedCropForStraighten(
+  w: number,
+  h: number,
+  recipe: Pick<EditRecipe, "rotate" | "straighten">,
+): EditCrop {
+  if (!recipe.straighten) return { x: 0, y: 0, w: 1, h: 1 };
+  const quarterSwaps = recipe.rotate === 90 || recipe.rotate === 270;
+  const w1 = quarterSwaps ? h : w;
+  const h1 = quarterSwaps ? w : h;
+  const inner = rotatedRectWithMaxArea(w1, h1, toRad(recipe.straighten));
+  const work = workingDimensions(w, h, recipe);
+  const nw = Math.min(1, inner.w / work.w);
+  const nh = Math.min(1, inner.h / work.h);
+  return { x: (1 - nw) / 2, y: (1 - nh) / 2, w: nw, h: nh };
+}
+
+/** Resolve a normalized crop to an integer pixel extract rect on a
+ *  `workingW`×`workingH` image, clamped to stay in bounds (worker sharp
+ *  `.extract()` throws on a rect that overflows even by a pixel). Null crop →
+ *  the whole frame. */
+export function resolveCropRect(
+  workingW: number,
+  workingH: number,
+  crop: EditCrop | null,
+): { left: number; top: number; width: number; height: number } {
+  if (!crop) return { left: 0, top: 0, width: workingW, height: workingH };
+  const left = Math.min(workingW - 1, Math.max(0, Math.round(crop.x * workingW)));
+  const top = Math.min(workingH - 1, Math.max(0, Math.round(crop.y * workingH)));
+  const width = Math.max(1, Math.min(workingW - left, Math.round(crop.w * workingW)));
+  const height = Math.max(1, Math.min(workingH - top, Math.round(crop.h * workingH)));
+  return { left, top, width, height };
+}
