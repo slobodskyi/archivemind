@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
+import type { EditRecipe } from "@archivemind/shared";
 import { CAPTION_LANG_DB, CAPTION_STYLE_DB, getCaptionRow } from "@/lib/format";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -157,6 +158,8 @@ interface WorkspaceState {
   hoveredId: string | null;
   marquee: Marquee | null;
   drawerId: string | null;
+  /** Asset id being edited in the image editor (ADR 0030), or null. */
+  editorId: string | null;
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
@@ -329,6 +332,14 @@ export interface Workspace {
   closeDrawer: () => void;
   navDrawer: (dir: number) => void;
   deletePhoto: (id: string) => void;
+  /** Image editor (ADR 0030). */
+  editorOpen: boolean;
+  editorPhoto: Photo | null;
+  editBusy: boolean;
+  openEditor: (id: string) => void;
+  closeEditor: () => void;
+  saveEdit: (recipe: EditRecipe) => void;
+  resetEdit: (id: string) => void;
   setLang: (l: Language) => void;
   setStyle: (s: CaptionStyle) => void;
   copyCap: () => void;
@@ -524,6 +535,7 @@ export function useWorkspace(
     hoveredId: null,
     marquee: null,
     drawerId: null,
+    editorId: null,
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
@@ -1246,6 +1258,52 @@ export function useWorkspace(
     [setState, flashToast],
   );
 
+  // ── Image editor (ADR 0030) ──────────────────────────────────────────────
+  const openEditor = useCallback((id: string) => setState({ editorId: id }), [setState]);
+  const closeEditor = useCallback(() => setState({ editorId: null }), [setState]);
+
+  /** Enqueue a non-destructive edit (crop/rotate/straighten/flip). The worker
+   *  renders fresh edited previews from the original medium; progress + the
+   *  refresh that swaps them in ride the shared job pipeline (useJobProgress). */
+  const saveEdit = useCallback(
+    async (recipe: EditRecipe) => {
+      const s = stateRef.current;
+      const id = s.editorId;
+      if (!id || activeJobId.current) return;
+      setState({ editorId: null, proc: { active: true, label: "Queueing edit…", pct: 3 } });
+      try {
+        const resp = await fetch(`/api/assets/${id}/edit`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ recipe }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const { jobId } = (await resp.json()) as { jobId: string };
+        activeJobId.current = jobId;
+        setState({ proc: { active: true, label: "Rendering edit…", pct: 5 } });
+      } catch {
+        setState({ proc: { active: false, label: "", pct: 0 } });
+        flashToast("Edit failed to start — try again");
+      }
+    },
+    [setState, flashToast],
+  );
+
+  /** Reset (ADR 0030): drop the edit row — the untouched originals were never
+   *  overwritten, so the views snap back on refresh. No worker round-trip. */
+  const resetEdit = useCallback(
+    (id: string) => {
+      fetch(`/api/assets/${id}/edit`, { method: "DELETE" })
+        .then((resp) => {
+          if (!resp.ok) throw new Error(String(resp.status));
+          flashToast("Edit reverted");
+          router.refresh();
+        })
+        .catch(() => flashToast("Could not revert — try again"));
+    },
+    [flashToast, router],
+  );
+
   const neuralGalleryFor = useCallback(
     (
       photos: Photo[],
@@ -1906,11 +1964,13 @@ export function useWorkspace(
       flashToast(
         job.type === "caption"
           ? `${job.total_items ?? 0} caption(s) generated`
-          : `${job.total_items ?? 0} photo(s) analyzed`,
+          : job.type === "edit"
+            ? "Image edited"
+            : `${job.total_items ?? 0} photo(s) analyzed`,
       );
-      router.refresh(); // pulls fresh tags/facts/captions into the server payload
+      router.refresh(); // pulls fresh tags/facts/captions/edits into the server payload
     } else {
-      const verb = job.type === "caption" ? "Caption" : "Analyze";
+      const verb = job.type === "caption" ? "Caption" : job.type === "edit" ? "Edit" : "Analyze";
       flashToast(`${verb} ${job.status}${job.error ? ` — ${cloudErrorCopy(job.error) ?? job.error}` : ""}`);
     }
   });
@@ -2101,6 +2161,10 @@ export function useWorkspace(
     ? state.photos.find((p) => p.id === state.drawerId) ?? null
     : null;
 
+  const editorPhoto = state.editorId
+    ? state.photos.find((p) => p.id === state.editorId) ?? null
+    : null;
+
   const isNeural = state.view === "neural";
   const isTimelineView = state.view === "timeline" && state.projCurrent !== "all";
   const isMapView = state.view === "map" && state.projCurrent !== "all";
@@ -2289,6 +2353,13 @@ export function useWorkspace(
     closeDrawer,
     navDrawer,
     deletePhoto,
+    editorOpen: state.editorId != null,
+    editorPhoto,
+    editBusy: state.proc.active,
+    openEditor,
+    closeEditor,
+    saveEdit,
+    resetEdit,
     setLang,
     setStyle,
     copyCap,

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { editRecipeSchema, resolveCropRect, workingDimensions } from "@archivemind/shared";
 import type { ExifData, Photo, PhotoCaptions } from "@/types";
 import { presignGet } from "@/lib/r2";
 import { UNSORTED_CLOUD_KEY } from "@/lib/layout";
@@ -53,6 +54,14 @@ interface FileOriginRow {
   source_path: string | null;
 }
 
+/** A non-destructive edit (ADR 0030). To-one (asset_edits.asset_id is its PK),
+ *  so Supabase embeds it as an object|null — same shape as asset_exif. */
+interface AssetEditRow {
+  recipe: unknown;
+  edited_thumb_key: string | null;
+  edited_medium_key: string | null;
+}
+
 interface AssetRow {
   id: string;
   title: string | null;
@@ -64,6 +73,7 @@ interface AssetRow {
   files: FileOriginRow[];
   asset_previews: PreviewRow[];
   asset_exif: ExifRow | null;
+  asset_edits: AssetEditRow | null;
   asset_tags: TagRow[];
   facts: FactRow[];
   captions: CaptionDbRow[];
@@ -111,13 +121,29 @@ function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
 
 async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   const thumb = a.asset_previews.find((p) => p.size === "thumb");
+  // A non-destructive edit (ADR 0030) redirects src to the edited thumb; the
+  // originals in asset_previews are left untouched (a reset just drops the row).
+  const edit = a.asset_edits;
+  const edited = Boolean(edit);
+  const thumbKey = edit?.edited_thumb_key ?? thumb?.r2_key;
   // Only the thumb is presigned up front — the canvas renders thumbs. The
   // medium is fetched lazily by the drawer via /api/assets/[id]/medium, which
   // halves the per-load signing work.
-  const src = thumb ? await presignGet(thumb.r2_key) : undefined;
+  const src = thumbKey ? await presignGet(thumbKey) : undefined;
 
   // Tile aspect basis from the thumb; the mock's w/h are ~64–96px display units.
-  const aspect = thumb?.width && thumb?.height ? thumb.width / thumb.height : 4 / 3;
+  // The edited thumb carries no stored dims, but the recipe + the original thumb
+  // dims resolve its shape (a rotate90 swaps the tile, a crop reshapes it), so
+  // the tile matches what the edit actually renders.
+  let aspect = thumb?.width && thumb?.height ? thumb.width / thumb.height : 4 / 3;
+  if (edit && thumb?.width && thumb?.height) {
+    const parsed = editRecipeSchema.safeParse(edit.recipe);
+    if (parsed.success) {
+      const work = workingDimensions(thumb.width, thumb.height, parsed.data);
+      const rect = resolveCropRect(work.w, work.h, parsed.data.crop);
+      if (rect.width > 0 && rect.height > 0) aspect = rect.width / rect.height;
+    }
+  }
   const w = Math.max(56, Math.min(112, Math.round(76 * Math.sqrt(aspect))));
   const h = Math.max(48, Math.min(112, Math.round(w / aspect)));
 
@@ -162,6 +188,7 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
     group: topic,
     country: "Ukraine",
     source: gdrive ? "gdrive" : dropbox ? "dropbox" : "upload",
+    edited,
     folder: gdrive ? (a.files[0]?.source_path ?? "Google Drive") : dropbox ? "Dropbox" : "Uploads",
     project: "",
     exif: toExifData(a.asset_exif, created),
@@ -173,6 +200,7 @@ const ASSET_SELECT = `id, title, status, ai_processed_at, created_at, cluster_id
        topic_clusters ( label ),
        files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),
+       asset_edits ( recipe, edited_thumb_key, edited_medium_key ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
        asset_tags ( tags ( name, category ) ),
        facts ( text, status ),
