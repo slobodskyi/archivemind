@@ -1949,6 +1949,34 @@ export function useWorkspace(
       if (job.status === "done") router.refresh();
       return;
     }
+    // Edit jobs (ADR 0030) render fast — locally, no external API — so the
+    // "done" broadcast can land BEFORE saveEdit even records activeJobId (unlike
+    // the multi-second analyze/caption). Refresh on ANY edit completing (like
+    // cluster), independent of activeJobId, so the swapped-in edited previews
+    // appear without a manual reload; the tracked branch still drives the
+    // progress bar + toast.
+    if (job.type === "edit") {
+      const tracked = job.id === activeJobId.current;
+      if (job.status === "running" || job.status === "queued") {
+        if (tracked) {
+          setState({
+            proc: { active: true, label: job.progress_label ?? "Rendering edit…", pct: Math.max(5, job.progress) },
+          });
+        }
+        return;
+      }
+      if (tracked) {
+        activeJobId.current = null;
+        setState({ proc: { active: false, label: "", pct: 0 } });
+        flashToast(
+          job.status === "done"
+            ? "Image edited"
+            : `Edit ${job.status}${job.error ? ` — ${cloudErrorCopy(job.error) ?? job.error}` : ""}`,
+        );
+      }
+      if (job.status === "done") router.refresh();
+      return;
+    }
     if (job.id !== activeJobId.current) return;
     if (job.status === "running" || job.status === "queued") {
       setState({
@@ -1971,13 +1999,11 @@ export function useWorkspace(
       flashToast(
         job.type === "caption"
           ? `${job.total_items ?? 0} caption(s) generated`
-          : job.type === "edit"
-            ? "Image edited"
-            : `${job.total_items ?? 0} photo(s) analyzed`,
+          : `${job.total_items ?? 0} photo(s) analyzed`,
       );
-      router.refresh(); // pulls fresh tags/facts/captions/edits into the server payload
+      router.refresh(); // pulls fresh tags/facts/captions into the server payload
     } else {
-      const verb = job.type === "caption" ? "Caption" : job.type === "edit" ? "Edit" : "Analyze";
+      const verb = job.type === "caption" ? "Caption" : "Analyze";
       flashToast(`${verb} ${job.status}${job.error ? ` — ${cloudErrorCopy(job.error) ?? job.error}` : ""}`);
     }
   });
