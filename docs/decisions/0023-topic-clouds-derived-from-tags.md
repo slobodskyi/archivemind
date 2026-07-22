@@ -2,7 +2,12 @@
 
 Date: 2026-07-20
 
-Status: Accepted
+Status: Accepted; superseded in part by
+[0028](0028-topic-clusters-from-embedding-kmeans.md) — the tag heuristic below
+is now the **fallback**, used only for assets not yet covered by a stored
+embedding cluster (and for workspaces under the clustering floor). It is no
+longer the primary source of a photo's Topic cloud, but every rule here still
+governs that fallback path verbatim.
 
 Supersedes the "Topic renders one `archive` cloud on real data" part of
 [0018](0018-cloud-clusters-map-topic-default-zoom.md) /

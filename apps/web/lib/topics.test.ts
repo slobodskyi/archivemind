@@ -174,3 +174,72 @@ describe("deriveTopics (ADR 0023)", () => {
     for (const [id, topic] of forward) expect(reversed.get(id)).toBe(topic);
   });
 });
+
+const clustered = (id: string, label: string | null, tags: [string, string][] = []): TopicAsset => ({
+  id,
+  clusterLabel: label,
+  tags: tags.map(([category, name]) => ({ category, name })),
+});
+
+describe("deriveTopics cluster labels (ADR 0028)", () => {
+  it("a stored cluster label wins over the tag heuristic", () => {
+    // Tags alone would pick "mat"; the cluster label overrides it.
+    const topics = deriveTopics([
+      clustered("a", "yoga · stretching", [["object", "mat"]]),
+      clustered("b", "yoga · stretching", [["object", "mat"]]),
+    ]);
+    expect(topics.get("a")).toBe("yoga · stretching");
+    expect(topics.get("b")).toBe("yoga · stretching");
+  });
+
+  it("a null or empty cluster label falls back to the tag heuristic", () => {
+    const topics = deriveTopics([
+      clustered("a", null, [["object", "mat"]]),
+      clustered("b", "", [["object", "mat"]]),
+      clustered("c", "   ", [["object", "mat"]]), // whitespace-only is not a label
+    ]);
+    expect(topics.get("a")).toBe("mat");
+    expect(topics.get("b")).toBe("mat");
+    expect(topics.get("c")).toBe("mat");
+  });
+
+  it("a clustered asset with no tags gets its label, not Unsorted", () => {
+    const topics = deriveTopics([clustered("a", "protest", [])]);
+    expect(topics.get("a")).toBe("protest");
+  });
+
+  it("an unclustered, untagged asset is still Unsorted", () => {
+    const topics = deriveTopics([clustered("a", null, [])]);
+    expect(topics.get("a")).toBe(UNSORTED_CLOUD_KEY);
+  });
+
+  it("cluster labels fold into Other beyond the cap, together with heuristic topics", () => {
+    // c00 has 3 members, c01..c06 one each: 7 cluster labels, cap 6 → the
+    // last-by-name singleton folds into Other, exactly like tag topics do.
+    const pad = (n: number) => `c${String(n).padStart(2, "0")}`;
+    const assets: TopicAsset[] = [
+      clustered("a0", pad(0)),
+      clustered("a1", pad(0)),
+      clustered("a2", pad(0)),
+      ...Array.from({ length: TOPIC_CLOUD_CAP }, (_, i) => clustered(`s${i}`, pad(i + 1))),
+    ];
+    const topics = deriveTopics(assets);
+    const named = new Set(
+      [...topics.values()].filter((t) => t !== TOPIC_OTHER_KEY && t !== UNSORTED_CLOUD_KEY),
+    );
+    expect(named.size).toBe(TOPIC_CLOUD_CAP);
+    expect(topics.get(`s${TOPIC_CLOUD_CAP - 1}`)).toBe(TOPIC_OTHER_KEY);
+  });
+
+  it("is deterministic under reorder with mixed clustered and heuristic assets", () => {
+    const assets = [
+      clustered("a", "yoga", [["object", "mat"]]),
+      asset("b", [["event", "protest"], ["object", "flag"]]),
+      clustered("c", null, [["object", "flag"]]),
+      asset("d", []),
+    ];
+    const forward = deriveTopics(assets);
+    const reversed = deriveTopics([...assets].reverse());
+    for (const [id, topic] of forward) expect(reversed.get(id)).toBe(topic);
+  });
+});

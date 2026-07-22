@@ -1868,6 +1868,15 @@ export function useWorkspace(
       router.refresh();
       return;
     }
+    // The cluster job (ADR 0028) is worker-enqueued after analyze, so it is
+    // never activeJobId and stays out of the analyze/caption progress UI. But
+    // when it finishes it has rewritten topic_clusters, so refresh silently to
+    // pull the stable semantic labels into the Topic view this session — without
+    // it, the user sees heuristic clouds until they navigate away and back.
+    if (job.type === "cluster") {
+      if (job.status === "done") router.refresh();
+      return;
+    }
     if (job.id !== activeJobId.current) return;
     if (job.status === "running" || job.status === "queued") {
       setState({

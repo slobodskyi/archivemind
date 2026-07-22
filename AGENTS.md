@@ -34,16 +34,21 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   the inert `"Ukraine"` default in `lib/assets.ts`. GPS reaches the map because the
   worker fills `asset_exif.gps_label` offline (GeoNames index + kdbush, ADR 0026)
   and — critically — reads iPhone HEIC EXIF at all: `exifr` throws on those, so
-  ingest falls back to `exiftool-vendored` (#113). Topic clusters by `group`,
-  DERIVED from AI tags (`lib/topics.ts`,
-  ADR 0023) — real multi-cloud, but only for analyzed assets (unanalyzed →
-  Unsorted). The chat panel IS
+  ingest falls back to `exiftool-vendored` (#113). Topic clusters by `group` =
+  the stored semantic cluster label when present (`topic_clusters`, ADR 0028 —
+  worker k-means over embeddings; "yoga"/"stretching"/"йога" become one cloud,
+  stable across sessions and identical in every project), with the read-time tag
+  heuristic (`lib/topics.ts`, ADR 0023) as the fallback for not-yet-clustered
+  assets and `Unsorted` for the unanalyzed. The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders ranked
   results (`lib/chat.ts` keeps only static help/greeting copy).
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
   HEIC + RAW paths), analyze (Gemini tags/facts + embeddings; user-triggered
-  only — never automatic) and caption (styled multilingual captions — live
-  end-to-end since #82: drawer Regenerate/edit/Save per lang × style).
+  only — never automatic), caption (styled multilingual captions — live
+  end-to-end since #82: drawer Regenerate/edit/Save per lang × style) and
+  cluster (deterministic k-means over image embeddings → `topic_clusters` +
+  `assets.cluster_id`; auto-enqueued after analyze, zero Gemini calls so the
+  "AI only by button" rule holds — ADR 0028).
 - `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),
@@ -59,8 +64,11 @@ design from this file:**
 - `docs/PLAN.md` — the phase-by-phase build order (Phase 0–7).
 - `docs/decisions/` — the "why" behind each call. Some ADRs supersede earlier ones in
   part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 → 0024,
-  with **0027** now superseding the Map half — read **0022** (unified cloud canvas +
-  tag-driven connecting lines, now Topic-only), **0023** (tag-derived Topic clouds),
+  with **0027** now superseding the Map half and **0028** the Topic half — read
+  **0022** (unified cloud canvas +
+  tag-driven connecting lines, now Topic-only), **0023** (tag-derived Topic clouds,
+  now the *fallback*), **0028** (Topic clouds cluster by stored embedding k-means —
+  the primary source of a photo's Topic now),
   **0024** (Timeline as a per-day date axis; cloud focus/whole-cloud drag) and
   **0027** (Map as a real MapLibre geographic map over EXIF GPS; ADR 0026 for the
   offline reverse geocoding that labels it) for what ships today.
