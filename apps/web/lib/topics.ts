@@ -1,8 +1,13 @@
 import { UNSORTED_CLOUD_KEY } from "./layout";
 
-/** Derives each asset's Topic-view cloud from its AI tags (ADR 0023) — the
- *  interim replacement for the inert `group: "archive"` default, until a real
- *  clustering job over embeddings owns this field (spec §13, post-MVP).
+/** Derives each asset's Topic-view cloud.
+ *
+ *  Primary source is the STORED semantic cluster label (topic_clusters.label,
+ *  ADR 0028): a worker k-means job groups "yoga"/"stretching"/"йога" into one
+ *  cloud, stable across sessions and identical in every project. When an asset
+ *  has no cluster yet (not analyzed, or clustered before it was added), this
+ *  falls back to the tag heuristic (ADR 0023 — event→scene→object priority,
+ *  ambient-tag skipping, top-6 + Other). Untagged AND unclustered → Unsorted.
  *
  *  Pure and deterministic: same rows in, same topics out, regardless of row
  *  order — safe for SSR + client re-render (the no-Math.random layout rule). */
@@ -15,6 +20,9 @@ export interface TopicTag {
 export interface TopicAsset {
   id: string;
   tags: readonly TopicTag[];
+  /** Stored cluster label (ADR 0028) — wins over the tag heuristic when set.
+   *  Absent/null/empty means not-yet-clustered → fall back to tags. */
+  clusterLabel?: string | null;
 }
 
 /** Thematic categories, most to least topical. `place` belongs to the Map
@@ -40,7 +48,8 @@ export const TOPIC_OTHER_KEY = "Other";
 
 /**
  * Assigns every asset a topic cloud key:
- * - untagged (unanalyzed) → Unsorted;
+ * - a stored cluster label (ADR 0028) wins outright, even for a tagless asset;
+ * - else untagged (unanalyzed) → Unsorted;
  * - otherwise the asset's most *clustering-useful* tag: walk the category
  *   priority, and within the first category that has any viable tag pick the
  *   one shared with the most other assets (ambient tags excluded), name
@@ -49,7 +58,8 @@ export const TOPIC_OTHER_KEY = "Other";
  *   the asset keeps its ambient tag instead of falling to Other;
  * - no tag in any thematic category at all → Other;
  * - finally only the TOPIC_CLOUD_CAP biggest topics keep their name — the
- *   rest fold into Other so the canvas stays readable.
+ *   rest fold into Other so the canvas stays readable. Cluster labels and
+ *   heuristic topics fold together into one combined set.
  */
 export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string> {
   const topics = new Map<string, string>();
@@ -73,6 +83,12 @@ export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string>
   const ambientMax = Math.max(2, Math.floor(taggedCount * TOPIC_AMBIENT_FRACTION));
 
   for (const asset of assets) {
+    // Stored cluster label wins outright — even for an asset with no tags.
+    const clusterLabel = asset.clusterLabel?.trim();
+    if (clusterLabel) {
+      topics.set(asset.id, clusterLabel);
+      continue;
+    }
     if (asset.tags.length === 0) {
       topics.set(asset.id, UNSORTED_CLOUD_KEY);
       continue;

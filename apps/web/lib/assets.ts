@@ -59,6 +59,8 @@ interface AssetRow {
   status: string;
   ai_processed_at: string | null;
   created_at: string;
+  cluster_id: string | null;
+  topic_clusters: { label: string } | null;
   files: FileOriginRow[];
   asset_previews: PreviewRow[];
   asset_exif: ExifRow | null;
@@ -167,7 +169,8 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   return photo;
 }
 
-const ASSET_SELECT = `id, title, status, ai_processed_at, created_at,
+const ASSET_SELECT = `id, title, status, ai_processed_at, created_at, cluster_id,
+       topic_clusters ( label ),
        files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
@@ -196,14 +199,15 @@ export async function getRealPhotos(supabase: SupabaseClient, projectId?: string
         .limit(500);
   if (error) throw error;
   const rows = (data ?? []) as unknown as AssetRow[];
-  // Topic clouds are RESULT-SET-relative: sharing counts, the ambient
-  // threshold and the top-6 fold are computed over exactly the rows this
-  // call returns (one project's newest ≤500, or the workspace window for
-  // "all") — the same asset can legitimately carry different topics in
-  // different projects (ADR 0023).
+  // Topic = the stored semantic cluster label when present (ADR 0028: stable
+  // across sessions, identical in every project), else the RESULT-SET-relative
+  // tag heuristic (ADR 0023) over exactly the rows this call returns — the
+  // fallback for assets not yet clustered. Under RLS a cross-workspace cluster
+  // embeds as null, so the join can only ever surface the caller's own labels.
   const topics = deriveTopics(
     rows.map((r) => ({
       id: r.id,
+      clusterLabel: r.topic_clusters?.label ?? null,
       tags: r.asset_tags.flatMap((t) => (t.tags ? [{ name: t.tags.name, category: t.tags.category }] : [])),
     })),
   );
