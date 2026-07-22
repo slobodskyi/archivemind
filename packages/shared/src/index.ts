@@ -381,13 +381,21 @@ Return JSON only. Fields:
 - semantic_text: what to match visually/semantically, reworded as a dense noun phrase (keep the query's language). Empty string if the query is pure filters.
 - date_from / date_to: ISO dates (YYYY-MM-DD) when the query names a period ("last June", "2026", "18.06"), else null. Resolve relative periods against today's date given below.
 - place_terms: place names mentioned (city/country/venue), lowercase, in both the query's language and English if obvious.
-- tag_terms: concrete nouns worth matching against tags (objects/scenes/events), lowercase English singular.
+- tag_terms: concrete nouns worth matching against tags (objects/scenes/events), lowercase English singular. For each concept also include 1-2 common synonyms or near-variants ("dog" -> dog, puppy; "girl" -> girl, woman). At most 6 terms total.
 - kinds: subset of ["photo","pdf","document","other"] only when the query names a type.
 Never invent filters the query does not state.`;
+
+/** Relevance tier for one search hit (ADR 0029). "strong" = it matched an
+ *  explicit query term (tag/place) or sits within the top cosine band;
+ *  "weak" = ranked but distant — the UI shows these collapsed, so a 5-photo
+ *  archive stops answering every query with all 5 photos. */
+export const searchTierSchema = z.enum(["strong", "weak"]);
+export type SearchTier = z.infer<typeof searchTierSchema>;
 
 export const searchResultSchema = z.object({
   assetId: uuidSchema,
   similarity: z.number(),
+  tier: searchTierSchema,
   matchedTags: z.array(z.string()),
   matchedPlace: z.string().nullable(),
   takenAt: z.string().nullable(),

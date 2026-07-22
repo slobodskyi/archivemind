@@ -254,16 +254,27 @@ describe("search contracts", () => {
     const resp = searchResponseSchema.parse({
       parsed,
       results: [
-        { assetId: id, similarity: 0.87, matchedTags: ["rescue"], matchedPlace: "Kyiv, Ukraine", takenAt: null },
+        { assetId: id, similarity: 0.87, tier: "strong", matchedTags: ["rescue"], matchedPlace: "Kyiv, Ukraine", takenAt: null },
       ],
     });
     expect(resp.results[0].matchedTags).toEqual(["rescue"]);
+    expect(resp.results[0].tier).toBe("strong");
     expect(resp.parsed.semantic_text).toBe("flooded street rescue");
   });
 
   it("rejects malformed result rows", () => {
     expect(
-      searchResultSchema.safeParse({ assetId: "nope", similarity: 1, matchedTags: [], matchedPlace: null, takenAt: null })
+      searchResultSchema.safeParse({ assetId: "nope", similarity: 1, tier: "strong", matchedTags: [], matchedPlace: null, takenAt: null })
+        .success,
+    ).toBe(false);
+    // tier is part of the contract now — a row without one (or with a made-up
+    // tier) must fail loudly, not default.
+    expect(
+      searchResultSchema.safeParse({ assetId: id, similarity: 1, matchedTags: [], matchedPlace: null, takenAt: null })
+        .success,
+    ).toBe(false);
+    expect(
+      searchResultSchema.safeParse({ assetId: id, similarity: 1, tier: "best", matchedTags: [], matchedPlace: null, takenAt: null })
         .success,
     ).toBe(false);
   });
