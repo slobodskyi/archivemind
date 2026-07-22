@@ -40,8 +40,12 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   stable across sessions and identical in every project), with the read-time tag
   heuristic (`lib/topics.ts`, ADR 0023) as the fallback for not-yet-clustered
   assets and `Unsorted` for the unanalyzed. The chat panel IS
-  Smart Search (#16): `sendChat` calls `GET /api/search` and renders ranked
-  results (`lib/chat.ts` keeps only static help/greeting copy).
+  Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
+  relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
+  description/facts) outrank cosine-only rows and read as "strong", the rest
+  collapse behind "show more" (ADR 0029). Search is **hybrid**: image-embedding
+  cosine + Postgres FTS over description/facts + EXIF filters (camera/ISO/aperture)
+  alongside date/place (ADR 0031). `lib/chat.ts` keeps only static help/greeting copy.
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
   HEIC + RAW paths), analyze (Gemini tags/facts + embeddings; user-triggered
   only — never automatic), caption (styled multilingual captions — live

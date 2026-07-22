@@ -466,14 +466,16 @@ Per asset: 1 usage_event `image_analyzed` + 1 `embedding`. Set `assets.ai_proces
 Per asset × lang: prompt = base template (in `packages/shared/prompts.ts`, per style) + `projects.caption_prompt` (if run in project context) + known metadata (date, GPS label, confirmed facts) + medium preview → text → upsert `captions`. Editing a caption in UI sets `is_edited=true`; regenerate never silently overwrites edited captions (UI confirms).
 
 ### 8.4 Search (route handler, not a job)
-1. `GEMINI_ANALYZE_MODEL` parses the query (structured output via `generateContent`) → `{semantic_text, date_from?, date_to?, place_terms[], tag_terms[], kinds[]}`.
+1. `GEMINI_ANALYZE_MODEL` parses the query (structured output via `generateContent`) → `{semantic_text, date_from?, date_to?, place_terms[], tag_terms[], camera_terms[], iso_min?, iso_max?, aperture?, kinds[]}`. Every field is `.catch()`-guarded, so a sloppy parse degrades to plain semantic search rather than failing.
 2. Embed `semantic_text` (same model/space as documents; Embedding 2 → embed query text into the multimodal space).
-3. SQL: cosine similarity over `embeddings` scoped to workspace (+ project filter), joined with metadata filters:
+3. SQL (`search_assets`, **hybrid** — ADR 0031): image-embedding cosine over `embeddings` scoped to workspace (+ project filter), plus:
+   - **lexical signal** → `websearch_to_tsquery('simple', …)` over the AI `description` (`embeddings.content`) + `facts.text` (GIN-indexed; `'simple'` needs no extension and doesn't stem — right for the uk/en mix). A hit is an *explicit* match;
    - dates → `asset_exif.taken_at` range;
-   - places → match `gps_label ILIKE` any place_term OR the asset has a `place`-category tag matching;
-   - tags → boost/filter via `asset_tags`.
-4. Return top-N assets with similarity + matched-filter explanation (UI shows *why* it matched).
-Graceful degradation: no GPS in archive (common for pro cameras) → place matching falls back to tags/caption text; note in UI ("location from tags").
+   - places → `gps_label ILIKE` any place_term OR a `place`-category tag match;
+   - EXIF filters (narrow, don't rank) → camera make/model/lens ILIKE, `iso` range, aperture ILIKE;
+   - tags → `asset_tags`, exact term or whole-word of a multi-word tag.
+4. **Ranking is tiered (ADR 0029), not raw cosine.** Explicit matches — a matched tag, place, or lexical hit — sort to the front and read as "strong"; the rest are cosine-only and collapse behind "show more" in the UI. Return top-N with a `matched_tags`/`matched_place`/`matched_text` explanation (UI shows *why* it matched — accent border + "in description").
+Graceful degradation: no GPS in archive (common for pro cameras) → place matching falls back to place-tags; an EXIF filter simply drops assets missing that field. Raw OCR is not yet a source — the worker discards `ocr_text`; the `description` already carries most on-image (screenshot) text (ADR 0031, raw-OCR persistence deferred).
 Log `search_query` usage_event. Latency budget: 1 analyze-model call + 1 embed + 1 SQL ≈ well under Vercel limits.
 
 ### 8.5 Export (`type='export'`)

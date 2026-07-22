@@ -30,8 +30,12 @@ superclustering each photo's EXIF GPS into thumbnail markers, geotagged photos
 only (ADR 0027, superseding 0018's inert country cloud; the worker labels those
 coordinates offline via ADR 0026, and reads iPhone HEIC EXIF at all only since
 the `exiftool-vendored` fallback in #113). The chat panel is Smart Search
-(#16): `sendChat` → `GET /api/search` → ranked results with thumb strip +
-select-on-canvas; `lib/chat.ts` keeps only static help/greeting copy.
+(#16): `sendChat` → `GET /api/search` → results in relevance tiers (explicit
+tag/place/lexical matches read as "strong", cosine-only ones collapse behind
+"show more" — ADR 0029) with thumb strip + select-on-canvas. Search is hybrid:
+image-embedding cosine + Postgres FTS over the AI description/facts + EXIF
+filters (camera/ISO/aperture) beside date/place (ADR 0031). `lib/chat.ts` keeps
+only static help/greeting copy.
 
 ## Data flow (today — paths relative to `apps/web/`)
 
@@ -66,6 +70,8 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                previews from the original medium into asset_edits
   app/api/captions/[id]                        caption edit (is_edited) / resetEdited
   app/api/search                               GET §8.4: parse → embed → search_assets()
+                                               (hybrid: cosine + FTS on description/facts,
+                                               tiered; date/place/EXIF filters — ADR 0029/0031)
   app/api/integrations/google · /connect       Drive connect: status/revoke · popup-code
                                                exchange → AES-GCM tokens (ADR 0025;
                                                token custody: lib/integrations/*, the
