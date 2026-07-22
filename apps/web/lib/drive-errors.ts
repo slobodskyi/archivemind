@@ -38,6 +38,10 @@ const MESSAGES: Record<string, string> = Object.assign(Object.create(null), {
   drive_picker_failed: "Couldn't open the Google Drive picker. Reload and try again.",
   import_backlog: "Imports are queued up — wait for the current ones to finish, then retry.",
   drive_import_failed: "Some files couldn't be submitted. Try again.",
+  // Ingest worker (#119): the whole batch failed to process (all files
+  // unreadable, or an expired cloud pick). Partial failures stay 'done' and
+  // report the count in progress_label instead.
+  ingest_all_failed: "None of those files could be processed. Check the files (re-pick cloud imports) and try again.",
   // Server-side exchange failures.
   drive_code_invalid: "That connection attempt expired. Try again.",
   drive_connection_revoked:

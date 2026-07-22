@@ -2049,6 +2049,18 @@ export function useWorkspace(
           ) }
           : {}),
       }));
+      // #119: make a dropped file impossible to miss.
+      // - Wholly-failed / canceled: the tile-error map above only reaches
+      //   drag-drop uploads (they carry a jobId on their preview); cloud picks
+      //   create no previews, so without a toast an all-failed Drive/Dropbox
+      //   import would be completely silent. Toast the first-party copy.
+      // - Partial 'done': some files landed, but the "N failed / N missing"
+      //   the worker wrote to progress_label must surface too.
+      if (terminalStatus !== "done") {
+        flashToast(cloudErrorCopy(job.error) ?? "Some files couldn't be imported");
+      } else if (/\b(failed|missing)\b/.test(job.progress_label ?? "")) {
+        flashToast(job.progress_label ?? "Some files couldn't be imported");
+      }
       router.refresh();
       return;
     }
