@@ -12,7 +12,10 @@ export function createPool(): pg.Pool {
   }
   return new pg.Pool({
     connectionString,
-    max: Number(process.env.WORKER_POOL_MAX ?? 3),
+    // Floor of 2: the cluster handler holds a dedicated client across its whole
+    // transaction while progress()/heartbeat() acquire a SECOND client from the
+    // pool — max=1 would self-deadlock at the first in-transaction progress call.
+    max: Math.max(2, Number(process.env.WORKER_POOL_MAX ?? 3)),
     // Supabase poolers terminate TLS with a cert the default CA set can't
     // verify; local Docker Postgres speaks no TLS at all.
     ssl: /supabase\.(co|com)/.test(connectionString) ? { rejectUnauthorized: false } : undefined,

@@ -17,4 +17,5 @@ export const handlers: Partial<Record<JobType, JobHandler>> = {
   ingest: (ctx) => import("./ingest").then((m) => m.ingestHandler(ctx)),
   analyze: (ctx) => import("./analyze").then((m) => m.analyzeHandler(ctx)),
   caption: (ctx) => import("./caption").then((m) => m.captionHandler(ctx)),
+  cluster: (ctx) => import("./cluster").then((m) => m.clusterHandler(ctx)),
 };

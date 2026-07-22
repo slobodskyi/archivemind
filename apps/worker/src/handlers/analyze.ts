@@ -29,6 +29,7 @@ export async function analyzeHandler({ pool, job, progress }: HandlerContext): P
   );
 
   let done = 0;
+  let analyzed = 0;
   for (const row of rows) {
     const label = row.title ?? row.asset_id;
     await progress(Math.round((done / rows.length) * 100), `Analyzing ${label}`, done, rows.length);
@@ -91,8 +92,26 @@ export async function analyzeHandler({ pool, job, progress }: HandlerContext): P
     );
 
     await pool.query(`update assets set ai_processed_at = now() where id = $1`, [row.asset_id]);
+    analyzed += 1;
     done += 1;
   }
 
   await progress(100, `Analyzed ${done} asset(s)`, done, rows.length);
+
+  // Re-cluster the workspace's embeddings (ADR 0028). Deterministic, zero paid
+  // calls — enqueued only when this run actually produced new embeddings, and
+  // skipped if a cluster job is already queued (ai_jobs has no dedupe key, so
+  // without this guard every analyze batch would pile one up). `done_items`
+  // starts null so it never masks the workspace as "0/total" in the UI, which
+  // never shows this job anyway (useWorkspace ignores non-active job ids).
+  if (analyzed > 0) {
+    await pool.query(
+      `insert into ai_jobs (workspace_id, user_id, type, payload, total_items)
+       select $1, $2, 'cluster', $3, 1
+       where not exists (
+         select 1 from ai_jobs
+         where workspace_id = $1 and type = 'cluster' and status = 'queued')`,
+      [job.workspace_id, job.user_id, JSON.stringify({ workspace_id: job.workspace_id })],
+    );
+  }
 }
