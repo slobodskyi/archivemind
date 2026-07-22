@@ -137,7 +137,7 @@ Phases 1–2). What actually remains:
   the client half (versioned `localStorage` + undo/redo) already ships (#93,
   ADR 0022).
 - **Remaining #17:** per-project `caption_prompt`, project members.
-- **Topic embedding clustering — ✅ DONE 2026-07-22 (#122)** — the
+- **Topic embedding clustering — ✅ DONE 2026-07-22 (#122), LIVE on prod** — the
   stable replacement for the read-time tag heuristic (ADR 0023): a deterministic
   k-means `cluster` worker job over the image embeddings writes `topic_clusters`
   + `assets.cluster_id`, labelled from each cluster's most discriminative tags,
@@ -145,7 +145,11 @@ Phases 1–2). What actually remains:
   analyze with **zero Gemini calls** (pure CPU — the "AI only by button" rule
   holds). `lib/topics.ts` reads the stored label first, tag heuristic as
   fallback ([ADR 0028](decisions/0028-topic-clusters-from-embedding-kmeans.md);
-  migration `20260722000001`, pgTAP `004`).
+  pgTAP `004`). Migration `20260722000001` (`topic_clusters` + `assets.cluster_id`
+  + `cluster` job type) — **on prod 2026-07-22** (owner runbook, verified via
+  ledger + empty `db diff`). End-to-end verified live: a cluster job over an
+  11-asset workspace produced two discriminative-labelled clouds covering all 11,
+  stable (same ids/labels, no duplicates) across a re-run.
 
 ### Phase 6 — Cloud imports (~week 7) — ✅ DONE 2026-07-21 (Drive: #97–#101, #103 · Dropbox: #105–#107; pulled ahead of Phase 5's remainder at the owner's call)
 
