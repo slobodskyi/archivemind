@@ -137,7 +137,7 @@ Phases 1–2). What actually remains:
   the client half (versioned `localStorage` + undo/redo) already ships (#93,
   ADR 0022).
 - **Remaining #17:** per-project `caption_prompt`, project members.
-- **Topic embedding clustering — ✅ DONE 2026-07-22 (PR__PR_NUMBER__)** — the
+- **Topic embedding clustering — ✅ DONE 2026-07-22 (#122)** — the
   stable replacement for the read-time tag heuristic (ADR 0023): a deterministic
   k-means `cluster` worker job over the image embeddings writes `topic_clusters`
   + `assets.cluster_id`, labelled from each cluster's most discriminative tags,
