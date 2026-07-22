@@ -233,13 +233,32 @@ describe("search contracts", () => {
       date_from: 7,
       place_terms: "kyiv",
       tag_terms: null,
+      camera_terms: "sony",
+      iso_min: "high",
+      aperture: 1.8,
       kinds: ["photo", "video"],
     });
     expect(p.semantic_text).toBe("");
     expect(p.date_from).toBeNull();
     expect(p.place_terms).toEqual([]);
     expect(p.tag_terms).toEqual([]);
+    expect(p.camera_terms).toEqual([]); // EXIF fields degrade too, never throw
+    expect(p.iso_min).toBeNull();
+    expect(p.aperture).toBeNull();
     expect(p.kinds).toEqual([]); // one bad member degrades the whole list, not the request
+  });
+
+  it("keeps valid EXIF filters through the parse", () => {
+    const p = searchParseSchema.parse({
+      semantic_text: "night street",
+      camera_terms: ["iphone 13 pro"],
+      iso_min: 1600,
+      iso_max: null,
+      aperture: "f/1.5",
+    });
+    expect(p.camera_terms).toEqual(["iphone 13 pro"]);
+    expect(p.iso_min).toBe(1600);
+    expect(p.aperture).toBe("f/1.5");
   });
 
   it("round-trips a full parse through searchResponseSchema", () => {
@@ -249,34 +268,35 @@ describe("search contracts", () => {
       date_to: null,
       place_terms: ["kyiv"],
       tag_terms: ["rescue"],
+      camera_terms: [],
+      iso_min: null,
+      iso_max: null,
+      aperture: null,
       kinds: [],
     };
     const resp = searchResponseSchema.parse({
       parsed,
       results: [
-        { assetId: id, similarity: 0.87, tier: "strong", matchedTags: ["rescue"], matchedPlace: "Kyiv, Ukraine", takenAt: null },
+        { assetId: id, similarity: 0.87, tier: "strong", matchedTags: ["rescue"], matchedPlace: "Kyiv, Ukraine", matchedText: true, takenAt: null },
       ],
     });
     expect(resp.results[0].matchedTags).toEqual(["rescue"]);
     expect(resp.results[0].tier).toBe("strong");
+    expect(resp.results[0].matchedText).toBe(true);
     expect(resp.parsed.semantic_text).toBe("flooded street rescue");
   });
 
   it("rejects malformed result rows", () => {
-    expect(
-      searchResultSchema.safeParse({ assetId: "nope", similarity: 1, tier: "strong", matchedTags: [], matchedPlace: null, takenAt: null })
-        .success,
-    ).toBe(false);
-    // tier is part of the contract now — a row without one (or with a made-up
-    // tier) must fail loudly, not default.
-    expect(
-      searchResultSchema.safeParse({ assetId: id, similarity: 1, matchedTags: [], matchedPlace: null, takenAt: null })
-        .success,
-    ).toBe(false);
-    expect(
-      searchResultSchema.safeParse({ assetId: id, similarity: 1, tier: "best", matchedTags: [], matchedPlace: null, takenAt: null })
-        .success,
-    ).toBe(false);
+    const ok = { assetId: id, similarity: 1, tier: "strong", matchedTags: [], matchedPlace: null, matchedText: false, takenAt: null };
+    expect(searchResultSchema.safeParse(ok).success).toBe(true);
+    expect(searchResultSchema.safeParse({ ...ok, assetId: "nope" }).success).toBe(false);
+    // tier and matchedText are part of the contract now — a row missing either
+    // (or with a made-up tier) must fail loudly, not default.
+    const { tier: _t, ...noTier } = ok;
+    expect(searchResultSchema.safeParse(noTier).success).toBe(false);
+    const { matchedText: _m, ...noText } = ok;
+    expect(searchResultSchema.safeParse(noText).success).toBe(false);
+    expect(searchResultSchema.safeParse({ ...ok, tier: "best" }).success).toBe(false);
   });
 });
 

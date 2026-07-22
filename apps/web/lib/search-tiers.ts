@@ -7,8 +7,8 @@ import type { SearchTier } from "@archivemind/shared";
  *  query used to return the entire archive ("Found 11" for both "dog" and
  *  "girl"). This module draws the honesty line the SQL can't:
  *
- *  - a row that matched an explicit query term (tag or place) is always
- *    "strong" — the user literally named it;
+ *  - a row that matched an explicit query term (tag, place, or a lexical hit
+ *    on its description/facts) is always "strong" — the user literally named it;
  *  - otherwise a row is "strong" only while it sits within STRONG_DELTA of
  *    the best similarity in the set, capped at STRONG_COSINE_CAP rows so a
  *    flat cross-modal distribution (one-word queries produce these) can't
@@ -31,6 +31,7 @@ interface TierableRow {
   similarity: number;
   matchedTags: string[];
   matchedPlace: string | null;
+  matchedText?: boolean;
 }
 
 /** Annotate ranked rows with their tier, preserving order. */
@@ -42,7 +43,7 @@ export function assignTiers<T extends TierableRow>(
   const best = rows.reduce((m, r) => Math.max(m, r.similarity), -Infinity);
   let cosineStrong = 0;
   return rows.map((r) => {
-    if (r.matchedTags.length > 0 || r.matchedPlace) return { ...r, tier: "strong" as const };
+    if (r.matchedTags.length > 0 || r.matchedPlace || r.matchedText) return { ...r, tier: "strong" as const };
     if (r.similarity >= best - delta && cosineStrong < cosineCap) {
       cosineStrong += 1;
       return { ...r, tier: "strong" as const };

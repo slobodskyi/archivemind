@@ -374,16 +374,24 @@ export const searchParseSchema = z.object({
   date_to: z.string().nullish().catch(null),
   place_terms: z.array(z.string()).catch([]),
   tag_terms: z.array(z.string()).catch([]),
+  // EXIF filters (ADR 0031). Nullable numbers/strings degrade to "no filter".
+  camera_terms: z.array(z.string()).catch([]),
+  iso_min: z.number().nullish().catch(null),
+  iso_max: z.number().nullish().catch(null),
+  aperture: z.string().nullish().catch(null),
   kinds: z.array(assetKindSchema).catch([]),
 });
 export type SearchParse = z.infer<typeof searchParseSchema>;
 
 export const SEARCH_PARSE_PROMPT = `You translate a photo-archive search query into structured filters.
 Return JSON only. Fields:
-- semantic_text: what to match visually/semantically, reworded as a dense noun phrase (keep the query's language). Empty string if the query is pure filters.
+- semantic_text: what to match visually/semantically, reworded as a dense noun phrase (keep the query's language). Empty string if the query is pure filters. This text is ALSO matched literally against each photo's AI description and facts, so keep the salient nouns.
 - date_from / date_to: ISO dates (YYYY-MM-DD) when the query names a period ("last June", "2026", "18.06"), else null. Resolve relative periods against today's date given below.
 - place_terms: place names mentioned (city/country/venue), lowercase, in both the query's language and English if obvious.
 - tag_terms: concrete nouns worth matching against tags (objects/scenes/events), lowercase English singular. For each concept also include 1-2 common synonyms or near-variants ("dog" -> dog, puppy; "girl" -> girl, woman). At most 6 terms total.
+- camera_terms: camera make/model or lens named in the query ("iphone 13 pro", "sony a7", "50mm"), lowercase. Else [].
+- iso_min / iso_max: ISO bounds only when implied. Explicit ("iso 320") sets both. Vague: "high iso" or "night/low-light" -> iso_min 1600; "low iso"/"bright daylight" -> iso_max 400. Else null.
+- aperture: an f-number when the query names one ("f/1.5", "wide open" -> "f/1.8", "shot at 2.8" -> "f/2.8"), as it appears in EXIF (e.g. "f/1.5"). Else null.
 - kinds: subset of ["photo","pdf","document","other"] only when the query names a type.
 Never invent filters the query does not state.`;
 
@@ -400,6 +408,9 @@ export const searchResultSchema = z.object({
   tier: searchTierSchema,
   matchedTags: z.array(z.string()),
   matchedPlace: z.string().nullable(),
+  /** The query's text hit this asset's AI description or facts (ADR 0031) —
+   *  an explicit match, so it counts toward the strong tier like a tag does. */
+  matchedText: z.boolean(),
   takenAt: z.string().nullable(),
 });
 export type SearchResult = z.infer<typeof searchResultSchema>;

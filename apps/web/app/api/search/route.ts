@@ -10,6 +10,7 @@ interface SearchRow {
   similarity: number;
   matched_tags: string[];
   matched_place: string | null;
+  matched_text: boolean;
   taken_at: string | null;
 }
 
@@ -41,7 +42,18 @@ export async function GET(request: Request) {
   try {
     parsed = await parseSearchQuery(q, today);
   } catch {
-    parsed = { semantic_text: q, date_from: null, date_to: null, place_terms: [], tag_terms: [], kinds: [] };
+    parsed = {
+      semantic_text: q,
+      date_from: null,
+      date_to: null,
+      place_terms: [],
+      tag_terms: [],
+      camera_terms: [],
+      iso_min: null,
+      iso_max: null,
+      aperture: null,
+      kinds: [],
+    };
   }
 
   let embedding: number[];
@@ -59,6 +71,13 @@ export async function GET(request: Request) {
     date_to: parsed.date_to ?? undefined,
     place_terms: parsed.place_terms.length ? parsed.place_terms.map((t) => t.toLowerCase()) : undefined,
     tag_terms: parsed.tag_terms.length ? parsed.tag_terms.map((t) => t.toLowerCase()) : undefined,
+    // Lexical hybrid (ADR 0031): the same text we embed is also matched against
+    // each asset's AI description + facts. EXIF filters narrow the set.
+    text_query: parsed.semantic_text.trim() || q,
+    camera_terms: parsed.camera_terms.length ? parsed.camera_terms.map((t) => t.toLowerCase()) : undefined,
+    iso_min: parsed.iso_min ?? undefined,
+    iso_max: parsed.iso_max ?? undefined,
+    aperture_term: parsed.aperture ?? undefined,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -82,6 +101,7 @@ export async function GET(request: Request) {
       similarity: r.similarity,
       matchedTags: r.matched_tags ?? [],
       matchedPlace: r.matched_place,
+      matchedText: r.matched_text ?? false,
       takenAt: r.taken_at,
     })),
   );
