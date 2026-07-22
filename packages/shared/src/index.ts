@@ -21,7 +21,9 @@ export type MemberRole = z.infer<typeof memberRoleSchema>;
 
 // Job queue contracts per TECH_SPEC §4 `job_type` / `job_status` — the wire
 // format between web (enqueue via POST /api/jobs) and the worker (claim loop).
-export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export"]);
+// `cluster` (ADR 0028) is worker-only: enqueued at the tail of analyze, never
+// via POST /api/jobs (deliberately absent from createJobRequestSchema).
+export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export", "cluster"]);
 export type JobType = z.infer<typeof jobTypeSchema>;
 
 export const jobStatusSchema = z.enum(["queued", "running", "done", "failed", "canceled"]);
@@ -166,6 +168,18 @@ export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
 
 export const analyzeJobPayloadSchema = ingestJobPayloadSchema;
 export type AnalyzeJobPayload = IngestJobPayload;
+
+// ── Cluster (spec §10/§13; ADR 0028) — worker-only, enqueued after analyze ───
+
+/** ai_jobs.payload for type='cluster'. Workspace-scoped, not asset-scoped: the
+ *  job re-clusters every analyzed asset in the workspace so topics stay stable
+ *  across sessions and identical in every project. No web enqueue path exists
+ *  (the tag heuristic in lib/topics.ts covers the un-clustered window), so this
+ *  is only ever produced by the worker's analyze tail. */
+export const clusterJobPayloadSchema = z.object({
+  workspace_id: uuidSchema,
+});
+export type ClusterJobPayload = z.infer<typeof clusterJobPayloadSchema>;
 
 // ── Captions (spec §8.3) — worker handler #13; API wiring joins with #14 ─────
 

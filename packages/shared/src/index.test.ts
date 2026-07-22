@@ -8,6 +8,7 @@ import {
   captionJobPayloadSchema,
   captionLangSchema,
   captionStyleSchema,
+  clusterJobPayloadSchema,
   completeUploadRequestSchema,
   createJobRequestSchema,
   createProjectRequestSchema,
@@ -54,7 +55,7 @@ describe("memberRoleSchema", () => {
 
 describe("job queue contracts", () => {
   it("accepts every §4 job_type / job_status", () => {
-    for (const t of ["ingest", "analyze", "caption", "export"]) {
+    for (const t of ["ingest", "analyze", "caption", "export", "cluster"]) {
       expect(jobTypeSchema.parse(t)).toBe(t);
     }
     for (const s of ["queued", "running", "done", "failed", "canceled"]) {
@@ -66,6 +67,20 @@ describe("job queue contracts", () => {
     expect(jobTypeSchema.safeParse("transcode").success).toBe(false);
     expect(jobStatusSchema.safeParse("cancelled").success).toBe(false); // US spelling only
     expect(jobTypeSchema.safeParse(undefined).success).toBe(false);
+  });
+
+  it("clusterJobPayloadSchema takes a workspace_id (snake_case, not asset-scoped)", () => {
+    const ws = "8f7a1c2e-0000-4000-8000-1234567890ab";
+    expect(clusterJobPayloadSchema.parse({ workspace_id: ws }).workspace_id).toBe(ws);
+    expect(clusterJobPayloadSchema.safeParse({ workspaceId: ws }).success).toBe(false); // camelCase is the wire body, not the payload
+    expect(clusterJobPayloadSchema.safeParse({ workspace_id: "nope" }).success).toBe(false);
+    expect(clusterJobPayloadSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("createJobRequestSchema never accepts cluster — it is worker-only (ADR 0028)", () => {
+    const id = "4df136fe-a1a4-49c1-ab22-1f1713a1c53c";
+    expect(createJobRequestSchema.safeParse({ type: "cluster", assetIds: [id] }).success).toBe(false);
+    expect(createJobRequestSchema.safeParse({ type: "cluster", workspace_id: id }).success).toBe(false);
   });
 });
 
