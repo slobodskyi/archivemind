@@ -1,0 +1,127 @@
+import { Z } from "@/lib/ui";
+
+interface CanvasContextMenuProps {
+  menu: { x: number; y: number; targetId: string | null } | null;
+  /** Hide the project-editing tools (frame/AI/import) that don't apply to the
+   *  read-only all-files grid — matches the left toolbar's own gating. */
+  allFilesMode: boolean;
+  onClose: () => void;
+  onSelectTool: () => void;
+  onHandTool: () => void;
+  onOpenSearch: () => void;
+  onToggleChat: () => void;
+  onToggleBulkPanel: () => void;
+  onExtractExif: () => void;
+  onAdd: () => void;
+  onAddStickyNote: () => void;
+  onFit: () => void;
+}
+
+/** Right-click menu on the grid — mirrors the functions of the left tools
+ *  toolbar (not the bottom action bar). Available on the Workspace and the
+ *  sorting views. */
+export default function CanvasContextMenu({
+  menu,
+  allFilesMode,
+  onClose,
+  onSelectTool,
+  onHandTool,
+  onOpenSearch,
+  onToggleChat,
+  onToggleBulkPanel,
+  onExtractExif,
+  onAdd,
+  onAddStickyNote,
+  onFit,
+}: CanvasContextMenuProps) {
+  if (!menu) return null;
+
+  const W = 190;
+  const left = typeof window !== "undefined" ? Math.min(menu.x, window.innerWidth - W - 8) : menu.x;
+  const top = typeof window !== "undefined" ? Math.min(menu.y, window.innerHeight - 320) : menu.y;
+
+  const run = (fn: () => void) => () => {
+    onClose();
+    fn();
+  };
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+        style={{ position: "fixed", inset: 0, zIndex: Z.menuBackdrop }}
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          left,
+          top,
+          width: W,
+          background: "rgba(18,18,18,.97)",
+          border: "1px solid var(--bd)",
+          borderRadius: 2,
+          backdropFilter: "blur(20px)",
+          boxShadow: "0 20px 60px rgba(0,0,0,.7)",
+          zIndex: Z.menu,
+          padding: 6,
+        }}
+      >
+        <Item label="Select" onClick={run(onSelectTool)} />
+        <Item label="Pan" onClick={run(onHandTool)} />
+        {!allFilesMode && (
+          <>
+            <Divider />
+            <Item label="Smart Search" onClick={run(onOpenSearch)} />
+            <Item label="AI Assistant" onClick={run(onToggleChat)} />
+            <Item label="Generate Captions" onClick={run(onToggleBulkPanel)} />
+            <Item label="Extract EXIF" onClick={run(onExtractExif)} />
+            <Divider />
+            <Item label="Add" onClick={run(onAdd)} />
+            <Item label="Sticky Note" onClick={run(onAddStickyNote)} />
+          </>
+        )}
+        {allFilesMode && (
+          <>
+            <Divider />
+            <Item label="AI Assistant" onClick={run(onToggleChat)} />
+          </>
+        )}
+        <Divider />
+        <Item label="Fit to view" onClick={run(onFit)} />
+      </div>
+    </>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: 1, background: "var(--bd)", margin: "5px 4px" }} />;
+}
+
+function Item({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        width: "100%",
+        padding: "8px 10px",
+        border: 0,
+        borderRadius: 2,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        color: "var(--t2)",
+        fontSize: 12.5,
+        background: "transparent",
+        textAlign: "left",
+      }}
+    >
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+    </button>
+  );
+}

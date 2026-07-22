@@ -1,5 +1,5 @@
 import type { ViewMode } from "@/types";
-import { ViewCanvasIcon, ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
+import { ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
 
 interface ViewTabsProps {
   show: boolean;
@@ -7,8 +7,9 @@ interface ViewTabsProps {
   onSelect: (v: ViewMode) => void;
 }
 
+// The sorting views only — Workspace (neural) is promoted to its own distinct
+// subheader control (WorkspaceToggle), so it no longer reads as a peer tab.
 const TABS: { key: ViewMode; label: string; Icon: typeof ViewTimelineIcon }[] = [
-  { key: "neural", label: "CANVAS", Icon: ViewCanvasIcon },
   { key: "timeline", label: "TIMELINE", Icon: ViewTimelineIcon },
   { key: "map", label: "MAP", Icon: ViewMapIcon },
   { key: "sense", label: "TOPIC", Icon: ViewSenseIcon },

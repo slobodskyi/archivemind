@@ -3,7 +3,6 @@ import type { Tool } from "@/types";
 import {
   SelectToolIcon,
   HandToolIcon,
-  FrameToolIcon,
   SearchIcon,
   ChatIcon,
   TagIcon,
@@ -26,7 +25,6 @@ interface LeftToolbarProps {
   bulkPanelOpen?: boolean;
   onSelectTool?: () => void;
   onHandTool?: () => void;
-  onFrameTool?: () => void;
   onOpenSearch?: () => void;
   onToggleChat?: () => void;
   onToggleBulkPanel?: () => void;
@@ -86,7 +84,6 @@ function LeftToolbar({
   bulkPanelOpen = false,
   onSelectTool,
   onHandTool,
-  onFrameTool,
   onOpenSearch,
   onToggleChat,
   onToggleBulkPanel,
@@ -101,8 +98,6 @@ function LeftToolbar({
   const selColor = tool === "select" ? "#000" : "var(--t2)";
   const handBg = tool === "hand" ? "#fff" : "transparent";
   const handColor = tool === "hand" ? "#000" : "var(--t2)";
-  const frameBg = tool === "frame" ? "#fff" : "transparent";
-  const frameColor = tool === "frame" ? "#000" : "var(--t2)";
 
   return (
     <div
@@ -167,30 +162,6 @@ function LeftToolbar({
         <HandToolIcon />
         <span className="tip">Pan</span>
       </button>
-      {!allFilesMode && (
-        <button
-          onClick={onFrameTool}
-          className="am-tb tw"
-          title="Frame"
-          aria-label="Frame tool"
-          style={{
-            display: "flex",
-            width: 34,
-            height: 34,
-            alignItems: "center",
-            justifyContent: "center",
-            border: 0,
-            borderRadius: 2,
-            cursor: "pointer",
-            background: frameBg,
-            color: frameColor,
-          }}
-        >
-          <FrameToolIcon />
-          <span className="tip">Frame</span>
-        </button>
-      )}
-
       <Divider />
 
       {!allFilesMode && (

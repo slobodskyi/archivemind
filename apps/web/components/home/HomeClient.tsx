@@ -14,6 +14,7 @@ import AccountMenu from "@/components/home/AccountMenu";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import UploadManager from "@/components/upload/UploadManager";
 import { Z } from "@/lib/ui";
+import HelpModal from "@/components/modals/HelpModal";
 import {
   SearchIcon,
   DataSourcesIcon,
@@ -22,6 +23,9 @@ import {
   TrashIcon,
   UpgradeIcon,
   MoreIcon,
+  LogsIcon,
+  HelpIcon,
+  PrivacyIcon,
 } from "@/components/icons/icons";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
@@ -86,6 +90,7 @@ export default function HomeClient({
   const [query, setQuery] = useState("");
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [activeProjects, setActiveProjects] = useState<ProjectCard[]>(projects);
   const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
@@ -227,7 +232,7 @@ export default function HomeClient({
   }
 
   return (
-    <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden", background: "var(--bg)" }}>
+    <div style={{ position: "relative", display: "flex", width: "100vw", height: "100vh", overflow: "hidden", background: "var(--bg)" }}>
       {/* ── drawer sidebar ─────────────────────────────────────────── */}
       <aside
         style={{
@@ -298,6 +303,9 @@ export default function HomeClient({
         <div style={{ flex: 1 }} />
 
         <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <NavItem label="Logs" icon={<LogsIcon />} onClick={() => flash("Activity log coming soon")} />
+          <NavItem label="Help" icon={<HelpIcon />} onClick={() => setHelpOpen(true)} />
+          <NavItem label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => flash("Privacy Policy coming soon")} />
           <NavItem label="Upgrade" icon={<UpgradeIcon />} onClick={() => flash("Upgrade plans — coming soon")} />
           <NavItem label="Archived" active={view === "archived"} icon={<ArchiveIcon />} onClick={openArchived} />
           <NavItem label="Trash" active={view === "trash"} icon={<TrashIcon />} onClick={openTrash} />
@@ -380,6 +388,15 @@ export default function HomeClient({
       <UploadManager projectId="all" disabled disabledMessage="OPEN A PROJECT TO UPLOAD" />
 
       <Toast show={!!toast} text={toast ?? ""} />
+
+      <HelpModal
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onSend={() => {
+          setHelpOpen(false);
+          flash("Support ticket sent — we'll be in touch within 24h");
+        }}
+      />
 
       <DataSourcesModal
         open={sourcesOpen}

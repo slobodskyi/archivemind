@@ -11,19 +11,21 @@ import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
 import GeoMapPane from "@/components/map/GeoMapPane";
 import AppHeader from "@/components/header/AppHeader";
 import ViewTabs from "@/components/header/ViewTabs";
+import WorkspaceToggle from "@/components/header/WorkspaceToggle";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
 import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
 import ChatPanel from "@/components/chat/ChatPanel";
 import LeftToolbar from "@/components/toolbar/LeftToolbar";
+import WorkspaceActionBar from "@/components/toolbar/WorkspaceActionBar";
 import Minimap from "@/components/toolbar/Minimap";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
+import CanvasContextMenu from "@/components/canvas/CanvasContextMenu";
 import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import ImageEditor from "@/components/editor/ImageEditor";
 import SearchModal from "@/components/modals/SearchModal";
-import HelpModal from "@/components/modals/HelpModal";
 import ImportModal from "@/components/import/ImportModal";
 import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
@@ -43,11 +45,6 @@ export default function ArchiveWorkspace({
 }: ArchiveWorkspaceProps) {
   const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId);
 
-  const sendHelpTicket = () => {
-    ws.closeHelp();
-    ws.flashToast("Support ticket sent — we'll be in touch within 24h");
-  };
-
   return (
     <div
       style={{
@@ -63,6 +60,10 @@ export default function ArchiveWorkspace({
       <PanZoomCanvas
         setCanvasRef={ws.setCanvasRef}
         onCanvasDown={ws.onCanvasDown}
+        onCanvasContext={(e) => {
+          e.preventDefault();
+          ws.openContextMenu(e.clientX, e.clientY, null);
+        }}
         canvasCursor={ws.canvasCursor}
         canvasTransform={ws.canvasTransform}
         animating={ws.tilesAnimating}
@@ -98,6 +99,7 @@ export default function ArchiveWorkspace({
           setHover={ws.setHover}
           openDrawer={ws.openDrawer}
           deletePhoto={ws.deletePhoto}
+          openContextMenu={ws.openContextMenu}
         />
         {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} focusedCloudKey={ws.focusedCloudKey} onCloudLabelDown={ws.onCloudLabelDown} />}
       </PanZoomCanvas>
@@ -171,10 +173,14 @@ export default function ArchiveWorkspace({
         canRedo={ws.canRedo}
         onUndo={ws.undo}
         onRedo={ws.redo}
-        onOpenHelp={ws.openHelp}
         onFlashToast={ws.flashToast}
         onOpenAcct={ws.openAcct}
         viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
+        afterProject={
+          ws.projectMode ? (
+            <WorkspaceToggle active={ws.view === "neural"} onSelect={() => ws.setView("neural")} />
+          ) : undefined
+        }
       />
 
       <ZoomDropdown
@@ -217,7 +223,6 @@ export default function ArchiveWorkspace({
         bulkPanelOpen={ws.bulkPanelOpen}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
-        onFrameTool={ws.toolFrame}
         onOpenSearch={ws.openSearch}
         onToggleChat={ws.toggleChat}
         onToggleBulkPanel={ws.toggleBulkPanel}
@@ -229,6 +234,22 @@ export default function ArchiveWorkspace({
         onAddToProject={ws.toggleAddProj}
       />
 
+      {/* Workspace-only bottom action bar — hosts the artboard tool (moved off
+          the left toolbar) plus selection actions. Absent on the sorting views. */}
+      {ws.view === "neural" && ws.projectMode && (
+        <WorkspaceActionBar
+          tool={ws.tool}
+          selCount={ws.selectedIds.size}
+          onArtboard={ws.toolFrame}
+          onCopy={ws.copyFiles}
+          onDuplicate={ws.duplicateFiles}
+          onExport={ws.exportFiles}
+          onGroup={ws.groupFiles}
+          onArchive={ws.archiveFiles}
+          onDelete={ws.deleteSelected}
+        />
+      )}
+
       <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />
 
       <AddToProjectPopover
@@ -237,6 +258,15 @@ export default function ArchiveWorkspace({
         onClose={ws.closeAddProj}
         onSelect={ws.addToProject}
         onCreateNew={ws.createNewProject}
+        artboards={ws.frames.map((f) => ({ key: f.id, label: f.label }))}
+        onSelectArtboard={(id) => {
+          ws.closeAddProj();
+          ws.addToExistingArtboard(id);
+        }}
+        onCreateArtboard={() => {
+          ws.closeAddProj();
+          ws.addToNewArtboard();
+        }}
       />
 
       <SourceBrowserSidebar
@@ -304,7 +334,20 @@ export default function ArchiveWorkspace({
 
       <SearchModal open={ws.search} onClose={ws.closeSearch} />
 
-      <HelpModal open={ws.helpOpen} onClose={ws.closeHelp} onSend={sendHelpTicket} />
+      <CanvasContextMenu
+        menu={ws.contextMenu}
+        allFilesMode={ws.allFilesMode}
+        onClose={ws.closeContextMenu}
+        onSelectTool={ws.toolSelect}
+        onHandTool={ws.toolHand}
+        onOpenSearch={ws.openSearch}
+        onToggleChat={ws.toggleChat}
+        onToggleBulkPanel={ws.toggleBulkPanel}
+        onExtractExif={ws.extractExif}
+        onAdd={ws.addToolbar}
+        onAddStickyNote={ws.addStickyNote}
+        onFit={ws.onFit}
+      />
 
       <PhotoDrawer
         photo={ws.drawerPhoto}
