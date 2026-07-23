@@ -1,4 +1,6 @@
+import { useId } from "react";
 import { HELP_FAQ } from "@/lib/chat";
+import { useDialog } from "@/hooks/useDialog";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import { CloseIcon, SparkleIcon } from "@/components/icons/icons";
 
@@ -19,6 +21,8 @@ function HelpGlyph() {
 }
 
 export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
+  const dialogRef = useDialog<HTMLDivElement>(open, onClose);
+  const titleId = useId();
   if (!open) return null;
   return (
     <div
@@ -35,6 +39,10 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
       }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
         style={{ width: 490, background: "var(--bg-sf)", border: "1px solid var(--bdh)", borderRadius: 2, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,.7)" }}
       >
@@ -43,7 +51,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
             <span style={{ display: "flex", width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 2, background: "color-mix(in srgb,var(--ac) 18%,transparent)" }}>
               <HelpGlyph />
             </span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>Help &amp; Support</span>
+            <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>Help &amp; Support</span>
           </div>
           <button
             onClick={onClose}
