@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Tool } from "@/types";
-import { FrameToolIcon, CopyIcon, ArchiveIcon, TrashIcon } from "@/components/icons/icons";
+import { FrameToolIcon, CopyIcon, TrashIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
   tool: Tool;
@@ -10,7 +10,6 @@ interface WorkspaceActionBarProps {
   onDuplicate: () => void;
   onExport: () => void;
   onGroup: () => void;
-  onArchive: () => void;
   onDelete: () => void;
 }
 
@@ -68,7 +67,9 @@ function Divider() {
 
 /** Bottom action bar for the Workspace (neural view) only. Hosts the artboard
  *  tool (moved off the left toolbar) plus selection actions. Copy/Duplicate/
- *  Export/Group/Archive are stubs for now; Delete is real. */
+ *  Export/Group are stubs for now; Delete is real (bulk trash + undo, ADR
+ *  0033 — the old Archive stub sat next to it implying a parity that never
+ *  existed, so it's gone until asset archiving is a real feature). */
 function WorkspaceActionBar({
   tool,
   selCount,
@@ -77,7 +78,6 @@ function WorkspaceActionBar({
   onDuplicate,
   onExport,
   onGroup,
-  onArchive,
   onDelete,
 }: WorkspaceActionBarProps) {
   const noSel = selCount === 0;
@@ -117,9 +117,6 @@ function WorkspaceActionBar({
       </Btn>
       <Btn title="Group" disabled={noSel} onClick={onGroup}>
         <GroupGlyph />
-      </Btn>
-      <Btn title="Archive" disabled={noSel} onClick={onArchive}>
-        <ArchiveIcon width={16} height={16} />
       </Btn>
 
       <Divider />

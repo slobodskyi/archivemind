@@ -25,7 +25,10 @@ export type MemberRole = z.infer<typeof memberRoleSchema>;
 // via POST /api/jobs (deliberately absent from createJobRequestSchema).
 // `edit` (ADR 0030) is enqueued by the dedicated POST /api/assets/[id]/edit
 // route (not POST /api/jobs) — the worker renders the edited previews.
-export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export", "cluster", "edit"]);
+// `purge` (ADR 0033) is enqueued by the DB sweep (sweep_deleted_assets) and by
+// POST /api/assets/purge ("Delete permanently") — the worker erases R2 bytes +
+// DB derivatives of expired trash, keeping the asset row as a dedup tombstone.
+export const jobTypeSchema = z.enum(["ingest", "analyze", "caption", "export", "cluster", "edit", "purge"]);
 export type JobType = z.infer<typeof jobTypeSchema>;
 
 export const jobStatusSchema = z.enum(["queued", "running", "done", "failed", "canceled"]);
@@ -182,6 +185,53 @@ export const clusterJobPayloadSchema = z.object({
   workspace_id: uuidSchema,
 });
 export type ClusterJobPayload = z.infer<typeof clusterJobPayloadSchema>;
+
+// ── Purge (ADR 0033) — trash retention's second half ─────────────────────────
+
+/** ai_jobs.payload for type='purge'. Enqueued by sweep_deleted_assets() (one
+ *  job per workspace per run) and by POST /api/assets/purge ("Delete
+ *  permanently" / "Empty trash"). The worker deletes the R2 objects FIRST
+ *  (originals, previews, edited previews — while the rows still map the keys),
+ *  then the derivative rows, then stamps assets.purged_at. The asset row
+ *  itself survives as a tombstone (ADR 0032 dedup reactivation), but its
+ *  files.content_hash/r2_key are cleared so it never again claims a hash. */
+export const purgeJobPayloadSchema = z.object({
+  asset_ids: z.array(uuidSchema).min(1),
+});
+export type PurgeJobPayload = z.infer<typeof purgeJobPayloadSchema>;
+
+// ── Asset trash ops (ADR 0033) — bulk delete / restore / purge ───────────────
+
+/** POST /api/assets/delete | /restore | /purge. Bulk-first: multi-select
+ *  delete used to fan out N single-id DELETE calls; one request now moves the
+ *  whole selection (and the undo toast restores it with one call too). Same
+ *  500 cap as uploads/imports. */
+export const assetIdsRequestSchema = z.object({
+  ids: z.array(uuidSchema).min(1).max(500),
+});
+export type AssetIdsRequest = z.infer<typeof assetIdsRequestSchema>;
+
+/** One row of GET /api/assets?scope=trash — the photo half of the Trash view.
+ *  `thumb` is a presigned preview URL (null when previews never rendered);
+ *  `deletedAt` drives the "N days left" countdown client-side. Purged
+ *  tombstones are excluded server-side — nothing restorable, nothing shown. */
+export const trashedAssetSchema = z.object({
+  id: uuidSchema,
+  name: z.string(),
+  thumb: z.string().nullable(),
+  deletedAt: z.string().nullable(),
+});
+export type TrashedAsset = z.infer<typeof trashedAssetSchema>;
+
+export const trashedAssetsResponseSchema = z.object({
+  assets: z.array(trashedAssetSchema),
+});
+export type TrashedAssetsResponse = z.infer<typeof trashedAssetsResponseSchema>;
+
+/** Trash retention window (days) — mirrors the SQL default in
+ *  sweep_trashed_projects / sweep_deleted_assets (the DB default is the source
+ *  of truth; this constant only feeds UI copy + the countdown). */
+export const TRASH_RETENTION_DAYS = 30;
 
 // ── Captions (spec §8.3) — worker handler #13; API wiring joins with #14 ─────
 

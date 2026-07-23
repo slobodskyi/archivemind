@@ -168,7 +168,7 @@ interface WorkspaceState {
   bulkStyle: CaptionStyle;
   bulkPanelOpen: boolean;
   proc: ProcState;
-  toast: { show: boolean; text: string };
+  toast: { show: boolean; text: string; actionLabel?: string; onAction?: () => void };
   /** True while a canvas pan drag is active (drives the grabbing cursor). */
   panning: boolean;
   frames: Frame[];
@@ -185,6 +185,8 @@ interface WorkspaceState {
   /** Cloud whose label was clicked — it stays prominent while the others fade
    *  (grouping views only). Null = nothing focused. */
   focusedCloudKey: string | null;
+  /** Selection parked in the bulk-delete ConfirmModal (ADR 0033); null = closed. */
+  confirmDeleteIds: string[] | null;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -245,6 +247,12 @@ type DragSession =
   | null;
 
 const DEFAULT_RECT = { left: 0, top: 0, width: 1000, height: 700 };
+
+/** Bulk deletes of this size and up confirm first (ADR 0033): the undo toast
+ *  is enough insurance for a stray click on 3 files, not for "select all". */
+const BULK_DELETE_CONFIRM_AT = 8;
+/** Undo toasts outlive plain ones — reading + deciding + clicking takes time. */
+const UNDO_TOAST_MS = 6500;
 export interface ProjectListItem {
   key: ProjectKey;
   label: string;
@@ -292,7 +300,7 @@ export interface Workspace {
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
-  toast: { show: boolean; text: string };
+  toast: { show: boolean; text: string; actionLabel?: string; onAction?: () => void };
   canvasWidth: number;
   galleryOverrides: GalleryOverrides;
   gridSize: number;
@@ -332,6 +340,15 @@ export interface Workspace {
   closeDrawer: () => void;
   navDrawer: (dir: number) => void;
   deletePhoto: (id: string) => void;
+  /** Bulk-delete confirmation gate (ADR 0033): a selection of
+   *  ≥ BULK_DELETE_CONFIRM_AT waits in the modal; smaller ones soft-delete
+   *  straight away behind the undo toast. */
+  confirmDeleteCount: number;
+  confirmDeleteNow: () => void;
+  cancelConfirmDelete: () => void;
+  /** Right-click "Move to Trash" — the selection when one exists, else the
+   *  tile under the cursor. */
+  deleteFromContext: () => void;
   /** Image editor (ADR 0030). */
   editorOpen: boolean;
   editorPhoto: Photo | null;
@@ -365,7 +382,6 @@ export interface Workspace {
   duplicateFiles: () => void;
   exportFiles: () => void;
   groupFiles: () => void;
-  archiveFiles: () => void;
   addToNewArtboard: () => void;
   addToExistingArtboard: (frameId: string) => void;
 
@@ -507,7 +523,7 @@ export interface Workspace {
   clearSelection: () => void;
   runBulk: () => void;
 
-  flashToast: (text: string) => void;
+  flashToast: (text: string, action?: { label: string; onAction: () => void }) => void;
 }
 
 export function useWorkspace(
@@ -569,6 +585,7 @@ export function useWorkspace(
     zoomMenuOpen: false,
     tilesAnimating: false,
     focusedCloudKey: null,
+    confirmDeleteIds: null,
   });
 
   // Right-click menu on the grid — a lightweight overlay, kept out of the main
@@ -649,12 +666,15 @@ export function useWorkspace(
   );
 
   const flashToast = useCallback(
-    (text: string) => {
-      setState({ toast: { show: true, text } });
+    (text: string, action?: { label: string; onAction: () => void }) => {
+      setState({
+        toast: { show: true, text, actionLabel: action?.label, onAction: action?.onAction },
+      });
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(
         () => setState({ toast: { show: false, text: "" } }),
-        3200,
+        // An action needs reading + deciding + clicking; plain confirmations don't.
+        action ? UNDO_TOAST_MS : 3200,
       );
     },
     [setState],
@@ -1225,22 +1245,59 @@ export function useWorkspace(
     [flashToast, router],
   );
 
-  /** Real soft-delete (spec §12: user delete → assets.status='deleted'; R2
-   *  derivatives purge is a background job, not this request). Optimistic —
-   *  removes the tile immediately and reconciles from the server on failure. */
-  const deletePhoto = useCallback(
-    (id: string) => {
-      // Functional update so deleting a multi-selection (a forEach of these in
-      // one tick) composes instead of each call clobbering the last — otherwise
-      // only one file would actually disappear per keypress.
+  /** Real soft-delete (spec §12 / ADR 0033: status='deleted', the DB stamps
+   *  deleted_at, the worker purges after 30 days). Bulk-first: one POST moves
+   *  the whole selection, and the undo toast brings it back with one POST too.
+   *  Optimistic — tiles vanish immediately; failure reconciles from the server. */
+  const deletePhotos = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      // Snapshot the removed tiles WITH their indexes so undo can splice them
+      // back in place instantly, without waiting for the server round-trip.
+      const removed = stateRef.current.photos
+        .map((photo, index) => ({ photo, index }))
+        .filter(({ photo }) => idSet.has(photo.id));
+      if (removed.length === 0) return;
       setState((prev) => ({
-        photos: prev.photos.filter((p) => p.id !== id),
-        selectedIds: prev.selectedIds.filter((x) => x !== id),
-        drawerId: prev.drawerId === id ? null : prev.drawerId,
+        photos: prev.photos.filter((p) => !idSet.has(p.id)),
+        selectedIds: prev.selectedIds.filter((x) => !idSet.has(x)),
+        drawerId: prev.drawerId && idSet.has(prev.drawerId) ? null : prev.drawerId,
       }));
-      fetch(`/api/assets/${id}`, { method: "DELETE" })
+      const undo = () => {
+        setState((prev) => {
+          const photos = [...prev.photos];
+          for (const { photo, index } of removed) {
+            if (photos.some((p) => p.id === photo.id)) continue;
+            photos.splice(Math.min(index, photos.length), 0, photo);
+          }
+          return { photos, toast: { show: false, text: "" } };
+        });
+        fetch("/api/assets/restore", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids }),
+        })
+          .then((resp) => {
+            if (!resp.ok) throw new Error(String(resp.status));
+            router.refresh();
+          })
+          .catch(() => {
+            flashToast("Could not restore — try again");
+            router.refresh();
+          });
+      };
+      fetch("/api/assets/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      })
         .then((resp) => {
           if (!resp.ok) throw new Error(String(resp.status));
+          flashToast(
+            removed.length === 1 ? "Moved to Trash" : `${removed.length} files moved to Trash`,
+            { label: "Undo", onAction: undo },
+          );
         })
         .catch(() => {
           flashToast("Could not delete — try again");
@@ -1248,6 +1305,30 @@ export function useWorkspace(
         });
     },
     [setState, flashToast, router],
+  );
+
+  /** Single-tile / drawer delete — the same bulk pipeline, one id. */
+  const deletePhoto = useCallback((id: string) => deletePhotos([id]), [deletePhotos]);
+
+  /** Delete with a guardrail (ADR 0033): small selections soft-delete straight
+   *  away behind the undo toast; ≥ BULK_DELETE_CONFIRM_AT waits in the modal. */
+  const requestDeletePhotos = useCallback(
+    (ids: string[]) => {
+      if (ids.length >= BULK_DELETE_CONFIRM_AT) setState({ confirmDeleteIds: ids });
+      else deletePhotos(ids);
+    },
+    [setState, deletePhotos],
+  );
+
+  const confirmDeleteNow = useCallback(() => {
+    const ids = stateRef.current.confirmDeleteIds;
+    setState({ confirmDeleteIds: null });
+    if (ids) deletePhotos(ids);
+  }, [setState, deletePhotos]);
+
+  const cancelConfirmDelete = useCallback(
+    () => setState({ confirmDeleteIds: null }),
+    [setState],
   );
 
   /** Drawer's single-photo Analyze — a REAL analyze job. This was the last
@@ -1407,21 +1488,34 @@ export function useWorkspace(
   );
 
   // ── Selection actions (bottom action bar + right-click menu) ───────────────
-  // Delete is real (soft-delete via deletePhoto); the rest are stubs pending
-  // their backends, matching the app's "coming soon" pattern (Share, Connect).
+  // Delete is real (bulk soft-delete + undo, ADR 0033); the rest are stubs
+  // pending their backends, matching the app's "coming soon" pattern.
 
   const deleteSelected = useCallback(() => {
     const ids = stateRef.current.selectedIds.slice();
     if (ids.length === 0) return flashToast("Select files to delete");
-    ids.forEach((id) => deletePhoto(id));
+    requestDeletePhotos(ids);
     setContextMenu(null);
-  }, [deletePhoto, flashToast]);
+  }, [requestDeletePhotos, flashToast]);
+
+  /** Right-click "Move to Trash": the selection when one exists, else the tile
+   *  under the cursor (the menu's targetId). */
+  const deleteFromContext = useCallback(() => {
+    const s = stateRef.current;
+    const ids =
+      s.selectedIds.length > 0
+        ? s.selectedIds.slice()
+        : contextMenu?.targetId
+          ? [contextMenu.targetId]
+          : [];
+    setContextMenu(null);
+    if (ids.length > 0) requestDeletePhotos(ids);
+  }, [contextMenu, requestDeletePhotos]);
 
   const copyFiles = useCallback(() => { setContextMenu(null); flashToast("Copy — coming soon"); }, [flashToast]);
   const duplicateFiles = useCallback(() => { setContextMenu(null); flashToast("Duplicate — coming soon"); }, [flashToast]);
   const exportFiles = useCallback(() => { setContextMenu(null); flashToast("Export — coming soon"); }, [flashToast]);
   const groupFiles = useCallback(() => { setContextMenu(null); flashToast("Group — coming soon"); }, [flashToast]);
-  const archiveFiles = useCallback(() => { setContextMenu(null); flashToast("Archive — coming soon"); }, [flashToast]);
 
   /** New function: wrap the current selection in an artboard (frame). Artboards
    *  live on the Workspace, so the bounding box is computed in neural (grid)
@@ -2258,7 +2352,9 @@ export function useWorkspace(
         const s = stateRef.current;
         if (!isTyping && s.selectedIds.length > 0) {
           e.preventDefault();
-          s.selectedIds.forEach((id) => deletePhoto(id));
+          // Same guardrail as the action bar: big selections confirm first —
+          // a stray keypress with "select all" active must not empty a project.
+          requestDeletePhotos(s.selectedIds);
         }
         return;
       }
@@ -2273,7 +2369,7 @@ export function useWorkspace(
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeSidebar, deletePhoto]);
+  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeSidebar, requestDeletePhotos]);
 
   useEffect(() => {
     const activeClientIds = new Set(state.uploadPreviews.map((preview) => preview.clientId));
@@ -2510,6 +2606,10 @@ export function useWorkspace(
     closeDrawer,
     navDrawer,
     deletePhoto,
+    confirmDeleteCount: state.confirmDeleteIds?.length ?? 0,
+    confirmDeleteNow,
+    cancelConfirmDelete,
+    deleteFromContext,
     editorOpen: state.editorId != null,
     editorPhoto,
     editBusy: state.proc.active,
@@ -2540,7 +2640,6 @@ export function useWorkspace(
     duplicateFiles,
     exportFiles,
     groupFiles,
-    archiveFiles,
     addToNewArtboard,
     addToExistingArtboard,
 

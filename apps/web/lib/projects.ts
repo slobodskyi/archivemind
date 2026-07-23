@@ -11,6 +11,9 @@ export interface ProjectCard {
   count: number;
   /** Presigned thumb URLs (≤4) for the card collage; empty for empty projects. */
   previews: string[];
+  /** When the project entered the Trash — only populated for scope="trash",
+   *  where it drives the "N days left" countdown (ADR 0033). */
+  deletedAt?: string | null;
 }
 
 const CARD_PREVIEWS = 4;
@@ -30,6 +33,7 @@ interface ProjectRow {
   id: string;
   name: string;
   created_at: string;
+  deleted_at?: string | null;
   project_assets: ProjectAssetRow[];
 }
 
@@ -42,21 +46,29 @@ export async function getProjectCards(
   supabase: SupabaseClient,
   scope: ProjectScope = "active",
 ): Promise<ProjectCard[]> {
-  let query = supabase.from("projects").select(PROJECT_CARD_SELECT).order("created_at", { ascending: true });
+  // deleted_at only joins the trash select: adding it to the shared constant
+  // would break the 42703 pre-migration fallback below (the retry re-runs the
+  // same columns), and trash on a pre-migration DB already degrades to [].
+  // (The runtime select string defeats supabase-js's literal query parser, so
+  // the result is typed at this boundary — rows are cast to ProjectRow below
+  // exactly as before.)
+  type CardQueryResult = { data: unknown[] | null; error: { code?: string; message?: string } | null };
+  const select = scope === "trash" ? `${PROJECT_CARD_SELECT}, deleted_at` : PROJECT_CARD_SELECT;
+  let query = supabase.from("projects").select(select).order("created_at", { ascending: true });
   if (scope === "active") query = query.is("archived_at", null).is("deleted_at", null);
   else if (scope === "archived") query = query.not("archived_at", "is", null).is("deleted_at", null);
   else query = query.not("deleted_at", "is", null);
 
-  let { data, error } = await query;
+  let { data, error } = (await query) as CardQueryResult;
   if (error?.code === "42703") {
     // archived_at/deleted_at migration (20260713000001) not applied to this
     // database yet — degrade to pre-migration behavior instead of a hard
     // crash: every project counts as active, Archived/Trash stay empty.
     if (scope !== "active") return [];
-    ({ data, error } = await supabase
+    ({ data, error } = (await supabase
       .from("projects")
       .select(PROJECT_CARD_SELECT)
-      .order("created_at", { ascending: true }));
+      .order("created_at", { ascending: true })) as CardQueryResult);
   }
   if (error) throw error;
 
@@ -69,7 +81,13 @@ export async function getProjectCards(
         .filter((k): k is string => Boolean(k))
         .slice(0, CARD_PREVIEWS);
       const previews = await Promise.all(thumbKeys.map((k) => presignGet(k)));
-      return { id: p.id, name: p.name, count: active.length, previews };
+      return {
+        id: p.id,
+        name: p.name,
+        count: active.length,
+        previews,
+        ...(scope === "trash" ? { deletedAt: p.deleted_at ?? null } : {}),
+      };
     }),
   );
 }

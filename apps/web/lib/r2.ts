@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /** R2 S3 client (server-only). Our buckets carry the EU jurisdiction, whose
@@ -61,6 +61,14 @@ export async function presignGet(key: string): Promise<string> {
   const command = new GetObjectCommand({ Bucket: r2Bucket(), Key: key });
   const signingDate = new Date(Math.floor(Date.now() / SIGNING_BUCKET_MS) * SIGNING_BUCKET_MS);
   return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_GET_TTL_SECONDS, signingDate });
+}
+
+/** Delete one object (idempotent — S3 delete of a missing key succeeds). The
+ *  only web-side use is the edit-reset cleanup (ADR 0033): two freshly-orphaned
+ *  edited previews whose keys are only known in that request. Everything
+ *  heavier (asset purge) stays in the worker. */
+export async function deleteObject(key: string): Promise<void> {
+  await r2Client().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key }));
 }
 
 /** Object key layout per spec §6: {workspace_id}/originals/{uuid}/{filename}.

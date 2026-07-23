@@ -4,9 +4,13 @@ import { CheckIcon } from "@/components/icons/icons";
 interface ToastProps {
   show: boolean;
   text: string;
+  /** Optional action button (ADR 0033 — the delete Undo). Rendered inline so
+   *  the toast stays a single quiet line; the caller owns what happens next. */
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
-export default function Toast({ show, text }: ToastProps) {
+export default function Toast({ show, text, actionLabel, onAction }: ToastProps) {
   if (!show) return null;
   return (
     <div
@@ -41,6 +45,27 @@ export default function Toast({ show, text }: ToastProps) {
         <CheckIcon />
       </span>
       <span style={{ fontSize: 13, color: "var(--t1)" }}>{text}</span>
+      {actionLabel && onAction && (
+        <button
+          onClick={onAction}
+          style={{
+            marginLeft: 4,
+            height: 24,
+            padding: "0 10px",
+            background: "transparent",
+            border: "1px solid var(--bdh)",
+            borderRadius: 2,
+            color: "var(--ac)",
+            fontSize: 11.5,
+            fontWeight: 700,
+            letterSpacing: ".04em",
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {actionLabel}
+        </button>
+      )}
     </div>
   );
 }
