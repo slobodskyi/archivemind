@@ -76,6 +76,10 @@ export default function StickyNoteOverlay({ notes, onDragStart, onTextChange, on
               fontSize: 12.5,
               lineHeight: 1.4,
               padding: "0 10px 10px",
+              // Re-enable text selection: the canvas surface sets user-select:none,
+              // and a note body must stay selectable/editable underneath it.
+              userSelect: "text",
+              WebkitUserSelect: "text",
             }}
           />
         </div>

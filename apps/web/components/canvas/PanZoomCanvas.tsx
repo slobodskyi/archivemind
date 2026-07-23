@@ -37,6 +37,12 @@ export default function PanZoomCanvas({
         overflow: "hidden",
         cursor: canvasCursor,
         zIndex: 1,
+        // The canvas is a spatial drag surface, not a document: a pan/marquee/tile
+        // drag must never double as a native text-selection gesture that highlights
+        // every filename label it sweeps over. Editable widgets (the sticky-note
+        // textarea, chat/drawer) re-enable selection on their own elements.
+        userSelect: "none",
+        WebkitUserSelect: "none",
       }}
     >
       <div

@@ -158,6 +158,7 @@ function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown }: CloudLab
               cursor: "grab",
               touchAction: "none",
               userSelect: "none",
+              WebkitUserSelect: "none",
             }}
           >
             {c.label.toUpperCase()}
