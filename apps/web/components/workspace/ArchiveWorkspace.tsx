@@ -80,10 +80,15 @@ export default function ArchiveWorkspace({
           frames={ws.frames}
           counts={ws.frameCounts}
           draft={ws.frameDraft}
+          scale={ws.scale}
           onSelectFrame={ws.selectFrame}
           onExportFrame={ws.exportFrame}
           onDeleteFrame={ws.deleteFrameWithContent}
           onRenameFrame={ws.renameFrame}
+          onBeginMove={ws.beginFrameMove}
+          onBeginResize={ws.beginFrameResize}
+          onGestureMove={ws.frameGestureMove}
+          onEndGesture={ws.endFrameGesture}
         />
         <FolderOverlay
           folders={ws.folders}

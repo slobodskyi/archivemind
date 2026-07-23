@@ -1,17 +1,27 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Frame } from "@/lib/layout";
 import { CloseIcon } from "@/components/icons/icons";
+
+type Handle = "nw" | "ne" | "sw" | "se";
 
 interface FrameOverlayProps {
   frames: Frame[];
   /** How many tiles sit inside each frame (positional) — header badge. */
   counts: Record<string, number>;
   draft: { x: number; y: number; w: number; h: number } | null;
+  /** Canvas zoom, to convert screen-space drag deltas into content space. */
+  scale: number;
   onSelectFrame: (id: string) => void;
   onExportFrame: (id: string) => void;
   onDeleteFrame: (id: string) => void;
   onRenameFrame: (id: string, label: string) => void;
+  onBeginMove: (id: string) => void;
+  onBeginResize: (id: string, handle: Handle) => void;
+  onGestureMove: (dx: number, dy: number) => void;
+  onEndGesture: () => void;
 }
+
+const DRAG_THRESHOLD = 3;
 
 const btn: React.CSSProperties = {
   display: "flex",
@@ -29,21 +39,34 @@ const btn: React.CSSProperties = {
   padding: 0,
 };
 
-/** Artboards (frames) on the canvas. Beyond drawing a labelled region, a frame
- *  is now actionable as one unit (ADR 0034/0035): its header toolbar can select
- *  everything inside, export the whole artboard to PDF, or delete the frame +
- *  its content. Membership is positional — the tiles whose centers fall inside. */
+const HANDLE_CURSOR: Record<Handle, string> = {
+  nw: "nwse-resize",
+  se: "nwse-resize",
+  ne: "nesw-resize",
+  sw: "nesw-resize",
+};
+
+/** Artboards (frames): a labelled region that acts as one unit (ADR 0034/0035).
+ *  The header selects/exports/deletes the whole artboard and is the move handle;
+ *  corner handles resize it. Move translates and resize scales the contained
+ *  tiles' positions so nothing inside is ever left behind. */
 export default function FrameOverlay({
   frames,
   counts,
   draft,
+  scale,
   onSelectFrame,
   onExportFrame,
   onDeleteFrame,
   onRenameFrame,
+  onBeginMove,
+  onBeginResize,
+  onGestureMove,
+  onEndGesture,
 }: FrameOverlayProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
+  const gesture = useRef<{ id: string; mode: "move" | "resize"; handle: Handle; sx: number; sy: number; began: boolean } | null>(null);
 
   const commitRename = () => {
     if (editingId) {
@@ -52,6 +75,51 @@ export default function FrameOverlay({
     }
     setEditingId(null);
   };
+
+  const beginPointer = (e: React.PointerEvent, id: string, mode: "move" | "resize", handle: Handle) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    gesture.current = { id, mode, handle, sx: e.clientX, sy: e.clientY, began: false };
+    const onMove = (ev: PointerEvent) => {
+      const g = gesture.current;
+      if (!g) return;
+      const sdx = ev.clientX - g.sx;
+      const sdy = ev.clientY - g.sy;
+      if (!g.began) {
+        if (Math.abs(sdx) + Math.abs(sdy) < DRAG_THRESHOLD) return;
+        g.began = true;
+        if (g.mode === "move") onBeginMove(g.id);
+        else onBeginResize(g.id, g.handle);
+      }
+      onGestureMove(sdx / scale, sdy / scale);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const g = gesture.current;
+      gesture.current = null;
+      if (!g) return;
+      if (!g.began && g.mode === "move") onSelectFrame(g.id); // a click (no drag) selects
+      else if (g.began) onEndGesture();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const handleStyle = (h: Handle): React.CSSProperties => ({
+    position: "absolute",
+    width: 12,
+    height: 12,
+    background: "var(--bg-el)",
+    border: "1px solid var(--bdh)",
+    borderRadius: 2,
+    pointerEvents: "auto",
+    cursor: HANDLE_CURSOR[h],
+    ...(h === "nw" ? { left: -6, top: -6 } : {}),
+    ...(h === "ne" ? { right: -6, top: -6 } : {}),
+    ...(h === "sw" ? { left: -6, bottom: -6 } : {}),
+    ...(h === "se" ? { right: -6, bottom: -6 } : {}),
+  });
 
   return (
     <>
@@ -70,7 +138,11 @@ export default function FrameOverlay({
             pointerEvents: "none",
           }}
         >
+          {/* Header: move handle + select (click) + rename (dbl-click) + actions. */}
           <div
+            onPointerDown={(e) => {
+              if (editingId !== fr.id) beginPointer(e, fr.id, "move", "se");
+            }}
             style={{
               position: "absolute",
               left: 0,
@@ -79,6 +151,7 @@ export default function FrameOverlay({
               alignItems: "center",
               gap: 5,
               pointerEvents: "auto",
+              cursor: "grab",
             }}
           >
             {editingId === fr.id ? (
@@ -108,23 +181,19 @@ export default function FrameOverlay({
               />
             ) : (
               <span
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectFrame(fr.id);
-                }}
                 onDoubleClick={(e) => {
                   e.stopPropagation();
                   setEditingId(fr.id);
                   setDraftLabel(fr.label);
                 }}
-                title="Click to select the artboard · double-click to rename"
+                title="Drag to move · click to select · double-click to rename"
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
                   color: "var(--t3)",
                   letterSpacing: "0.02em",
                   whiteSpace: "nowrap",
-                  cursor: "pointer",
+                  cursor: "grab",
                 }}
               >
                 {fr.label}
@@ -156,6 +225,11 @@ export default function FrameOverlay({
               <CloseIcon width={9} height={9} strokeWidth={2.4} />
             </button>
           </div>
+
+          {/* Corner resize handles — content scales with the frame. */}
+          {(["nw", "ne", "sw", "se"] as Handle[]).map((h) => (
+            <div key={h} onPointerDown={(e) => beginPointer(e, fr.id, "resize", h)} style={handleStyle(h)} />
+          ))}
         </div>
       ))}
       {draft && (
