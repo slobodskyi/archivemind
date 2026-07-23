@@ -253,8 +253,10 @@ interface WorkspaceState {
   /** In-workspace Trash panel (ADR 0033). trashAssets null = not yet loaded. */
   trashOpen: boolean;
   trashAssets: TrashedAsset[] | null;
-  /** Export-to-PDF dialog (ADR 0035) — open for the current selection. */
+  /** Export-to-PDF dialog (ADR 0035). exportIds = the assets it will export
+   *  (a frame's content, or the current selection). */
   exportOpen: boolean;
+  exportIds: string[];
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -459,11 +461,16 @@ export interface Workspace {
   onZoomReset: () => void;
   setView: (v: ViewMode) => void;
 
-  // Frames (Figma-style canvas regions)
+  // Frames (Figma-style canvas regions). A frame + its content acts as one unit:
+  // select all inside, export it to PDF, or delete it (rect + content).
   frames: Frame[];
   frameDraft: { x: number; y: number; w: number; h: number } | null;
+  frameCounts: Record<string, number>;
   deleteFrame: (id: string) => void;
+  deleteFrameWithContent: (id: string) => void;
   renameFrame: (id: string, label: string) => void;
+  selectFrame: (id: string) => void;
+  exportFrame: (id: string) => void;
 
   // Folders (ADR 0034) — server-backed grouping, client-side geometry
   folders: FolderModel[];
@@ -478,6 +485,7 @@ export interface Workspace {
   duplicateFiles: () => void;
   exportFiles: () => void;
   exportOpen: boolean;
+  exportIds: string[];
   closeExport: () => void;
   groupFiles: () => void;
   /** Re-arrange the Canvas into a clean grid (selection-aware). */
@@ -702,6 +710,7 @@ export function useWorkspace(
     trashOpen: false,
     trashAssets: null,
     exportOpen: false,
+    exportIds: [],
   });
 
   // Right-click menu on the grid — a lightweight overlay, kept out of the main
@@ -1811,13 +1820,20 @@ export function useWorkspace(
 
   const copyFiles = useCallback(() => { setContextMenu(null); flashToast("Copy — coming soon"); }, [flashToast]);
   const duplicateFiles = useCallback(() => { setContextMenu(null); flashToast("Duplicate — coming soon"); }, [flashToast]);
-  /** Open the Export-to-PDF dialog for the current selection (ADR 0035). The
-   *  dialog itself does the POST /api/exports + poll + download. */
+  /** Open the Export-to-PDF dialog for an explicit set of assets (ADR 0035) — a
+   *  frame's content, a folder, or the current selection. The dialog itself does
+   *  the POST /api/exports + poll + download. */
+  const openExportFor = useCallback(
+    (ids: string[]) => {
+      setContextMenu(null);
+      if (ids.length === 0) return flashToast("Nothing to export");
+      setState({ exportOpen: true, exportIds: ids });
+    },
+    [flashToast, setState],
+  );
   const exportFiles = useCallback(() => {
-    setContextMenu(null);
-    if (stateRef.current.selectedIds.length === 0) return flashToast("Select files to export");
-    setState({ exportOpen: true });
-  }, [flashToast, setState]);
+    openExportFor(stateRef.current.selectedIds.slice());
+  }, [openExportFor]);
   const closeExport = useCallback(() => setState({ exportOpen: false }), [setState]);
   // ── Folders (ADR 0034) — server-backed grouping, client-side geometry ──────
 
@@ -2017,6 +2033,63 @@ export function useWorkspace(
     setContextMenu(null);
     flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to "${frame.label}"`);
   }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
+
+  // ── Frame (artboard) actions: treat the frame + its content as one unit ────
+
+  /** The asset ids whose tiles currently sit inside a frame (positional — a
+   *  frame has no stored membership; ADR 0034). */
+  const frameContentIds = useCallback(
+    (frame: Frame): string[] => {
+      const s = stateRef.current;
+      const pos = activeTilePositions({ ...s, view: "neural" });
+      return s.photos
+        .filter((p) => {
+          const t = pos[p.id];
+          return t && t.cx >= frame.x && t.cx <= frame.x + frame.w && t.cy >= frame.y && t.cy <= frame.y + frame.h;
+        })
+        .map((p) => p.id);
+    },
+    [activeTilePositions],
+  );
+
+  /** Select everything inside a frame — the normal action bar then operates on
+   *  the whole artboard. */
+  const selectFrame = useCallback(
+    (frameId: string) => {
+      const s = stateRef.current;
+      const frame = s.frames.find((f) => f.id === frameId);
+      if (!frame) return;
+      if (s.view !== "neural") setView("neural");
+      setState({ selectedIds: frameContentIds(frame) });
+    },
+    [frameContentIds, setView, setState],
+  );
+
+  /** Export a whole artboard's content to PDF (ADR 0035). */
+  const exportFrame = useCallback(
+    (frameId: string) => {
+      const frame = stateRef.current.frames.find((f) => f.id === frameId);
+      if (frame) openExportFor(frameContentIds(frame));
+    },
+    [frameContentIds, openExportFor],
+  );
+
+  /** Delete a frame AND its content — the photos go to Trash through the normal
+   *  soft-delete flow (undo toast + bulk-confirm ≥8, ADR 0033); the rect is
+   *  removed either way. */
+  const deleteFrameWithContent = useCallback(
+    (frameId: string) => {
+      const s = stateRef.current;
+      const frame = s.frames.find((f) => f.id === frameId);
+      if (!frame) return;
+      const ids = frameContentIds(frame);
+      pushHistory();
+      setState({ frames: s.frames.filter((f) => f.id !== frameId) });
+      if (ids.length > 0) requestDeletePhotos(ids);
+      else flashToast("Removed empty artboard");
+    },
+    [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast],
+  );
 
   /** "Tidy up" (issue #3): snap the Canvas grid back to order, with the same
    *  glide a view switch uses. Selection ≥ 2 packs just those tiles into an even
@@ -3053,6 +3126,22 @@ export function useWorkspace(
       }));
   }, [state.groups, state.groupGeom, state.photos]);
 
+  // How many tiles currently sit inside each frame (positional) — the header
+  // badge + a guard for the "export/delete this artboard" actions. Frames are
+  // few and photos ≤500, so the O(frames×photos) scan is cheap.
+  const frameCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const f of state.frames) {
+      let n = 0;
+      for (const p of state.photos) {
+        const t = neuralGalleryPos[p.id];
+        if (t && t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h) n++;
+      }
+      counts[f.id] = n;
+    }
+    return counts;
+  }, [state.frames, state.photos, neuralGalleryPos]);
+
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
 
   const marquee = state.marquee
@@ -3314,8 +3403,12 @@ export function useWorkspace(
 
     frames: state.frames,
     frameDraft,
+    frameCounts,
     deleteFrame,
+    deleteFrameWithContent,
     renameFrame,
+    selectFrame,
+    exportFrame,
 
     folders: folderModels,
     toggleFolder,
@@ -3328,6 +3421,7 @@ export function useWorkspace(
     duplicateFiles,
     exportFiles,
     exportOpen: state.exportOpen,
+    exportIds: state.exportIds,
     closeExport,
     groupFiles,
     tidyUp,
