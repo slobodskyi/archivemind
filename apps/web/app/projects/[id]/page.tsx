@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotos } from "@/lib/api";
 import { ensureWorkspace } from "@/lib/bootstrap";
+import { getCanvasGroups } from "@/lib/canvas-groups";
 import { getProjectCards } from "@/lib/projects";
 import { createClient } from "@/lib/supabase/server";
 
@@ -19,10 +20,11 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   // Parallel: ensureWorkspace is idempotent bootstrap, and getPhotos reuses
   // this page's client (skipping its internal re-auth) — the canvas load drops
   // from four sequential round trips to two.
-  const [workspaceId, photos, projectCards] = await Promise.all([
+  const [workspaceId, photos, projectCards, groups] = await Promise.all([
     ensureWorkspace(supabase, user),
     getPhotos(id, supabase),
     getProjectCards(supabase),
+    getCanvasGroups(supabase, id),
   ]);
   const projects = projectCards.map((p) => ({ id: p.id, name: p.name, count: p.count }));
 
@@ -36,6 +38,7 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
       workspaceId={workspaceId}
       projects={projects}
       currentProjectId={id}
+      initialGroups={groups}
     />
   );
 }

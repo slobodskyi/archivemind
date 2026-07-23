@@ -4,7 +4,15 @@ import {
   CAPTION_PROMPTS,
   SINGLE_PUT_MAX_BYTES,
   addProjectAssetsRequestSchema,
+  artboardSettingsSchema,
   assetKindFromMime,
+  canvasGroupKindSchema,
+  createCanvasGroupRequestSchema,
+  createExportRequestSchema,
+  exportJobPayloadSchema,
+  groupAssetsRequestSchema,
+  patchCanvasGroupRequestSchema,
+  resolveCaptionText,
   captionJobPayloadSchema,
   captionLangSchema,
   captionStyleSchema,
@@ -497,5 +505,108 @@ describe("importRequestSchema provider union + mimeFromFilename (#24)", () => {
     expect(mimeFromFilename("IMG_1.HEIC")).toBe("image/heic");
     expect(mimeFromFilename("shot.NEF")).toBe("application/octet-stream");
     expect(mimeFromFilename("noext")).toBe("application/octet-stream");
+  });
+});
+
+describe("canvas groups: folders + artboards (ADR 0034)", () => {
+  it("kind is exactly folder | artboard", () => {
+    expect(canvasGroupKindSchema.parse("folder")).toBe("folder");
+    expect(canvasGroupKindSchema.parse("artboard")).toBe("artboard");
+    expect(canvasGroupKindSchema.safeParse("frame").success).toBe(false);
+  });
+
+  it("createCanvasGroupRequest defaults assetIds to [] and takes an optional scope", () => {
+    const r = createCanvasGroupRequestSchema.parse({ kind: "folder", name: "Yoga" });
+    expect(r.assetIds).toEqual([]);
+    expect(r.projectId).toBeUndefined();
+    // trims + caps the name; rejects empty
+    expect(createCanvasGroupRequestSchema.safeParse({ kind: "folder", name: "  " }).success).toBe(false);
+    expect(
+      createCanvasGroupRequestSchema.safeParse({ kind: "artboard", name: "x".repeat(81) }).success,
+    ).toBe(false);
+  });
+
+  it("artboardSettings fills every default from {}", () => {
+    const s = artboardSettingsSchema.parse({});
+    expect(s.pageLayout).toBe("one_per_page");
+    expect(s.pageSize).toBe("A4");
+    expect(s.orientation).toBe("portrait");
+    expect(s.captionLang).toBe("en");
+    expect(s.captionStyle).toBe("agency");
+    expect(s.include).toEqual({ caption: true, title: true, facts: false, exif: false });
+  });
+
+  it("patchCanvasGroupRequest needs at least one field", () => {
+    expect(patchCanvasGroupRequestSchema.safeParse({}).success).toBe(false);
+    expect(patchCanvasGroupRequestSchema.safeParse({ name: "Renamed" }).success).toBe(true);
+    expect(patchCanvasGroupRequestSchema.safeParse({ sortIndex: 3 }).success).toBe(true);
+  });
+
+  it("groupAssetsRequest requires 1..500 ids", () => {
+    expect(groupAssetsRequestSchema.safeParse({ assetIds: [] }).success).toBe(false);
+    expect(
+      groupAssetsRequestSchema.safeParse({
+        assetIds: ["00000000-0000-0000-0000-0000000000f1"],
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("artboard PDF export (ADR 0035)", () => {
+  const opts = artboardSettingsSchema.parse({});
+
+  it("createExportRequest accepts a groupId OR a selection, never neither", () => {
+    expect(
+      createExportRequestSchema.safeParse({
+        groupId: "00000000-0000-0000-0000-0000000000c2",
+        options: opts,
+      }).success,
+    ).toBe(true);
+    expect(
+      createExportRequestSchema.safeParse({
+        assetIds: ["00000000-0000-0000-0000-0000000000f1"],
+        options: opts,
+      }).success,
+    ).toBe(true);
+    // neither source → rejected
+    expect(createExportRequestSchema.safeParse({ options: opts }).success).toBe(false);
+  });
+
+  it("exportJobPayload mirrors the request in snake_case and carries result_url", () => {
+    const p = exportJobPayloadSchema.parse({
+      group_id: "00000000-0000-0000-0000-0000000000c2",
+      options: opts,
+      result_url: "https://r2.example/exports/j.pdf",
+    });
+    expect(p.result_url).toContain(".pdf");
+    expect(exportJobPayloadSchema.safeParse({ options: opts }).success).toBe(false);
+  });
+});
+
+describe("resolveCaptionText fallback chain", () => {
+  const rows = [
+    { lang: "en", style: "agency", text: "EN agency" },
+    { lang: "uk", style: "social", text: "UK social" },
+  ] as const;
+
+  it("prefers the exact (lang, style)", () => {
+    expect(resolveCaptionText([...rows], "uk", "social")).toBe("UK social");
+  });
+
+  it("falls back to English of the same style, then any EN", () => {
+    // uk/agency absent → EN agency (same style)
+    expect(resolveCaptionText([...rows], "uk", "agency")).toBe("EN agency");
+    // ru absent entirely → any EN
+    expect(resolveCaptionText([...rows], "ru", "archival")).toBe("EN agency");
+  });
+
+  it("falls back to any style in the requested lang before giving up", () => {
+    // only uk/social exists; request uk/agency → same-lang, different style
+    expect(resolveCaptionText([{ lang: "uk", style: "social", text: "x" }], "uk", "agency")).toBe("x");
+  });
+
+  it("returns '' when no lang/style and no English exist", () => {
+    expect(resolveCaptionText([{ lang: "uk", style: "social", text: "x" }], "ru", "agency")).toBe("");
+    expect(resolveCaptionText([], "en", "agency")).toBe("");
   });
 });

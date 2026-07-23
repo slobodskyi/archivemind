@@ -140,6 +140,13 @@ Phases 1–2). What actually remains:
 - **Server-side layout persistence (#22 remainder)** — `PUT /api/canvas/layout`;
   the client half (versioned `localStorage` + undo/redo) already ships (#93,
   ADR 0022).
+- **Canvas folders — ✅ shipped 2026-07-23 (ADR 0034):** combine files into
+  server-backed folders on the Canvas (collapse ↔ expand in place, drag files
+  in/out, rename, ungroup). New `canvas_groups` + `canvas_group_assets` tables
+  (membership on the server, geometry in the `localStorage` groupGeom bucket —
+  ADR 0022 still holds); routes under `app/api/canvas-groups/*`; the "Group"
+  action-bar button is now real. Artboards still draw client `Frame`s;
+  promoting them to `kind='artboard'` server groups is the follow-up.
 - **Remaining #17:** per-project `caption_prompt`, project members.
 - **Topic embedding clustering — ✅ DONE 2026-07-22 (#122), LIVE on prod** — the
   stable replacement for the read-time tag heuristic (ADR 0023): a deterministic
@@ -189,7 +196,7 @@ Phases 1–2). What actually remains:
 
 ### Phase 7 — Export + hardening (~week 8)
 
-Export handler (ZIP: owned originals else medium previews + note; `captions.csv` sidecar) → R2 `exports/` + presigned GET (7 d = R2 max). ~~Deletion flows (soft-delete + R2 purge; `source_missing` on fetch failure keeps derivatives)~~ — **✅ pulled forward, shipped 2026-07-23 (ADR 0033):** photo trash with undo + Restore + 30-day `sweep_deleted_assets()` → `purge` worker job (R2 bytes + DB derivatives erased, dedup tombstone kept), Trash view lists photos with day countdowns, "Delete permanently"/"Empty trash", edit-reset cleans its orphaned R2 objects; `source_missing` still keeps derivatives. Security pass per spec §12 (RLS audit, token handling, TTLs). **GDPR right-to-erasure: account/workspace-level "delete everything" flow (rows + R2, incl. tombstones) — still open, deliberately NOT covered by ADR 0033; the purge handler is its building block.** Privacy Policy + ToS before first external user. Full QA on a real dirty archive.
+Export handler (ZIP: owned originals else medium previews + note; `captions.csv` sidecar) → R2 `exports/` + presigned GET (7 d = R2 max). **Pulled forward as a laid-out PDF, shipped 2026-07-23 (ADR 0035):** `POST /api/exports` → `export` worker job (`pdf-lib` + embedded Cyrillic font) renders each photo + caption (one-per-page or grid) → R2 `{ws}/exports/{job_id}.pdf` → 7-day presigned URL in `ai_jobs.payload.result_url`; ExportDialog polls + downloads. Sources the medium previews (edited-medium when present), so it works for Drive-linked assets. A **superset** of the ZIP+CSV planned here — the originals-bundle shape can still be added later. ~~Deletion flows (soft-delete + R2 purge; `source_missing` on fetch failure keeps derivatives)~~ — **✅ pulled forward, shipped 2026-07-23 (ADR 0033):** photo trash with undo + Restore + 30-day `sweep_deleted_assets()` → `purge` worker job (R2 bytes + DB derivatives erased, dedup tombstone kept), Trash view lists photos with day countdowns, "Delete permanently"/"Empty trash", edit-reset cleans its orphaned R2 objects; `source_missing` still keeps derivatives. Security pass per spec §12 (RLS audit, token handling, TTLs). **GDPR right-to-erasure: account/workspace-level "delete everything" flow (rows + R2, incl. tombstones) — still open, deliberately NOT covered by ADR 0033; the purge handler is its building block.** Privacy Policy + ToS before first external user. Full QA on a real dirty archive.
 
 ---
 

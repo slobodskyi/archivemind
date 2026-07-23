@@ -1,4 +1,5 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /** Worker-side R2 access. Same constraints as the web app's client: the
  *  EU-jurisdiction endpoint (host contains `.eu.`) with path-style addressing
@@ -43,4 +44,13 @@ export async function putObject(key: string, body: Buffer, contentType: string):
 
 export async function deleteObject(key: string): Promise<void> {
   await r2().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key }));
+}
+
+/** Presigned GET with an explicit TTL — used for export deliverables (ADR 0035),
+ *  which need a longer lifetime than the web app's 1 h preview URLs (up to R2's
+ *  7-day maximum). Kept worker-side so the web presigner stays short-lived. */
+export async function presignGetLong(key: string, ttlSeconds: number): Promise<string> {
+  return getSignedUrl(r2(), new GetObjectCommand({ Bucket: r2Bucket(), Key: key }), {
+    expiresIn: ttlSeconds,
+  });
 }

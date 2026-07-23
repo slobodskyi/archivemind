@@ -413,6 +413,174 @@ export const addProjectAssetsRequestSchema = z.object({
 });
 export type AddProjectAssetsRequest = z.infer<typeof addProjectAssetsRequestSchema>;
 
+// ── Canvas groups: folders + artboards (ADR 0034) ────────────────────────────
+//
+// One server model, two behaviours. MEMBERSHIP + name + order + settings are
+// data (these contracts + the canvas_groups/canvas_group_assets tables); the
+// on-canvas geometry stays a per-user client override (ADR 0022 holds).
+//   • folder   — organize; a file lives in at most one folder per scope.
+//   • artboard — compose a PDF deliverable; ordered members = the pages.
+
+export const canvasGroupKindSchema = z.enum(["folder", "artboard"]);
+export type CanvasGroupKind = z.infer<typeof canvasGroupKindSchema>;
+
+/** PDF export config, stored in canvas_groups.settings for artboards ({} for
+ *  folders) and echoed in the export job payload. All fields default so an
+ *  older client / a folder row parses cleanly. */
+export const pageLayoutSchema = z.enum(["one_per_page", "grid"]);
+export type PageLayout = z.infer<typeof pageLayoutSchema>;
+export const pageSizeSchema = z.enum(["A4", "Letter"]);
+export const pageOrientationSchema = z.enum(["portrait", "landscape"]);
+
+export const artboardSettingsSchema = z.object({
+  pageLayout: pageLayoutSchema.default("one_per_page"),
+  pageSize: pageSizeSchema.default("A4"),
+  orientation: pageOrientationSchema.default("portrait"),
+  captionLang: captionLangSchema.default("en"),
+  captionStyle: captionStyleSchema.default("agency"),
+  // Explicit literal default: a bare .default({}) would be used as-is (zod does
+  // not re-parse the default), leaving the inner booleans undefined.
+  include: z
+    .object({
+      caption: z.boolean().default(true),
+      title: z.boolean().default(true),
+      facts: z.boolean().default(false),
+      exif: z.boolean().default(false),
+    })
+    .default({ caption: true, title: true, facts: false, exif: false }),
+});
+export type ArtboardSettings = z.infer<typeof artboardSettingsSchema>;
+
+/** POST /api/canvas-groups. `assetIds` seeds membership; for a folder the route
+ *  also removes those assets from any other folder in the same scope
+ *  (single-membership, enforced in the route, not the DB). */
+export const createCanvasGroupRequestSchema = z.object({
+  kind: canvasGroupKindSchema,
+  name: z.string().trim().min(1).max(80),
+  projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
+  assetIds: z.array(uuidSchema).max(500).default([]),
+  settings: artboardSettingsSchema.optional(),
+});
+export type CreateCanvasGroupRequest = z.infer<typeof createCanvasGroupRequestSchema>;
+
+/** PATCH /api/canvas-groups/[id] — rename / reorder (artboards) / retune export
+ *  settings. At least one field must be present. */
+export const patchCanvasGroupRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    sortIndex: z.number().int().optional(),
+    settings: artboardSettingsSchema.optional(),
+  })
+  .refine((v) => v.name !== undefined || v.sortIndex !== undefined || v.settings !== undefined, {
+    message: "at least one of name, sortIndex, settings is required",
+  });
+export type PatchCanvasGroupRequest = z.infer<typeof patchCanvasGroupRequestSchema>;
+
+/** POST | DELETE /api/canvas-groups/[id]/assets — add / remove members. New
+ *  members append after the current max position; folder-exclusivity is applied
+ *  server-side on add. */
+export const groupAssetsRequestSchema = z.object({
+  assetIds: z.array(uuidSchema).min(1).max(500),
+});
+export type GroupAssetsRequest = z.infer<typeof groupAssetsRequestSchema>;
+
+/** GET /api/canvas-groups?project= — the read shape the canvas hydrates from.
+ *  `members` are asset ids ordered by canvas_group_assets.position; `settings`
+ *  is the parsed artboard config (null for folders). */
+export const canvasGroupSchema = z.object({
+  id: uuidSchema,
+  kind: canvasGroupKindSchema,
+  name: z.string(),
+  projectId: uuidSchema.nullable(),
+  sortIndex: z.number().int(),
+  settings: artboardSettingsSchema.nullable(),
+  members: z.array(uuidSchema),
+});
+export type CanvasGroup = z.infer<typeof canvasGroupSchema>;
+
+export const canvasGroupsResponseSchema = z.object({
+  groups: z.array(canvasGroupSchema),
+});
+export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
+
+// ── Artboard PDF export (ADR 0035) — POST /api/exports → ai_jobs type='export' ─
+//
+// Not routed through POST /api/jobs (like edit/purge, export gets its own
+// route). The worker reads the ordered members, renders a PDF (photo + caption
+// under each), writes it to R2 `{workspace_id}/exports/{job_id}.pdf`, and puts a
+// long-lived presigned URL in ai_jobs.payload.result_url. The type='export'
+// value has been in the job_type enum since init.
+
+/** R2 max presign lifetime — export deliverables outlive the 1 h preview TTL. */
+export const EXPORT_PRESIGN_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/** POST /api/exports body — export a saved artboard (`groupId`) or an ad-hoc
+ *  selection (`assetIds`). Exactly one source is required. */
+export const createExportRequestSchema = z
+  .object({
+    groupId: uuidSchema.optional(),
+    assetIds: z.array(uuidSchema).min(1).max(500).optional(),
+    options: artboardSettingsSchema,
+  })
+  .refine((v) => v.groupId !== undefined || (v.assetIds !== undefined && v.assetIds.length > 0), {
+    message: "one of groupId, assetIds is required",
+  });
+export type CreateExportRequest = z.infer<typeof createExportRequestSchema>;
+
+export const createExportResponseSchema = z.object({ jobId: uuidSchema });
+export type CreateExportResponse = z.infer<typeof createExportResponseSchema>;
+
+/** ai_jobs.payload for type='export' (worker handler). Mirrors the request but
+ *  in snake_case queue convention, and after the route has resolved a groupId
+ *  to its member asset_ids (or passed the selection through). */
+export const exportJobPayloadSchema = z
+  .object({
+    group_id: uuidSchema.optional(),
+    asset_ids: z.array(uuidSchema).min(1).max(500).optional(),
+    options: artboardSettingsSchema,
+    /** written back by the worker when the PDF lands in R2 */
+    result_url: z.string().optional(),
+  })
+  .refine((v) => v.group_id !== undefined || (v.asset_ids !== undefined && v.asset_ids.length > 0), {
+    message: "one of group_id, asset_ids is required",
+  });
+export type ExportJobPayload = z.infer<typeof exportJobPayloadSchema>;
+
+/** GET /api/exports?jobId= — poll/lookup after Realtime signals 'done'. */
+export const exportResultSchema = z.object({
+  jobId: uuidSchema,
+  status: jobStatusSchema,
+  url: z.string().nullable(),
+});
+export type ExportResult = z.infer<typeof exportResultSchema>;
+
+/** One caption row as the DB stores it (lowercase enums), for resolveCaptionText. */
+export interface CaptionRowLike {
+  lang: CaptionLang;
+  style: CaptionStyleKey;
+  text: string;
+}
+
+/** Pick the caption text for (lang, style) with graceful fallback: exact →
+ *  English of the same style → any style in the requested lang → any English →
+ *  "". Shared so the PDF export (worker) and the drawer (web) never disagree on
+ *  which text a photo shows. */
+export function resolveCaptionText(
+  rows: CaptionRowLike[],
+  lang: CaptionLang,
+  style: CaptionStyleKey,
+): string {
+  const pick = (l: CaptionLang, s: CaptionStyleKey): string | undefined =>
+    rows.find((r) => r.lang === l && r.style === s)?.text;
+  return (
+    pick(lang, style) ??
+    pick("en", style) ??
+    rows.find((r) => r.lang === lang)?.text ??
+    rows.find((r) => r.lang === "en")?.text ??
+    ""
+  );
+}
+
 // ── Search (spec §8.4; issue #15) — GET /api/search ──────────────────────────
 
 /** Gemini's structured parse of a free-text archive query. Every field is

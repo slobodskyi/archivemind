@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import type { EditRecipe, TrashedAsset } from "@archivemind/shared";
+import type { CanvasGroup, EditRecipe, TrashedAsset } from "@archivemind/shared";
 import { CAPTION_LANG_DB, CAPTION_STYLE_DB, getCaptionRow } from "@/lib/format";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -66,10 +66,59 @@ const canvasStoreKey = (projectId: string) => `${CANVAS_STORE_PREFIX}${projectId
  *  saved by the design-branch DEMO_CLOUDS builds (fake Poland/Italy/topic clouds). */
 const CANVAS_STORE_VERSION = 2;
 
+/** Per-folder on-canvas geometry + collapse state, keyed by server group id.
+ *  Client-only (ADR 0022): the server owns which assets are in the folder, the
+ *  browser owns where the folder box sits and whether it's collapsed. Additive
+ *  to the persisted blob — pre-folder saves simply lack it. */
+export interface GroupGeom {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  collapsed: boolean;
+}
+
+/** Collapsed-folder tile footprint (content-space px). */
+export const FOLDER_TILE_W = 152;
+export const FOLDER_TILE_H = 118;
+
+/** The rect a tile's center must land inside to join a folder: the collapsed
+ *  tile's box, or the whole expanded rect. */
+export function folderHitRect(geom: GroupGeom): { x: number; y: number; w: number; h: number } {
+  return geom.collapsed
+    ? { x: geom.x, y: geom.y, w: FOLDER_TILE_W, h: FOLDER_TILE_H }
+    : { x: geom.x, y: geom.y, w: geom.w, h: geom.h };
+}
+
+/** A stable default spot for a folder that has no client geometry yet (created
+ *  in another session/device). Deterministic (id hash) so it doesn't jump. */
+export function defaultFolderGeom(id: string): GroupGeom {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return {
+    x: 48 + (h % 6) * 184,
+    y: 48 + ((h >> 4) % 4) * 156,
+    w: FOLDER_TILE_W,
+    h: FOLDER_TILE_H,
+    collapsed: true,
+  };
+}
+
+/** Render model for one folder on the canvas (FolderOverlay). */
+export interface FolderModel {
+  id: string;
+  name: string;
+  count: number;
+  /** Up to 3 presigned member thumbs for the collapsed stack. */
+  previews: string[];
+  geom: GroupGeom;
+}
+
 interface PersistedCanvas {
   v?: number;
   galleryOverrides?: Partial<GalleryOverrides>;
   frames?: Frame[];
+  groupGeom?: Record<string, GroupGeom>;
   stickyNotes?: StickyNote[];
 }
 
@@ -179,6 +228,13 @@ interface WorkspaceState {
    *  so the selected tool is never mutated and resumes on release. Not persisted. */
   spacePan: boolean;
   frames: Frame[];
+  /** Canvas groups — folders + artboards (ADR 0034). Server owns membership +
+   *  name + order + settings; the on-canvas geometry lives in the localStorage
+   *  groupGeom bucket (ADR 0022 holds — positions stay client-side). */
+  groups: CanvasGroup[];
+  /** Per-group on-canvas geometry + collapse state, keyed by server group id.
+   *  Client-only (persisted with the rest of the canvas arrangement). */
+  groupGeom: Record<string, GroupGeom>;
   stickyNotes: StickyNote[];
   /** Content-space preview rect while the frame tool is actively drawing. */
   frameDraftRect: { x: number; y: number; w: number; h: number } | null;
@@ -197,6 +253,8 @@ interface WorkspaceState {
   /** In-workspace Trash panel (ADR 0033). trashAssets null = not yet loaded. */
   trashOpen: boolean;
   trashAssets: TrashedAsset[] | null;
+  /** Export-to-PDF dialog (ADR 0035) — open for the current selection. */
+  exportOpen: boolean;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -407,11 +465,20 @@ export interface Workspace {
   deleteFrame: (id: string) => void;
   renameFrame: (id: string, label: string) => void;
 
+  // Folders (ADR 0034) — server-backed grouping, client-side geometry
+  folders: FolderModel[];
+  toggleFolder: (id: string) => void;
+  renameGroup: (id: string, name: string) => void;
+  deleteGroup: (id: string) => void;
+  moveGroup: (id: string, dx: number, dy: number) => void;
+
   // Selection actions (bottom action bar + right-click menu)
   deleteSelected: () => void;
   copyFiles: () => void;
   duplicateFiles: () => void;
   exportFiles: () => void;
+  exportOpen: boolean;
+  closeExport: () => void;
   groupFiles: () => void;
   /** Re-arrange the Canvas into a clean grid (selection-aware). */
   tidyUp: () => void;
@@ -573,6 +640,7 @@ export function useWorkspace(
   workspaceId: string,
   initialProjects: ProjectOption[],
   currentProjectId: string,
+  initialGroups: CanvasGroup[],
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
@@ -621,6 +689,8 @@ export function useWorkspace(
     panning: false,
     spacePan: false,
     frames: [],
+    groups: initialGroups,
+    groupGeom: {},
     stickyNotes: [],
     frameDraftRect: null,
     history: [],
@@ -631,6 +701,7 @@ export function useWorkspace(
     confirmDeleteIds: null,
     trashOpen: false,
     trashAssets: null,
+    exportOpen: false,
   });
 
   // Right-click menu on the grid — a lightweight overlay, kept out of the main
@@ -1176,6 +1247,59 @@ export function useWorkspace(
     [setState],
   );
 
+  /** After a Canvas tile drag, reconcile folder membership (ADR 0034): a tile
+   *  dropped inside a folder joins it (server enforces single-membership; we
+   *  mirror it optimistically), one dragged out of its folder leaves. Folders
+   *  are a neural-view concept, so this only runs for `kind === "asset"` drags.
+   *  Fire-and-forget: the server is re-read on the next refresh, so a failed
+   *  fetch just reverts on reload rather than blocking the drag. */
+  const syncFolderMembership = useCallback(
+    (draggedIds: string[]) => {
+      const s = stateRef.current;
+      const folders = s.groups.filter((g) => g.kind === "folder");
+      if (folders.length === 0 || draggedIds.length === 0) return;
+      const positions = activeTilePositions(s);
+
+      const move = (assetId: string, fromId: string | null, toId: string | null) =>
+        setState((prev) => ({
+          groups: prev.groups.map((g) => {
+            if (g.id === fromId) return { ...g, members: g.members.filter((m) => m !== assetId) };
+            if (g.id === toId && !g.members.includes(assetId)) return { ...g, members: [...g.members, assetId] };
+            return g;
+          }),
+        }));
+
+      for (const assetId of draggedIds) {
+        const tile = positions[assetId];
+        if (!tile) continue;
+        const target =
+          folders.find((f) => {
+            const r = folderHitRect(s.groupGeom[f.id] ?? defaultFolderGeom(f.id));
+            return tile.cx >= r.x && tile.cx <= r.x + r.w && tile.cy >= r.y && tile.cy <= r.y + r.h;
+          }) ?? null;
+        const current = folders.find((f) => f.members.includes(assetId)) ?? null;
+        if (target?.id === current?.id) continue;
+
+        if (target) {
+          move(assetId, current?.id ?? null, target.id);
+          void fetch(`/api/canvas-groups/${target.id}/assets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assetIds: [assetId] }),
+          }).catch(() => {});
+        } else if (current) {
+          move(assetId, current.id, null);
+          void fetch(`/api/canvas-groups/${current.id}/assets`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ assetIds: [assetId] }),
+          }).catch(() => {});
+        }
+      }
+    },
+    [activeTilePositions, setState],
+  );
+
   const up = useCallback(() => {
     const d = dragRef.current;
     if (!d) return;
@@ -1251,8 +1375,12 @@ export function useWorkspace(
           }
         }
       }
+      // Folder membership follows the drop (ADR 0034) — Canvas tiles only.
+      if (d.moved && d.kind === "asset") {
+        syncFolderMembership(d.groupCenters ? Object.keys(d.groupCenters) : [d.key]);
+      }
     }
-  }, [setState, pushHistory, activeTilePositions]);
+  }, [setState, pushHistory, activeTilePositions, syncFolderMembership]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 
@@ -1683,8 +1811,148 @@ export function useWorkspace(
 
   const copyFiles = useCallback(() => { setContextMenu(null); flashToast("Copy — coming soon"); }, [flashToast]);
   const duplicateFiles = useCallback(() => { setContextMenu(null); flashToast("Duplicate — coming soon"); }, [flashToast]);
-  const exportFiles = useCallback(() => { setContextMenu(null); flashToast("Export — coming soon"); }, [flashToast]);
-  const groupFiles = useCallback(() => { setContextMenu(null); flashToast("Group — coming soon"); }, [flashToast]);
+  /** Open the Export-to-PDF dialog for the current selection (ADR 0035). The
+   *  dialog itself does the POST /api/exports + poll + download. */
+  const exportFiles = useCallback(() => {
+    setContextMenu(null);
+    if (stateRef.current.selectedIds.length === 0) return flashToast("Select files to export");
+    setState({ exportOpen: true });
+  }, [flashToast, setState]);
+  const closeExport = useCallback(() => setState({ exportOpen: false }), [setState]);
+  // ── Folders (ADR 0034) — server-backed grouping, client-side geometry ──────
+
+  /** "Group" action: wrap the current selection in a new folder. The server
+   *  owns membership (single-folder-membership is enforced route-side); the
+   *  browser owns the collapsed tile's spot, placed at the selection's center. */
+  const groupFiles = useCallback(() => {
+    const s = stateRef.current;
+    const ids = s.selectedIds.slice();
+    setContextMenu(null);
+    if (ids.length === 0) return flashToast("Select files to group into a folder");
+    const projectId = s.projCurrent === "all" ? null : s.projCurrent;
+    const pos = activeTilePositions({ ...s, view: "neural" });
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const id of ids) {
+      const p = pos[id];
+      if (!p) continue;
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + p.w); maxY = Math.max(maxY, p.y + p.h);
+    }
+    const cx = Number.isFinite(minX) ? (minX + maxX) / 2 : 200;
+    const cy = Number.isFinite(minY) ? (minY + maxY) / 2 : 200;
+    const n = s.groups.filter((g) => g.kind === "folder").length + 1;
+    void fetch("/api/canvas-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "folder", name: "Folder " + n, projectId, assetIds: ids }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<CanvasGroup>) : Promise.reject(new Error("create failed"))))
+      .then((group) => {
+        const geom: GroupGeom = {
+          x: cx - FOLDER_TILE_W / 2,
+          y: cy - FOLDER_TILE_H / 2,
+          w: FOLDER_TILE_W,
+          h: FOLDER_TILE_H,
+          collapsed: true,
+        };
+        setState((prev) => ({
+          groups: [...prev.groups, group],
+          groupGeom: { ...prev.groupGeom, [group.id]: geom },
+          selectedIds: [],
+        }));
+        flashToast(`Grouped ${ids.length} ${ids.length === 1 ? "file" : "files"} into "${group.name}"`);
+      })
+      .catch(() => flashToast("Couldn't create the folder"));
+  }, [activeTilePositions, flashToast, setState]);
+
+  /** Collapse ↔ expand. Expanding packs the members into a grid inside a rect
+   *  anchored at the tile's spot (Milanote-style in-place open); collapsing just
+   *  hides them again (they keep their override positions). */
+  const toggleFolder = useCallback(
+    (id: string) => {
+      const s = stateRef.current;
+      const folder = s.groups.find((g) => g.id === id && g.kind === "folder");
+      if (!folder) return;
+      const geom = s.groupGeom[id] ?? defaultFolderGeom(id);
+      if (!geom.collapsed) {
+        setState({ groupGeom: { ...s.groupGeom, [id]: { ...geom, collapsed: true, w: FOLDER_TILE_W, h: FOLDER_TILE_H } } });
+        return;
+      }
+      // Pack members into a grid inside a rect anchored at the tile's spot;
+      // each tile is centered in its cell (the layout keeps its real aspect).
+      const cell = 128, gap = 14, pad = 16, header = 32;
+      const count = Math.max(1, folder.members.length);
+      const cols = Math.min(count, Math.max(2, Math.ceil(Math.sqrt(count))));
+      const rows = Math.ceil(count / cols);
+      const rectW = pad * 2 + cols * (cell + gap) - gap;
+      const rectH = header + pad * 2 + rows * (cell + gap) - gap;
+      const asset = { ...s.galleryOverrides.asset };
+      folder.members.forEach((mid, i) => {
+        const col = i % cols, row = Math.floor(i / cols);
+        asset[mid] = {
+          x: geom.x + pad + col * (cell + gap) + cell / 2,
+          y: geom.y + header + pad + row * (cell + gap) + cell / 2,
+        };
+      });
+      pushHistory();
+      setState({
+        galleryOverrides: { ...s.galleryOverrides, asset },
+        groupGeom: { ...s.groupGeom, [id]: { ...geom, collapsed: false, w: rectW, h: rectH } },
+        tilesAnimating: true,
+      });
+      if (animTimer.current) clearTimeout(animTimer.current);
+      animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+    },
+    [pushHistory, setState],
+  );
+
+  const renameGroup = useCallback(
+    (id: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      setState({ groups: stateRef.current.groups.map((g) => (g.id === id ? { ...g, name: trimmed } : g)) });
+      void fetch(`/api/canvas-groups/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      }).catch(() => {});
+    },
+    [setState],
+  );
+
+  const deleteGroup = useCallback(
+    (id: string) => {
+      const s = stateRef.current;
+      const geom = { ...s.groupGeom };
+      delete geom[id];
+      setState({ groups: s.groups.filter((g) => g.id !== id), groupGeom: geom });
+      void fetch(`/api/canvas-groups/${id}`, { method: "DELETE" }).catch(() => {});
+    },
+    [setState],
+  );
+
+  /** Drag a folder box: shift its geometry; an expanded folder carries its
+   *  member tiles along (their overrides shift by the same delta). Deltas arrive
+   *  in content space from the overlay. */
+  const moveGroup = useCallback(
+    (id: string, dx: number, dy: number) => {
+      const s = stateRef.current;
+      const geom = s.groupGeom[id] ?? defaultFolderGeom(id);
+      const next: GroupGeom = { ...geom, x: geom.x + dx, y: geom.y + dy };
+      if (!geom.collapsed) {
+        const folder = s.groups.find((g) => g.id === id);
+        const asset = { ...s.galleryOverrides.asset };
+        folder?.members.forEach((mid) => {
+          const c = asset[mid];
+          if (c) asset[mid] = { x: c.x + dx, y: c.y + dy };
+        });
+        setState({ groupGeom: { ...s.groupGeom, [id]: next }, galleryOverrides: { ...s.galleryOverrides, asset } });
+      } else {
+        setState({ groupGeom: { ...s.groupGeom, [id]: next } });
+      }
+    },
+    [setState],
+  );
 
   /** New function: wrap the current selection in an artboard (frame). Artboards
    *  live on the Workspace, so the bounding box is computed in neural (grid)
@@ -2611,6 +2879,7 @@ export function useWorkspace(
       setState({
         galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
         frames: saved.frames ?? [],
+        groupGeom: saved.groupGeom ?? {},
         stickyNotes: saved.stickyNotes ?? [],
       });
     } catch {
@@ -2632,6 +2901,7 @@ export function useWorkspace(
             v: CANVAS_STORE_VERSION,
             galleryOverrides: state.galleryOverrides,
             frames: state.frames,
+            groupGeom: state.groupGeom,
             stickyNotes: state.stickyNotes,
           } satisfies PersistedCanvas),
         );
@@ -2642,7 +2912,7 @@ export function useWorkspace(
     return () => {
       if (persistTimer.current) clearTimeout(persistTimer.current);
     };
-  }, [currentProjectId, state.galleryOverrides, state.frames, state.stickyNotes]);
+  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.stickyNotes]);
 
   // Flush the latest arrangement on unmount too, so navigating away right after
   // a drag (before the debounce fires) still saves it.
@@ -2657,6 +2927,7 @@ export function useWorkspace(
             v: CANVAS_STORE_VERSION,
             galleryOverrides: s.galleryOverrides,
             frames: s.frames,
+            groupGeom: s.groupGeom,
             stickyNotes: s.stickyNotes,
           } satisfies PersistedCanvas),
         );
@@ -2751,6 +3022,37 @@ export function useWorkspace(
     [state.photos, state.galleryOverrides, state.uploadPreviews, neuralGalleryFor],
   );
 
+  // Folders (ADR 0034) hide their members while collapsed — the folder tile
+  // stands in for them. Neural view only (folders don't touch Timeline/Topic/Map
+  // in v1), so this post-processes the Canvas grid, not the cloud sorts.
+  const foldedNeuralPos = useMemo(() => {
+    const folders = state.groups.filter((g) => g.kind === "folder");
+    if (folders.length === 0) return neuralGalleryPos;
+    const pos = { ...neuralGalleryPos };
+    for (const f of folders) {
+      const geom = state.groupGeom[f.id] ?? defaultFolderGeom(f.id);
+      if (geom.collapsed) for (const m of f.members) delete pos[m];
+    }
+    return pos;
+  }, [neuralGalleryPos, state.groups, state.groupGeom]);
+
+  // Render model for the FolderOverlay: resolved geometry + up-to-3 member thumbs.
+  const folderModels = useMemo<FolderModel[]>(() => {
+    const byId = new Map(state.photos.map((p) => [p.id, p]));
+    return state.groups
+      .filter((g) => g.kind === "folder")
+      .map((g) => ({
+        id: g.id,
+        name: g.name,
+        count: g.members.length,
+        previews: g.members
+          .map((m) => byId.get(m)?.src)
+          .filter((s): s is string => Boolean(s))
+          .slice(0, 3),
+        geom: state.groupGeom[g.id] ?? defaultFolderGeom(g.id),
+      }));
+  }, [state.groups, state.groupGeom, state.photos]);
+
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
 
   const marquee = state.marquee
@@ -2840,7 +3142,7 @@ export function useWorkspace(
     : isSenseView
       ? topicLayoutResult
       : null;
-  const activePositions = cloudDecor ? cloudDecor.tiles : neuralGalleryPos;
+  const activePositions = cloudDecor ? cloudDecor.tiles : foldedNeuralPos;
 
   // Committed after every render so pointer-down handlers (onCloudLabelDown)
   // read the exact layout the canvas is showing instead of recomputing it.
@@ -3015,10 +3317,18 @@ export function useWorkspace(
     deleteFrame,
     renameFrame,
 
+    folders: folderModels,
+    toggleFolder,
+    renameGroup,
+    deleteGroup,
+    moveGroup,
+
     deleteSelected,
     copyFiles,
     duplicateFiles,
     exportFiles,
+    exportOpen: state.exportOpen,
+    closeExport,
     groupFiles,
     tidyUp,
     addToNewArtboard,

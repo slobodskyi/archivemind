@@ -1,0 +1,15 @@
+LiberationSans-Regular.ttf
+==========================
+
+Liberation Sans (Regular) — used by the artboard PDF export (ADR 0035) as the
+embedded text face. Chosen because it covers Latin + Cyrillic (incl. Ukrainian
+є/ї/ґ) + Greek in a single TTF, so multilingual captions (en/uk/ru) render
+without glyph fallback ("tofu").
+
+License: SIL Open Font License, Version 1.1 (OFL-1.1). The Liberation fonts are
+free/libre and redistributable under the OFL; see
+https://github.com/liberationfonts/liberation-fonts for the upstream project and
+the full OFL text. Copyright (c) Red Hat, Inc.
+
+Swap this file (and the path in src/services/pdf-font.ts) for any TTF/OTF with
+the required script coverage if a different house font is preferred.

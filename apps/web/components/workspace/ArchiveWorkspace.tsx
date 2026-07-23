@@ -1,10 +1,12 @@
 "use client";
 
+import type { CanvasGroup } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
+import FolderOverlay from "@/components/canvas/FolderOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
@@ -27,6 +29,7 @@ import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import ImageEditor from "@/components/editor/ImageEditor";
 import SearchModal from "@/components/modals/SearchModal";
+import ExportDialog from "@/components/export/ExportDialog";
 import ImportModal from "@/components/import/ImportModal";
 import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
@@ -37,6 +40,7 @@ interface ArchiveWorkspaceProps {
   workspaceId: string;
   projects: ProjectOption[];
   currentProjectId: string;
+  initialGroups: CanvasGroup[];
 }
 
 export default function ArchiveWorkspace({
@@ -44,8 +48,9 @@ export default function ArchiveWorkspace({
   workspaceId,
   projects,
   currentProjectId,
+  initialGroups,
 }: ArchiveWorkspaceProps) {
-  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId);
+  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId, initialGroups);
 
   return (
     <div
@@ -76,6 +81,14 @@ export default function ArchiveWorkspace({
           draft={ws.frameDraft}
           onDeleteFrame={ws.deleteFrame}
           onRenameFrame={ws.renameFrame}
+        />
+        <FolderOverlay
+          folders={ws.folders}
+          scale={ws.scale}
+          onToggle={ws.toggleFolder}
+          onMove={ws.moveGroup}
+          onRename={ws.renameGroup}
+          onDelete={ws.deleteGroup}
         />
         <StickyNoteOverlay
           notes={ws.stickyNotes}
@@ -345,6 +358,8 @@ export default function ArchiveWorkspace({
       />
 
       <SearchModal open={ws.search} onClose={ws.closeSearch} />
+
+      {ws.exportOpen && <ExportDialog assetIds={Array.from(ws.selectedIds)} onClose={ws.closeExport} />}
 
       <CanvasContextMenu
         menu={ws.contextMenu}
