@@ -6,6 +6,7 @@ interface WorkspaceActionBarProps {
   tool: Tool;
   selCount: number;
   onArtboard: () => void;
+  onTidy: () => void;
   onCopy: () => void;
   onDuplicate: () => void;
   onExport: () => void;
@@ -18,6 +19,8 @@ const gp = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: 
 const DuplicateGlyph = () => (<svg {...gp}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M4 16V6a2 2 0 0 1 2-2h10" /></svg>);
 const ExportGlyph = () => (<svg {...gp}><path d="M12 3v12" /><path d="m8 7 4-4 4 4" /><path d="M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" /></svg>);
 const GroupGlyph = () => (<svg {...gp}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>);
+/* Tidy up: four photo-tile-shaped cells snapping into an even grid. */
+const TidyGlyph = () => (<svg {...gp}><rect x="3" y="4" width="8" height="6" rx="1" /><rect x="13" y="4" width="8" height="6" rx="1" /><rect x="3" y="14" width="8" height="6" rx="1" /><rect x="13" y="14" width="8" height="6" rx="1" /></svg>);
 
 function Btn({
   title,
@@ -74,6 +77,7 @@ function WorkspaceActionBar({
   tool,
   selCount,
   onArtboard,
+  onTidy,
   onCopy,
   onDuplicate,
   onExport,
@@ -102,6 +106,9 @@ function WorkspaceActionBar({
     >
       <Btn title="Artboard" active={tool === "frame"} onClick={onArtboard}>
         <FrameToolIcon />
+      </Btn>
+      <Btn title={selCount >= 2 ? "Tidy up selection" : "Tidy up canvas"} onClick={onTidy}>
+        <TidyGlyph />
       </Btn>
 
       <Divider />

@@ -5,6 +5,7 @@ import {
   droppedAssetCenters,
   fitBounds,
   hitTestTiles,
+  packGrid,
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
   timelineAxisLayout,
@@ -441,5 +442,34 @@ describe("hitTestTiles", () => {
 
   it("returns no hits for an empty position map", () => {
     expect(hitTestTiles({}, { xl: 0, yt: 0, xr: 100, yb: 100 })).toEqual([]);
+  });
+});
+
+describe("packGrid", () => {
+  const tile = (cx: number, cy: number): TilePos => ({ x: cx - 50, y: cy - 50, w: 100, h: 100, cx, cy });
+
+  it("packs a selection into an even grid centered on its centroid, skipping unknown ids", () => {
+    const positions = { a: tile(0, 0), b: tile(400, 0), c: tile(0, 400), d: tile(400, 400) };
+    const out = packGrid(["a", "b", "c", "d", "ghost"], positions);
+    // "ghost" is absent from positions and must not appear.
+    expect(Object.keys(out)).toEqual(["a", "b", "c", "d"]);
+    // Centroid (200,200); 2×2 grid at ASSET_CELL_W/H (184×176) spacing.
+    expect(out).toEqual({
+      a: { x: 108, y: 112 },
+      b: { x: 292, y: 112 },
+      c: { x: 108, y: 288 },
+      d: { x: 292, y: 288 },
+    });
+    // The packed block's own centroid stays on the selection's centroid.
+    const mx = (out.a.x + out.b.x + out.c.x + out.d.x) / 4;
+    const my = (out.a.y + out.b.y + out.c.y + out.d.y) / 4;
+    expect([mx, my]).toEqual([200, 200]);
+  });
+
+  it("returns empty for no present ids and is deterministic", () => {
+    expect(packGrid([], {})).toEqual({});
+    expect(packGrid(["x"], {})).toEqual({});
+    const positions = { a: tile(10, 20), b: tile(30, 40), c: tile(50, 60) };
+    expect(packGrid(["a", "b", "c"], positions)).toEqual(packGrid(["a", "b", "c"], { ...positions }));
   });
 });

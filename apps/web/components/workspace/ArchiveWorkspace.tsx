@@ -242,6 +242,7 @@ export default function ArchiveWorkspace({
           tool={ws.tool}
           selCount={ws.selectedIds.size}
           onArtboard={ws.toolFrame}
+          onTidy={ws.tidyUp}
           onCopy={ws.copyFiles}
           onDuplicate={ws.duplicateFiles}
           onExport={ws.exportFiles}
