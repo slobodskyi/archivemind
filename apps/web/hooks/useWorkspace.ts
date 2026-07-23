@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import type { EditRecipe } from "@archivemind/shared";
+import type { EditRecipe, TrashedAsset } from "@archivemind/shared";
 import { CAPTION_LANG_DB, CAPTION_STYLE_DB, getCaptionRow } from "@/lib/format";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -194,6 +194,9 @@ interface WorkspaceState {
   focusedCloudKey: string | null;
   /** Selection parked in the bulk-delete ConfirmModal (ADR 0033); null = closed. */
   confirmDeleteIds: string[] | null;
+  /** In-workspace Trash panel (ADR 0033). trashAssets null = not yet loaded. */
+  trashOpen: boolean;
+  trashAssets: TrashedAsset[] | null;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -520,6 +523,14 @@ export interface Workspace {
   onUploadBatchStart: (batch: UploadBatchStart) => void;
   onUploadBatchSettled: (result: UploadBatchResult) => void;
 
+  // Trash panel (ADR 0033)
+  trashOpen: boolean;
+  trashAssets: TrashedAsset[] | null;
+  openTrash: () => void;
+  closeTrash: () => void;
+  restoreFromTrash: (ids: string[]) => void;
+  purgeFromTrash: (ids: string[]) => void;
+
   // Grouping views (Timeline / Map / Topic) are the same canvas as Canvas, just
   // sorted — `activePositions` is the current view's tile layout and `cloudDecor`
   // is its backdrop/edges/labels (null on the unsorted Canvas). `tilesAnimating`
@@ -617,6 +628,8 @@ export function useWorkspace(
     tilesAnimating: false,
     focusedCloudKey: null,
     confirmDeleteIds: null,
+    trashOpen: false,
+    trashAssets: null,
   });
 
   // Right-click menu on the grid — a lightweight overlay, kept out of the main
@@ -2149,6 +2162,85 @@ export function useWorkspace(
   }, [setState]);
   const closeImport = useCallback(() => setState({ imp: { open: false } }), [setState]);
 
+  // ── Trash panel (ADR 0033) ────────────────────────────────────────────────
+  // Quick in-workspace access to trashed assets so a mistaken delete can be
+  // undone without leaving the canvas (the homepage Trash view is the other
+  // entry point). Restore brings the asset back onto the canvas.
+  const openTrash = useCallback(() => {
+    // Right-side panel — retire the others that live in the same slot.
+    setState({
+      trashOpen: true,
+      trashAssets: null,
+      drawerId: null,
+      chatOpen: false,
+      sidebarTabs: [],
+      sidebarActiveTab: null,
+      sidebarAddOpen: false,
+    });
+    fetch("/api/assets?scope=trash")
+      .then((resp) => (resp.ok ? resp.json() : Promise.reject(new Error(String(resp.status)))))
+      .then((data: { assets: TrashedAsset[] }) => {
+        if (stateRef.current.trashOpen) setState({ trashAssets: data.assets });
+      })
+      .catch(() => {
+        if (stateRef.current.trashOpen) setState({ trashAssets: [] });
+      });
+  }, [setState]);
+
+  const closeTrash = useCallback(() => setState({ trashOpen: false }), [setState]);
+
+  const restoreFromTrash = useCallback(
+    (ids: string[]) => {
+      if (!ids.length) return;
+      const idSet = new Set(ids);
+      setState((prev) => ({ trashAssets: prev.trashAssets?.filter((a) => !idSet.has(a.id)) ?? null }));
+      fetch("/api/assets/restore", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      })
+        .then((resp) => {
+          if (!resp.ok) throw new Error(String(resp.status));
+          flashToast(ids.length === 1 ? "Photo restored" : `${ids.length} photos restored`);
+          router.refresh(); // bring the restored asset(s) back onto the canvas
+        })
+        .catch(() => {
+          flashToast("Could not restore — try again");
+          openTrash(); // reload the list so the failed row reappears
+        });
+    },
+    [setState, flashToast, router, openTrash],
+  );
+
+  const purgeFromTrash = useCallback(
+    (ids: string[]) => {
+      if (!ids.length) return;
+      const many = ids.length > 1;
+      const ok = window.confirm(
+        many
+          ? `Delete ${ids.length} photos permanently? This can’t be undone.`
+          : "Delete this photo permanently? This can’t be undone.",
+      );
+      if (!ok) return;
+      const idSet = new Set(ids);
+      setState((prev) => ({ trashAssets: prev.trashAssets?.filter((a) => !idSet.has(a.id)) ?? null }));
+      fetch("/api/assets/purge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      })
+        .then((resp) => {
+          if (!resp.ok) throw new Error(String(resp.status));
+          flashToast(many ? `${ids.length} photos deleted permanently` : "Photo deleted permanently");
+        })
+        .catch(() => {
+          flashToast("Could not delete — try again");
+          openTrash();
+        });
+    },
+    [setState, flashToast, openTrash],
+  );
+
   const onUploadBatchStart = useCallback(
     (batch: UploadBatchStart) => {
       const s = stateRef.current;
@@ -2588,11 +2680,12 @@ export function useWorkspace(
       else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
+      else if (s.trashOpen) closeTrash();
       else if (s.sidebarTabs.length) closeSidebar();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeSidebar, requestDeletePhotos]);
+  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
   // hand-tool path, so the selected tool is never mutated and simply resumes on
@@ -2766,7 +2859,8 @@ export function useWorkspace(
   const minimapRight =
     drawerRight +
     (sidebarOpenForMinimap ? 380 : 0) +
-    (state.drawerId ? 410 : 0);
+    (state.drawerId ? 410 : 0) +
+    (state.trashOpen ? 360 : 0);
 
   // Minimap dots are derived from exactly what the canvas renders (ADR 0022):
   // the active view's canonical tile centers, plus any pending uploads (which
@@ -3011,6 +3105,13 @@ export function useWorkspace(
     closeImport,
     onUploadBatchStart,
     onUploadBatchSettled,
+
+    trashOpen: state.trashOpen,
+    trashAssets: state.trashAssets,
+    openTrash,
+    closeTrash,
+    restoreFromTrash,
+    purgeFromTrash,
 
     activePositions,
     cloudDecor,

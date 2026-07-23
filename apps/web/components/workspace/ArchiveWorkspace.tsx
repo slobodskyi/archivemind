@@ -19,6 +19,7 @@ import ChatPanel from "@/components/chat/ChatPanel";
 import LeftToolbar from "@/components/toolbar/LeftToolbar";
 import WorkspaceActionBar from "@/components/toolbar/WorkspaceActionBar";
 import Minimap from "@/components/toolbar/Minimap";
+import TrashPanel from "@/components/trash/TrashPanel";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
 import CanvasContextMenu from "@/components/canvas/CanvasContextMenu";
 import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
@@ -230,9 +231,19 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
+        onOpenTrash={ws.openTrash}
+        trashOpen={ws.trashOpen}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
+      />
+
+      <TrashPanel
+        open={ws.trashOpen}
+        assets={ws.trashAssets}
+        onClose={ws.closeTrash}
+        onRestore={ws.restoreFromTrash}
+        onPurge={ws.purgeFromTrash}
       />
 
       {/* Workspace-only bottom action bar — hosts the artboard tool (moved off
