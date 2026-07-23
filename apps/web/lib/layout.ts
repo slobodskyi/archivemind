@@ -947,6 +947,11 @@ export function minimapLayout(
     yb = Math.max(...points.map((p) => p.y));
   const bw = Math.max(xr - xl, 1),
     bh = Math.max(yb - yt, 1);
+  // Nothing off-screen → no minimap (Figma/tldraw): a "map" of content that
+  // already fits the viewport is just noise. Uses the tile-center bbox, which
+  // under-counts the true extent by ~half a tile each side, so it errs toward
+  // keeping the map a touch longer than strictly necessary — the safe direction.
+  if (bw * scale <= rect.width && bh * scale <= rect.height) return EMPTY_MINIMAP;
   const innerW = MB_W - MB_PAD * 2,
     innerH = MB_H - MB_PAD * 2;
   const mscale = Math.min(innerW / bw, innerH / bh);
