@@ -32,7 +32,7 @@ interface LeftToolbarProps {
   onExtractExif?: () => void;
   onAdd?: () => void;
   onAddStickyNote?: () => void;
-  onOpenTrash?: () => void;
+  onToggleTrash?: () => void;
   trashOpen?: boolean;
   onFit?: () => void;
   onZoomReset?: () => void;
@@ -93,7 +93,7 @@ function LeftToolbar({
   onExtractExif,
   onAdd,
   onAddStickyNote,
-  onOpenTrash,
+  onToggleTrash,
   trashOpen = false,
   onFit,
   onZoomReset,
@@ -177,7 +177,7 @@ function LeftToolbar({
       <TbButton onClick={onToggleChat} title="AI Assistant" active={chatOpen}>
         <ChatIcon />
       </TbButton>
-      <TbButton onClick={onOpenTrash} title="Trash" active={trashOpen}>
+      <TbButton onClick={onToggleTrash} title="Trash" active={trashOpen}>
         <TrashIcon />
       </TbButton>
       {!allFilesMode && (

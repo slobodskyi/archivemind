@@ -231,7 +231,7 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
-        onOpenTrash={ws.openTrash}
+        onToggleTrash={ws.toggleTrash}
         trashOpen={ws.trashOpen}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
