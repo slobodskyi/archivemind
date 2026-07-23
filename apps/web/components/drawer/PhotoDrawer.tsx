@@ -11,6 +11,7 @@ import {
   SparkleIcon,
   CopyIcon,
   AddIcon,
+  TrashIcon,
 } from "@/components/icons/icons";
 
 interface PhotoDrawerProps {
@@ -30,6 +31,9 @@ interface PhotoDrawerProps {
   onGenSingle: () => void;
   onSaveCaption: (text: string) => void;
   onEditImage: () => void;
+  /** Move to Trash (ADR 0033) — the drawer used to have no delete at all, so
+   *  deletion intent formed here forced the user back out to the tile. */
+  onDelete: () => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -51,6 +55,7 @@ export default function PhotoDrawer({
   onGenSingle,
   onSaveCaption,
   onEditImage,
+  onDelete,
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
@@ -136,6 +141,16 @@ export default function PhotoDrawer({
                   <span style={{ width: 5, height: 5, borderRadius: 999, background: "var(--ac)" }} />
                 )}
                 {photo.edited ? "Edited" : "Edit"}
+              </button>
+            )}
+            {isRealSource(photo.source) && (
+              <button
+                onClick={onDelete}
+                style={deletePill}
+                aria-label="Move to Trash"
+                title="Move to Trash — restorable for 30 days"
+              >
+                <TrashIcon width={12} height={12} />
               </button>
             )}
           </div>
@@ -389,6 +404,16 @@ const editPill: React.CSSProperties = {
   fontFamily: "inherit",
   cursor: "pointer",
   backdropFilter: "blur(8px)",
+};
+
+/** Edit's danger sibling, anchored to the opposite corner so a reach for Edit
+ *  can't land on Delete. */
+const deletePill: React.CSSProperties = {
+  ...editPill,
+  left: "auto",
+  right: 8,
+  padding: "0 9px",
+  color: "var(--red)",
 };
 
 function navBtn(kind: "left" | "right" | "close"): React.CSSProperties {

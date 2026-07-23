@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { editAssetRequestSchema, isIdentityRecipe, uuidSchema } from "@archivemind/shared";
+import { deleteObject } from "@/lib/r2";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
@@ -13,9 +14,10 @@ import { getCurrentWorkspaceId } from "@/lib/workspace";
  *           or null.
  *  DELETE — reset: drop the asset_edits row (editors only). Instant, no worker —
  *           asset_previews (the originals) were never touched, so the views snap
- *           back on the next refresh. The orphaned edited R2 objects are reclaimed
- *           by a re-edit (stable keys) or the asset-delete purge, like other
- *           derivatives (see /api/assets/[id]). */
+ *           back on the next refresh. The freshly-orphaned edited R2 objects are
+ *           deleted best-effort right here (ADR 0033): their keys are only known
+ *           in this request, and waiting for the asset-delete purge would leak
+ *           them for every asset that is reset but never deleted. */
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   if (!uuidSchema.safeParse(id).success) {
@@ -112,9 +114,29 @@ export async function DELETE(_request: Request, ctx: { params: Promise<{ id: str
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   // RLS asset_edits_delete = is_editor_of_asset: a viewer or an outsider deletes
-  // zero rows (no error), an editor drops their own asset's edit.
-  const { error } = await supabase.from("asset_edits").delete().eq("asset_id", id);
+  // zero rows (no error), an editor drops their own asset's edit. The keys are
+  // read back from the deleted row so the R2 cleanup below can't touch anything
+  // the caller wasn't allowed to drop.
+  const { data: dropped, error } = await supabase
+    .from("asset_edits")
+    .delete()
+    .eq("asset_id", id)
+    .select("edited_thumb_key, edited_medium_key");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Best-effort orphan cleanup (ADR 0033): the reset already succeeded — a
+  // transient R2 failure must not turn it into an error. A re-edit would
+  // overwrite the same stable keys anyway, so a rare leaked pair is benign.
+  const keys = (dropped ?? []).flatMap((r) =>
+    [r.edited_thumb_key, r.edited_medium_key].filter((k): k is string => Boolean(k)),
+  );
+  await Promise.all(
+    keys.map((key) =>
+      deleteObject(key).catch((err: unknown) =>
+        console.error(`edit reset: R2 cleanup failed for ${key}:`, err),
+      ),
+    ),
+  );
 
   return NextResponse.json({ ok: true });
 }

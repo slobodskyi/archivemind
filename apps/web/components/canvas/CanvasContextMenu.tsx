@@ -5,6 +5,9 @@ interface CanvasContextMenuProps {
   /** Hide the project-editing tools (frame/AI/import) that don't apply to the
    *  read-only all-files grid — matches the left toolbar's own gating. */
   allFilesMode: boolean;
+  /** Current selection size — with a selection, "Move to Trash" acts on it;
+   *  without one it acts on the right-clicked tile (menu.targetId). */
+  selCount: number;
   onClose: () => void;
   onSelectTool: () => void;
   onHandTool: () => void;
@@ -14,6 +17,7 @@ interface CanvasContextMenuProps {
   onExtractExif: () => void;
   onAdd: () => void;
   onAddStickyNote: () => void;
+  onDelete: () => void;
   onFit: () => void;
 }
 
@@ -23,6 +27,7 @@ interface CanvasContextMenuProps {
 export default function CanvasContextMenu({
   menu,
   allFilesMode,
+  selCount,
   onClose,
   onSelectTool,
   onHandTool,
@@ -32,9 +37,11 @@ export default function CanvasContextMenu({
   onExtractExif,
   onAdd,
   onAddStickyNote,
+  onDelete,
   onFit,
 }: CanvasContextMenuProps) {
   if (!menu) return null;
+  const deletable = !allFilesMode && (selCount > 0 || menu.targetId != null);
 
   const W = 190;
   const left = typeof window !== "undefined" ? Math.min(menu.x, window.innerWidth - W - 8) : menu.x;
@@ -91,6 +98,16 @@ export default function CanvasContextMenu({
             <Item label="AI Assistant" onClick={run(onToggleChat)} />
           </>
         )}
+        {deletable && (
+          <>
+            <Divider />
+            <Item
+              label={selCount > 1 ? `Move ${selCount} to Trash` : "Move to Trash"}
+              danger
+              onClick={run(onDelete)}
+            />
+          </>
+        )}
         <Divider />
         <Item label="Fit to view" onClick={run(onFit)} />
       </div>
@@ -102,7 +119,7 @@ function Divider() {
   return <div style={{ height: 1, background: "var(--bd)", margin: "5px 4px" }} />;
 }
 
-function Item({ label, onClick }: { label: string; onClick: () => void }) {
+function Item({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       onClick={onClick}
@@ -115,7 +132,7 @@ function Item({ label, onClick }: { label: string; onClick: () => void }) {
         borderRadius: 2,
         cursor: "pointer",
         fontFamily: "inherit",
-        color: "var(--t2)",
+        color: danger ? "var(--red)" : "var(--t2)",
         fontSize: 12.5,
         background: "transparent",
         textAlign: "left",

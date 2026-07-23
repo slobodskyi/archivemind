@@ -52,7 +52,10 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   end-to-end since #82: drawer Regenerate/edit/Save per lang × style) and
   cluster (deterministic k-means over image embeddings → `topic_clusters` +
   `assets.cluster_id`; auto-enqueued after analyze, zero Gemini calls so the
-  "AI only by button" rule holds — ADR 0028).
+  "AI only by button" rule holds — ADR 0028) and purge (erase an expired
+  trashed asset's R2 bytes + DB derivatives, keep the row as a dedup
+  tombstone; enqueued by the 6-hourly `sweep_deleted_assets()` after the
+  30-day photo-trash window or by "Delete permanently" — ADR 0033).
 - `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),

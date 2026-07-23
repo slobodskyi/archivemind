@@ -12,14 +12,15 @@ import {
   type Job,
 } from "./queue";
 import { backfillGeoLabels } from "./geo-backfill";
-import { sweepTrashedProjects } from "./retention";
+import { sweepDeletedAssets, sweepTrashedProjects } from "./retention";
 import { checkExifToolAvailable } from "./services/exif";
 
 /** Poll loop + graceful shutdown (TECH_SPEC §7).
  *  - idle: poll every POLL_MS (default 2 s)
  *  - reaper: every 5 min requeue stale 'running' jobs (crash recovery)
  *  - heartbeat: refresh claimed_at every 60 s while a job runs
- *  - sweeper: on start, then every 6 h, hard-delete expired trashed projects
+ *  - sweeper: on start, then every 6 h — hard-delete expired trashed projects
+ *    and enqueue purge jobs for expired trashed assets (ADR 0033)
  *  - geo backfill: on start, then every 6 h, label pre-ADR-0026 coordinates
  *  - SIGTERM/SIGINT: stop claiming; release the in-flight job back to queued */
 
@@ -76,10 +77,16 @@ async function main(): Promise<void> {
       .catch((e: unknown) => log(`reaper failed: ${String(e)}`));
   }, REAPER_EVERY_MS);
 
-  const runSweep = () =>
+  // Two sweeps, one cadence, independent failure domains — a broken project
+  // sweep must not silently stall asset purging or vice versa.
+  const runSweep = () => {
     sweepTrashedProjects(pool)
       .then((n) => n > 0 && log(`sweeper removed ${n} expired trashed project(s)`))
       .catch((e: unknown) => log(`sweeper failed: ${String(e)}`));
+    sweepDeletedAssets(pool)
+      .then((n) => n > 0 && log(`sweeper enqueued purge for ${n} expired trashed asset(s)`))
+      .catch((e: unknown) => log(`asset sweeper failed: ${String(e)}`));
+  };
   // Once on boot as well as on the timer: redeploys can be more frequent than
   // SWEEP_EVERY_MS, and a timer-only sweep would then never fire.
   void runSweep();

@@ -3,9 +3,11 @@ import { uuidSchema } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
 
 /** DELETE /api/assets/[id] — soft delete (TECH_SPEC §12: user delete →
- *  status='deleted'; R2 derivative purge is a background job, not this
- *  request). RLS scopes the update (assets_update = is_editor). Any view's
- *  photo tile can call this — it isn't project- or view-specific. */
+ *  status='deleted'; the DB trigger stamps deleted_at and the 30-day purge is
+ *  the worker's job — ADR 0033). RLS scopes the update (assets_update =
+ *  is_editor). The canvas now moves selections through the bulk
+ *  POST /api/assets/delete; this single-id form stays for the drawer and any
+ *  external caller. */
 export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   if (!uuidSchema.safeParse(id).success) {

@@ -83,7 +83,7 @@ archive-mind/
 │       ├── src/
 │       │   ├── index.ts            # poll loop + graceful shutdown
 │       │   ├── queue.ts            # claim / heartbeat / complete / retry / reaper
-│       │   ├── retention.ts        # periodic sweeps (trashed-project purge, §7)
+│       │   ├── retention.ts        # periodic sweeps (trashed projects + trashed assets, §7/ADR 0033)
 │       │   ├── handlers/           # ingest.ts, analyze.ts, caption.ts, export.ts
 │       │   ├── services/           # gemini.ts, embeddings.ts, r2.ts, exif.ts,
 │       │   │                       # previews.ts, heic.ts, raw.ts, pdf.ts,
@@ -500,10 +500,11 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 |---|---|
 | `POST /api/uploads/presign` | `{filename,mime,size}` → `{uploadUrl, r2Key}` (fixed-size multipart >100 MB; server orchestrates Create/Complete; CORS `ExposeHeaders:[ETag]`) |
 | `POST /api/uploads/complete` | after PUT: create `assets` + `files` row(s) → enqueue `ingest` |
-| `GET  /api/assets` | list (workspace or `?projectId=`), cursor-paginated, incl. preview URLs |
+| `GET  /api/assets` | list (workspace or `?projectId=`), cursor-paginated, incl. preview URLs. **Shipped half:** `?scope=trash` — the Trash view's photo list (un-purged trash + `deletedAt` for the countdown, ADR 0033) |
 | `GET  /api/assets/:id` | asset + files + exif + tags + captions + facts |
 | `PATCH /api/assets/:id` | rename (title), status |
-| `DELETE /api/assets/:id` | **shipped** — soft delete (`status='deleted'`, §12). Callable from any canvas view. Note this overlaps the status half of the PATCH row above; the two want reconciling. |
+| `DELETE /api/assets/:id` | **shipped** — soft delete (`status='deleted'`; the DB trigger stamps `deleted_at`, §12/ADR 0033). Single-id form (drawer); the canvas moves selections through the bulk route below. Still overlaps the status half of the PATCH row above; the two want reconciling. |
+| `POST /api/assets/delete` · `/restore` · `/purge` | **shipped (ADR 0033)** — bulk trash ops on `{ids:[…]}`: soft-delete a selection · un-delete it (undo toast + Trash Restore; purged tombstones excluded) · enqueue the `purge` job ("Delete permanently"/"Empty trash" — worker erases R2 bytes + derivatives, keeps the tombstone) |
 | `GET  /api/canvas?projectId=` | aggregates for neural view (workspace-wide, or scoped to a project — matches the `canvas_layouts.scope` = `'all'` \| project uuid): sources → folders → counts + first-K tile previews (lazy-load the rest) |
 | `PUT  /api/canvas/layout` | persist `canvas_layouts` (scope, overrides, organize_mode) |
 | `POST /api/integrations/google/connect` · `GET/DELETE /api/integrations/google` | **shipped shape (ADR 0025)** — popup code flow: the browser POSTs the one-time code (no public OAuth callback route exists); GET = status, DELETE = revoke + neuter. Tokens AES-GCM-encrypted via `packages/shared/token-crypto`. (Supersedes the sketched `GET/POST /api/sources/:provider/oauth` redirect flow.) |
@@ -590,7 +591,7 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
 - Attribute-level people recognition only; no face-ID, no identity persistence. Face grouping = post-MVP, opt-in, consent-gated.
 - Product policy stated in UI + ToS: user data is never used to train models.
 - `usage_events` doubles as AI-action audit trail (who ran what, when, on how many files).
-- Deletion: user delete → `status='deleted'` + purge R2 derivatives (background); source file deleted upstream → on fetch failure mark `source_missing`, **keep derivatives** (captions/tags/embeddings survive — archive value).
+- Deletion — **shipped 2026-07-23 (ADR 0033):** user delete → `status='deleted'` + `deleted_at` (trigger-stamped) = a **30-day trash** with undo/Restore; `sweep_deleted_assets()` then enqueues a `purge` job that deletes the R2 bytes (original + previews + edited previews) and the DB derivatives, keeping the assets row as a dedup tombstone (`purged_at`, hash/key cleared — ADR 0032 revival stays safe). "Delete permanently"/"Empty trash" purge early. Source file deleted upstream → on fetch failure mark `source_missing`, **keep derivatives** (captions/tags/embeddings survive — archive value; never purged).
 - Project retention: archive (`archived_at`) is reversible and open-ended; trash (`deleted_at`) is a **30-day grace period**, after which `sweep_trashed_projects()` hard-deletes the project on the worker's schedule (§7). The UI states the window, so it must stay enforced. Only the project dies — its assets are workspace-global and survive (rule 9), so no R2 purge is involved. ADR 0019.
 - Privacy Policy + ToS before first external user (GDPR-aware: data location EU where possible — Supabase EU region, R2 EU jurisdiction).
 

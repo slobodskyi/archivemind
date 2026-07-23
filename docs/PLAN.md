@@ -189,7 +189,7 @@ Phases 1–2). What actually remains:
 
 ### Phase 7 — Export + hardening (~week 8)
 
-Export handler (ZIP: owned originals else medium previews + note; `captions.csv` sidecar) → R2 `exports/` + presigned GET (7 d = R2 max). Deletion flows (soft-delete + R2 purge; `source_missing` on fetch failure keeps derivatives). Security pass per spec §12 (RLS audit, token handling, TTLs). Privacy Policy + ToS before first external user. Full QA on a real dirty archive.
+Export handler (ZIP: owned originals else medium previews + note; `captions.csv` sidecar) → R2 `exports/` + presigned GET (7 d = R2 max). ~~Deletion flows (soft-delete + R2 purge; `source_missing` on fetch failure keeps derivatives)~~ — **✅ pulled forward, shipped 2026-07-23 (ADR 0033):** photo trash with undo + Restore + 30-day `sweep_deleted_assets()` → `purge` worker job (R2 bytes + DB derivatives erased, dedup tombstone kept), Trash view lists photos with day countdowns, "Delete permanently"/"Empty trash", edit-reset cleans its orphaned R2 objects; `source_missing` still keeps derivatives. Security pass per spec §12 (RLS audit, token handling, TTLs). **GDPR right-to-erasure: account/workspace-level "delete everything" flow (rows + R2, incl. tombstones) — still open, deliberately NOT covered by ADR 0033; the purge handler is its building block.** Privacy Policy + ToS before first external user. Full QA on a real dirty archive.
 
 ---
 

@@ -29,6 +29,7 @@ import SearchModal from "@/components/modals/SearchModal";
 import ImportModal from "@/components/import/ImportModal";
 import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
+import ConfirmModal from "@/components/modals/ConfirmModal";
 
 interface ArchiveWorkspaceProps {
   initialPhotos: Photo[];
@@ -245,7 +246,6 @@ export default function ArchiveWorkspace({
           onDuplicate={ws.duplicateFiles}
           onExport={ws.exportFiles}
           onGroup={ws.groupFiles}
-          onArchive={ws.archiveFiles}
           onDelete={ws.deleteSelected}
         />
       )}
@@ -337,6 +337,7 @@ export default function ArchiveWorkspace({
       <CanvasContextMenu
         menu={ws.contextMenu}
         allFilesMode={ws.allFilesMode}
+        selCount={ws.selectedIds.size}
         onClose={ws.closeContextMenu}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
@@ -346,6 +347,7 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
+        onDelete={ws.deleteFromContext}
         onFit={ws.onFit}
       />
 
@@ -365,6 +367,7 @@ export default function ArchiveWorkspace({
         onGenSingle={() => ws.drawerPhoto && ws.genSingle(ws.drawerPhoto.id)}
         onSaveCaption={ws.saveCaption}
         onEditImage={() => ws.drawerPhoto && ws.openEditor(ws.drawerPhoto.id)}
+        onDelete={() => ws.drawerPhoto && ws.deletePhoto(ws.drawerPhoto.id)}
       />
 
       <ImageEditor
@@ -376,7 +379,24 @@ export default function ArchiveWorkspace({
         onReset={ws.resetEdit}
       />
 
-      <Toast show={ws.toast.show} text={ws.toast.text} />
+      {/* Big-selection delete guardrail (ADR 0033) — the same modal projects
+          use, with copy that matches the real behavior: trash + 30 days. */}
+      <ConfirmModal
+        open={ws.confirmDeleteCount > 0}
+        title={`Delete ${ws.confirmDeleteCount} files?`}
+        body={`${ws.confirmDeleteCount} files will move to Trash and be permanently removed after 30 days. You can restore them from Trash until then.`}
+        confirmLabel="Move to Trash"
+        danger
+        onConfirm={ws.confirmDeleteNow}
+        onClose={ws.cancelConfirmDelete}
+      />
+
+      <Toast
+        show={ws.toast.show}
+        text={ws.toast.text}
+        actionLabel={ws.toast.actionLabel}
+        onAction={ws.toast.onAction}
+      />
     </div>
   );
 }

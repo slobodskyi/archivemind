@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { createProjectResponseSchema } from "@archivemind/shared";
+import {
+  createProjectResponseSchema,
+  TRASH_RETENTION_DAYS,
+  type TrashedAsset,
+} from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import Toast from "@/components/modals/Toast";
 import DataSourcesModal from "@/components/modals/DataSourcesModal";
@@ -57,8 +61,24 @@ const VIEW_EMPTY: Record<ViewMode, string> = {
   projects: "No projects yet — create one to group photos from your archive.",
   recents: "No recently opened projects yet.",
   archived: "No archived projects — archive a project to tuck it away without deleting it.",
-  trash: "Trash is empty — deleted projects stay here for 30 days before they're removed for good.",
+  trash: "Trash is empty — deleted projects and photos stay here for 30 days before they're removed for good.",
 };
+
+/** Whole days until the sweep claims something deleted at `deletedAt`; null
+ *  when the timestamp is missing (pre-migration rows) or unparseable. */
+function daysLeft(deletedAt: string | null | undefined): number | null {
+  if (!deletedAt) return null;
+  const t = new Date(deletedAt).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.ceil(TRASH_RETENTION_DAYS - (Date.now() - t) / 86_400_000));
+}
+
+function daysLeftLabel(deletedAt: string | null | undefined): string | null {
+  const d = daysLeft(deletedAt);
+  if (d == null) return null;
+  if (d === 0) return "removal due";
+  return d === 1 ? "1 day left" : `${d} days left`;
+}
 
 const RECENTS_KEY = "archivemind:recentProjects";
 const RECENTS_MAX = 8;
@@ -95,8 +115,11 @@ export default function HomeClient({
   const [activeProjects, setActiveProjects] = useState<ProjectCard[]>(projects);
   const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
   const [trashProjects, setTrashProjects] = useState<ProjectCard[] | null>(null);
+  const [trashAssets, setTrashAssets] = useState<TrashedAsset[] | null>(null);
   const [renameTarget, setRenameTarget] = useState<ProjectCard | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ project: ProjectCard; action: "archive" | "delete" } | null>(null);
+  /** Pending "delete photos permanently" confirmation (ADR 0033). */
+  const [purgeTarget, setPurgeTarget] = useState<{ ids: string[]; emptyAll: boolean } | null>(null);
 
   const flash = (t: string) => {
     setToast(t);
@@ -140,7 +163,42 @@ export default function HomeClient({
   const openTrash = () => {
     setView("trash");
     void fetchScope("trash").then(setTrashProjects);
+    void fetch("/api/assets?scope=trash")
+      .then((resp) => (resp.ok ? resp.json() : { assets: [] }))
+      .then(({ assets }) => setTrashAssets(assets as TrashedAsset[]))
+      .catch(() => setTrashAssets([]));
   };
+
+  async function restoreAssets(ids: string[]) {
+    try {
+      const resp = await fetch("/api/assets/restore", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!resp.ok) throw new Error(String(resp.status));
+      setTrashAssets((l) => (l ? l.filter((a) => !ids.includes(a.id)) : l));
+      flash(ids.length === 1 ? "Photo restored" : `${ids.length} photos restored`);
+    } catch {
+      flash("Could not restore — try again");
+    }
+  }
+
+  async function purgeAssets(ids: string[]) {
+    setPurgeTarget(null);
+    try {
+      const resp = await fetch("/api/assets/purge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!resp.ok) throw new Error(String(resp.status));
+      setTrashAssets((l) => (l ? l.filter((a) => !ids.includes(a.id)) : l));
+      flash(ids.length === 1 ? "Photo deleted permanently" : `${ids.length} photos deleted permanently`);
+    } catch {
+      flash("Could not delete — try again");
+    }
+  }
 
   const baseList = view === "recents"
     ? (recentIds.map((id) => activeProjects.find((p) => p.id === id)).filter(Boolean) as ProjectCard[])
@@ -152,6 +210,10 @@ export default function HomeClient({
 
   const q = query.trim().toLowerCase();
   const visibleProjects = q ? baseList.filter((p) => p.name.toLowerCase().includes(q)) : baseList;
+  const visibleTrashAssets =
+    view === "trash"
+      ? (trashAssets ?? []).filter((a) => !q || a.name.toLowerCase().includes(q))
+      : [];
 
   async function patchProject(id: string, patch: { name?: string; archived?: boolean; deleted?: boolean }): Promise<boolean> {
     try {
@@ -364,6 +426,7 @@ export default function HomeClient({
               previews={p.previews}
               accent={cardColor(p.id)}
               href={`/projects/${p.id}`}
+              meta={view === "trash" ? daysLeftLabel(p.deletedAt) : null}
               onOpen={() => recordRecentProject(p.id)}
             >
               <CardMenu
@@ -378,9 +441,40 @@ export default function HomeClient({
           ))}
         </div>
 
-        {visibleProjects.length === 0 && !((view === "projects" || view === "recents") && creating) && (
+        {/* Trashed PHOTOS (ADR 0033) — the asset half of the Trash: restore or
+            permanently delete individual photos, or empty the lot. Projects
+            above keep their own lifecycle; "Empty trash" is photos-only. */}
+        {view === "trash" && visibleTrashAssets.length > 0 && (
+          <section style={{ marginTop: visibleProjects.length > 0 ? 30 : 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--t1)", margin: 0 }}>
+                Photos <span style={{ color: "var(--tm)", fontWeight: 400 }}>({visibleTrashAssets.length})</span>
+              </h2>
+              <button
+                onClick={() => setPurgeTarget({ ids: (trashAssets ?? []).map((a) => a.id), emptyAll: true })}
+                style={{ height: 28, padding: "0 12px", background: "transparent", color: "var(--red)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 11.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer", fontFamily: "inherit" }}
+              >
+                Empty trash
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
+              {visibleTrashAssets.map((a) => (
+                <TrashedPhotoCard
+                  key={a.id}
+                  asset={a}
+                  onRestore={() => void restoreAssets([a.id])}
+                  onPurge={() => setPurgeTarget({ ids: [a.id], emptyAll: false })}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {visibleProjects.length === 0 &&
+          visibleTrashAssets.length === 0 &&
+          !((view === "projects" || view === "recents") && creating) && (
           <div style={{ marginTop: 26, fontSize: 12.5, color: "var(--tm)" }}>
-            {q ? "No projects match your search." : VIEW_EMPTY[view]}
+            {q ? "Nothing matches your search." : VIEW_EMPTY[view]}
           </div>
         )}
       </main>
@@ -435,6 +529,71 @@ export default function HomeClient({
         }}
         onClose={() => setConfirmTarget(null)}
       />
+
+      {/* Permanent photo deletion (ADR 0033) — the one action in the app that
+          truly cannot be undone, so it always confirms, even for one photo. */}
+      <ConfirmModal
+        open={!!purgeTarget}
+        title={purgeTarget?.emptyAll ? "Empty trash?" : "Delete permanently?"}
+        body={
+          purgeTarget?.emptyAll
+            ? `All ${purgeTarget.ids.length} trashed photos will be permanently deleted, including their previews and AI data. This cannot be undone.`
+            : "This photo will be permanently deleted, including its previews and AI data. This cannot be undone."
+        }
+        confirmLabel="Delete permanently"
+        danger
+        onConfirm={() => purgeTarget && void purgeAssets(purgeTarget.ids)}
+        onClose={() => setPurgeTarget(null)}
+      />
+    </div>
+  );
+}
+
+function TrashedPhotoCard({
+  asset,
+  onRestore,
+  onPurge,
+}: {
+  asset: TrashedAsset;
+  onRestore: () => void;
+  onPurge: () => void;
+}) {
+  const left = daysLeftLabel(asset.deletedAt);
+  return (
+    <div style={{ background: "var(--bg-s)", border: "1px solid var(--bd)", borderRadius: 3, overflow: "hidden" }}>
+      <div
+        style={{
+          height: 96,
+          background: asset.thumb ? `url(${asset.thumb}) center/cover` : "var(--bg-el)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {!asset.thumb && <span style={{ color: "var(--tm)", fontSize: 10.5 }}>No preview</span>}
+      </div>
+      <div style={{ padding: "8px 10px" }}>
+        <div style={{ fontSize: 11.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={asset.name}>
+          {asset.name}
+        </div>
+        {left && <div style={{ fontSize: 10.5, color: "var(--tm)", marginTop: 2 }}>{left}</div>}
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button
+            onClick={onRestore}
+            style={{ flex: 1, height: 24, background: "var(--bg-el)", color: "var(--t1)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Restore
+          </button>
+          <button
+            onClick={onPurge}
+            aria-label={`Delete ${asset.name} permanently`}
+            title="Delete permanently"
+            style={{ flex: "0 0 auto", height: 24, padding: "0 8px", background: "transparent", color: "var(--red)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            <TrashIcon width={11} height={11} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -445,6 +604,7 @@ function ProjectCardView({
   previews,
   accent,
   href,
+  meta,
   onOpen,
   children,
 }: {
@@ -453,6 +613,8 @@ function ProjectCardView({
   previews: string[];
   accent: string;
   href: string;
+  /** Extra status line (e.g. the Trash view's "N days left" countdown). */
+  meta?: string | null;
   onOpen?: () => void;
   children?: React.ReactNode;
 }) {
@@ -513,6 +675,7 @@ function ProjectCardView({
         </div>
           <div style={{ fontSize: 11, color: "var(--tm)", marginTop: 2 }}>
             {count} {count === 1 ? "file" : "files"}
+            {meta && <span style={{ color: "var(--t3)" }}> · {meta}</span>}
           </div>
         </div>
       </Link>
