@@ -391,11 +391,16 @@ export default function ArchiveWorkspace({
         onClose={ws.cancelConfirmDelete}
       />
 
+      {/* Action toasts (delete → Undo) render as the quiet bottom-left chip —
+          they fire on every delete during normal culling and must not shout
+          from the canvas center; plain confirmations/errors keep the
+          attention spot under the header. */}
       <Toast
         show={ws.toast.show}
         text={ws.toast.text}
         actionLabel={ws.toast.actionLabel}
         onAction={ws.toast.onAction}
+        variant={ws.toast.actionLabel ? "quiet" : "default"}
       />
     </div>
   );
