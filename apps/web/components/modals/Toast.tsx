@@ -4,14 +4,65 @@ import { CheckIcon } from "@/components/icons/icons";
 interface ToastProps {
   show: boolean;
   text: string;
-  /** Optional action button (ADR 0033 — the delete Undo). Rendered inline so
-   *  the toast stays a single quiet line; the caller owns what happens next. */
+  /** Optional action button (ADR 0033 — the delete Undo). The caller owns
+   *  what happens next. */
   actionLabel?: string;
   onAction?: () => void;
+  /** "default" = the attention toast under the header (confirmations, errors).
+   *  "quiet" = a low-key bottom-left snackbar chip for routine actions that
+   *  repeat during normal work (delete → Undo): the only free corner — the
+   *  toolbar owns the left middle, the action bar the bottom center, the
+   *  minimap the bottom right — and the spot the Google-style undo pattern
+   *  trained everyone to glance at. */
+  variant?: "default" | "quiet";
 }
 
-export default function Toast({ show, text, actionLabel, onAction }: ToastProps) {
+export default function Toast({ show, text, actionLabel, onAction, variant = "default" }: ToastProps) {
   if (!show) return null;
+
+  if (variant === "quiet") {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: 20,
+          bottom: 20,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          background: "rgba(16,16,16,.92)",
+          border: "1px solid var(--bd)",
+          borderRadius: 2,
+          padding: "7px 12px",
+          boxShadow: "0 6px 20px rgba(0,0,0,.35)",
+          backdropFilter: "blur(16px)",
+          zIndex: Z.toast,
+          animation: "amFadeScale .2s ease both",
+        }}
+      >
+        <span style={{ fontSize: 12, color: "var(--t2)" }}>{text}</span>
+        {actionLabel && onAction && (
+          <button
+            onClick={onAction}
+            style={{
+              padding: 0,
+              background: "transparent",
+              border: 0,
+              color: "var(--ac)",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: ".04em",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {actionLabel}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
