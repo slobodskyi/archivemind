@@ -28,6 +28,7 @@ import {
   appendClusterAnchor,
   assetGallery,
   centerAtScale,
+  fitBounds,
   DEFAULT_ZOOM,
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
@@ -1579,6 +1580,25 @@ export function useWorkspace(
     setState(computeFit(s.view, s.photos, s.galleryOverrides, s.uploadPreviews));
   }, [setState, computeFit]);
 
+  /** The Fit button: zoom so EVERY tile fits the viewport (fitBounds solves for a
+   *  best-fit scale, capped at ~1.05), unlike the fixed-75% view-switch default —
+   *  users expect "Fit" to frame the whole archive, not just recenter. Map owns
+   *  its own camera. Glides via tilesAnimating. */
+  const doFitContent = useCallback(() => {
+    const s = stateRef.current;
+    if (s.view === "map") return;
+    const r = rect();
+    const bounds =
+      s.view === "sense"
+        ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).bounds
+        : s.view === "timeline"
+          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline).bounds
+          : neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
+    setState({ ...fitBounds(bounds, r), tilesAnimating: true });
+    if (animTimer.current) clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+  }, [rect, setState, neuralGalleryFor]);
+
   const setZoomPct = useCallback(
     (pct: number) => {
       const s = stateRef.current;
@@ -2181,6 +2201,29 @@ export function useWorkspace(
       // above already committed the previews to stateRef, so setView's re-fit
       // includes them and frames the new batch.
       if (droppedIntoSortedView) setView("neural");
+      // Seed the real aspect ASAP: previews start at a 4:3 placeholder, so without
+      // this the tile visibly jumps to the photo's true shape only when the
+      // processed asset lands (seconds later). Measuring the already-loaded local
+      // bytes now settles the tile to its real aspect within a frame or two, and
+      // the canonical asset (same dimensions) then arrives with no further reflow.
+      for (const preview of previews) {
+        const localUrl = preview.localUrl;
+        if (!localUrl) continue;
+        const clientId = preview.clientId;
+        const probe = new window.Image();
+        probe.onload = () => {
+          const w = probe.naturalWidth,
+            h = probe.naturalHeight;
+          if (w > 0 && h > 0) {
+            setState((prev) => ({
+              uploadPreviews: prev.uploadPreviews.map((p) =>
+                p.clientId === clientId ? { ...p, width: w, height: h } : p,
+              ),
+            }));
+          }
+        };
+        probe.src = localUrl;
+      }
     },
     [rect, setState, toContent, neuralGalleryFor, setView],
   );
@@ -2861,7 +2904,7 @@ export function useWorkspace(
     toolSelect,
     toolHand,
     toolFrame,
-    onFit: doFit,
+    onFit: doFitContent,
     onZoomReset: doFit,
     setView,
 

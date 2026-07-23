@@ -168,6 +168,25 @@ export default function PhotoTile({
             {STAGE_LABEL[stage]}
           </span>
         )}
+        {loading && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 2,
+              overflow: "hidden",
+              background: "rgba(255,255,255,.08)",
+            }}
+          >
+            <span
+              className="am-progress-indeterminate"
+              style={{ position: "absolute", top: 0, bottom: 0, width: "35%", background: "var(--ac)" }}
+            />
+          </span>
+        )}
       </span>
       <span
         style={{
