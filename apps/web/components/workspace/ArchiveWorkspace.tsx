@@ -78,8 +78,11 @@ export default function ArchiveWorkspace({
       >
         <FrameOverlay
           frames={ws.frames}
+          counts={ws.frameCounts}
           draft={ws.frameDraft}
-          onDeleteFrame={ws.deleteFrame}
+          onSelectFrame={ws.selectFrame}
+          onExportFrame={ws.exportFrame}
+          onDeleteFrame={ws.deleteFrameWithContent}
           onRenameFrame={ws.renameFrame}
         />
         <FolderOverlay
@@ -359,7 +362,7 @@ export default function ArchiveWorkspace({
 
       <SearchModal open={ws.search} onClose={ws.closeSearch} />
 
-      {ws.exportOpen && <ExportDialog assetIds={Array.from(ws.selectedIds)} onClose={ws.closeExport} />}
+      {ws.exportOpen && <ExportDialog assetIds={ws.exportIds} onClose={ws.closeExport} />}
 
       <CanvasContextMenu
         menu={ws.contextMenu}
