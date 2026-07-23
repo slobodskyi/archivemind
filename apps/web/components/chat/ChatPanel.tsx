@@ -103,12 +103,12 @@ function ResultStrip({ results, onOpenResult, onSelectResults }: { results: Chat
           Select {strong.length} on canvas
         </button>
         {weak.length > 0 && (
-          <button onClick={() => setShowWeak((v) => !v)} style={{ ...smallBtn, color: "var(--tm)" }}>
+          <button onClick={() => setShowWeak((v) => !v)} style={{ ...smallBtn, color: "var(--t2b)" }}>
             {showWeak ? "Hide" : "Show"} {weak.length} more distant
           </button>
         )}
         {showWeak && weak.length > 0 && (
-          <button onClick={() => onSelectResults(results.map((r) => r.assetId))} style={{ ...smallBtn, color: "var(--tm)" }}>
+          <button onClick={() => onSelectResults(results.map((r) => r.assetId))} style={{ ...smallBtn, color: "var(--t2b)" }}>
             Select all {results.length}
           </button>
         )}

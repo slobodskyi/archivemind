@@ -130,7 +130,7 @@ export default function TrashPanel({ open, assets, onClose, onRestore, onPurge }
                   <div style={{ fontSize: 11, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {asset.name}
                   </div>
-                  <div style={{ fontSize: 10, color: left !== null && left <= 3 ? "var(--red)" : "var(--t3)", marginTop: 2 }}>
+                  <div style={{ fontSize: 10, color: left !== null && left <= 3 ? "var(--red)" : "var(--t2b)", marginTop: 2 }}>
                     {left === null ? "in trash" : left === 0 ? "removed today" : `${left} day${left === 1 ? "" : "s"} left`}
                   </div>
                 </div>

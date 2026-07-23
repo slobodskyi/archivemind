@@ -174,7 +174,7 @@ export default function ArchiveWorkspace({
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t2)" }}>
             {ws.projCurrent === "all" ? "Your archive is empty" : "This project is empty"}
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+          <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
             {ws.allFilesMode ? "Open a project to upload files" : "Drop files anywhere — or import from a source"}
           </div>
           <button

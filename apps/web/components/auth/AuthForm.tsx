@@ -119,7 +119,7 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
       {/* method="post": if the form is submitted before hydration, the native
           fallback must never put credentials into the URL as a GET would. */}
       <form onSubmit={submit} method="post" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <label style={{ fontSize: 10.5, color: "var(--t3)", letterSpacing: "0.08em" }}>
+        <label style={{ fontSize: 10.5, color: "var(--t2b)", letterSpacing: "0.08em" }}>
           EMAIL
           <input
             type="email"
@@ -130,7 +130,7 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
             style={{ ...inputStyle, marginTop: 5 }}
           />
         </label>
-        <label style={{ fontSize: 10.5, color: "var(--t3)", letterSpacing: "0.08em" }}>
+        <label style={{ fontSize: 10.5, color: "var(--t2b)", letterSpacing: "0.08em" }}>
           PASSWORD
           <input
             type="password"

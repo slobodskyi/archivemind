@@ -196,7 +196,7 @@ export default function PhotoDrawer({
                           fontFamily: "inherit",
                           cursor: "pointer",
                           background: lang === l ? "#fff" : "transparent",
-                          color: lang === l ? "#000" : "var(--t3)",
+                          color: lang === l ? "#000" : "var(--t2b)",
                         }}
                       >
                         {l}
@@ -218,7 +218,7 @@ export default function PhotoDrawer({
                         fontFamily: "inherit",
                         cursor: "pointer",
                         background: style === ss ? "var(--bg-el)" : "transparent",
-                        color: style === ss ? "#fff" : "var(--t3)",
+                        color: style === ss ? "#fff" : "var(--t2b)",
                       }}
                     >
                       {ss}
@@ -326,19 +326,21 @@ export default function PhotoDrawer({
           <div style={{ marginTop: 18 }}>
             <span style={labelCaps}>Metadata / EXIF</span>
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "7px 14px", marginTop: 10, fontSize: 12 }}>
-              <span style={{ color: "var(--t3)" }}>Camera</span>
+              {/* Labels use --t2b (4.72:1), not --t3 (2.96:1, WCAG fail) — this
+                  is the readable label column, not decoration. */}
+              <span style={exifLabel}>Camera</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.camera}</span>
-              <span style={{ color: "var(--t3)" }}>Lens</span>
+              <span style={exifLabel}>Lens</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.lens}</span>
-              <span style={{ color: "var(--t3)" }}>Date</span>
+              <span style={exifLabel}>Date</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.dateTaken}</span>
-              <span style={{ color: "var(--t3)" }}>GPS</span>
+              <span style={exifLabel}>GPS</span>
               <span style={{ color: "var(--t2)" }}>{formatGps(photo.exif)}</span>
-              <span style={{ color: "var(--t3)" }}>ISO</span>
+              <span style={exifLabel}>ISO</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.iso}</span>
-              <span style={{ color: "var(--t3)" }}>Aperture</span>
+              <span style={exifLabel}>Aperture</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.aperture}</span>
-              <span style={{ color: "var(--t3)" }}>Shutter</span>
+              <span style={exifLabel}>Shutter</span>
               <span style={{ color: "var(--t2)" }}>{photo.exif.shutter}</span>
             </div>
           </div>
@@ -369,8 +371,11 @@ const labelCaps: React.CSSProperties = {
   fontSize: 10.5,
   textTransform: "uppercase",
   letterSpacing: ".04em",
-  color: "var(--t3)",
+  // --t2b (4.72:1) clears WCAG AA; --t3 (2.96:1) does not.
+  color: "var(--t2b)",
 };
+
+const exifLabel: React.CSSProperties = { color: "var(--t2b)" };
 
 const smallBtn: React.CSSProperties = {
   display: "flex",
