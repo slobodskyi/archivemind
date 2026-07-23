@@ -27,7 +27,7 @@ interface PhotoDrawerProps {
   onSetLang: (l: Language) => void;
   onSetStyle: (s: CaptionStyle) => void;
   onRegen: () => void;
-  onCopy: () => void;
+  onCopy: (text: string) => void;
   onGenSingle: () => void;
   onSaveCaption: (text: string) => void;
   onEditImage: () => void;
@@ -248,7 +248,7 @@ export default function PhotoDrawer({
                     <SparkleIcon />
                     Regenerate
                   </button>
-                  <button onClick={onCopy} style={smallBtn}>
+                  <button onClick={() => onCopy(shownCaption)} style={smallBtn}>
                     <CopyIcon />
                     {copyLabel}
                   </button>

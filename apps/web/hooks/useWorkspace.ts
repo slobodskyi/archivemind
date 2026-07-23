@@ -450,7 +450,7 @@ export interface Workspace {
   resetEdit: (id: string) => void;
   setLang: (l: Language) => void;
   setStyle: (s: CaptionStyle) => void;
-  copyCap: () => void;
+  copyCap: (text: string) => void;
   regen: () => void;
   saveCaption: (text: string) => void;
   genSingle: (id: string) => void;
@@ -1432,11 +1432,25 @@ export function useWorkspace(
     [openDrawer],
   );
 
-  const copyCap = useCallback(() => {
-    setState({ copyLabel: "Copied" });
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setState({ copyLabel: "Copy" }), 1400);
-  }, [setState]);
+  const copyCap = useCallback(
+    async (text: string) => {
+      // The visible caption (incl. any unsaved edit) is copied from the drawer;
+      // only claim "Copied" after the clipboard write actually succeeds — a
+      // false "Copied" made users paste stale clipboard content elsewhere.
+      const caption = text.trim();
+      if (!caption) return;
+      try {
+        await navigator.clipboard.writeText(caption);
+      } catch {
+        flashToast("Couldn't copy — select the caption and copy manually");
+        return;
+      }
+      setState({ copyLabel: "Copied" });
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setState({ copyLabel: "Copy" }), 1400);
+    },
+    [setState, flashToast],
+  );
 
   /** Regenerate the visible caption (drawer lang × style) via a real caption
    *  job (#14). An edited caption asks first, then clears is_edited — the
@@ -2804,7 +2818,9 @@ export function useWorkspace(
   // ── Misc toolbar actions ────────────────────────────────────────────────
 
   const extractExif = useCallback(
-    () => flashToast(`EXIF extracted for ${stateRef.current.photos.length} files`),
+    // EXIF is already read during ingest (worker) — this button never did work.
+    // Tell the truth instead of faking a completion toast for a no-op.
+    () => flashToast("EXIF is read automatically when files are imported"),
     [flashToast],
   );
 

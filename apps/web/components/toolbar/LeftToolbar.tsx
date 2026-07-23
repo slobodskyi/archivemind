@@ -18,6 +18,9 @@ interface LeftToolbarProps {
   /** The legacy workspace recovery grid only selects/adds existing assets.
    * Editing, AI actions, and imports live inside an open project. */
   allFilesMode?: boolean;
+  /** Map is a separate MapLibre surface — sticky notes drop behind the basemap
+   * and Fit/zoom move the hidden canvas, so those tools are hidden on Map. */
+  isMapView?: boolean;
   showAddToProject?: boolean;
   selCount?: number;
   zoomPct?: string;
@@ -79,6 +82,7 @@ function TbButton({ onClick, title, active, children }: TbButtonProps) {
 function LeftToolbar({
   tool = "select",
   allFilesMode = false,
+  isMapView = false,
   showAddToProject = false,
   selCount = 0,
   zoomPct = "100%",
@@ -216,7 +220,7 @@ function LeftToolbar({
           <span className="tip">Add</span>
         </button>
       )}
-      {!allFilesMode && (
+      {!allFilesMode && !isMapView && (
         <button
           onClick={onAddStickyNote}
           title="Sticky Note"
@@ -240,48 +244,53 @@ function LeftToolbar({
         </button>
       )}
 
-      <Divider />
-
-      <button
-        onClick={onFit}
-        title="Fit"
-        aria-label="Fit to content"
-        className="tw"
-        style={{
-          display: "flex",
-          width: 34,
-          height: 34,
-          alignItems: "center",
-          justifyContent: "center",
-          border: 0,
-          borderRadius: 2,
-          cursor: "pointer",
-          background: "transparent",
-          color: "var(--t2)",
-        }}
-      >
-        <FitIcon />
-        <span className="tip">Fit</span>
-      </button>
-      <button
-        onClick={onZoomReset}
-        style={{
-          display: "flex",
-          width: 34,
-          height: 28,
-          alignItems: "center",
-          justifyContent: "center",
-          border: 0,
-          borderRadius: 2,
-          cursor: "pointer",
-          background: "transparent",
-          color: "var(--t3)",
-          fontSize: 11,
-          fontFamily: "inherit",
-        }}
-      >
-        {zoomPct}
-      </button>
+      {/* Fit + zoom act on the tile canvas — on Map they'd move the hidden
+          neural surface, so they're suppressed there (MapLibre has its own). */}
+      {!isMapView && (
+        <>
+          <Divider />
+          <button
+            onClick={onFit}
+            title="Fit"
+            aria-label="Fit to content"
+            className="tw"
+            style={{
+              display: "flex",
+              width: 34,
+              height: 34,
+              alignItems: "center",
+              justifyContent: "center",
+              border: 0,
+              borderRadius: 2,
+              cursor: "pointer",
+              background: "transparent",
+              color: "var(--t2)",
+            }}
+          >
+            <FitIcon />
+            <span className="tip">Fit</span>
+          </button>
+          <button
+            onClick={onZoomReset}
+            style={{
+              display: "flex",
+              width: 34,
+              height: 28,
+              alignItems: "center",
+              justifyContent: "center",
+              border: 0,
+              borderRadius: 2,
+              cursor: "pointer",
+              background: "transparent",
+              color: "var(--t3)",
+              fontSize: 11,
+              fontFamily: "inherit",
+            }}
+          >
+            {zoomPct}
+          </button>
+        </>
+      )}
 
       {showAddToProject && (
         <>

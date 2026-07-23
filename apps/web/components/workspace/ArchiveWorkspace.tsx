@@ -35,12 +35,19 @@ import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
 import ConfirmModal from "@/components/modals/ConfirmModal";
 
+interface Account {
+  initials: string;
+  name: string;
+  email: string;
+}
+
 interface ArchiveWorkspaceProps {
   initialPhotos: Photo[];
   workspaceId: string;
   projects: ProjectOption[];
   currentProjectId: string;
   initialGroups: CanvasGroup[];
+  account: Account;
 }
 
 export default function ArchiveWorkspace({
@@ -49,6 +56,7 @@ export default function ArchiveWorkspace({
   projects,
   currentProjectId,
   initialGroups,
+  account,
 }: ArchiveWorkspaceProps) {
   const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId, initialGroups);
 
@@ -196,7 +204,7 @@ export default function ArchiveWorkspace({
         projLabel={ws.projLabel}
         onHome={ws.goHome}
         onOpenProj={ws.openProj}
-        showZoomControl
+        showZoomControl={!ws.isMapView}
         zoomPct={ws.zoomPct}
         onToggleZoomMenu={ws.toggleZoomMenu}
         canUndo={ws.canUndo}
@@ -205,6 +213,8 @@ export default function ArchiveWorkspace({
         onRedo={ws.redo}
         onFlashToast={ws.flashToast}
         onOpenAcct={ws.openAcct}
+        accountInitials={account.initials}
+        accountName={account.name}
         viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
         afterProject={
           ws.projectMode ? (
@@ -228,7 +238,7 @@ export default function ArchiveWorkspace({
         onSelect={ws.selectProject}
       />
 
-      <AccountDropdown open={ws.acctOpen} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />
+      <AccountDropdown open={ws.acctOpen} account={account} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />
 
       <ChatPanel
         open={ws.chatOpen}
@@ -245,6 +255,7 @@ export default function ArchiveWorkspace({
       <LeftToolbar
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
+        isMapView={ws.isMapView}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
@@ -290,7 +301,10 @@ export default function ArchiveWorkspace({
         />
       )}
 
-      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />
+      {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
+          show/pan the hidden neural grid and physically cover MapLibre's own
+          zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
+      {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />}
 
       <AddToProjectPopover
         open={ws.addProjOpen}
