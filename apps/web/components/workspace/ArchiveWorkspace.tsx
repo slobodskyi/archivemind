@@ -76,28 +76,35 @@ export default function ArchiveWorkspace({
         animating={ws.tilesAnimating}
         marquee={ws.marquee}
       >
-        <FrameOverlay
-          frames={ws.frames}
-          counts={ws.frameCounts}
-          draft={ws.frameDraft}
-          scale={ws.scale}
-          onSelectFrame={ws.selectFrame}
-          onExportFrame={ws.exportFrame}
-          onDeleteFrame={ws.deleteFrameWithContent}
-          onRenameFrame={ws.renameFrame}
-          onBeginMove={ws.beginFrameMove}
-          onBeginResize={ws.beginFrameResize}
-          onGestureMove={ws.frameGestureMove}
-          onEndGesture={ws.endFrameGesture}
-        />
-        <FolderOverlay
-          folders={ws.folders}
-          scale={ws.scale}
-          onToggle={ws.toggleFolder}
-          onMove={ws.moveGroup}
-          onRename={ws.renameGroup}
-          onDelete={ws.deleteGroup}
-        />
+        {/* Artboards + folders are a Canvas (neural) concept only — their
+            geometry is in neural coordinates, so they'd render misplaced on
+            Timeline/Topic (and Map covers the canvas entirely). */}
+        {ws.view === "neural" && (
+          <>
+            <FrameOverlay
+              frames={ws.frames}
+              counts={ws.frameCounts}
+              draft={ws.frameDraft}
+              scale={ws.scale}
+              onSelectFrame={ws.selectFrame}
+              onExportFrame={ws.exportFrame}
+              onDeleteFrame={ws.deleteFrameWithContent}
+              onRenameFrame={ws.renameFrame}
+              onBeginMove={ws.beginFrameMove}
+              onBeginResize={ws.beginFrameResize}
+              onGestureMove={ws.frameGestureMove}
+              onEndGesture={ws.endFrameGesture}
+            />
+            <FolderOverlay
+              folders={ws.folders}
+              scale={ws.scale}
+              onToggle={ws.toggleFolder}
+              onMove={ws.moveGroup}
+              onRename={ws.renameGroup}
+              onDelete={ws.deleteGroup}
+            />
+          </>
+        )}
         <StickyNoteOverlay
           notes={ws.stickyNotes}
           onDragStart={ws.onStickyDown}
