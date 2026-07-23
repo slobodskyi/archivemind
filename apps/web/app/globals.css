@@ -57,7 +57,13 @@ body {
 body {
   background: var(--bg);
   color: var(--t1);
-  font-family: var(--font-space-mono), monospace;
+  /* Latin renders in Space Mono; Cyrillic (which Space Mono lacks) falls to
+     JetBrains Mono instead of the oversized system monospace. font-size-adjust
+     from-font normalises the fallback's x-height to Space Mono's, so Cyrillic no
+     longer reads a size larger than the Latin around it (degrades gracefully
+     where unsupported). */
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size-adjust: from-font;
   letter-spacing: 0em;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -238,7 +244,7 @@ textarea {
   border: 1px solid var(--bd);
   border-radius: 2px;
   color: var(--t3);
-  font-family: var(--font-space-mono), monospace;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
   font-size: 10px;
 }
 .maplibregl-ctrl-attrib a {
