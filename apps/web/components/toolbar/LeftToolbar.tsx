@@ -10,6 +10,7 @@ import {
   AddIcon,
   FitIcon,
   StickyNoteIcon,
+  TrashIcon,
 } from "@/components/icons/icons";
 
 interface LeftToolbarProps {
@@ -31,6 +32,8 @@ interface LeftToolbarProps {
   onExtractExif?: () => void;
   onAdd?: () => void;
   onAddStickyNote?: () => void;
+  onOpenTrash?: () => void;
+  trashOpen?: boolean;
   onFit?: () => void;
   onZoomReset?: () => void;
   onAddToProject?: () => void;
@@ -90,6 +93,8 @@ function LeftToolbar({
   onExtractExif,
   onAdd,
   onAddStickyNote,
+  onOpenTrash,
+  trashOpen = false,
   onFit,
   onZoomReset,
   onAddToProject,
@@ -171,6 +176,9 @@ function LeftToolbar({
       )}
       <TbButton onClick={onToggleChat} title="AI Assistant" active={chatOpen}>
         <ChatIcon />
+      </TbButton>
+      <TbButton onClick={onOpenTrash} title="Trash" active={trashOpen}>
+        <TrashIcon />
       </TbButton>
       {!allFilesMode && (
         <>
