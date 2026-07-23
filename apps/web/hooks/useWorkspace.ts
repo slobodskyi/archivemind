@@ -252,6 +252,23 @@ type DragSession =
       y1: number;
       moved: boolean;
     }
+  | {
+      // Dragging inside the minimap pans the viewport continuously. The
+      // content↔minimap mapping (origin/off/mscale) and the minimap element's
+      // screen rect are snapshotted at pointer-down (they don't change while the
+      // content stays put), and grabDx/grabDy hold the content-space offset from
+      // the pointer to the viewport center so grabbing the box doesn't jump it.
+      mode: "minimap";
+      rectLeft: number;
+      rectTop: number;
+      originX: number;
+      originY: number;
+      offX: number;
+      offY: number;
+      mscale: number;
+      grabDx: number;
+      grabDy: number;
+    }
   | null;
 
 const DEFAULT_RECT = { left: 0, top: 0, width: 1000, height: 700 };
@@ -1110,6 +1127,15 @@ export function useWorkspace(
           marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 },
           frameDraftRect: { x: xl, y: yt, w, h },
         });
+      } else if (d.mode === "minimap") {
+        const mx = e.clientX - d.rectLeft,
+          my = e.clientY - d.rectTop;
+        const cx = d.originX + (mx - d.offX) / d.mscale;
+        const cy = d.originY + (my - d.offY) / d.mscale;
+        const rr = rect();
+        const targetX = cx - d.grabDx,
+          targetY = cy - d.grabDy;
+        setState({ tx: rr.width / 2 - targetX * s.scale, ty: rr.height / 2 - targetY * s.scale });
       }
     },
     [rect, toContent, setState, pushHistory],
@@ -2692,7 +2718,33 @@ export function useWorkspace(
       const cx = minimap.originX + (mx - minimap.offX) / minimap.mscale;
       const cy = minimap.originY + (my - minimap.offY) / minimap.mscale;
       const rr = rect();
-      setState({ tx: rr.width / 2 - cx * s.scale, ty: rr.height / 2 - cy * s.scale });
+      // Grab the viewport box in place (no jump); grab empty minimap space to
+      // recenter there first, then track. Continuous panning is handled by the
+      // window-level move() via this minimap drag session.
+      const vpCenterX = (rr.width / 2 - s.tx) / s.scale;
+      const vpCenterY = (rr.height / 2 - s.ty) / s.scale;
+      const insideVp =
+        mx >= minimap.vp.x &&
+        mx <= minimap.vp.x + minimap.vp.w &&
+        my >= minimap.vp.y &&
+        my <= minimap.vp.y + minimap.vp.h;
+      const grabDx = insideVp ? cx - vpCenterX : 0;
+      const grabDy = insideVp ? cy - vpCenterY : 0;
+      dragRef.current = {
+        mode: "minimap",
+        rectLeft: rectEl.left,
+        rectTop: rectEl.top,
+        originX: minimap.originX,
+        originY: minimap.originY,
+        offX: minimap.offX,
+        offY: minimap.offY,
+        mscale: minimap.mscale,
+        grabDx,
+        grabDy,
+      };
+      const targetX = cx - grabDx,
+        targetY = cy - grabDy;
+      setState({ tx: rr.width / 2 - targetX * s.scale, ty: rr.height / 2 - targetY * s.scale });
     },
     [minimap, rect, setState],
   );

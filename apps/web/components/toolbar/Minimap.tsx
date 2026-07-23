@@ -25,8 +25,9 @@ export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
         boxShadow: "0 8px 32px rgba(0,0,0,.45)",
         zIndex: 35,
         overflow: "hidden",
-        cursor: "pointer",
+        cursor: "grab",
         transition: "right .2s cubic-bezier(.22,1,.36,1)",
+        touchAction: "none",
       }}
     >
       {minimap.dots.map((d, i) => (
@@ -34,12 +35,12 @@ export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
           key={i}
           style={{
             position: "absolute",
-            left: d.x,
-            top: d.y,
-            width: 2,
-            height: 2,
-            borderRadius: 999,
-            background: "var(--t3)",
+            left: d.x - 2,
+            top: d.y - 2,
+            width: 4,
+            height: 4,
+            borderRadius: 1.5,
+            background: "var(--t2)",
           }}
         />
       ))}
