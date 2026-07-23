@@ -528,6 +528,7 @@ export interface Workspace {
   trashAssets: TrashedAsset[] | null;
   openTrash: () => void;
   closeTrash: () => void;
+  toggleTrash: () => void;
   restoreFromTrash: (ids: string[]) => void;
   purgeFromTrash: (ids: string[]) => void;
 
@@ -2189,6 +2190,13 @@ export function useWorkspace(
 
   const closeTrash = useCallback(() => setState({ trashOpen: false }), [setState]);
 
+  // The toolbar button toggles the panel; openTrash stays a pure open so the
+  // restore/purge error retries can reload the list without closing it.
+  const toggleTrash = useCallback(() => {
+    if (stateRef.current.trashOpen) closeTrash();
+    else openTrash();
+  }, [closeTrash, openTrash]);
+
   const restoreFromTrash = useCallback(
     (ids: string[]) => {
       if (!ids.length) return;
@@ -3110,6 +3118,7 @@ export function useWorkspace(
     trashAssets: state.trashAssets,
     openTrash,
     closeTrash,
+    toggleTrash,
     restoreFromTrash,
     purgeFromTrash,
 
