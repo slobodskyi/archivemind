@@ -23,6 +23,35 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
 };
 
+const labelStyle: React.CSSProperties = { fontSize: 10.5, color: "var(--t2b)", letterSpacing: "0.08em" };
+const linkBtn: React.CSSProperties = {
+  alignSelf: "flex-start",
+  marginTop: 14,
+  padding: 0,
+  background: "transparent",
+  border: 0,
+  color: "var(--t2b)",
+  fontSize: 11,
+  fontFamily: "inherit",
+  cursor: "pointer",
+};
+
+function primaryBtnStyle(busy: boolean): React.CSSProperties {
+  return {
+    marginTop: 4,
+    padding: "11px 12px",
+    background: busy ? "var(--bg-el)" : "var(--ac)",
+    color: busy ? "var(--t2b)" : "#050505",
+    border: 0,
+    borderRadius: 2,
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    cursor: busy ? "default" : "pointer",
+    fontFamily: "inherit",
+  };
+}
+
 /** Official four-colour Google "G". Google's branding guidelines require the
  *  mark on any "Sign in with Google" affordance, so it stays coloured even
  *  though the rest of the surface is monochrome. */
@@ -55,6 +84,8 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
   const [error, setError] = useState<string | null>(initialError);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Within login mode, a lightweight "forgot password" sub-view (email-only).
+  const [view, setView] = useState<"auth" | "reset">("auth");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -93,6 +124,28 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
     setBusy(false);
   }
 
+  async function sendReset(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    const supabase = createClient();
+    // Reuse the hardened callback: it exchanges the recovery code, then
+    // forwards to /auth/update-password (validated by safeNextUrl). The
+    // Supabase project's Redirect URLs must allow this callback URL.
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=/auth/update-password`,
+    });
+    if (error) {
+      setError(error.message);
+      setBusy(false);
+      return;
+    }
+    // Don't confirm the address exists (account enumeration) — neutral copy.
+    setInfo("If that email has an account, a password-reset link is on its way. Check your inbox.");
+    setBusy(false);
+  }
+
   async function signInWithGoogle() {
     setError(null);
     setInfo(null);
@@ -114,12 +167,13 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
     }
   }
 
-  return (
-    <>
-      {/* method="post": if the form is submitted before hydration, the native
-          fallback must never put credentials into the URL as a GET would. */}
-      <form onSubmit={submit} method="post" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <label style={{ fontSize: 10.5, color: "var(--t2b)", letterSpacing: "0.08em" }}>
+  if (view === "reset") {
+    return (
+      <form onSubmit={sendReset} method="post" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--t2)", lineHeight: 1.5, marginBottom: 2 }}>
+          Enter your account email and we&apos;ll send a link to set a new password.
+        </div>
+        <label style={labelStyle}>
           EMAIL
           <input
             type="email"
@@ -130,7 +184,45 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
             style={{ ...inputStyle, marginTop: 5 }}
           />
         </label>
-        <label style={{ fontSize: 10.5, color: "var(--t2b)", letterSpacing: "0.08em" }}>
+
+        {error && <div style={{ fontSize: 11.5, color: "var(--red)", lineHeight: 1.5 }}>{error}</div>}
+        {info && <div style={{ fontSize: 11.5, color: "var(--ac)", lineHeight: 1.5 }}>{info}</div>}
+
+        <button type="submit" disabled={busy} style={primaryBtnStyle(busy)}>
+          {busy ? "SENDING…" : "SEND RESET LINK"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setView("auth");
+            setError(null);
+            setInfo(null);
+          }}
+          style={linkBtn}
+        >
+          ← Back to sign in
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <>
+      {/* method="post": if the form is submitted before hydration, the native
+          fallback must never put credentials into the URL as a GET would. */}
+      <form onSubmit={submit} method="post" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <label style={labelStyle}>
+          EMAIL
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ ...inputStyle, marginTop: 5 }}
+          />
+        </label>
+        <label style={labelStyle}>
           PASSWORD
           <input
             type="password"
@@ -142,6 +234,9 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
             style={{ ...inputStyle, marginTop: 5 }}
           />
         </label>
+        {mode === "signup" && (
+          <div style={{ fontSize: 10.5, color: "var(--t2b)", marginTop: -2 }}>At least 6 characters.</div>
+        )}
 
         {error && (
           <div style={{ fontSize: 11.5, color: "var(--red)", lineHeight: 1.5 }}>{error}</div>
@@ -150,25 +245,22 @@ export default function AuthForm({ mode, initialError = null }: AuthFormProps) {
           <div style={{ fontSize: 11.5, color: "var(--ac)", lineHeight: 1.5 }}>{info}</div>
         )}
 
-        <button
-          type="submit"
-          disabled={busy}
-          style={{
-            marginTop: 4,
-            padding: "11px 12px",
-            background: busy ? "var(--bg-el)" : "var(--ac)",
-            color: busy ? "var(--t3)" : "#050505",
-            border: 0,
-            borderRadius: 2,
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            cursor: busy ? "default" : "pointer",
-            fontFamily: "inherit",
-          }}
-        >
-          {busy ? "…" : mode === "login" ? "SIGN IN" : "CREATE ACCOUNT"}
+        <button type="submit" disabled={busy} style={primaryBtnStyle(busy)}>
+          {busy ? (mode === "login" ? "SIGNING IN…" : "CREATING ACCOUNT…") : mode === "login" ? "SIGN IN" : "CREATE ACCOUNT"}
         </button>
+        {mode === "login" && (
+          <button
+            type="button"
+            onClick={() => {
+              setView("reset");
+              setError(null);
+              setInfo(null);
+            }}
+            style={linkBtn}
+          >
+            Forgot password?
+          </button>
+        )}
       </form>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0" }}>
