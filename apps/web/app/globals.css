@@ -195,6 +195,37 @@ textarea {
   animation: amSkeleton 1.4s ease-in-out infinite;
 }
 
+/* Loading shimmer for canvas tiles whose image hasn't arrived yet (a dropped
+   HEIC/RAW with no local preview, or a server asset whose preview URL is still
+   resolving). A moving gradient sweep reads as "content is arriving" far better
+   than a spinner or bare label. Degrades to a static tint under
+   prefers-reduced-motion (WCAG 2.3.3). */
+@keyframes amShimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.am-tile-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    var(--bg-in) 30%,
+    rgba(255, 255, 255, 0.06) 50%,
+    var(--bg-in) 70%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: amShimmer 1.3s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .am-tile-shimmer {
+    animation: none;
+    background: var(--bg-el);
+  }
+}
+
 
 /* MapLibre's own chrome ships white-on-white for a light basemap; on our
    near-black map the attribution and zoom buttons would otherwise glare.
