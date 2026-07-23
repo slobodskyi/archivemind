@@ -1286,10 +1286,31 @@ export function useWorkspace(
         .map((photo, index) => ({ photo, index }))
         .filter(({ photo }) => idSet.has(photo.id));
       if (removed.length === 0) return;
+      // Make deletion LOCAL. assetGallery lays the Canvas out by array index
+      // (lib/layout.ts), so dropping a tile renumbers every non-overridden tile
+      // after it — the survivors visibly reflow. Pin each survivor that has no
+      // override yet to its current center so nothing moves; the removed tile
+      // just leaves a gap. Record the keys we add so undo strips exactly them
+      // (restoring the pristine default grid); Tidy up is the way back to the
+      // default layout for good. Only affects the neural Canvas (Timeline/Topic
+      // read their own override buckets).
+      const before = stateRef.current;
+      const neuralPos = activeTilePositions({ ...before, view: "neural" });
+      const frozen: Record<string, CanvasPoint> = {};
+      for (const p of before.photos) {
+        if (idSet.has(p.id)) continue;
+        if (before.galleryOverrides.asset[p.id]) continue;
+        const tile = neuralPos[p.id];
+        if (tile) frozen[p.id] = { x: tile.cx, y: tile.cy };
+      }
+      const frozenKeys = Object.keys(frozen);
       setState((prev) => ({
         photos: prev.photos.filter((p) => !idSet.has(p.id)),
         selectedIds: prev.selectedIds.filter((x) => !idSet.has(x)),
         drawerId: prev.drawerId && idSet.has(prev.drawerId) ? null : prev.drawerId,
+        galleryOverrides: frozenKeys.length
+          ? { ...prev.galleryOverrides, asset: { ...prev.galleryOverrides.asset, ...frozen } }
+          : prev.galleryOverrides,
       }));
       const undo = () => {
         setState((prev) => {
@@ -1298,7 +1319,16 @@ export function useWorkspace(
             if (photos.some((p) => p.id === photo.id)) continue;
             photos.splice(Math.min(index, photos.length), 0, photo);
           }
-          return { photos, toast: { show: false, text: "" } };
+          // Strip only the freeze THIS delete added, so the restored tile and its
+          // neighbours fall back to their default cells (a user's own prior drags
+          // are left untouched).
+          const asset = { ...prev.galleryOverrides.asset };
+          for (const key of frozenKeys) delete asset[key];
+          return {
+            photos,
+            galleryOverrides: { ...prev.galleryOverrides, asset },
+            toast: { show: false, text: "" },
+          };
         });
         fetch("/api/assets/restore", {
           method: "POST",
@@ -1331,7 +1361,7 @@ export function useWorkspace(
           router.refresh();
         });
     },
-    [setState, flashToast, router],
+    [setState, flashToast, router, activeTilePositions],
   );
 
   /** Single-tile / drawer delete — the same bulk pipeline, one id. */
