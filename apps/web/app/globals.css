@@ -232,6 +232,30 @@ textarea {
   }
 }
 
+/* Indeterminate progress sliver along a tile's bottom edge while it uploads /
+   processes — a live "working" signal that doesn't cover the preview image the
+   way the full shimmer does. Under reduced motion it rests as a static half-bar. */
+@keyframes amIndeterminate {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+.am-progress-indeterminate {
+  left: -35%;
+  animation: amIndeterminate 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .am-progress-indeterminate {
+    left: 0;
+    width: 100% !important;
+    opacity: 0.5;
+    animation: none;
+  }
+}
+
 
 /* MapLibre's own chrome ships white-on-white for a light basemap; on our
    near-black map the attribution and zoom buttons would otherwise glare.
