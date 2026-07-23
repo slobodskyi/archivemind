@@ -172,6 +172,9 @@ interface WorkspaceState {
   toast: { show: boolean; text: string; actionLabel?: string; onAction?: () => void };
   /** True while a canvas pan drag is active (drives the grabbing cursor). */
   panning: boolean;
+  /** True while Space is held: a transient pan mode layered over the hand tool,
+   *  so the selected tool is never mutated and resumes on release. Not persisted. */
+  spacePan: boolean;
   frames: Frame[];
   stickyNotes: StickyNote[];
   /** Content-space preview rect while the frame tool is actively drawing. */
@@ -584,6 +587,7 @@ export function useWorkspace(
     proc: { active: false, label: "", pct: 0 },
     toast: { show: false, text: "" },
     panning: false,
+    spacePan: false,
     frames: [],
     stickyNotes: [],
     frameDraftRect: null,
@@ -756,6 +760,17 @@ export function useWorkspace(
     [rect, setState],
   );
 
+  /** Start a pan drag session (shared by the hand tool, Space-hold, and the tile
+   *  handlers when Space is down). Reads live tx/ty from stateRef. */
+  const startPan = useCallback(
+    (e: React.PointerEvent) => {
+      const s = stateRef.current;
+      dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, otx: s.tx, oty: s.ty };
+      setState({ panning: true });
+    },
+    [setState],
+  );
+
   const onCanvasDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
@@ -771,7 +786,9 @@ export function useWorkspace(
       // (marquee) tools work in all four, and only the hand tool pans on a
       // background drag. Marquee hit-tests against the active view's own tile
       // positions so it selects whatever is on screen, sorted or not.
-      if (s.tool === "frame") {
+      // Space-hold pans over anything, so it takes precedence over the frame and
+      // select tools; the hand tool pans too.
+      if (s.tool === "frame" && !s.spacePan) {
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
           dy0 = e.clientY - r.top;
@@ -789,15 +806,8 @@ export function useWorkspace(
           marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 },
           frameDraftRect: { x: c.x, y: c.y, w: 0, h: 0 },
         });
-      } else if (s.tool === "hand") {
-        dragRef.current = {
-          mode: "pan",
-          sx: e.clientX,
-          sy: e.clientY,
-          otx: s.tx,
-          oty: s.ty,
-        };
-        setState({ panning: true });
+      } else if (s.tool === "hand" || s.spacePan) {
+        startPan(e);
       } else {
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
@@ -827,7 +837,7 @@ export function useWorkspace(
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
-    [rect, toContent, setState, activeTilePositions],
+    [rect, toContent, setState, activeTilePositions, startPan],
   );
 
   const onGalleryNodeDown = useCallback(
@@ -858,6 +868,12 @@ export function useWorkspace(
       e.preventDefault();
       e.stopPropagation();
       const s = stateRef.current;
+      // Space-hold pans even when the press starts on a tile (tiles stopPropagation,
+      // so the canvas root never sees it) — hand off to a pan drag and bail.
+      if (s.spacePan) {
+        startPan(e);
+        return;
+      }
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
       let selectedIds: string[];
       if (additive) {
@@ -894,7 +910,7 @@ export function useWorkspace(
         groupCenters,
       };
     },
-    [setState, activeTilePositions],
+    [setState, activeTilePositions, startPan],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
    *  that matches the active sort, so a tile stays where you drop it within the
@@ -919,6 +935,10 @@ export function useWorkspace(
       e.preventDefault();
       e.stopPropagation();
       const s = stateRef.current;
+      if (s.spacePan) {
+        startPan(e);
+        return;
+      }
       const bucket = s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
       const layout = cloudDecorRef.current;
       if (!bucket || !layout) return;
@@ -937,16 +957,20 @@ export function useWorkspace(
         historyPushed: false,
       };
     },
-    [],
+    [startPan],
   );
 
   const onStickyDown = useCallback(
     (e: React.PointerEvent, id: string, orig: { x: number; y: number }) => {
       e.stopPropagation();
+      if (stateRef.current.spacePan) {
+        startPan(e);
+        return;
+      }
       pushHistory();
       dragRef.current = { mode: "sticky", id, sx: e.clientX, sy: e.clientY, orig, moved: false };
     },
-    [pushHistory],
+    [pushHistory, startPan],
   );
 
   const addStickyNote = useCallback(() => {
@@ -2460,6 +2484,35 @@ export function useWorkspace(
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeDrawer, closeSearch, closeHelp, closeChat, closeSidebar, requestDeletePhotos]);
 
+  // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
+  // hand-tool path, so the selected tool is never mutated and simply resumes on
+  // release. Ignore autorepeat and text-entry focus; preventDefault stops the
+  // browser's page-scroll-on-space. A window blur clears it so a missed keyup
+  // (alt-tab mid-hold) can't strand pan mode.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      if (!stateRef.current.spacePan) setState({ spacePan: true });
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space" && stateRef.current.spacePan) setState({ spacePan: false });
+    };
+    const onBlur = () => {
+      if (stateRef.current.spacePan) setState({ spacePan: false });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [setState]);
+
   useEffect(() => {
     const activeClientIds = new Set(state.uploadPreviews.map((preview) => preview.clientId));
     for (const [clientId, url] of objectUrlsRef.current) {
@@ -2673,7 +2726,7 @@ export function useWorkspace(
     canvasTransform: `translate(${state.tx}px, ${state.ty}px) scale(${state.scale})`,
     canvasCursor: state.panning
       ? "grabbing"
-      : state.tool === "hand"
+      : state.tool === "hand" || state.spacePan
         ? "grab"
         : "default",
     marquee,
