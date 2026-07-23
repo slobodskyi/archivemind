@@ -330,6 +330,30 @@ export function packGrid(
   return out;
 }
 
+/** Minimum gap (px, content space) kept between a just-dropped tile and any other
+ *  tile center. Free overlap is allowed everywhere on the canvas — this only stops
+ *  a tile from landing near-exactly on top of another and hiding it 100%. Larger
+ *  than the default grid's ±5px jitter, so ordinary grid tiles never trigger it. */
+export const OVERLAP_EPSILON = 24;
+const OVERLAP_CASCADE_STEP = 30;
+const OVERLAP_MAX_STEPS = 16;
+
+/** If `center` sits within OVERLAP_EPSILON of any center in `others`, cascade it
+ *  by a fixed diagonal step until it clears (or a small cap is hit), so the tile
+ *  underneath always keeps a visible sliver. Deterministic (no Math.random), so
+ *  the layout stays reproducible. Returns the resolved center — unchanged when
+ *  there was no near-exact clash. */
+export function nudgeOffOverlap(center: CanvasPoint, others: readonly CanvasPoint[]): CanvasPoint {
+  let { x, y } = center;
+  for (let step = 0; step < OVERLAP_MAX_STEPS; step++) {
+    const clash = others.some((o) => Math.abs(o.x - x) < OVERLAP_EPSILON && Math.abs(o.y - y) < OVERLAP_EPSILON);
+    if (!clash) break;
+    x += OVERLAP_CASCADE_STEP;
+    y += OVERLAP_CASCADE_STEP;
+  }
+  return { x, y };
+}
+
 /** Strict rectangle intersection: touching an edge alone is not a hit. */
 export function hitTestTiles(pos: Readonly<Record<string, TilePos>>, bounds: Bounds): string[] {
   return Object.entries(pos)

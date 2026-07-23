@@ -32,6 +32,7 @@ import {
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
+  nudgeOffOverlap,
   packGrid,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
@@ -1209,8 +1210,34 @@ export function useWorkspace(
       } else {
         setState({ tool: "select" });
       }
+    } else if (d.mode === "gallery") {
+      // Anti-full-occlusion (Canvas only): a single tile dropped near-exactly on
+      // another cascades off so a sliver of the one underneath always shows. Free
+      // overlap is still allowed — this only prevents a 100% cover. Group moves
+      // keep their internal arrangement, and the sorted views own their tile
+      // positions, so both are left alone. History was already pushed at drag
+      // start, so the nudge is part of the same undo step.
+      if (d.moved && !d.groupCenters && d.kind === "asset") {
+        const s = stateRef.current;
+        const positions = activeTilePositions(s);
+        const dropped = positions[d.key];
+        if (dropped) {
+          const others = Object.entries(positions)
+            .filter(([id]) => id !== d.key)
+            .map(([, tile]) => ({ x: tile.cx, y: tile.cy }));
+          const resolved = nudgeOffOverlap({ x: dropped.cx, y: dropped.cy }, others);
+          if (resolved.x !== dropped.cx || resolved.y !== dropped.cy) {
+            setState({
+              galleryOverrides: {
+                ...s.galleryOverrides,
+                asset: { ...s.galleryOverrides.asset, [d.key]: resolved },
+              },
+            });
+          }
+        }
+      }
     }
-  }, [setState, pushHistory]);
+  }, [setState, pushHistory, activeTilePositions]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 

@@ -6,6 +6,7 @@ import {
   droppedAssetCenters,
   fitBounds,
   hitTestTiles,
+  nudgeOffOverlap,
   packGrid,
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
@@ -190,6 +191,30 @@ describe("droppedAssetCenters", () => {
     const xs = Object.values(droppedAssetCenters(ids, { x: 0, y: 0 })).map((p) => p.x);
     // 30 files → ceil(sqrt(30))=6 distinct columns, matching the base gallery.
     expect(new Set(xs).size).toBe(6);
+  });
+});
+
+describe("nudgeOffOverlap", () => {
+  it("leaves a tile with clear space exactly where it was dropped", () => {
+    expect(nudgeOffOverlap({ x: 100, y: 100 }, [{ x: 500, y: 500 }])).toEqual({ x: 100, y: 100 });
+    expect(nudgeOffOverlap({ x: 0, y: 0 }, [])).toEqual({ x: 0, y: 0 });
+  });
+
+  it("cascades a near-exact drop off the tile beneath so a sliver stays visible", () => {
+    const under = { x: 200, y: 200 };
+    const out = nudgeOffOverlap({ x: 205, y: 203 }, [under]);
+    // Pushed diagonally, and now clear of the tile it landed on by >= the gap.
+    expect(out.x).toBeGreaterThan(205);
+    expect(out.y).toBeGreaterThan(203);
+    expect(Math.abs(out.x - under.x) >= 24 || Math.abs(out.y - under.y) >= 24).toBe(true);
+  });
+
+  it("keeps cascading through a run of stacked tiles and is deterministic", () => {
+    const others = [{ x: 0, y: 0 }, { x: 30, y: 30 }];
+    const out = nudgeOffOverlap({ x: 5, y: 5 }, others);
+    const clash = others.some((o) => Math.abs(o.x - out.x) < 24 && Math.abs(o.y - out.y) < 24);
+    expect(clash).toBe(false);
+    expect(nudgeOffOverlap({ x: 5, y: 5 }, [...others])).toEqual(out);
   });
 });
 
