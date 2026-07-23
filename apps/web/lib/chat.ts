@@ -5,7 +5,7 @@
  */
 
 export const CHAT_GREETING =
-  "Hi! I can help you search, analyze, and work with your archive. Ask me anything about your photos.";
+  "Search your archive by what's actually in the photos — people, places, objects, scenes. Try one of the examples below, or type your own.";
 
 export interface FaqItem {
   q: string;
@@ -30,6 +30,3 @@ export const HELP_FAQ: FaqItem[] = [
     a: "Files are encrypted at rest and in transit. AI processing runs in isolated sandboxes — your content is never used to train models.",
   },
 ];
-
-export const SEARCH_PLACEHOLDER =
-  'Search what\'s inside your photos — "medics", "rubble at night", "aid line"…';

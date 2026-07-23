@@ -189,7 +189,6 @@ interface WorkspaceState {
   acctOpen: boolean;
   projOpen: boolean;
   addProjOpen: boolean;
-  search: boolean;
   helpOpen: boolean;
   imp: ImpState;
   galleryOverrides: GalleryOverrides;
@@ -585,11 +584,6 @@ export interface Workspace {
   sidebarViewMode: SidebarViewMode;
   setSidebarViewMode: (mode: SidebarViewMode) => void;
 
-  // Search
-  search: boolean;
-  openSearch: () => void;
-  closeSearch: () => void;
-
   // Help
   helpOpen: boolean;
   openHelp: () => void;
@@ -669,7 +663,6 @@ export function useWorkspace(
     acctOpen: false,
     projOpen: false,
     addProjOpen: false,
-    search: false,
     helpOpen: false,
     imp: { open: false },
     galleryOverrides: EMPTY_GALLERY_OVERRIDES,
@@ -2589,8 +2582,6 @@ export function useWorkspace(
 
   // ── Search / Help ────────────────────────────────────────────────────────
 
-  const openSearch = useCallback(() => setState({ search: true }), [setState]);
-  const closeSearch = useCallback(() => setState({ search: false }), [setState]);
   const openHelp = useCallback(() => setState({ helpOpen: true }), [setState]);
   const closeHelp = useCallback(() => setState({ helpOpen: false }), [setState]);
 
@@ -3128,7 +3119,6 @@ export function useWorkspace(
       const s = stateRef.current;
       if (s.imp.open) return; // ImportModal owns Esc while open (upload-aware)
       if (s.drawerId) closeDrawer();
-      else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
       else if (s.trashOpen) closeTrash();
@@ -3136,7 +3126,7 @@ export function useWorkspace(
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos]);
+  }, [closeDrawer, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
   // hand-tool path, so the selected tool is never mutated and simply resumes on
@@ -3607,9 +3597,6 @@ export function useWorkspace(
     sidebarViewMode: state.sidebarViewMode,
     setSidebarViewMode,
 
-    search: state.search,
-    openSearch,
-    closeSearch,
 
     helpOpen: state.helpOpen,
     openHelp,

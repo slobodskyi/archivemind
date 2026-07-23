@@ -28,11 +28,11 @@ import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import ImageEditor from "@/components/editor/ImageEditor";
-import SearchModal from "@/components/modals/SearchModal";
 import ExportDialog from "@/components/export/ExportDialog";
 import ImportModal from "@/components/import/ImportModal";
 import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
+// SearchModal retired — the magnifier now opens the real Smart Search panel (ChatPanel).
 import ConfirmModal from "@/components/modals/ConfirmModal";
 
 interface Account {
@@ -259,13 +259,11 @@ export default function ArchiveWorkspace({
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
-        searchOpen={ws.search}
-        chatOpen={ws.chatOpen}
+        searchOpen={ws.chatOpen}
         bulkPanelOpen={ws.bulkPanelOpen}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
-        onOpenSearch={ws.openSearch}
-        onToggleChat={ws.toggleChat}
+        onOpenSearch={ws.toggleChat}
         onToggleBulkPanel={ws.toggleBulkPanel}
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
@@ -386,8 +384,6 @@ export default function ArchiveWorkspace({
         onBatchSettled={ws.onUploadBatchSettled}
       />
 
-      <SearchModal open={ws.search} onClose={ws.closeSearch} />
-
       {ws.exportOpen && <ExportDialog assetIds={ws.exportIds} onClose={ws.closeExport} />}
 
       <CanvasContextMenu
@@ -397,7 +393,6 @@ export default function ArchiveWorkspace({
         onClose={ws.closeContextMenu}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
-        onOpenSearch={ws.openSearch}
         onToggleChat={ws.toggleChat}
         onToggleBulkPanel={ws.toggleBulkPanel}
         onExtractExif={ws.extractExif}

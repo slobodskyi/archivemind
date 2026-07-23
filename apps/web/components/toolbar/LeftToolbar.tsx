@@ -4,7 +4,6 @@ import {
   SelectToolIcon,
   HandToolIcon,
   SearchIcon,
-  ChatIcon,
   TagIcon,
   ExifIcon,
   AddIcon,
@@ -24,13 +23,13 @@ interface LeftToolbarProps {
   showAddToProject?: boolean;
   selCount?: number;
   zoomPct?: string;
+  /** Smart Search panel open? (the magnifier is the single search entry point). */
   searchOpen?: boolean;
-  chatOpen?: boolean;
   bulkPanelOpen?: boolean;
   onSelectTool?: () => void;
   onHandTool?: () => void;
+  /** Toggle the Smart Search panel (the real search — see ChatPanel). */
   onOpenSearch?: () => void;
-  onToggleChat?: () => void;
   onToggleBulkPanel?: () => void;
   onExtractExif?: () => void;
   onAdd?: () => void;
@@ -87,12 +86,10 @@ function LeftToolbar({
   selCount = 0,
   zoomPct = "100%",
   searchOpen = false,
-  chatOpen = false,
   bulkPanelOpen = false,
   onSelectTool,
   onHandTool,
   onOpenSearch,
-  onToggleChat,
   onToggleBulkPanel,
   onExtractExif,
   onAdd,
@@ -173,13 +170,8 @@ function LeftToolbar({
       </button>
       <Divider />
 
-      {!allFilesMode && (
-        <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
-          <SearchIcon />
-        </TbButton>
-      )}
-      <TbButton onClick={onToggleChat} title="AI Assistant" active={chatOpen}>
-        <ChatIcon />
+      <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
+        <SearchIcon />
       </TbButton>
       <TbButton onClick={onToggleTrash} title="Trash" active={trashOpen}>
         <TrashIcon />

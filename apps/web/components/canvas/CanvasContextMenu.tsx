@@ -11,7 +11,7 @@ interface CanvasContextMenuProps {
   onClose: () => void;
   onSelectTool: () => void;
   onHandTool: () => void;
-  onOpenSearch: () => void;
+  /** Opens the Smart Search panel (ChatPanel) — the single search entry point. */
   onToggleChat: () => void;
   onToggleBulkPanel: () => void;
   onExtractExif: () => void;
@@ -31,7 +31,6 @@ export default function CanvasContextMenu({
   onClose,
   onSelectTool,
   onHandTool,
-  onOpenSearch,
   onToggleChat,
   onToggleBulkPanel,
   onExtractExif,
@@ -83,8 +82,7 @@ export default function CanvasContextMenu({
         {!allFilesMode && (
           <>
             <Divider />
-            <Item label="Smart Search" onClick={run(onOpenSearch)} />
-            <Item label="AI Assistant" onClick={run(onToggleChat)} />
+            <Item label="Smart Search" onClick={run(onToggleChat)} />
             <Item label="Generate Captions" onClick={run(onToggleBulkPanel)} />
             <Item label="Extract EXIF" onClick={run(onExtractExif)} />
             <Divider />
@@ -95,7 +93,7 @@ export default function CanvasContextMenu({
         {allFilesMode && (
           <>
             <Divider />
-            <Item label="AI Assistant" onClick={run(onToggleChat)} />
+            <Item label="Smart Search" onClick={run(onToggleChat)} />
           </>
         )}
         {deletable && (
