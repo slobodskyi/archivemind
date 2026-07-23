@@ -471,6 +471,10 @@ export interface Workspace {
   renameFrame: (id: string, label: string) => void;
   selectFrame: (id: string) => void;
   exportFrame: (id: string) => void;
+  beginFrameMove: (id: string) => void;
+  beginFrameResize: (id: string, handle: "nw" | "ne" | "sw" | "se") => void;
+  frameGestureMove: (dx: number, dy: number) => void;
+  endFrameGesture: () => void;
 
   // Folders (ADR 0034) — server-backed grouping, client-side geometry
   folders: FolderModel[];
@@ -2091,6 +2095,85 @@ export function useWorkspace(
     [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast],
   );
 
+  // Move / resize an artboard while its content rides along (the user's ask:
+  // "не втрачалось те що всередині"). Content is captured positionally at gesture
+  // start, then translated (move) or scaled about the fixed corner (resize), so
+  // nothing inside is left behind. Cumulative deltas arrive in content space.
+  const frameGesture = useRef<{
+    id: string;
+    mode: "move" | "resize";
+    handle: "nw" | "ne" | "sw" | "se";
+    orig: Frame;
+    content: { id: string; cx: number; cy: number }[];
+  } | null>(null);
+
+  const beginFrameMove = useCallback(
+    (id: string) => {
+      const s = stateRef.current;
+      const frame = s.frames.find((f) => f.id === id);
+      if (!frame) return;
+      const pos = activeTilePositions({ ...s, view: "neural" });
+      const content = frameContentIds(frame).map((cid) => ({ id: cid, cx: pos[cid]?.cx ?? 0, cy: pos[cid]?.cy ?? 0 }));
+      pushHistory();
+      frameGesture.current = { id, mode: "move", handle: "se", orig: { ...frame }, content };
+    },
+    [activeTilePositions, frameContentIds, pushHistory],
+  );
+
+  const beginFrameResize = useCallback(
+    (id: string, handle: "nw" | "ne" | "sw" | "se") => {
+      const s = stateRef.current;
+      const frame = s.frames.find((f) => f.id === id);
+      if (!frame) return;
+      const pos = activeTilePositions({ ...s, view: "neural" });
+      const content = frameContentIds(frame).map((cid) => ({ id: cid, cx: pos[cid]?.cx ?? 0, cy: pos[cid]?.cy ?? 0 }));
+      pushHistory();
+      frameGesture.current = { id, mode: "resize", handle, orig: { ...frame }, content };
+    },
+    [activeTilePositions, frameContentIds, pushHistory],
+  );
+
+  const frameGestureMove = useCallback(
+    (dx: number, dy: number) => {
+      const g = frameGesture.current;
+      if (!g) return;
+      const s = stateRef.current;
+      const asset = { ...s.galleryOverrides.asset };
+      let nf: Frame;
+      if (g.mode === "move") {
+        nf = { ...g.orig, x: g.orig.x + dx, y: g.orig.y + dy };
+        for (const c of g.content) asset[c.id] = { x: c.cx + dx, y: c.cy + dy };
+      } else {
+        const MIN = 80;
+        const west = g.handle === "nw" || g.handle === "sw";
+        const north = g.handle === "nw" || g.handle === "ne";
+        const w = Math.max(MIN, west ? g.orig.w - dx : g.orig.w + dx);
+        const h = Math.max(MIN, north ? g.orig.h - dy : g.orig.h + dy);
+        const x = west ? g.orig.x + (g.orig.w - w) : g.orig.x;
+        const y = north ? g.orig.y + (g.orig.h - h) : g.orig.y;
+        nf = { ...g.orig, x, y, w, h };
+        // Scale content about the corner that stays put, so it keeps its
+        // relative place inside the resized frame (never falls out).
+        const anchorX = west ? g.orig.x + g.orig.w : g.orig.x;
+        const anchorY = north ? g.orig.y + g.orig.h : g.orig.y;
+        const sxr = w / g.orig.w;
+        const syr = h / g.orig.h;
+        for (const c of g.content) {
+          asset[c.id] = { x: anchorX + (c.cx - anchorX) * sxr, y: anchorY + (c.cy - anchorY) * syr };
+        }
+      }
+      setState({
+        frames: s.frames.map((f) => (f.id === g.id ? nf : f)),
+        galleryOverrides: { ...s.galleryOverrides, asset },
+      });
+    },
+    [setState],
+  );
+
+  const endFrameGesture = useCallback(() => {
+    frameGesture.current = null;
+  }, []);
+
   /** "Tidy up" (issue #3): snap the Canvas grid back to order, with the same
    *  glide a view switch uses. Selection ≥ 2 packs just those tiles into an even
    *  grid where they already sit (Figma-style, selection-first); selection ≤ 1
@@ -3409,6 +3492,10 @@ export function useWorkspace(
     renameFrame,
     selectFrame,
     exportFrame,
+    beginFrameMove,
+    beginFrameResize,
+    frameGestureMove,
+    endFrameGesture,
 
     folders: folderModels,
     toggleFolder,
