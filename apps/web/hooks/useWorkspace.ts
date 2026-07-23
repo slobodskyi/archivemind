@@ -31,6 +31,7 @@ import {
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
+  packGrid,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
   timelineAxisLayout as computeTimelineLayout,
@@ -213,6 +214,10 @@ type DragSession =
       orig: { x: number; y: number };
       moved: boolean;
       historyPushed: boolean;
+      // When the grabbed tile is part of a multi-selection, the whole selection
+      // moves together: each selected tile's original center, captured at
+      // pointer-down and translated by the same (dx,dy). Null = single-tile drag.
+      groupCenters: Record<string, { x: number; y: number }> | null;
     }
   | {
       // Dragging a cloud's label moves every tile in that cloud together; a
@@ -382,6 +387,8 @@ export interface Workspace {
   duplicateFiles: () => void;
   exportFiles: () => void;
   groupFiles: () => void;
+  /** Re-arrange the Canvas into a clean grid (selection-aware). */
+  tidyUp: () => void;
   addToNewArtboard: () => void;
   addToExistingArtboard: (frameId: string) => void;
 
@@ -836,6 +843,7 @@ export function useWorkspace(
         orig: origCenter,
         moved: false,
         historyPushed: true,
+        groupCenters: null,
       };
     },
     [pushHistory],
@@ -861,6 +869,19 @@ export function useWorkspace(
         selectedIds = s.selectedIds.includes(id) ? s.selectedIds : [id];
       }
       setState({ selectedIds, drawerId: null });
+      // Group move: grabbing any member of a multi-selection drags the whole set
+      // by one delta (Figma/Miro semantics). Capture every selected tile's center
+      // now, from the active view's layout; a single-tile drag stays groupCenters
+      // = null and moves only the grabbed key.
+      let groupCenters: Record<string, { x: number; y: number }> | null = null;
+      if (selectedIds.length > 1 && selectedIds.includes(id)) {
+        const tiles = activeTilePositions(s);
+        groupCenters = {};
+        for (const gid of selectedIds) {
+          const t = tiles[gid];
+          if (t) groupCenters[gid] = { x: t.cx, y: t.cy };
+        }
+      }
       dragRef.current = {
         mode: "gallery",
         kind,
@@ -870,9 +891,10 @@ export function useWorkspace(
         orig: origCenter,
         moved: false,
         historyPushed: false,
+        groupCenters,
       };
     },
-    [setState],
+    [setState, activeTilePositions],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
    *  that matches the active sort, so a tile stays where you drop it within the
@@ -983,11 +1005,16 @@ export function useWorkspace(
         if (!d.moved) return;
         const dx = (e.clientX - d.sx) / s.scale,
           dy = (e.clientY - d.sy) / s.scale;
+        const bucket = { ...s.galleryOverrides[d.kind] };
+        if (d.groupCenters) {
+          for (const gid of Object.keys(d.groupCenters)) {
+            bucket[gid] = { x: d.groupCenters[gid].x + dx, y: d.groupCenters[gid].y + dy };
+          }
+        } else {
+          bucket[d.key] = { x: d.orig.x + dx, y: d.orig.y + dy };
+        }
         setState({
-          galleryOverrides: {
-            ...s.galleryOverrides,
-            [d.kind]: { ...s.galleryOverrides[d.kind], [d.key]: { x: d.orig.x + dx, y: d.orig.y + dy } },
-          },
+          galleryOverrides: { ...s.galleryOverrides, [d.kind]: bucket },
         });
       } else if (d.mode === "cloudDrag") {
         // Timeline's whole-cloud drag is VERTICAL-only (ADR 0024): the label,
@@ -1580,6 +1607,38 @@ export function useWorkspace(
     setContextMenu(null);
     flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to "${frame.label}"`);
   }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
+
+  /** "Tidy up" (issue #3): snap the Canvas grid back to order, with the same
+   *  glide a view switch uses. Selection ≥ 2 packs just those tiles into an even
+   *  grid where they already sit (Figma-style, selection-first); selection ≤ 1
+   *  resets the whole asset bucket to assetGallery's deterministic default grid —
+   *  except tiles that live inside an artboard (their override is what holds them
+   *  there), so a tidy-all never ejects framed work. Undoable via pushHistory;
+   *  neural-view only (the bottom action bar that hosts it is neural-only). */
+  const tidyUp = useCallback(() => {
+    const s = stateRef.current;
+    const pos = activeTilePositions({ ...s, view: "neural" });
+    let nextAsset: Record<string, CanvasPoint>;
+    if (s.selectedIds.length >= 2) {
+      nextAsset = { ...s.galleryOverrides.asset, ...packGrid(s.selectedIds, pos) };
+    } else {
+      if (Object.keys(s.galleryOverrides.asset).length === 0) return; // already the default grid
+      const keep: Record<string, CanvasPoint> = {};
+      for (const [id, center] of Object.entries(s.galleryOverrides.asset)) {
+        const t = pos[id];
+        const inFrame = t
+          ? s.frames.some((f) => t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h)
+          : true; // not in the current layout — keep its override defensively
+        if (inFrame) keep[id] = center;
+      }
+      nextAsset = keep;
+    }
+    pushHistory();
+    setState({ galleryOverrides: { ...s.galleryOverrides, asset: nextAsset }, tilesAnimating: true });
+    if (animTimer.current) clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+    setContextMenu(null);
+  }, [activeTilePositions, pushHistory, setState]);
 
   /** Open the grid context menu at the cursor. A right-click on an unselected
    *  tile selects it first (matching desktop file-manager behaviour) so the menu
@@ -2640,6 +2699,7 @@ export function useWorkspace(
     duplicateFiles,
     exportFiles,
     groupFiles,
+    tidyUp,
     addToNewArtboard,
     addToExistingArtboard,
 

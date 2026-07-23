@@ -274,6 +274,39 @@ export function droppedAssetCenters(ids: readonly string[], anchor: CanvasPoint)
   );
 }
 
+/** Packs the given tiles into an evenly-spaced, near-square grid centered on the
+ *  centroid of their current positions, honoring each tile's cell footprint.
+ *  Returns new CENTERS (galleryOverrides store centers, not top-lefts). Ids with
+ *  no entry in `positions` are skipped. Deterministic — no Math.random — so it
+ *  satisfies the layout-reproducibility rule. Used by the "Tidy up" action to
+ *  align a selection into a clean grid where it already sits. */
+export function packGrid(
+  ids: readonly string[],
+  positions: Readonly<Record<string, TilePos>>,
+): Record<string, CanvasPoint> {
+  const present = ids.filter((id) => positions[id]);
+  if (present.length === 0) return {};
+  let sx = 0,
+    sy = 0;
+  for (const id of present) {
+    sx += positions[id].cx;
+    sy += positions[id].cy;
+  }
+  const cx0 = sx / present.length,
+    cy0 = sy / present.length;
+  const cols = Math.max(1, Math.round(Math.sqrt(present.length)));
+  const rows = Math.ceil(present.length / cols);
+  const startX = cx0 - ((cols - 1) * ASSET_CELL_W) / 2;
+  const startY = cy0 - ((rows - 1) * ASSET_CELL_H) / 2;
+  const out: Record<string, CanvasPoint> = {};
+  present.forEach((id, index) => {
+    const col = index % cols,
+      row = Math.floor(index / cols);
+    out[id] = { x: startX + col * ASSET_CELL_W, y: startY + row * ASSET_CELL_H };
+  });
+  return out;
+}
+
 /** Strict rectangle intersection: touching an edge alone is not a hit. */
 export function hitTestTiles(pos: Readonly<Record<string, TilePos>>, bounds: Bounds): string[] {
   return Object.entries(pos)
