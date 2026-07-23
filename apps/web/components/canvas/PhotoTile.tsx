@@ -54,6 +54,10 @@ export default function PhotoTile({
   const zIndex = hovered ? 30 : selected ? 12 : 2;
   const status = stage === "ready" ? "" : `, ${STAGE_LABEL[stage]}`;
   const posTransition = animating ? "left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1)" : "";
+  // A tile with no image yet, while still being uploaded/processed, shows a
+  // loading shimmer instead of a bare tint — a static "Preview unavailable"
+  // (stage ready) or a failed tile must NOT shimmer forever.
+  const loading = stage === "uploading" || stage === "processing";
 
   return (
     <div
@@ -122,6 +126,9 @@ export default function PhotoTile({
           boxShadow: hovered ? "0 12px 28px rgba(0,0,0,.42)" : "none",
         }}
       >
+        {!src && loading && (
+          <span aria-hidden="true" className="am-tile-shimmer" style={{ position: "absolute", inset: 0 }} />
+        )}
         {!src && (
           <span
             style={{
