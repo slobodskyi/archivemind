@@ -52,6 +52,10 @@ const MESSAGES: Record<string, string> = Object.assign(Object.create(null), {
   // Server-side misconfiguration: the user can't fix it, so don't imply they can.
   provider_disabled: "This sign-in method is currently unavailable.",
   signup_disabled: "New account creation is currently disabled.",
+
+  // Reached /auth/update-password without a recovery session (link expired
+  // mid-flow, or a direct hit) — send them back to request a fresh link.
+  recovery_session_missing: "That password-reset link is invalid or has expired. Request a new one below.",
 });
 
 /**

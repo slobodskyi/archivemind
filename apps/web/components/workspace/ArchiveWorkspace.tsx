@@ -28,12 +28,18 @@ import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import ImageEditor from "@/components/editor/ImageEditor";
-import SearchModal from "@/components/modals/SearchModal";
 import ExportDialog from "@/components/export/ExportDialog";
 import ImportModal from "@/components/import/ImportModal";
 import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
+// SearchModal retired — the magnifier now opens the real Smart Search panel (ChatPanel).
 import ConfirmModal from "@/components/modals/ConfirmModal";
+
+interface Account {
+  initials: string;
+  name: string;
+  email: string;
+}
 
 interface ArchiveWorkspaceProps {
   initialPhotos: Photo[];
@@ -41,6 +47,7 @@ interface ArchiveWorkspaceProps {
   projects: ProjectOption[];
   currentProjectId: string;
   initialGroups: CanvasGroup[];
+  account: Account;
 }
 
 export default function ArchiveWorkspace({
@@ -49,6 +56,7 @@ export default function ArchiveWorkspace({
   projects,
   currentProjectId,
   initialGroups,
+  account,
 }: ArchiveWorkspaceProps) {
   const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId, initialGroups);
 
@@ -166,7 +174,7 @@ export default function ArchiveWorkspace({
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t2)" }}>
             {ws.projCurrent === "all" ? "Your archive is empty" : "This project is empty"}
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+          <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
             {ws.allFilesMode ? "Open a project to upload files" : "Drop files anywhere — or import from a source"}
           </div>
           <button
@@ -196,7 +204,7 @@ export default function ArchiveWorkspace({
         projLabel={ws.projLabel}
         onHome={ws.goHome}
         onOpenProj={ws.openProj}
-        showZoomControl
+        showZoomControl={!ws.isMapView}
         zoomPct={ws.zoomPct}
         onToggleZoomMenu={ws.toggleZoomMenu}
         canUndo={ws.canUndo}
@@ -205,6 +213,8 @@ export default function ArchiveWorkspace({
         onRedo={ws.redo}
         onFlashToast={ws.flashToast}
         onOpenAcct={ws.openAcct}
+        accountInitials={account.initials}
+        accountName={account.name}
         viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
         afterProject={
           ws.projectMode ? (
@@ -228,7 +238,7 @@ export default function ArchiveWorkspace({
         onSelect={ws.selectProject}
       />
 
-      <AccountDropdown open={ws.acctOpen} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />
+      <AccountDropdown open={ws.acctOpen} account={account} onClose={ws.closeAcct} onFlashToast={ws.flashToast} />
 
       <ChatPanel
         open={ws.chatOpen}
@@ -245,16 +255,15 @@ export default function ArchiveWorkspace({
       <LeftToolbar
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
+        isMapView={ws.isMapView}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
-        searchOpen={ws.search}
-        chatOpen={ws.chatOpen}
+        searchOpen={ws.chatOpen}
         bulkPanelOpen={ws.bulkPanelOpen}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
-        onOpenSearch={ws.openSearch}
-        onToggleChat={ws.toggleChat}
+        onOpenSearch={ws.toggleChat}
         onToggleBulkPanel={ws.toggleBulkPanel}
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
@@ -290,7 +299,10 @@ export default function ArchiveWorkspace({
         />
       )}
 
-      <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />
+      {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
+          show/pan the hidden neural grid and physically cover MapLibre's own
+          zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
+      {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />}
 
       <AddToProjectPopover
         open={ws.addProjOpen}
@@ -372,8 +384,6 @@ export default function ArchiveWorkspace({
         onBatchSettled={ws.onUploadBatchSettled}
       />
 
-      <SearchModal open={ws.search} onClose={ws.closeSearch} />
-
       {ws.exportOpen && <ExportDialog assetIds={ws.exportIds} onClose={ws.closeExport} />}
 
       <CanvasContextMenu
@@ -383,7 +393,6 @@ export default function ArchiveWorkspace({
         onClose={ws.closeContextMenu}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
-        onOpenSearch={ws.openSearch}
         onToggleChat={ws.toggleChat}
         onToggleBulkPanel={ws.toggleBulkPanel}
         onExtractExif={ws.extractExif}

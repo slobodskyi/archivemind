@@ -103,12 +103,12 @@ function ResultStrip({ results, onOpenResult, onSelectResults }: { results: Chat
           Select {strong.length} on canvas
         </button>
         {weak.length > 0 && (
-          <button onClick={() => setShowWeak((v) => !v)} style={{ ...smallBtn, color: "var(--tm)" }}>
+          <button onClick={() => setShowWeak((v) => !v)} style={{ ...smallBtn, color: "var(--t2b)" }}>
             {showWeak ? "Hide" : "Show"} {weak.length} more distant
           </button>
         )}
         {showWeak && weak.length > 0 && (
-          <button onClick={() => onSelectResults(results.map((r) => r.assetId))} style={{ ...smallBtn, color: "var(--tm)" }}>
+          <button onClick={() => onSelectResults(results.map((r) => r.assetId))} style={{ ...smallBtn, color: "var(--t2b)" }}>
             Select all {results.length}
           </button>
         )}
@@ -142,7 +142,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
           <span style={{ display: "flex", width: 27, height: 27, alignItems: "center", justifyContent: "center", borderRadius: 2, background: "color-mix(in srgb,var(--ac) 18%,transparent)" }}>
             <SparkleIcon width={13} height={13} stroke="var(--ac)" strokeWidth={1.7} />
           </span>
-          <span style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)" }}>AI Assistant</span>
+          <span style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)" }}>Smart Search</span>
           <span style={{ height: 18, padding: "0 7px", borderRadius: 2, background: "var(--bg-el)", fontSize: 10, color: "var(--tm)", display: "inline-flex", alignItems: "center" }}>
             Gemini
           </span>
@@ -234,7 +234,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
       <div style={{ padding: "9px 11px 11px", borderTop: "1px solid var(--bd)" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 7, background: "var(--bg-in)", border: "1px solid var(--bdh)", borderRadius: 2, padding: "7px 7px 7px 11px" }}>
           <textarea
-            placeholder="Ask about your archive…"
+            placeholder="Search your archive — a place, object, or scene…"
             value={input}
             onChange={onInput}
             onKeyDown={onKey}

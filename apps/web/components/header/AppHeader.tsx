@@ -20,6 +20,9 @@ interface AppHeaderProps {
   onRedo?: () => void;
   onFlashToast?: (text: string) => void;
   onOpenAcct?: () => void;
+  /** Real account initials/name for the avatar (replaces the old hardcoded "AM"). */
+  accountInitials?: string;
+  accountName?: string;
   viewTabs?: ReactNode;
   /** Rendered in the breadcrumb, right of the project name (e.g. the Workspace toggle). */
   afterProject?: ReactNode;
@@ -38,6 +41,8 @@ export default function AppHeader({
   onRedo,
   onFlashToast,
   onOpenAcct,
+  accountInitials = "",
+  accountName,
   viewTabs,
   afterProject,
 }: AppHeaderProps) {
@@ -209,6 +214,7 @@ export default function AppHeader({
         <button
           onClick={onOpenAcct}
           aria-label="Account menu"
+          title={accountName}
           style={{
             width: 30,
             height: 30,
@@ -222,7 +228,7 @@ export default function AppHeader({
             color: "var(--t1)",
           }}
         >
-          AM
+          {accountInitials}
         </button>
       </div>
     </div>

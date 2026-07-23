@@ -189,7 +189,6 @@ interface WorkspaceState {
   acctOpen: boolean;
   projOpen: boolean;
   addProjOpen: boolean;
-  search: boolean;
   helpOpen: boolean;
   imp: ImpState;
   galleryOverrides: GalleryOverrides;
@@ -450,7 +449,7 @@ export interface Workspace {
   resetEdit: (id: string) => void;
   setLang: (l: Language) => void;
   setStyle: (s: CaptionStyle) => void;
-  copyCap: () => void;
+  copyCap: (text: string) => void;
   regen: () => void;
   saveCaption: (text: string) => void;
   genSingle: (id: string) => void;
@@ -585,11 +584,6 @@ export interface Workspace {
   sidebarViewMode: SidebarViewMode;
   setSidebarViewMode: (mode: SidebarViewMode) => void;
 
-  // Search
-  search: boolean;
-  openSearch: () => void;
-  closeSearch: () => void;
-
   // Help
   helpOpen: boolean;
   openHelp: () => void;
@@ -669,7 +663,6 @@ export function useWorkspace(
     acctOpen: false,
     projOpen: false,
     addProjOpen: false,
-    search: false,
     helpOpen: false,
     imp: { open: false },
     galleryOverrides: EMPTY_GALLERY_OVERRIDES,
@@ -1432,11 +1425,25 @@ export function useWorkspace(
     [openDrawer],
   );
 
-  const copyCap = useCallback(() => {
-    setState({ copyLabel: "Copied" });
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setState({ copyLabel: "Copy" }), 1400);
-  }, [setState]);
+  const copyCap = useCallback(
+    async (text: string) => {
+      // The visible caption (incl. any unsaved edit) is copied from the drawer;
+      // only claim "Copied" after the clipboard write actually succeeds — a
+      // false "Copied" made users paste stale clipboard content elsewhere.
+      const caption = text.trim();
+      if (!caption) return;
+      try {
+        await navigator.clipboard.writeText(caption);
+      } catch {
+        flashToast("Couldn't copy — select the caption and copy manually");
+        return;
+      }
+      setState({ copyLabel: "Copied" });
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setState({ copyLabel: "Copy" }), 1400);
+    },
+    [setState, flashToast],
+  );
 
   /** Regenerate the visible caption (drawer lang × style) via a real caption
    *  job (#14). An edited caption asks first, then clears is_edited — the
@@ -2575,8 +2582,6 @@ export function useWorkspace(
 
   // ── Search / Help ────────────────────────────────────────────────────────
 
-  const openSearch = useCallback(() => setState({ search: true }), [setState]);
-  const closeSearch = useCallback(() => setState({ search: false }), [setState]);
   const openHelp = useCallback(() => setState({ helpOpen: true }), [setState]);
   const closeHelp = useCallback(() => setState({ helpOpen: false }), [setState]);
 
@@ -2804,7 +2809,9 @@ export function useWorkspace(
   // ── Misc toolbar actions ────────────────────────────────────────────────
 
   const extractExif = useCallback(
-    () => flashToast(`EXIF extracted for ${stateRef.current.photos.length} files`),
+    // EXIF is already read during ingest (worker) — this button never did work.
+    // Tell the truth instead of faking a completion toast for a no-op.
+    () => flashToast("EXIF is read automatically when files are imported"),
     [flashToast],
   );
 
@@ -3112,7 +3119,6 @@ export function useWorkspace(
       const s = stateRef.current;
       if (s.imp.open) return; // ImportModal owns Esc while open (upload-aware)
       if (s.drawerId) closeDrawer();
-      else if (s.search) closeSearch();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
       else if (s.trashOpen) closeTrash();
@@ -3120,7 +3126,7 @@ export function useWorkspace(
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeSearch, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos]);
+  }, [closeDrawer, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
   // hand-tool path, so the selected tool is never mutated and simply resumes on
@@ -3591,9 +3597,6 @@ export function useWorkspace(
     sidebarViewMode: state.sidebarViewMode,
     setSidebarViewMode,
 
-    search: state.search,
-    openSearch,
-    closeSearch,
 
     helpOpen: state.helpOpen,
     openHelp,

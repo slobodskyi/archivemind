@@ -20,16 +20,22 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   // Parallel: ensureWorkspace is idempotent bootstrap, and getPhotos reuses
   // this page's client (skipping its internal re-auth) — the canvas load drops
   // from four sequential round trips to two.
-  const [workspaceId, photos, projectCards, groups] = await Promise.all([
+  const [workspaceId, photos, projectCards, groups, { data: profile }] = await Promise.all([
     ensureWorkspace(supabase, user),
     getPhotos(id, supabase),
     getProjectCards(supabase),
     getCanvasGroups(supabase, id),
+    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
   const projects = projectCards.map((p) => ({ id: p.id, name: p.name, count: p.count }));
 
   // Guard: an unknown project id (deleted, or not the caller's) → home.
   if (id !== "all" && !projects.some((p) => p.id === id)) redirect("/");
+
+  // Real identity for the header — mirrors app/page.tsx so the canvas no longer
+  // shows a hardcoded "Alex M." that contradicts the home hub.
+  const name = profile?.display_name ?? user.email?.split("@")[0] ?? "You";
+  const account = { initials: name.slice(0, 2).toUpperCase(), name, email: user.email ?? "" };
 
   return (
     <ArchiveWorkspace
@@ -39,6 +45,7 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
       projects={projects}
       currentProjectId={id}
       initialGroups={groups}
+      account={account}
     />
   );
 }

@@ -1,8 +1,15 @@
 import { Z } from "@/lib/ui";
 import { SettingsIcon, BillingIcon, UsageIcon, SignOutIcon } from "@/components/icons/icons";
 
+interface Account {
+  initials: string;
+  name: string;
+  email: string;
+}
+
 interface AccountDropdownProps {
   open: boolean;
+  account: Account;
   onClose: () => void;
   onFlashToast: (text: string) => void;
 }
@@ -10,11 +17,11 @@ interface AccountDropdownProps {
 const ITEMS = [
   { label: "Account Settings", icon: SettingsIcon, color: "var(--t2)", toast: "Settings coming soon" },
   { label: "Billing & Plan", icon: BillingIcon, color: "var(--t2)", toast: "Billing coming soon" },
-  { label: "Usage & Storage", icon: UsageIcon, color: "var(--t2)", toast: "12% of 500 GB used" },
+  { label: "Usage & Storage", icon: UsageIcon, color: "var(--t2)", toast: "Usage details coming soon" },
   { label: "Sign out", icon: SignOutIcon, color: "var(--red)", toast: "Signed out" },
 ];
 
-export default function AccountDropdown({ open, onClose, onFlashToast }: AccountDropdownProps) {
+export default function AccountDropdown({ open, account, onClose, onFlashToast }: AccountDropdownProps) {
   if (!open) return null;
   return (
     <>
@@ -51,11 +58,11 @@ export default function AccountDropdown({ open, onClose, onFlashToast }: Account
               flex: "0 0 auto",
             }}
           >
-            AM
+            {account.initials}
           </div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)" }}>Alex M.</div>
-            <div style={{ fontSize: 10.5, color: "var(--tm)", marginTop: 1 }}>Pro · 12% used</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 400, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name}</div>
+            <div style={{ fontSize: 10.5, color: "var(--t2)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={account.email}>{account.email}</div>
           </div>
         </div>
         <div style={{ height: 1, background: "var(--bd)", marginBottom: 4 }} />

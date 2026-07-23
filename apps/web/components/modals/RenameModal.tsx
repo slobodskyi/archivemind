@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useId, useState } from "react";
+import { useDialog } from "@/hooks/useDialog";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 
 interface RenameModalProps {
@@ -13,6 +14,8 @@ interface RenameModalProps {
  *  instead of syncing initialName via an effect. */
 export default function RenameModal({ open, initialName, onSave, onClose }: RenameModalProps) {
   const [name, setName] = useState(initialName);
+  const dialogRef = useDialog<HTMLDivElement>(open, onClose);
+  const titleId = useId();
 
   if (!open) return null;
   const trimmed = name.trim();
@@ -32,18 +35,24 @@ export default function RenameModal({ open, initialName, onSave, onClose }: Rena
       }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
         style={{ width: 380, background: "var(--bg-sf)", border: "1px solid var(--bdh)", borderRadius: 2, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,.7)" }}
       >
         <div style={{ padding: "20px 20px 16px" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", marginBottom: 12 }}>Rename project</div>
+          <div id={titleId} style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", marginBottom: 12 }}>Rename project</div>
           <input
-            autoFocus
+            // Initial focus is handled by useDialog (which first captures the
+            // trigger to restore focus to it on close) — autoFocus here would
+            // pre-empt that capture and lose the return target.
+            data-autofocus=""
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && trimmed) onSave(trimmed);
-              if (e.key === "Escape") onClose();
             }}
             style={{ width: "100%", padding: "10px 12px", background: "var(--bg-in)", border: "1px solid var(--bdh)", borderRadius: 2, color: "var(--t1)", fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
           />
@@ -58,7 +67,7 @@ export default function RenameModal({ open, initialName, onSave, onClose }: Rena
           </button>
           <button
             onClick={onClose}
-            style={{ flex: 1, height: 34, background: "transparent", color: "var(--t3)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+            style={{ flex: 1, height: 34, background: "transparent", color: "var(--t2b)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
           >
             Cancel
           </button>

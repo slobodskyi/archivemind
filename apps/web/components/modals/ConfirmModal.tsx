@@ -1,3 +1,5 @@
+import { useId } from "react";
+import { useDialog } from "@/hooks/useDialog";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 
 interface ConfirmModalProps {
@@ -11,6 +13,9 @@ interface ConfirmModalProps {
 }
 
 export default function ConfirmModal({ open, title, body, confirmLabel, danger, onConfirm, onClose }: ConfirmModalProps) {
+  const dialogRef = useDialog<HTMLDivElement>(open, onClose);
+  const titleId = useId();
+  const bodyId = useId();
   if (!open) return null;
   return (
     <div
@@ -27,12 +32,17 @@ export default function ConfirmModal({ open, title, body, confirmLabel, danger, 
       }}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={bodyId}
         onClick={(e) => e.stopPropagation()}
         style={{ width: 380, background: "var(--bg-sf)", border: "1px solid var(--bdh)", borderRadius: 2, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,.7)" }}
       >
         <div style={{ padding: "20px 20px 16px" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", marginBottom: 8 }}>{title}</div>
-          <div style={{ fontSize: 12.5, color: "var(--t2)", lineHeight: 1.5 }}>{body}</div>
+          <div id={titleId} style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)", marginBottom: 8 }}>{title}</div>
+          <div id={bodyId} style={{ fontSize: 12.5, color: "var(--t2)", lineHeight: 1.5 }}>{body}</div>
         </div>
         <div style={{ display: "flex", gap: 8, padding: "0 20px 20px" }}>
           <button
@@ -55,7 +65,9 @@ export default function ConfirmModal({ open, title, body, confirmLabel, danger, 
           </button>
           <button
             onClick={onClose}
-            style={{ flex: 1, height: 34, background: "transparent", color: "var(--t3)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+            // For an irreversible/danger action, focus lands on Cancel, not Confirm.
+            data-autofocus={danger ? "" : undefined}
+            style={{ flex: 1, height: 34, background: "transparent", color: "var(--t2b)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
           >
             Cancel
           </button>

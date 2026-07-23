@@ -52,7 +52,8 @@ export default function ViewTabs({ show, view, onSelect }: ViewTabsProps) {
               fontFamily: "inherit",
               cursor: "pointer",
               background: active ? "var(--bg-el)" : "transparent",
-              color: active ? "var(--t1)" : "var(--t3)",
+              // Inactive tabs use --t2b (4.72:1); --t3 (2.96:1) fails WCAG.
+              color: active ? "var(--t1)" : "var(--t2b)",
             }}
           >
             <Icon />

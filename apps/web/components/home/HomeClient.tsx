@@ -576,7 +576,7 @@ function TrashedPhotoCard({
         <div style={{ fontSize: 11.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={asset.name}>
           {asset.name}
         </div>
-        {left && <div style={{ fontSize: 10.5, color: "var(--tm)", marginTop: 2 }}>{left}</div>}
+        {left && <div style={{ fontSize: 10.5, color: "var(--t2)", marginTop: 2 }}>{left}</div>}
         <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
           <button
             onClick={onRestore}
@@ -673,9 +673,9 @@ function ProjectCardView({
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {title}
         </div>
-          <div style={{ fontSize: 11, color: "var(--tm)", marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 2 }}>
             {count} {count === 1 ? "file" : "files"}
-            {meta && <span style={{ color: "var(--t3)" }}> · {meta}</span>}
+            {meta && <span style={{ color: "var(--t2b)" }}> · {meta}</span>}
           </div>
         </div>
       </Link>
