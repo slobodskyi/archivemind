@@ -40,7 +40,7 @@ update public.assets set status = 'deleted'
  where id = '00000000-0000-0000-0000-000000000a04';
 select isnt(
   (select deleted_at from public.assets where id = '00000000-0000-0000-0000-000000000a04'),
-  null,
+  null::timestamptz,
   'flipping status to deleted stamps deleted_at');
 
 update public.assets set purged_at = now()
@@ -49,11 +49,11 @@ update public.assets set status = 'active'
  where id = '00000000-0000-0000-0000-000000000a04';
 select is(
   (select deleted_at from public.assets where id = '00000000-0000-0000-0000-000000000a04'),
-  null,
+  null::timestamptz,
   'leaving trash clears deleted_at');
 select is(
   (select purged_at from public.assets where id = '00000000-0000-0000-0000-000000000a04'),
-  null,
+  null::timestamptz,
   'leaving trash clears purged_at too — a stale stamp must not exempt the next life from sweeps');
 
 -- ── the sweep ───────────────────────────────────────────────────────────
