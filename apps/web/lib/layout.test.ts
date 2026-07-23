@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Photo } from "@/types";
 import {
+  appendClusterAnchor,
   assetGallery,
   droppedAssetCenters,
   fitBounds,
@@ -182,6 +183,25 @@ describe("droppedAssetCenters", () => {
       expect(points.reduce((sum, point) => sum + point.x, 0) / points.length).toBe(anchor.x);
       expect((Math.min(...points.map((point) => point.y)) + Math.max(...points.map((point) => point.y))) / 2).toBe(anchor.y);
     }
+  });
+
+  it("caps a large batch at 6 columns (not a tall 4-wide strip)", () => {
+    const ids = Array.from({ length: 30 }, (_, i) => `f${i}`);
+    const xs = Object.values(droppedAssetCenters(ids, { x: 0, y: 0 })).map((p) => p.x);
+    // 30 files → ceil(sqrt(30))=6 distinct columns, matching the base gallery.
+    expect(new Set(xs).size).toBe(6);
+  });
+});
+
+describe("appendClusterAnchor", () => {
+  it("centers a batch one cell below the content bbox so it never overlaps", () => {
+    const bounds = { xl: 0, yt: 0, xr: 400, yb: 600 };
+    const anchor = appendClusterAnchor(bounds, 4);
+    expect(anchor.x).toBe(200); // horizontal center of the content
+    // A batch dropped at this anchor puts its top row exactly one cell
+    // (ASSET_CELL_H = 176) below the content's bottom edge — no overlap.
+    const topY = Math.min(...Object.values(droppedAssetCenters(["a", "b", "c", "d"], anchor)).map((p) => p.y));
+    expect(topY).toBe(600 + 176);
   });
 });
 

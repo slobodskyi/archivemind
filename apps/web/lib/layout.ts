@@ -250,10 +250,33 @@ export function assetGallery(
   return { pos, bounds: positionsBounds(pos) };
 }
 
+/** Number of columns a dropped batch of `count` files packs into: a near-square
+ *  block, capped at the base gallery's 6 so a big batch is a compact block rather
+ *  than a tall ≤4-wide strip that runs off-screen. */
+function dropCols(count: number): number {
+  return Math.min(ASSET_GRID_COLS, Math.max(1, Math.ceil(Math.sqrt(count))));
+}
+
+/** Anchor for appending a freshly-dropped batch as a cluster ONE cell below an
+ *  existing content bbox. Used when a drop lands in a sorted view (Timeline/
+ *  Topic) and snaps to Canvas: the pointer sat over the sorted layout, which is a
+ *  meaningless grid anchor, so the batch is appended under the Canvas content
+ *  instead. Shares dropCols with droppedAssetCenters so the returned anchor
+ *  centers the same block it will produce (its top lands exactly one cell below
+ *  `bounds`, never overlapping existing tiles). */
+export function appendClusterAnchor(bounds: Bounds, count: number): CanvasPoint {
+  const rows = Math.ceil(Math.max(1, count) / dropCols(count));
+  const top = bounds.yb + ASSET_CELL_H;
+  return {
+    x: (bounds.xl + bounds.xr) / 2,
+    y: top + ((rows - 1) * ASSET_CELL_H) / 2,
+  };
+}
+
 /** Centers a small grid of newly dropped assets around the pointer anchor. */
 export function droppedAssetCenters(ids: readonly string[], anchor: CanvasPoint): Record<string, CanvasPoint> {
   if (ids.length === 0) return {};
-  const cols = Math.min(4, Math.ceil(Math.sqrt(ids.length)));
+  const cols = dropCols(ids.length);
   const rows = Math.ceil(ids.length / cols);
   const startX = anchor.x - ((cols - 1) * ASSET_CELL_W) / 2;
   const startY = anchor.y - ((rows - 1) * ASSET_CELL_H) / 2;

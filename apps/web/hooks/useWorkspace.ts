@@ -25,6 +25,7 @@ import type {
   ViewMode,
 } from "@/types";
 import {
+  appendClusterAnchor,
   assetGallery,
   centerAtScale,
   DEFAULT_ZOOM,
@@ -2106,12 +2107,21 @@ export function useWorkspace(
       const s = stateRef.current;
       if (s.projCurrent === "all") return;
       const r = rect();
-      const clientPoint = batch.clientPoint ?? {
-        x: r.left + r.width / 2,
-        y: r.top + r.height / 2,
-      };
-      const anchor = toContent(clientPoint.x, clientPoint.y);
       const clientIds = batch.files.map((item) => `${batch.batchId}:${item.inputIndex}`);
+      // A freshly dropped file has no capture date / topic to sort by, so it can
+      // only live on the Canvas. If the drop landed in a sorted view the pointer
+      // was over the Timeline/Topic layout — a meaningless grid anchor — so append
+      // the batch as a neat cluster just below the existing Canvas content and
+      // snap to Canvas (below). In Canvas, cluster around the real drop point.
+      const droppedIntoSortedView = s.view !== "neural";
+      let anchor: CanvasPoint;
+      if (droppedIntoSortedView) {
+        const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
+        anchor = appendClusterAnchor(bounds, clientIds.length);
+      } else {
+        const clientPoint = batch.clientPoint ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        anchor = toContent(clientPoint.x, clientPoint.y);
+      }
       const centers = droppedAssetCenters(clientIds, anchor);
       const previews = batch.files.map((item): CanvasUploadPreview => {
         const clientId = `${batch.batchId}:${item.inputIndex}`;
@@ -2140,8 +2150,12 @@ export function useWorkspace(
           asset: { ...previous.galleryOverrides.asset, ...centers },
         },
       }));
+      // Snap to Canvas so the dropped cluster is what the user sees; the setState
+      // above already committed the previews to stateRef, so setView's re-fit
+      // includes them and frames the new batch.
+      if (droppedIntoSortedView) setView("neural");
     },
-    [rect, setState, toContent],
+    [rect, setState, toContent, neuralGalleryFor, setView],
   );
 
   const onUploadBatchSettled = useCallback(
