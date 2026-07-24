@@ -20,7 +20,11 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   drop-in → the same `POST /api/imports`; **zero OAuth** — no connection row, the
   ~4 h direct links ride in the ingest payload and the worker fetches each original
   once into R2 — ADR 0008, #105–#107), a real homepage of project cards,
-  and Canvas/Timeline/Map/Topic all rendering the caller's real assets. **Auth is a hardened surface, not a stub:**
+  and Canvas/Timeline/Map/Topic all rendering the caller's real assets.
+  `/` now serves **two** audiences (ADR 0036): `proxy.ts` exempts it by exact
+  match and `app/page.tsx` forks on the session — no claims renders the public
+  marketing landing (`components/landing/`), a signed-in caller still gets the
+  project hub. **Auth is a hardened surface, not a stub:**
   `/auth/callback` runs the PKCE exchange for both email links and Google, validates
   `?next=` through `lib/safe-redirect.ts` (open redirect, #90), and reports failures
   to `/login` as a *code only* — never the provider's own text. Read
@@ -126,7 +130,11 @@ when you touch `supabase/**`, not the only line of defence anymore.
 - Styling: ported elements intentionally use inline `style={{}}` objects, not
   Tailwind utility classes, to guarantee pixel fidelity to the source design — see
   `docs/decisions/0001-inline-styles-over-tailwind.md`. Tailwind is fine for new,
-  non-computed structural styling.
+  non-computed structural styling. **One documented exception:**
+  `components/landing/` uses a CSS Module — inline styles can't express the
+  sticky/scroll composition, media queries or `prefers-reduced-motion` fallbacks
+  a marketing page is made of (ADR 0036). Keep that boundary; don't spread CSS
+  Modules into the workspace UI.
 - Several behaviors that look like bugs are intentional fidelity to the source
   design (or a deliberate, documented deviation from it) — see
   `docs/decisions/0003-preserve-source-quirks.md` and

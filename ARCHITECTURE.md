@@ -54,7 +54,10 @@ lib/assets.ts · lib/projects.ts · lib/bootstrap.ts
         |                    mapped into the mockup's Photo / ProjectCard shapes
         v
 READ PATH (Server Components import these and await them directly):
-  app/page.tsx              homepage hub — ensureWorkspace() + getProjectCards()
+  app/page.tsx              "/" forks on the session (ADR 0036): no claims →
+                            components/landing/ (public marketing page; proxy.ts
+                            exempts "/" by exact match); signed in → homepage hub
+                            — ensureWorkspace() + getProjectCards()
   app/projects/[id]/page.tsx  canvas — getProjectCards() + lib/api.ts getPhotos()
         |                    ("all" = whole workspace; else the project's M:N assets)
         v

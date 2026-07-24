@@ -8,6 +8,10 @@ import { createServerClient } from "@supabase/ssr";
 const PUBLIC_PATHS = ["/login", "/signup", "/auth"];
 
 function isPublic(pathname: string) {
+  // "/" is public but must be matched exactly: anonymous visitors get the
+  // marketing landing there, while every /projects/* route stays guarded.
+  // app/page.tsx does the fork (landing vs. the signed-in project hub).
+  if (pathname === "/") return true;
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 

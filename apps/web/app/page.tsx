@@ -1,18 +1,26 @@
 import { redirect } from "next/navigation";
 import HomeClient from "@/components/home/HomeClient";
+import LandingPage from "@/components/landing/LandingPage";
 import { ensureWorkspace } from "@/lib/bootstrap";
 import { getProjectCards } from "@/lib/projects";
 import { createClient } from "@/lib/supabase/server";
 
-/** Homepage hub (issue #17) — the landing page after login: project cards +
- *  account. The canvas lives at /projects/[id]. */
+/** "/" serves two audiences. Anonymous visitors get the marketing landing
+ *  (proxy.ts lets them through); signed-in users get the homepage hub
+ *  (issue #17) — project cards + account. The canvas lives at /projects/[id]. */
 export default async function Home() {
   const supabase = await createClient();
+
+  // Cheap local JWT check first: no claims means no session cookie at all —
+  // a genuine visitor, so render the landing without a round-trip to Supabase.
+  const { data: claims } = await supabase.auth.getClaims();
+  if (!claims?.claims) return <LandingPage />;
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  // proxy.ts passed a signature-valid JWT, but the user may no longer exist
-  // (deleted account, wiped dev DB) — /auth/reset clears the dead cookies.
+  // The JWT was signature-valid, but the user may no longer exist (deleted
+  // account, wiped dev DB) — /auth/reset clears the dead cookies.
   if (!user) redirect("/auth/reset");
 
   // One parallel batch instead of three sequential awaits. ensureWorkspace is

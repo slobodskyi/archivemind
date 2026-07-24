@@ -1,0 +1,1278 @@
+/* Landing page styles (ADR 0036).
+ *
+ * A CSS Module rather than the app's inline-style convention (ADR 0001): that
+ * convention exists to pin ported canvas UI to the source design pixel-for-pixel,
+ * and inline styles can express neither the sticky/scroll composition nor the
+ * media queries and reduced-motion fallbacks this surface is built out of.
+ * Scoped by the module hash, so nothing here can leak into the workspace.
+ *
+ * Motion vocabulary follows frame.io's: sticky scroll storytelling, reveal-on-
+ * enter, a procedural canvas gradient. The palette and type are ArchiveMind's
+ * own — near-black, neon green, mono eyebrows over a tight-tracked grotesque. */
+
+.root {
+  /* globals.css pins body{overflow:hidden} for the app canvas, so the landing
+     brings its own scroll container. position:sticky resolves against this
+     element, which is exactly what the scrubbed sections need. */
+  position: fixed;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-y: overlay;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: var(--font-display), var(--font-space-mono), system-ui, sans-serif;
+  scroll-behavior: smooth;
+  --l-line: rgba(255, 255, 255, 0.07);
+  --l-line-h: rgba(255, 255, 255, 0.14);
+  --l-pad: clamp(20px, 5vw, 72px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    scroll-behavior: auto;
+  }
+}
+
+.root :global(::selection) {
+  background: var(--ac);
+  color: #060606;
+}
+
+/* ---------------------------------------------------------------- primitives */
+
+.eyebrow {
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ac);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  background: var(--ac);
+  opacity: 0.7;
+}
+
+.eyebrowMuted {
+  color: var(--t3);
+}
+.eyebrowMuted::before {
+  background: var(--t3);
+}
+
+/* The single most characteristic frame.io move: display type set large, weight
+   ~600, with aggressive negative tracking (theirs runs -3.6px at 80px ≈ -0.045em). */
+.display {
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 0.96;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.h1 {
+  font-size: clamp(40px, 7.4vw, 88px);
+}
+
+.h2 {
+  font-size: clamp(30px, 4.6vw, 60px);
+}
+
+.lede {
+  font-size: clamp(15px, 1.35vw, 18px);
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+  color: var(--t2);
+  margin: 0;
+  max-width: 46ch;
+}
+
+.section {
+  padding: clamp(90px, 12vh, 170px) var(--l-pad);
+  position: relative;
+}
+
+/* In-page anchors scroll inside .root, so their targets have to clear the
+   fixed nav themselves. */
+.section,
+.scrub,
+.prompter {
+  scroll-margin-top: 74px;
+}
+
+.sectionHead {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 1000px;
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+.btn {
+  --btn-bg: var(--ac);
+  --btn-fg: #061006;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1),
+    box-shadow 0.22s,
+    background 0.22s,
+    border-color 0.22s;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 34px rgba(57, 255, 106, 0.22);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btnGhost {
+  --btn-bg: transparent;
+  --btn-fg: var(--t1);
+  border-color: var(--l-line-h);
+}
+
+.btnGhost:hover {
+  --btn-bg: rgba(255, 255, 255, 0.04);
+  border-color: var(--t2b);
+  box-shadow: none;
+}
+
+.btnArrow {
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.btn:hover .btnArrow {
+  transform: translateX(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn:hover,
+  .btnArrow,
+  .btn:hover .btnArrow {
+    transform: none;
+    transition: background 0.22s, border-color 0.22s;
+  }
+}
+
+/* ---------------------------------------------------------------------- nav */
+
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 16px var(--l-pad);
+  border-bottom: 1px solid transparent;
+  transition:
+    background 0.3s,
+    border-color 0.3s,
+    backdrop-filter 0.3s;
+}
+
+.navStuck {
+  background: rgba(8, 8, 8, 0.72);
+  backdrop-filter: blur(14px) saturate(1.2);
+  border-bottom-color: var(--l-line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--t1);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.brandMark {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--ac);
+  box-shadow: 0 0 14px rgba(57, 255, 106, 0.55);
+}
+
+.navLinks {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+
+.navLink {
+  position: relative;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t2);
+  text-decoration: none;
+  padding: 4px 0;
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.navLink::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 1px;
+  width: 100%;
+  background: var(--ac);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.navLink:hover {
+  color: var(--t1);
+}
+
+.navLink:hover::after {
+  transform: scaleX(1);
+}
+
+.navCta {
+  padding: 9px 18px;
+  font-size: 11px;
+}
+
+@media (max-width: 860px) {
+  .navLinks {
+    display: none;
+  }
+}
+
+/* On a phone the bar keeps the brand and the one action that matters; "Sign in"
+   is still reachable from the footer. */
+@media (max-width: 520px) {
+  .nav {
+    gap: 14px;
+  }
+  .navSignIn {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------- hero */
+
+.hero {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 128px var(--l-pad) 0;
+  overflow: hidden;
+}
+
+.heroCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  opacity: 0.8;
+}
+
+/* Vignette over the gradient AND the grid: pulls the light back into the lower
+   third, keeps the fixed nav sitting on near-black, and gives the headline a
+   dark field to read against wherever the blobs happen to drift. */
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(8, 8, 8, 0.96) 0%, rgba(8, 8, 8, 0) 34%),
+    linear-gradient(0deg, rgba(8, 8, 8, 0.72) 0%, rgba(8, 8, 8, 0) 46%),
+    radial-gradient(105% 70% at 42% 56%, rgba(8, 8, 8, 0) 8%, rgba(8, 8, 8, 0.9) 92%);
+}
+
+/* Faint canvas-grid overlay — a nod to the product's infinite canvas, and it
+   keeps the gradient from reading as an empty vignette. */
+.heroGrid {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-image:
+    linear-gradient(var(--l-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--l-line) 1px, transparent 1px);
+  background-size: 78px 78px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 45%, #000 20%, transparent 78%);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.heroInner {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 46px;
+  max-width: 1320px;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: 56px;
+}
+
+.heroCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+@media (min-width: 1080px) {
+  .heroInner {
+    grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+    gap: 64px;
+  }
+}
+
+/* ------------------------------------------------------------ hero preview */
+
+.preview {
+  border: 1px solid var(--l-line-h);
+  border-radius: 4px;
+  background: var(--bg-s);
+  overflow: hidden;
+  box-shadow: 0 40px 110px rgba(0, 0, 0, 0.66);
+  opacity: 0;
+  transform: translateY(18px);
+  animation: previewIn 0.9s cubic-bezier(0.22, 0.8, 0.28, 1) 0.35s forwards;
+}
+
+@keyframes previewIn {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.previewBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--l-line);
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+
+.previewBarLabel {
+  color: var(--t2);
+}
+
+.previewBarRight {
+  margin-left: auto;
+  color: var(--ac);
+}
+
+/* Stands in for the photo: a low sun over a hard horizon, warm above, cool
+   below. Abstract on purpose — it should read as "a frame", never as a
+   photograph we're passing off as a customer's work. */
+.previewShot {
+  position: relative;
+  aspect-ratio: 3 / 2;
+  background:
+    radial-gradient(46% 34% at 74% 30%, rgba(255, 206, 138, 0.62), transparent 64%),
+    radial-gradient(90% 60% at 50% 100%, rgba(0, 0, 0, 0.55), transparent 60%),
+    linear-gradient(
+      180deg,
+      #2b2129 0%,
+      #4a3630 26%,
+      #6b4a33 45%,
+      #2e2a2c 52.5%,
+      #191b20 53%,
+      #0e1013 100%
+    );
+  overflow: hidden;
+}
+
+/* Horizon glint — the one hard edge in an otherwise soft frame. */
+.previewShot::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 52.5%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 214, 160, 0.5) 62%, transparent);
+}
+
+/* One pass of the analyzer over the frame — it runs once and stays gone. */
+.previewScan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 34%;
+  background: linear-gradient(180deg, transparent, rgba(57, 255, 106, 0.16), transparent);
+  border-bottom: 1px solid rgba(57, 255, 106, 0.4);
+  animation: scanPass 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.5s 1 forwards;
+  top: -34%;
+}
+
+@keyframes scanPass {
+  to {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+.previewChips {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.chip {
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--t1);
+  background: rgba(8, 8, 8, 0.72);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--l-line-h);
+  border-radius: 999px;
+  padding: 5px 11px;
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  animation: chipIn 0.5s cubic-bezier(0.22, 0.8, 0.28, 1) forwards;
+  animation-delay: calc(var(--i) * 120ms + 1.15s);
+}
+
+@keyframes chipIn {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.previewMeta {
+  padding: 16px 16px 18px;
+  border-top: 1px solid var(--l-line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.previewCaption {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--t2);
+}
+
+.previewExif {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview,
+  .chip {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .previewScan {
+    animation: none;
+    display: none;
+  }
+}
+
+.heroActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.heroMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+  padding-top: 6px;
+}
+
+.heroMeta span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heroMeta span::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ac);
+  opacity: 0.65;
+}
+
+/* Word-by-word entrance on the headline. Each span gets its own delay via an
+   inline --i, so the line assembles instead of fading in as one block. */
+.word {
+  display: inline-block;
+  /* The trailing space lives inside the span, and an inline-block would
+     collapse it — pre keeps the words apart without faking it with margins,
+     which would misalign the first word of every wrapped line. */
+  white-space: pre;
+  opacity: 0;
+  transform: translateY(0.38em);
+  animation: wordIn 0.72s cubic-bezier(0.22, 0.8, 0.28, 1) forwards;
+  animation-delay: calc(var(--i) * 55ms + 120ms);
+}
+
+@keyframes wordIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wordAccent {
+  color: var(--ac);
+}
+
+.scrollHint {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+
+.scrollHintRail {
+  width: 1px;
+  height: 46px;
+  background: linear-gradient(var(--l-line-h), transparent);
+  position: relative;
+  overflow: hidden;
+}
+
+.scrollHintRail::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  height: 14px;
+  background: var(--ac);
+  animation: railRun 1.9s ease-in-out infinite;
+}
+
+@keyframes railRun {
+  0% {
+    top: -14px;
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    top: 46px;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .word {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .scrollHintRail::after {
+    animation: none;
+    top: 0;
+    opacity: 0.5;
+  }
+}
+
+/* --------------------------------------------------------------- reveal ---- */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.85s cubic-bezier(0.22, 0.8, 0.28, 1),
+    transform 0.85s cubic-bezier(0.22, 0.8, 0.28, 1);
+  transition-delay: var(--d, 0ms);
+  will-change: opacity, transform;
+}
+
+.revealIn {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ----------------------------------------------------------------- scrubber */
+
+.scrub {
+  position: relative;
+}
+
+.scrubSticky {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 26px;
+  padding: 84px var(--l-pad) 40px;
+  overflow: hidden;
+}
+
+.scrubHead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1320px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.scrubTitle {
+  position: relative;
+  font-size: clamp(22px, 3vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.02;
+  margin: 0;
+  max-width: 15ch;
+  /* The three headlines are stacked in the same box and cross-fade, so the
+     heading reserves the tallest of them instead of collapsing to zero. */
+  min-height: 2.1em;
+  flex: 1;
+}
+
+/* Only the active line is exposed to assistive tech (aria-hidden on the rest),
+   so the heading reads as one sentence, not three. */
+.scrubTitleLine {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 0.8, 0.28, 1),
+    transform 0.5s cubic-bezier(0.22, 0.8, 0.28, 1);
+}
+
+.scrubTitleOn {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrubTitleLine {
+    transition: none;
+  }
+}
+
+/* On a phone the headline runs four lines, and reserving the tallest of three
+   would eat the stage. Drop the cross-fade there: show only the active line,
+   let the box size to it. */
+@media (max-width: 720px) {
+  .scrubTitle {
+    min-height: 0;
+  }
+  .scrubTitleLine {
+    position: static;
+    display: none;
+    transform: none;
+  }
+  .scrubTitleOn {
+    display: block;
+  }
+}
+
+.scrubSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.scrubStep {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--t3);
+  transition: color 0.35s;
+}
+
+.scrubStepOn {
+  color: var(--t1);
+}
+
+.scrubStepRail {
+  width: 46px;
+  height: 2px;
+  background: var(--l-line);
+  overflow: hidden;
+  border-radius: 1px;
+}
+
+.scrubStepFill {
+  height: 100%;
+  width: 100%;
+  background: var(--ac);
+  transform-origin: left;
+}
+
+/* The product window the tiles animate inside. */
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--l-line-h);
+  border-radius: 4px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(57, 255, 106, 0.05), transparent 60%),
+    var(--bg-s);
+  overflow: hidden;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6);
+}
+
+.stageBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--l-line);
+  background: rgba(8, 8, 8, 0.6);
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+  z-index: 3;
+}
+
+.stageDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--l-line-h);
+}
+
+.stageBarLabel {
+  margin-left: 10px;
+}
+
+.stageBarRight {
+  margin-left: auto;
+  color: var(--t2b);
+}
+
+.stageField {
+  position: absolute;
+  inset: 34px 0 0 0;
+}
+
+.stageGrid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--l-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--l-line) 1px, transparent 1px);
+  background-size: 54px 54px;
+  opacity: 0.5;
+  transition: opacity 0.5s;
+}
+
+/* Map mode swaps the canvas grid for a graticule + a landmass wash. */
+.stageMap {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s;
+  background:
+    radial-gradient(38% 46% at 26% 40%, rgba(57, 255, 106, 0.09), transparent 70%),
+    radial-gradient(30% 40% at 68% 62%, rgba(57, 255, 106, 0.07), transparent 70%),
+    radial-gradient(24% 30% at 82% 28%, rgba(57, 255, 106, 0.05), transparent 70%);
+}
+
+.stageMapOn {
+  opacity: 1;
+}
+
+.tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  will-change: transform;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.tileInner {
+  position: absolute;
+  inset: 0;
+  opacity: 0.92;
+}
+
+.tileGloss {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(150deg, rgba(255, 255, 255, 0.16), transparent 55%);
+}
+
+.cloudLabel {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--t1);
+  background: rgba(6, 6, 6, 0.9);
+  border: 1px solid rgba(57, 255, 106, 0.35);
+  border-radius: 2px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  /* Above the tiles it labels — DOM order alone loses to their box-shadow. */
+  z-index: 2;
+  transition: opacity 0.4s;
+}
+
+.stageCaption {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+  z-index: 3;
+  transition: opacity 0.4s;
+}
+
+.scrubSpacer {
+  height: 300vh;
+}
+
+@media (max-width: 720px) {
+  .scrubHead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .scrubSteps {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .scrubStepRail {
+    width: 22px;
+  }
+  /* The project path is the first thing to go when the bar can't hold both. */
+  .stageBarLabel {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------- tiles  */
+
+.tileTable {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  gap: 1px;
+  background: var(--l-line);
+  border: 1px solid var(--l-line);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 58px;
+}
+
+.featureCell {
+  background: var(--bg);
+  padding: 34px 28px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+  transition: background 0.3s;
+}
+
+.featureCell:hover {
+  background: var(--bg-sf);
+}
+
+.featureIndex {
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--ac);
+}
+
+.featureTitle {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.featureBody {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--t2);
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- prompter  */
+
+.prompter {
+  position: relative;
+  padding: 0 var(--l-pad);
+}
+
+.prompterInner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: clamp(30px, 6vw, 90px);
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.prompterSticky {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+}
+
+.prompterSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 22vh 0;
+}
+
+.prompterStep {
+  padding: 34px 0 34px 30px;
+  border-left: 1px solid var(--l-line);
+  position: relative;
+  transition:
+    border-color 0.4s,
+    opacity 0.4s;
+  opacity: 0.34;
+}
+
+.prompterStep::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 42px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--l-line-h);
+  transition: background 0.4s, box-shadow 0.4s;
+}
+
+.prompterStepOn {
+  opacity: 1;
+  border-left-color: var(--t2b);
+}
+
+.prompterStepOn::before {
+  background: var(--ac);
+  box-shadow: 0 0 12px rgba(57, 255, 106, 0.6);
+}
+
+.prompterStepTitle {
+  font-size: clamp(20px, 2.4vw, 30px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.12;
+  margin: 0 0 12px;
+}
+
+.prompterStepBody {
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--t2);
+  margin: 0;
+  max-width: 52ch;
+}
+
+.prompterTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+  border: 1px solid var(--l-line);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+
+@media (max-width: 900px) {
+  .prompterInner {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .prompterSticky {
+    position: relative;
+    height: auto;
+    padding: 90px 0 26px;
+  }
+  .prompterSteps {
+    padding: 0 0 90px;
+  }
+}
+
+/* ------------------------------------------------------------------- facts  */
+
+.factRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1px;
+  background: var(--l-line);
+  border-block: 1px solid var(--l-line);
+}
+
+.fact {
+  background: var(--bg);
+  padding: 40px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.factNum {
+  font-size: clamp(32px, 4.2vw, 54px);
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.factLabel {
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+  line-height: 1.5;
+}
+
+/* ----------------------------------------------------------------- marquee  */
+
+.marquee {
+  border-block: 1px solid var(--l-line);
+  overflow: hidden;
+  padding: 16px 0;
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+.marqueeTrack {
+  display: flex;
+  gap: 44px;
+  width: max-content;
+  animation: marqueeRun 38s linear infinite;
+}
+
+.marqueeItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--t3);
+  white-space: nowrap;
+}
+
+.marqueeItem::after {
+  content: "";
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ac);
+  opacity: 0.5;
+}
+
+@keyframes marqueeRun {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marqueeTrack {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------- final CTA  */
+
+.closer {
+  position: relative;
+  min-height: 78svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 30px;
+  text-align: center;
+  padding: 120px var(--l-pad);
+  overflow: hidden;
+}
+
+.closerGlow {
+  position: absolute;
+  left: 50%;
+  bottom: -40%;
+  width: min(1100px, 130vw);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(57, 255, 106, 0.14), transparent 62%);
+  pointer-events: none;
+}
+
+.closerInner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+}
+
+.closerTitle {
+  font-size: clamp(38px, 6.6vw, 84px);
+}
+
+/* ------------------------------------------------------------------ footer  */
+
+.footer {
+  border-top: 1px solid var(--l-line);
+  padding: 46px var(--l-pad);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px 40px;
+  align-items: center;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+
+.footerLinks {
+  display: flex;
+  gap: 26px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.footerLink {
+  color: var(--t3);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footerLink:hover {
+  color: var(--t1);
+}
