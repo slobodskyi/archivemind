@@ -89,10 +89,14 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                rename/reorder/delete · add/remove members. Server owns
                                                membership + order; geometry stays in localStorage (ADR 0022).
                                                Read seam: lib/canvas-groups.ts (getCanvasGroups)
-  app/api/exports                              artboard/selection → PDF (ADR 0035): POST enqueues an
-                                               'export' job (worker pdf-lib renders photo+caption per
-                                               page → R2 exports/{job_id}.pdf → 7-day presigned URL in
-                                               payload.result_url); GET ?jobId= polls it after Realtime 'done'
+  app/api/exports                              artboard/selection → PDF | captions.csv | ZIP (ADR 0035
+                                               + its Amendments): POST enqueues an 'export' job; the
+                                               worker renders the requested `format` into R2
+                                               {ws}/exports/{job_id}.{ext} and writes that KEY to
+                                               payload.result_key — GET ?jobId= presigns it per request,
+                                               so no bearer URL is stored or broadcast. Artifacts are
+                                               swept after EXPORT_RETENTION_DAYS, and purge.ts erases
+                                               any that contain an erased photo
   app/api/search                               GET §8.4: parse → embed → search_assets()
                                                (hybrid: cosine + FTS on description/facts,
                                                tiered; date/place/EXIF filters — ADR 0029/0031)
