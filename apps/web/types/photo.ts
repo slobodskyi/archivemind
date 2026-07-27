@@ -23,6 +23,9 @@ export type Language = "EN" | "UK" | "RU";
 export type CaptionKey = "a" | "b" | "c" | "gen";
 
 export interface Fact {
+  /** DB row id, needed to PATCH a verdict. null for the synthetic
+   *  "Analyze to extract facts" placeholder, which has no row behind it. */
+  id: string | null;
   text: string;
   status: FactStatus;
 }

@@ -284,6 +284,19 @@ export const patchCaptionRequestSchema = z
   });
 export type PatchCaptionRequest = z.infer<typeof patchCaptionRequestSchema>;
 
+/** The DB `fact_status` enum. 'likely' is what the analyze job writes for an
+ *  AI-extracted fact; 'confirmed' is a human saying it's true, which is the
+ *  only status the caption prompt will quote (see the caption handler). */
+export const factStatusSchema = z.enum(["confirmed", "likely", "needs_check"]);
+export type FactStatusKey = z.infer<typeof factStatusSchema>;
+
+/** PATCH /api/facts/[id] — a human verdict on one extracted fact. Per-fact by
+ *  design: 'confirmed' feeds the caption prompt, so a blanket "confirm
+ *  everything" would launder unreviewed model output into the next
+ *  generation's input. */
+export const patchFactRequestSchema = z.object({ status: factStatusSchema });
+export type PatchFactRequest = z.infer<typeof patchFactRequestSchema>;
+
 /** POST /api/jobs — the user-triggered AI entry point (analyze #12, caption
  *  #14, ingest re-runs #23; export joins with its phase). The ingest variant
  *  exists to heal Drive-linked assets whose download failed or whose

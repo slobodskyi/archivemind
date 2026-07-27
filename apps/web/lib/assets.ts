@@ -42,6 +42,7 @@ interface TagRow {
 }
 
 interface FactRow {
+  id: string;
   text: string;
   status: "confirmed" | "likely" | "needs_check";
 }
@@ -160,10 +161,11 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   const tagNames = [...new Set(a.asset_tags.map((t) => t.tags?.name).filter((n): n is string => Boolean(n)))];
   const facts =
     a.facts.length > 0
-      ? a.facts.map((f) => ({ text: f.text, status: FACT_STATUS_MAP[f.status] }))
+      ? a.facts.map((f) => ({ id: f.id, text: f.text, status: FACT_STATUS_MAP[f.status] }))
       : processed
         ? []
-        : [{ text: "Analyze to extract facts", status: "unknown" as const }];
+        // Placeholder, not a row — null id keeps it out of the confirm flow.
+        : [{ id: null, text: "Analyze to extract facts", status: "unknown" as const }];
 
   // Representative file: assets are 1:N to files by schema, but today every
   // asset has exactly one (dedup merges rather than attaching); [0] is it.
@@ -208,7 +210,7 @@ const ASSET_SELECT = `id, title, status, ai_processed_at, created_at, cluster_id
        asset_edits ( recipe, edited_thumb_key, edited_medium_key ),
        asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
        asset_tags ( tags ( name, category ) ),
-       facts ( text, status ),
+       facts ( id, text, status ),
        captions ( id, lang, style, text, is_edited )`;
 
 /** The caller's trashed photos (ADR 0033) — the photo half of the Trash view,

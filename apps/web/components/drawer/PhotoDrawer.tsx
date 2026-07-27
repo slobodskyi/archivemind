@@ -7,6 +7,7 @@ import { photoSrcMedium, isRealSource } from "@/lib/img";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  CheckIcon,
   CloseIcon,
   SparkleIcon,
   CopyIcon,
@@ -34,6 +35,11 @@ interface PhotoDrawerProps {
   /** Move to Trash (ADR 0033) — the drawer used to have no delete at all, so
    *  deletion intent formed here forced the user back out to the tile. */
   onDelete: () => void;
+  /** Confirm / withdraw one extracted fact — real AI input, see the Facts
+   *  block below. */
+  onSetFactStatus: (factId: string, status: "confirmed" | "likely") => void;
+  /** Export this one photo to PDF (ADR 0035). */
+  onExport: () => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -56,6 +62,8 @@ export default function PhotoDrawer({
   onSaveCaption,
   onEditImage,
   onDelete,
+  onSetFactStatus,
+  onExport,
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
@@ -371,21 +379,53 @@ export default function PhotoDrawer({
             </div>
           </div>
 
+          {/* Facts are confirmed one at a time, and the label says why: the
+              caption worker prompts with `facts where status = 'confirmed'`, so
+              a confirmed fact is an AI input. The old footer "Confirm facts"
+              button had no onClick at all — that query always came back empty
+              and every caption was written without this context. A blanket
+              confirm-all is deliberately not offered: it would launder
+              unreviewed model output into the next generation's input. */}
           <div style={{ marginTop: 18 }}>
             <span style={labelCaps}>Facts</span>
+            {photo.facts.some((f) => f.id) && (
+              <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 5, lineHeight: 1.45 }}>
+                Confirmed facts are quoted to the AI when it writes captions.
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 10 }}>
-              {photo.facts.map((f, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--t2)" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 999, flex: "0 0 auto", background: FACT_STATUS_COLOR[f.status] }} />
-                  {f.text}
-                </div>
-              ))}
+              {photo.facts.map((f, i) => {
+                const confirmed = f.status === "confirmed";
+                return (
+                  <div key={f.id ?? i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--t2)" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 999, flex: "0 0 auto", background: FACT_STATUS_COLOR[f.status] }} />
+                    <span style={{ flex: 1 }}>{f.text}</span>
+                    {/* Mock rows and the "Analyze to extract facts" placeholder
+                        carry no id — nothing to PATCH, so no control. */}
+                    {f.id && (
+                      <button
+                        onClick={() => onSetFactStatus(f.id!, confirmed ? "likely" : "confirmed")}
+                        title={confirmed ? "Confirmed — click to withdraw" : "Confirm this fact"}
+                        aria-label={confirmed ? `Withdraw confirmation: ${f.text}` : `Confirm: ${f.text}`}
+                        aria-pressed={confirmed}
+                        style={factBtn(confirmed)}
+                      >
+                        <CheckIcon width={11} height={11} />
+                        {confirmed ? "Confirmed" : "Confirm"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
+          {/* Was "Add to export", which implied a basket that never existed.
+              ADR 0035's export path is real — this now opens it for this photo. */}
           <div style={{ display: "flex", gap: 7, marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--bd)" }}>
-            <button style={footerBtn(true)}>Confirm facts</button>
-            <button style={footerBtn(false)}>Add to export</button>
+            <button onClick={onExport} style={footerBtn(true)}>
+              Export PDF
+            </button>
           </div>
         </div>
       )}
@@ -465,6 +505,27 @@ function navBtn(kind: "left" | "right" | "close"): React.CSSProperties {
   if (kind === "left") return { ...base, left: 8, top: "50%", transform: "translateY(-50%)" };
   if (kind === "right") return { ...base, right: 8, top: "50%", transform: "translateY(-50%)" };
   return { ...base, right: 8, top: 8 };
+}
+
+/** Per-fact confirm control. Confirmed reads as an accent-tinted state rather
+ *  than a button waiting to be pressed, so a reviewed list scans at a glance. */
+function factBtn(confirmed: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    flex: "0 0 auto",
+    height: 22,
+    padding: "0 8px",
+    borderRadius: 2,
+    border: `1px solid ${confirmed ? "color-mix(in srgb,var(--ac) 40%,transparent)" : "var(--bd)"}`,
+    background: confirmed ? "color-mix(in srgb,var(--ac) 14%,transparent)" : "transparent",
+    color: confirmed ? "var(--ac)" : "var(--t2b)",
+    fontSize: 10.5,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    transition: "background .12s, color .12s, border-color .12s",
+  };
 }
 
 function footerBtn(primary: boolean): React.CSSProperties {

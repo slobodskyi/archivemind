@@ -32,6 +32,8 @@ import {
   importRequestSchema,
   importResponseSchema,
   patchCaptionRequestSchema,
+  patchFactRequestSchema,
+  factStatusSchema,
   jobStatusSchema,
   jobTypeSchema,
   memberRoleSchema,
@@ -211,6 +213,20 @@ describe("caption contracts", () => {
     expect(patchCaptionRequestSchema.safeParse({}).success).toBe(false);
     expect(patchCaptionRequestSchema.safeParse({ text: "x", resetEdited: true }).success).toBe(false);
     expect(patchCaptionRequestSchema.safeParse({ text: "" }).success).toBe(false);
+  });
+
+  // A confirmed fact is quoted to the model when it writes a caption (the
+  // caption handler selects status = 'confirmed'), so this shape gates an AI
+  // input, not just a UI flag. The status set must stay the DB enum exactly.
+  it("patchFactRequestSchema takes exactly the DB fact_status values", () => {
+    for (const status of ["confirmed", "likely", "needs_check"]) {
+      expect(patchFactRequestSchema.parse({ status })).toEqual({ status });
+      expect(factStatusSchema.parse(status)).toBe(status);
+    }
+    expect(patchFactRequestSchema.safeParse({ status: "pending" }).success).toBe(false);
+    expect(patchFactRequestSchema.safeParse({ status: "unknown" }).success).toBe(false);
+    expect(patchFactRequestSchema.safeParse({}).success).toBe(false);
+    expect(patchFactRequestSchema.safeParse(null).success).toBe(false);
   });
 
   it("rejects empty langs, unknown lang/style, and missing asset ids", () => {
