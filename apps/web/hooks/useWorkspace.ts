@@ -3272,6 +3272,10 @@ export function useWorkspace(
         const target = e.target as HTMLElement | null;
         const isTyping = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
         const s = stateRef.current;
+        // The export dialog operates on the selection, so a stray Backspace
+        // there would trash the very photos being exported — and the route then
+        // 404s with a generic error that gives no hint the keypress did it.
+        if (s.exportOpen) return;
         if (!isTyping && s.selectedIds.length > 0) {
           e.preventDefault();
           // Same guardrail as the action bar: big selections confirm first —
@@ -3283,6 +3287,7 @@ export function useWorkspace(
       if (e.key !== "Escape") return;
       const s = stateRef.current;
       if (s.imp.open) return; // ImportModal owns Esc while open (upload-aware)
+      if (s.exportOpen) return; // ExportDialog owns Esc while open (useDialog)
       if (s.drawerId) closeDrawer();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
@@ -3303,6 +3308,9 @@ export function useWorkspace(
       if (e.code !== "Space" || e.repeat) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // Space is preventDefault'ed for canvas pan, which also stops it
+      // activating a focused button inside a modal dialog.
+      if (stateRef.current.exportOpen) return;
       e.preventDefault();
       if (!stateRef.current.spacePan) setState({ spacePan: true });
     };
