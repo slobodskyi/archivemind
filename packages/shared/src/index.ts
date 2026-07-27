@@ -526,12 +526,16 @@ export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
 //
 // Not routed through POST /api/jobs (like edit/purge, export gets its own
 // route). The worker reads the ordered members, renders a PDF (photo + caption
-// under each), writes it to R2 `{workspace_id}/exports/{job_id}.pdf`, and puts a
-// long-lived presigned URL in ai_jobs.payload.result_url. The type='export'
-// value has been in the job_type enum since init.
+// under each), writes it to R2 `{workspace_id}/exports/{job_id}.pdf`, and puts
+// that KEY in ai_jobs.payload.result_key — GET /api/exports presigns it per
+// request. The type='export' value has been in the job_type enum since init.
 
-/** R2 max presign lifetime — export deliverables outlive the 1 h preview TTL. */
-export const EXPORT_PRESIGN_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** How long an exported artifact is kept in R2 before the worker's retention
+ *  sweep deletes it. The DELIVERABLE's lifetime, not a URL's: the web route
+ *  presigns `payload.result_key` per request, so a download link is always
+ *  freshly minted and never rots (and no bearer URL is ever stored in a row that
+ *  every workspace member can read and that broadcasts on update). */
+export const EXPORT_RETENTION_DAYS = 8;
 
 /** Pages per export. One source of truth: the request cap, the payload cap and
  *  the number the dialog shows the user all read this. */
@@ -561,8 +565,10 @@ export const exportJobPayloadSchema = z
     group_id: uuidSchema.optional(),
     asset_ids: z.array(uuidSchema).min(1).max(EXPORT_MAX_ASSETS).optional(),
     options: artboardSettingsSchema,
-    /** written back by the worker when the PDF lands in R2 */
-    result_url: z.string().optional(),
+    /** R2 key of the finished artifact, written back by the worker. Presigned
+     *  per request by GET /api/exports; cleared by the retention sweep once the
+     *  object is deleted, so a stale key never offers a dead download. */
+    result_key: z.string().optional(),
   })
   .refine((v) => v.group_id !== undefined || (v.asset_ids !== undefined && v.asset_ids.length > 0), {
     message: "one of group_id, asset_ids is required",

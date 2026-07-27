@@ -594,13 +594,16 @@ describe("artboard PDF export (ADR 0035)", () => {
     expect(createExportRequestSchema.safeParse({ options: opts }).success).toBe(false);
   });
 
-  it("exportJobPayload mirrors the request in snake_case and carries result_url", () => {
+  it("exportJobPayload mirrors the request in snake_case and carries result_key", () => {
     const p = exportJobPayloadSchema.parse({
       group_id: "00000000-0000-0000-0000-0000000000c2",
       options: opts,
-      result_url: "https://r2.example/exports/j.pdf",
+      // A KEY, never a URL: a presigned URL stored here would be a 7-day bearer
+      // token readable by every workspace member (ai_jobs RLS is is_member with
+      // no column restriction) and broadcast to all of them on update.
+      result_key: "ws/exports/j.pdf",
     });
-    expect(p.result_url).toContain(".pdf");
+    expect(p.result_key).toContain(".pdf");
     expect(exportJobPayloadSchema.safeParse({ options: opts }).success).toBe(false);
   });
 });

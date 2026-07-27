@@ -3081,6 +3081,26 @@ export function useWorkspace(
       if (job.status === "done") router.refresh();
       return;
     }
+    // Exports are followed by the dialog's own poll, not activeJobId — but if the
+    // dialog is gone (tab reloaded mid-render, or the component unmounted) the
+    // finished PDF had no way of reaching anyone: the jobId lived only in that
+    // closure and there is no export history. The broadcast is workspace-scoped,
+    // so it still arrives after a reload; turn it into a toast that can download.
+    if (job.type === "export") {
+      if (job.status !== "done" || stateRef.current.exportOpen) return;
+      void (async () => {
+        try {
+          const r = await fetch(`/api/exports?jobId=${job.id}`);
+          if (!r.ok) return;
+          const { url } = (await r.json()) as { url: string | null };
+          if (!url) return;
+          flashToast("Your PDF is ready", { label: "Download", onAction: () => window.open(url, "_blank", "noopener") });
+        } catch {
+          // no toast beats a broken one
+        }
+      })();
+      return;
+    }
     if (job.id !== activeJobId.current) return;
     if (job.status === "running" || job.status === "queued") {
       setState({
