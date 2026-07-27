@@ -17,7 +17,10 @@ import type { HandlerContext } from "./index";
  *     previews, edited previews). A failure THROWS → the job retries with the
  *     key mapping intact. S3 deletes are idempotent, so a retry after a
  *     partial pass is safe.
- *  3. Derivative rows (previews/edits/tags/captions/facts/embeddings/EXIF) and
+ *  3. Export ARTIFACTS containing the asset — a PDF embeds a JPEG of it, a ZIP
+ *     embeds the file, so erasing the asset's own bytes and leaving those is not
+ *     erasure. Contained rather than throwing (see the call site).
+ *  4. Derivative rows (previews/edits/tags/captions/facts/embeddings/EXIF) and
  *     files.r2_key + content_hash — clearing the hash releases the dedup claim
  *     (files_dedup_idx), so re-importing the same bytes later ingests cleanly
  *     as a fresh asset instead of merging into an empty tombstone.
@@ -110,6 +113,23 @@ async function purgeAsset(pool: pg.Pool, assetId: string): Promise<"purged" | "s
     await deleteObject(key);
   }
 
+  // Derived DELIVERABLES carry a copy of the pixels too — an exported PDF embeds
+  // a JPEG of the medium preview, a ZIP embeds the file itself — so erasing the
+  // asset's own bytes while leaving those behind is not erasure.
+  //
+  // Contained deliberately: `sweepExpiredExports` deletes every artifact within
+  // EXPORT_RETENTION_DAYS regardless, so it is the backstop. Throwing here would
+  // be worse than the risk it guards — the asset's own bytes are already gone by
+  // this point, so a persistently failing artifact (a malformed key, say) would
+  // block the row cleanup below forever, leaving the tombstone holding its dedup
+  // claim and its derivative rows for good.
+  try {
+    const erased = await purgeExportArtifacts(pool, assetId);
+    if (erased > 0) console.log(`[purge] ${assetId}: erased ${erased} export artifact(s)`);
+  } catch (err) {
+    console.log(`[purge] ${assetId}: export cleanup failed, sweep will retry — ${String(err)}`);
+  }
+
   // Rows second. Sequential single-row-scope deletes; each is idempotent.
   await pool.query(`delete from asset_previews where asset_id = $1`, [assetId]);
   await pool.query(`delete from asset_edits where asset_id = $1`, [assetId]);
@@ -129,4 +149,40 @@ async function purgeAsset(pool: pg.Pool, assetId: string): Promise<"purged" | "s
     assetId,
   ]);
   return "purged";
+}
+
+/** Delete every export artifact that contains this asset, and clear its key so
+ *  GET /api/exports stops offering a download for bytes that are gone.
+ *
+ *  Matching is on `payload.exported_asset_ids` — the set the export job actually
+ *  rendered, written back by finishExport. The request payload alone is not
+ *  enough: a `group_id` export carries no asset list, and group membership can
+ *  change after the render. `payload.asset_ids` is still checked so artifacts
+ *  produced before that field existed are covered; it is the REQUESTED set, a
+ *  superset of the rendered one, which is the safe direction here — the user has
+ *  just permanently deleted this photo, so erring toward removing a deliverable
+ *  that may contain it is the intent, not a loss.
+ *
+ *  Workspace-scoped as a belt: an asset id is unique, but a pathological payload
+ *  must not be able to reach another workspace's artifact. */
+export async function purgeExportArtifacts(pool: pg.Pool, assetId: string): Promise<number> {
+  const { rows } = await pool.query<{ id: string; result_key: string | null }>(
+    `select id, payload->>'result_key' as result_key
+       from ai_jobs
+      where type = 'export'
+        and payload ? 'result_key'
+        and workspace_id = (select workspace_id from assets where id = $1)
+        and (payload->'exported_asset_ids' @> to_jsonb($1::text)
+             or payload->'asset_ids' @> to_jsonb($1::text))`,
+    [assetId],
+  );
+
+  let erased = 0;
+  for (const row of rows) {
+    if (!row.result_key) continue;
+    await deleteObject(row.result_key); // idempotent
+    await pool.query(`update ai_jobs set payload = payload - 'result_key' where id = $1`, [row.id]);
+    erased += 1;
+  }
+  return erased;
 }

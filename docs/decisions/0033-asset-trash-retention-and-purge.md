@@ -100,3 +100,17 @@ are never deleted.
   doesn't get lost; the purge handler is the building block it will reuse.
 - Copy discipline: tile/bar/menu deletes say "Move to Trash"; only the Trash
   view says "Delete permanently". The two must never swap.
+
+## Amendment — 2026-07-27: purge also erases export artifacts
+
+Purge collected keys from `files`, `asset_previews` and `asset_edits` only. But an
+exported PDF embeds a JPEG copy of the medium preview and an exported ZIP embeds
+the file itself, so "erase this asset's bytes" was leaving copies in
+`{workspace_id}/exports/`. `purgeExportArtifacts` now deletes every artifact whose
+job recorded this asset in `payload.exported_asset_ids` (written by the export
+handler for exactly this purpose) or in the legacy `payload.asset_ids`.
+
+It runs in the R2 phase but is **contained** — logged and skipped on failure,
+with `sweepExpiredExports` (ADR 0035 amendments) as the backstop. Throwing would
+leave the asset's derivative rows and dedup claim in place forever whenever an
+artifact could not be deleted, which is a worse outcome than a delayed artifact.

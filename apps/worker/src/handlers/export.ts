@@ -324,6 +324,9 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
 
   const rows = await collectExportRows(pool, payload);
   const total = rows.length;
+  /** Exactly what lands in the artifact — recorded in the payload so erasure can
+   *  find every deliverable a photo was rendered into. */
+  const renderedIds = rows.map((r) => r.asset_id);
 
   const artifact = EXPORT_ARTIFACTS[options.format];
   const key = `${job.workspace_id}/exports/${job.id}.${artifact.ext}`;
@@ -333,7 +336,7 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   if (options.format === "captions_csv") {
     await progress(20, `Writing ${total} caption row(s)`, 0, total);
     const csv = await renderCaptionsCsv(pool, rows, options);
-    await finishExport({ pool, job, progress }, key, csv, artifact.contentType, total, 0);
+    await finishExport({ pool, job, progress }, key, csv, artifact.contentType, total, 0, renderedIds);
     return;
   }
 
@@ -343,11 +346,11 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     const { body, skipped } = await renderZip(pool, rows, options, async (done, count) => {
       await progress(8 + Math.round((88 * done) / count), `Packing ${done}/${count}`, done, count);
     });
-    await finishExport({ pool, job, progress }, key, body, artifact.contentType, total, skipped);
+    await finishExport({ pool, job, progress }, key, body, artifact.contentType, total, skipped, renderedIds);
     return;
   }
 
-  const assetIds = rows.map((r) => r.asset_id);
+  const assetIds = renderedIds;
   /** Photos that ended up as a placeholder — reported, not silently swallowed. */
   let skipped = 0;
 
@@ -558,7 +561,15 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     }
   });
 
-  await finishExport({ pool, job, progress }, key, Buffer.from(await doc.save()), artifact.contentType, total, skipped);
+  await finishExport(
+    { pool, job, progress },
+    key,
+    Buffer.from(await doc.save()),
+    artifact.contentType,
+    total,
+    skipped,
+    renderedIds,
+  );
 }
 
 /** Store the artifact and hand back its KEY, not a URL — shared by every format.
@@ -578,10 +589,16 @@ async function finishExport(
   contentType: string,
   total: number,
   skipped: number,
+  assetIds: string[],
 ): Promise<void> {
   await putObject(key, body, contentType);
+  // `exported_asset_ids` is the set actually rendered into this artifact, so
+  // erasure can find it later. The request payload is not good enough: a
+  // `group_id` export carries no asset list at all, and group membership can
+  // change after the render, so the only reliable record is what the job itself
+  // put in the file. See purgeExportArtifacts (ADR 0033 + 0035 amendments).
   await pool.query(`update ai_jobs set payload = payload || $1::jsonb where id = $2`, [
-    JSON.stringify({ result_key: key, skipped_previews: skipped }),
+    JSON.stringify({ result_key: key, skipped_previews: skipped, exported_asset_ids: assetIds }),
     job.id,
   ]);
 
