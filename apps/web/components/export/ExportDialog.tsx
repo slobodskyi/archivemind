@@ -50,6 +50,22 @@ const ENQUEUE_ERROR_COPY: Record<string, string> = {
   export_backlog: "You already have exports rendering. Wait for those to finish and try again.",
 };
 
+/** Worker-side failures (ai_jobs.error). Codes may carry a `:detail` suffix, e.g.
+ *  `export_too_large:2.4GB`, so match on the prefix. */
+const JOB_ERROR_COPY: { code: string; copy: string }[] = [
+  {
+    code: "export_too_large",
+    copy: "That selection is too large to bundle. Pick fewer photos, or switch to Web-size.",
+  },
+  { code: "zip_too_many_entries", copy: "That is too many files for one archive. Split it into a few exports." },
+  { code: "zip_too_large", copy: "That bundle would be too big. Pick fewer photos, or switch to Web-size." },
+  { code: "export_empty", copy: "Nothing in that selection could be exported — the photos may be in Trash." },
+  { code: "export_font_missing", copy: "The PDF renderer is misconfigured on our side. We're on it." },
+];
+
+const jobErrorCopy = (raw: string | null): string | null =>
+  JOB_ERROR_COPY.find((e) => raw?.startsWith(e.code))?.copy ?? null;
+
 const CARD: React.CSSProperties = {
   background: "var(--bg-el)",
   border: "1px solid var(--bd)",
@@ -81,6 +97,7 @@ const LABEL: React.CSSProperties = {
  *  gates it with `&&`). */
 export default function ExportDialog({ assetIds, photos, onClose }: ExportDialogProps) {
   const [format, setFormat] = useState<ArtboardSettings["format"]>("pdf");
+  const [zipContents, setZipContents] = useState<ArtboardSettings["zipContents"]>("originals");
   const [layout, setLayout] = useState<ArtboardSettings["pageLayout"]>("one_per_page");
   const [pageSize, setPageSize] = useState<ArtboardSettings["pageSize"]>("A4");
   const [orientation, setOrientation] = useState<ArtboardSettings["orientation"]>("portrait");
@@ -123,6 +140,9 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
   const ids = useMemo(() => items.map((i) => i.id), [items]);
   const count = ids.length;
   const isCsv = format === "captions_csv";
+  const isZip = format === "zip";
+  /** Both non-PDF formats skip the page-layout controls entirely. */
+  const isDoc = format === "pdf";
 
   const captionState = useCallback(
     (photo: Photo | undefined): "exact" | "fallback" | "none" => {
@@ -139,6 +159,11 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
     // A CSV embeds no images and omits nothing: a missing preview or caption is
     // simply an empty cell, which is information rather than a broken page.
     if (isCsv) return [];
+    if (isZip) {
+      // A zip ships bytes, so the only thing that can be missing is bytes.
+      const noBytes = items.filter((i) => i.photo && !i.photo.srcMedium && !i.photo.src).length;
+      return noBytes > 0 ? [`${noBytes} of ${count} have nothing stored yet and will be listed in README.txt.`] : [];
+    }
     if (!inc.caption && count > 0) {
       const noPreview = items.filter((i) => i.photo && !i.photo.srcMedium && !i.photo.src).length;
       return noPreview > 0 ? [`${noPreview} of ${count} have no preview yet — those pages print blank.`] : [];
@@ -158,11 +183,11 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
     if (none > 0) out.push(`${none} have no caption at all and will print without one.`);
     if (noPreview > 0) out.push(`${noPreview} have no preview yet — those pages print blank.`);
     return out;
-  }, [items, count, isCsv, inc.caption, captionLang, captionStyle, captionState]);
+  }, [items, count, isCsv, isZip, inc.caption, captionLang, captionStyle, captionState]);
 
   const options: ArtboardSettings = useMemo(
-    () => ({ format, pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
-    [format, layout, pageSize, orientation, captionLang, captionStyle, inc],
+    () => ({ format, zipContents, pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
+    [format, zipContents, layout, pageSize, orientation, captionLang, captionStyle, inc],
   );
 
   // Describe what the run will actually contain — the old copy promised a
@@ -213,6 +238,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
             progressLabel?: string | null;
             doneItems?: number | null;
             totalItems?: number | null;
+            error?: string | null;
           };
           const seen = `${j.status}:${j.progress ?? 0}:${j.doneItems ?? ""}`;
           if (seen !== lastSeen) {
@@ -228,7 +254,10 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
             setPhase("ready");
           } else if (j.status === "failed" || j.status === "canceled") {
             stopPoll();
-            setErr("The render failed. Try again — if it keeps failing, send us this job id.");
+            setErr(
+              jobErrorCopy(j.error ?? null) ??
+                "The render failed. Try again — if it keeps failing, send us this job id.",
+            );
             setPhase("error");
           } else if (Date.now() - lastChange > STALL_MS) {
             // Queued with nobody claiming it, or a render wedged mid-flight.
@@ -299,18 +328,22 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
         style={CARD}
       >
         <div id={titleId} style={{ fontSize: 13, fontWeight: 800, color: "var(--t1)", marginBottom: 2 }}>
-          {isCsv ? "Export captions as CSV" : "Export to PDF"}
+          {isCsv ? "Export captions as CSV" : isZip ? "Download as ZIP" : "Export to PDF"}
         </div>
         <div style={{ fontSize: 11.5, color: "var(--t3)", marginBottom: 16 }}>
           {count} {count === 1 ? "photo" : "photos"} ·{" "}
           {isCsv
             ? "one row each · captions in EN, UK and RU"
-            : `${under}${layout === "one_per_page" ? ` · ${count} ${count === 1 ? "page" : "pages"}` : " · 2 per row"}`}
+            : isZip
+              ? `${zipContents === "originals" ? "original files" : "web-size images"} · captions.csv included`
+              : `${under}${layout === "one_per_page" ? ` · ${count} ${count === 1 ? "page" : "pages"}` : " · 2 per row"}`}
         </div>
 
         {phase === "ready" && url ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 12, color: "var(--t2)" }}>Your {isCsv ? "CSV" : "PDF"} is ready.</div>
+            <div style={{ fontSize: 12, color: "var(--t2)" }}>
+              Your {isCsv ? "CSV" : isZip ? "ZIP" : "PDF"} is ready.
+            </div>
             <a
               href={url}
               target="_blank"
@@ -329,7 +362,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                 textDecoration: "none",
               }}
             >
-              Download {isCsv ? "CSV" : "PDF"}
+              Download {isCsv ? "CSV" : isZip ? "ZIP" : "PDF"}
             </a>
             <button onClick={onClose} style={{ ...seg(false), height: 32 }}>
               Close
@@ -338,7 +371,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
         ) : phase === "working" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "8px 0 4px" }} aria-live="polite">
             <div style={{ fontSize: 12, color: "var(--t2)" }}>
-              {progressLabel ?? (isCsv ? "Collecting captions…" : "Rendering your PDF…")}
+              {progressLabel ?? (isCsv ? "Collecting captions…" : isZip ? "Packing your files…" : "Rendering your PDF…")}
             </div>
             <div
               style={{ height: 3, background: "var(--bd)", borderRadius: 2, overflow: "hidden", position: "relative" }}
@@ -370,7 +403,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {count > 0 && (
               <div>
-                <div style={LABEL}>{isCsv ? "Rows, in order" : "Pages, in order"}</div>
+                <div style={LABEL}>{isDoc ? "Pages, in order" : "Rows, in order"}</div>
                 <div
                   style={{
                     maxHeight: 148,
@@ -488,6 +521,9 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                 <button style={seg(isCsv)} onClick={() => setFormat("captions_csv")}>
                   Captions CSV
                 </button>
+                <button style={seg(isZip)} onClick={() => setFormat("zip")}>
+                  ZIP
+                </button>
               </div>
               {isCsv && (
                 <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
@@ -495,9 +531,26 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                   by review status, and the captions in all three languages of the chosen style.
                 </div>
               )}
+              {isZip && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={seg(zipContents === "originals")} onClick={() => setZipContents("originals")}>
+                      Originals
+                    </button>
+                    <button style={seg(zipContents === "web")} onClick={() => setZipContents("web")}>
+                      Web-size
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
+                    {zipContents === "originals"
+                      ? "The files as uploaded. Photos imported from Google Drive have no copy here — those come as web-size previews, listed in README.txt."
+                      : "1024px previews of everything — small enough to email."}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {!isCsv && (
+            {isDoc && (
               <>
                 <div>
                   <div style={LABEL}>Layout</div>
@@ -534,10 +587,10 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
             )}
 
             <div>
-              <div style={LABEL}>{isCsv ? "Caption style" : "Caption language / style"}</div>
+              <div style={LABEL}>{isDoc ? "Caption language / style" : "Caption style"}</div>
               {/* A CSV carries every language, so the lang picker would be a
                   control that changes nothing — say that instead of showing it. */}
-              {isCsv ? (
+              {!isDoc ? (
                 <div style={{ fontSize: 10.5, color: "var(--t3)", marginBottom: 6 }}>
                   All three languages are included as their own columns.
                 </div>
@@ -559,8 +612,8 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                 {STYLES.map((s) => (
                   <button
                     key={s.key}
-                    style={seg(captionStyle === s.key, !isCsv && !inc.caption)}
-                    disabled={!isCsv && !inc.caption}
+                    style={seg(captionStyle === s.key, isDoc && !inc.caption)}
+                    disabled={isDoc && !inc.caption}
                     onClick={() => setCaptionStyle(s.key)}
                   >
                     {s.label}
@@ -569,7 +622,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
               </div>
             </div>
 
-            {!isCsv && (
+            {isDoc && (
               <div>
                 <div style={LABEL}>Under each photo</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -621,7 +674,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                   fontFamily: "inherit",
                 }}
               >
-                {phase === "error" ? "Try again" : isCsv ? "Export CSV" : "Export PDF"}
+                {phase === "error" ? "Try again" : isCsv ? "Export CSV" : isZip ? "Download ZIP" : "Export PDF"}
               </button>
             </div>
           </div>

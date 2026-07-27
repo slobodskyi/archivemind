@@ -17,12 +17,13 @@ import type pg from "pg";
 import { getObjectBuffer, putObject } from "../services/r2";
 import { loadPdfFont } from "../services/pdf-font";
 import { renderCaptionsCsv } from "./export-csv";
+import { renderZip } from "./export-zip";
 import type { HandlerContext } from "./index";
 
-/** Artboard → PDF / captions.csv export (ADR 0035 + its Amendments). Reads a
- *  group's ordered members (or an ad-hoc selection), renders the artifact the
- *  requested `format` asks for — a laid-out PDF, or the caption spreadsheet
- *  TECH_SPEC §8.5 originally specified (see ./export-csv) —
+/** Export (ADR 0035 + its Amendments). Reads a group's ordered members (or an
+ *  ad-hoc selection) and renders whatever the requested `format` asks for — a
+ *  laid-out PDF, the caption spreadsheet TECH_SPEC §8.5 specified
+ *  (./export-csv), or a ZIP bundle of the files themselves (./export-zip) —
  *  stores it in R2 under {workspace_id}/exports/{job_id}.pdf, and writes
  *  its R2 key into ai_jobs.payload.result_key — the web route presigns that per
  *  request, so no bearer URL is ever stored or broadcast (the client polls
@@ -297,6 +298,16 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     await progress(20, `Writing ${total} caption row(s)`, 0, total);
     const csv = await renderCaptionsCsv(pool, rows, options);
     await finishExport({ pool, job, progress }, key, csv, artifact.contentType, total, 0);
+    return;
+  }
+
+  // zip: no font and no page geometry either — just the stored bytes, plus the
+  // captions CSV inside so the metadata travels with the pixels.
+  if (options.format === "zip") {
+    const { body, skipped } = await renderZip(pool, rows, options, async (done, count) => {
+      await progress(8 + Math.round((88 * done) / count), `Packing ${done}/${count}`, done, count);
+    });
+    await finishExport({ pool, job, progress }, key, body, artifact.contentType, total, skipped);
     return;
   }
 

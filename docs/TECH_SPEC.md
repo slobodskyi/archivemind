@@ -499,8 +499,16 @@ request; no bearer URL is stored or broadcast (the old `result_url` was readable
 every workspace member through `ai_jobs` RLS and pushed to all of them on update).
 Artifacts are deleted by `sweepExpiredExports` after `EXPORT_RETENTION_DAYS`.
 
-A ZIP bundle (originals where present, previews + a note for Drive-linked files) is
-the planned third `format` and does not exist yet.
+- `format: 'zip'` — the bundle: `zipContents: 'originals'` ships the stored file for
+  every source that has one in R2 (upload, Dropbox) and falls back to the web-size
+  preview for Drive-linked assets, which have no original in R2 (ADR 0025), naming
+  each substitution in a `README.txt` inside the archive; `zipContents: 'web'` ships
+  1024px previews for everything. `captions.csv` is included either way. STORE-only,
+  no compression (the payloads are already entropy-coded) and no zip dependency —
+  `services/zip.ts` over `node:zlib`'s `crc32`. Total size is summed from
+  `files.byte_size` BEFORE any fetch and refused above `ZIP_MAX_TOTAL_BYTES`, because
+  `putObject` is Buffer-only and an OOM would be a SIGKILL that `reapStaleJobs` then
+  requeues forever.
 
 ### Cost notes (recorded per event; re-verify current prices at Phase 2)
 - `gemini-3.1-flash-lite` analyze/caption: ≈ $0.31–0.35 per 1000 images ($0.25/M in, $1.50/M out; ~half at `media_resolution=medium`, ~half again via Batch API).

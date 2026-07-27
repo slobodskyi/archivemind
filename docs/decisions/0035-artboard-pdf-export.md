@@ -136,6 +136,46 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — the ZIP bundle: "pick some files, get a zip"
+
+The simplest thing a user expects of an archive tool, and the last piece of
+TECH_SPEC §8.5 that had never been built. `format: 'zip'`, with
+`zipContents: 'originals' | 'web'`:
+
+- **originals** — the real file for every source that HAS one in R2. A
+  Drive-linked asset does not: ADR 0025 streams Drive bytes at processing time and
+  never stores them, so those fall back to their 1024px preview, are renamed
+  `.webp` (shipping preview bytes under a `.NEF` name would be a lie), and are
+  **named individually in a README.txt** inside the archive. That is precisely
+  what §8.5 prescribed — "owned original files where present, else medium previews
+  + note" — and it beats both alternatives: silently passing a preview off as an
+  original, or failing the whole bundle because one photo came from Drive.
+- **web** — the previews for everything: ~100–300 KB each, so 500 photos land
+  around 50–150 MB and the bundle can actually be emailed.
+
+`captions.csv` rides inside either shape, so the metadata travels with the pixels
+and the recipient needs nothing from us to read it.
+
+**No zip dependency.** The monorepo had none, and the candidates (`yazl`,
+`archiver`) buy deflate we do not want: every payload is a JPEG, HEIC, webp or RAW,
+already entropy-coded, so compressing costs real CPU for ~0–2%. `services/zip.ts`
+is a ~120-line STORE-only writer whose one non-trivial piece — CRC-32 — is
+`node:zlib`'s, new in Node 22. STORE also keeps the format trivially correct: sizes
+and CRCs are known before each header is written, so there are no data descriptors.
+It is deliberately **not** Zip64, and both non-Zip64 limits (4 GiB, 65535 entries)
+**throw** rather than silently emitting a truncated archive.
+
+**The size guard is the load-bearing part.** `putObject` takes a Buffer and there
+is no multipart upload anywhere in the repo, so the archive is fully in memory. A
+RAW bundle would OOM — and an OOM is a SIGKILL, which skips the handler's catch
+entirely, so `failOrRetryJob` never runs, `MAX_ATTEMPTS` never applies, and
+`reapStaleJobs` requeues the poison job every ~15 minutes forever, taking the
+single-threaded worker down each cycle. So `planZip` sums `files.byte_size`
+**before fetching a single object** and throws `export_too_large` above
+`ZIP_MAX_TOTAL_BYTES`. A refusal the user can act on beats a crash loop.
+Streaming multipart would raise the ceiling later; it is not needed to make this
+safe.
+
 ### 2026-07-27 — captions.csv: the ZIP+CSV half of §8.5 was not a subset after all
 
 The Consequences above call this ADR "a **superset** of TECH_SPEC §8.5". For the

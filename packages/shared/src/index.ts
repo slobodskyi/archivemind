@@ -454,7 +454,7 @@ export const pageOrientationSchema = z.enum(["portrait", "landscape"]);
  *  parked: a PDF is NOT a superset of a spreadsheet — you cannot paste a PDF page
  *  into an agency's caption field, and until this existed the only way to get
  *  generated captions out was the drawer's Copy button, one at a time. */
-export const exportFormatSchema = z.enum(["pdf", "captions_csv"]);
+export const exportFormatSchema = z.enum(["pdf", "captions_csv", "zip"]);
 export type ExportFormat = z.infer<typeof exportFormatSchema>;
 
 /** Extension + MIME per format, so the worker has no hardcoded ".pdf". */
@@ -462,10 +462,28 @@ export const EXPORT_ARTIFACTS: Record<ExportFormat, { ext: string; contentType: 
   pdf: { ext: "pdf", contentType: "application/pdf" },
   // charset matters: the CSV carries uk/ru captions and opens in Excel.
   captions_csv: { ext: "csv", contentType: "text/csv; charset=utf-8" },
+  zip: { ext: "zip", contentType: "application/zip" },
 };
+
+/** What a ZIP bundle contains. `originals` ships the real files for every source
+ *  that HAS them in R2 (upload, Dropbox); Drive-linked assets have no original in
+ *  R2 at all (ADR 0025) and fall back to their web-size preview, listed in the
+ *  archive's README so the recipient is told rather than left guessing.
+ *  `web` ships the 1024px previews for everything — small enough to email. */
+export const zipContentsSchema = z.enum(["originals", "web"]);
+export type ZipContents = z.infer<typeof zipContentsSchema>;
+
+/** Refuse a bundle above this rather than OOM the worker. `putObject` takes a
+ *  Buffer (no multipart anywhere in the repo), so the whole archive is in memory:
+ *  an OOM is a SIGKILL, which skips failOrRetryJob entirely and leaves the job
+ *  'running' for reapStaleJobs to requeue — forever, every ~15 minutes. A refusal
+ *  the user can act on beats a crash loop that takes the worker down with it. */
+export const ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 export const artboardSettingsSchema = z.object({
   format: exportFormatSchema.default("pdf"),
+  /** Only meaningful for format 'zip'. */
+  zipContents: zipContentsSchema.default("originals"),
   pageLayout: pageLayoutSchema.default("one_per_page"),
   pageSize: pageSizeSchema.default("A4"),
   orientation: pageOrientationSchema.default("portrait"),
@@ -613,6 +631,9 @@ export const exportResultSchema = z.object({
   progressLabel: z.string().nullable().default(null),
   doneItems: z.number().int().nullable().default(null),
   totalItems: z.number().int().nullable().default(null),
+  /** ai_jobs.error on a failed job — a worker code like `export_too_large:2.4GB`,
+   *  which the dialog maps to actionable copy instead of "the render failed". */
+  error: z.string().nullable().default(null),
 });
 export type ExportResult = z.infer<typeof exportResultSchema>;
 
