@@ -537,9 +537,15 @@ export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
  *  every workspace member can read and that broadcasts on update). */
 export const EXPORT_RETENTION_DAYS = 8;
 
-/** Pages per export. One source of truth: the request cap, the payload cap and
- *  the number the dialog shows the user all read this. */
+/** Pages per export. One source of truth: the request cap, the payload cap, the
+ *  worker's group-query LIMIT and the number the dialog shows all read this. */
 export const EXPORT_MAX_ASSETS = 500;
+
+/** Queued+running exports allowed per workspace before POST /api/exports 429s.
+ *  The worker claims one job at a time across ALL workspaces with no per-type
+ *  lanes, so an unbounded export queue is a denial of service against every
+ *  other job type. Mirrors the ingest backlog guard in POST /api/imports. */
+export const EXPORT_MAX_IN_FLIGHT = 3;
 
 /** POST /api/exports body — export a saved artboard (`groupId`) or an ad-hoc
  *  selection (`assetIds`). Exactly one source is required. */
@@ -600,6 +606,7 @@ export const EXPORT_ERROR_CODES = [
   "too_many_assets",
   "no_matching_assets",
   "group_not_found",
+  "export_backlog",
 ] as const;
 export type ExportErrorCode = (typeof EXPORT_ERROR_CODES)[number];
 

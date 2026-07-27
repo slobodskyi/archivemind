@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   EXPORT_MAX_ASSETS,
+  EXPORT_MAX_IN_FLIGHT,
   createExportRequestSchema,
   exportResultSchema,
   uuidSchema,
@@ -76,6 +77,21 @@ export async function POST(request: Request) {
     if (assetIds.length === 0) return NextResponse.json({ error: "no_matching_assets" }, { status: 404 });
     payload = { asset_ids: assetIds, options: parsed.data.options };
     accepted = assetIds.length;
+  }
+
+  // Cheap backlog guard, same shape as POST /api/imports. The worker claims and
+  // awaits ONE job at a time with no per-type lanes, so an impatient user or a
+  // retry loop could queue hundreds of 500-page exports and starve every ingest,
+  // analyze and purge job in the deployment — for every workspace, since one
+  // worker serves them all.
+  const { count: inFlight } = await supabase
+    .from("ai_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .eq("type", "export")
+    .in("status", ["queued", "running"]);
+  if ((inFlight ?? 0) >= EXPORT_MAX_IN_FLIGHT) {
+    return NextResponse.json({ error: "export_backlog" }, { status: 429 });
   }
 
   const { data: jobRow, error: jobErr } = await supabase
