@@ -136,6 +136,41 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — captions.csv: the ZIP+CSV half of §8.5 was not a subset after all
+
+The Consequences above call this ADR "a **superset** of TECH_SPEC §8.5". For the
+laid-out document that is true; for the caption sidecar it is not. **A PDF is not a
+superset of a spreadsheet** — you cannot paste a PDF page into an agency's caption
+field, feed it to a CMS import, or hand it to a translator as a worklist. Until now
+the only way to get generated captions out of ArchiveMind was the drawer's Copy
+button, one caption at a time: exactly the manual labour the product exists to
+remove.
+
+`format` is added to `artboardSettingsSchema` as a **flat** enum, not a
+discriminated union: three live call sites parse a maybe-`{}` settings blob
+(`canvas_groups.settings`), and a union would reject every one of them. Every field
+defaults, so rows written before formats existed parse as `pdf`. No migration —
+`format` lives in jsonb and `'export'` has been in the `job_type` enum since init.
+
+The handler splits into `collectExportRows()` (format-agnostic, the ordered rows)
+plus a per-format renderer plus a shared `finishExport()` storage tail, and
+`EXPORT_ARTIFACTS` replaces the hardcoded `.pdf` / `application/pdf`.
+
+Two decisions inside the CSV worth recording:
+
+- **Facts are split into `facts_confirmed` and `facts_unreviewed`,** not filtered and
+  not merged. This is the other half of taking them out of the PDF: a machine
+  consumer *should* see the model's guesses, as long as the file says which they are.
+- **Caption columns use an exact (lang, style) lookup, deliberately not
+  `resolveCaptionText`.** Its fallback chain is right for a page that needs *some*
+  text under the photo and wrong for a column labelled `caption_uk`, which would
+  then hold English. An empty cell is the useful answer — it is precisely the list of
+  photos still needing Ukrainian.
+
+The CSV also carries what the PDF never did: tags (which §8.5 asked for), the AI
+description from `embeddings.content`, and the full EXIF the PDF only ever summarised
+into one line.
+
 ### 2026-07-27 — the artifact is keyed, presigned per request, and swept
 
 Decision §1 stored a **7-day presigned URL** in `ai_jobs.payload.result_url`.

@@ -4,8 +4,10 @@ import {
   CAPTION_PROMPTS,
   SINGLE_PUT_MAX_BYTES,
   addProjectAssetsRequestSchema,
+  EXPORT_ARTIFACTS,
   artboardSettingsSchema,
   assetKindFromMime,
+  exportFormatSchema,
   canvasGroupKindSchema,
   createCanvasGroupRequestSchema,
   createExportRequestSchema,
@@ -544,6 +546,7 @@ describe("canvas groups: folders + artboards (ADR 0034)", () => {
 
   it("artboardSettings fills every default from {}", () => {
     const s = artboardSettingsSchema.parse({});
+    expect(s.format).toBe("pdf");
     expect(s.pageLayout).toBe("one_per_page");
     expect(s.pageSize).toBe("A4");
     expect(s.orientation).toBe("portrait");
@@ -605,6 +608,25 @@ describe("artboard PDF export (ADR 0035)", () => {
     });
     expect(p.result_key).toContain(".pdf");
     expect(exportJobPayloadSchema.safeParse({ options: opts }).success).toBe(false);
+  });
+});
+
+describe("export formats", () => {
+  it("keeps `format` a FLAT field so a maybe-{} settings blob still parses", () => {
+    // Three live call sites do artboardSettingsSchema.parse(<jsonb settings>);
+    // a discriminated union on format would reject every one of them.
+    expect(artboardSettingsSchema.parse({}).format).toBe("pdf");
+    expect(artboardSettingsSchema.parse({ format: "captions_csv" }).format).toBe("captions_csv");
+    expect(artboardSettingsSchema.safeParse({ format: "docx" }).success).toBe(false);
+  });
+
+  it("gives every format an extension and a MIME type", () => {
+    for (const f of exportFormatSchema.options) {
+      expect(EXPORT_ARTIFACTS[f].ext).toMatch(/^[a-z0-9]+$/);
+      expect(EXPORT_ARTIFACTS[f].contentType).toContain("/");
+    }
+    // The CSV carries uk/ru captions — the charset is part of the contract.
+    expect(EXPORT_ARTIFACTS.captions_csv.contentType).toContain("charset=utf-8");
   });
 });
 
