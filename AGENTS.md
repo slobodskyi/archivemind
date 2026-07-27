@@ -50,6 +50,13 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   collapse behind "show more" (ADR 0029). Search is **hybrid**: image-embedding
   cosine + Postgres FTS over description/facts + EXIF filters (camera/ISO/aperture)
   alongside date/place (ADR 0031). `lib/chat.ts` keeps only static help/greeting copy.
+  **Usage & Storage** (ADR 0037, 2026-07-27) is the homepage's fifth view, not a
+  page of its own — the sidebar item and `/account/usage` both render
+  `HomeClient` with `initialView="usage"`, so there is exactly ONE signed-in
+  chrome. Add new signed-in surfaces as `ViewMode`s there, not as new layouts.
+  It reads one RLS-scoped `workspace_usage()` RPC (`lib/usage.ts` server-side,
+  `GET /api/usage` for the client switch) and answers three questions: storage
+  by bucket, credits this month, and what is still unanalyzed.
 - `apps/worker` — Railway job worker: ai_jobs queue, ingest (dedup/EXIF/previews,
   HEIC + RAW paths), analyze (Gemini tags/facts + embeddings; user-triggered
   only — never automatic), caption (styled multilingual captions — live
@@ -60,7 +67,15 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   trashed asset's R2 bytes + DB derivatives, keep the row as a dedup
   tombstone; enqueued by the 6-hourly `sweep_deleted_assets()` after the
   30-day photo-trash window or by "Delete permanently" — ADR 0033).
-- `packages/shared` — zod schemas / domain contracts shared by web + worker.
+- `packages/shared` — zod schemas / domain contracts shared by web + worker, plus
+  `src/usage.ts`: the **credit unit**. `1 credit = 1 AI action on 1 photo` —
+  analyze 1, caption 1 *per language*, and `embedding`/`search_query`/`export`/
+  `asset_ingested` **0** (the embedding is the second half of the same analyze
+  call; search is the core loop). Storage is a separate axis in bytes, never
+  converted to credits. Both the worker (which writes `usage_events`) and the
+  web reader (which totals them) import this, so the meter and the future bill
+  cannot drift apart. Limits live in the `plans` table and are display-only —
+  `plans.enforced` is false everywhere and nothing refuses work (ADR 0037).
 
 Target stack: Supabase (Postgres + Auth + pgvector),
 Cloudflare R2 (all binaries), and a **worker on Railway** for heavy jobs

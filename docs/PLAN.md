@@ -198,6 +198,48 @@ Phases 1–2). What actually remains:
 
 ~~Export handler (ZIP: owned originals else medium previews + note; `captions.csv` sidecar) → R2 `exports/` + presigned GET (7 d = R2 max).~~ — **✅ DONE 2026-07-27 (closes #25).** All three formats ship: `POST /api/exports` → `export` worker job with `options.format` = `pdf` (laid-out document, `pdf-lib` + embedded Cyrillic font, one-per-page or grid, optional cover + page footers) | `captions_csv` (one row per photo: filename, full EXIF, place, tags, AI description, facts split by review status, captions per language) | `zip` (originals where R2 has them, web-size previews for Drive-linked assets with a README.txt naming the substitutions and carrying the workspace rights block; `captions.csv` inside either shape). The worker writes the R2 KEY to `ai_jobs.payload.result_key` and `GET /api/exports` presigns it per request — no bearer URL is stored or broadcast. Artifacts are deleted by `sweepExpiredExports` after `EXPORT_RETENTION_DAYS`, and `purge.ts` erases any artifact containing an erased photo. Sources the medium previews (edited-medium when present), so the PDF works for Drive-linked assets. Migration `20260727000001` adds the workspace credit/rights block the deliverables carry. ~~Deletion flows (soft-delete + R2 purge; `source_missing` on fetch failure keeps derivatives)~~ — **✅ pulled forward, shipped 2026-07-23 (ADR 0033):** photo trash with undo + Restore + 30-day `sweep_deleted_assets()` → `purge` worker job (R2 bytes + DB derivatives erased, dedup tombstone kept), Trash view lists photos with day countdowns, "Delete permanently"/"Empty trash", edit-reset cleans its orphaned R2 objects; `source_missing` still keeps derivatives. Security pass per spec §12 (RLS audit, token handling, TTLs). **GDPR right-to-erasure: account/workspace-level "delete everything" flow (rows + R2, incl. tombstones) — still open, deliberately NOT covered by ADR 0033; the purge handler is its building block.** Privacy Policy + ToS before first external user. Full QA on a real dirty archive.
 
+### Usage & Storage — ✅ DONE 2026-07-27, LIVE on prod (#177 · #178 · #179, [ADR 0037](decisions/0037-usage-metering-and-the-credit-unit.md))
+
+Not in any phase's original list — it came out of the account menu's third
+"coming soon" toast, and building it exposed that the metering §11 rule 11
+promised was half-built.
+
+- **The credit unit is now defined, not just deferred:** `1 credit = 1 AI action
+  on 1 photo` — analyze 1, caption 1 *per language*, and `embedding` /
+  `search_query` / `export` / `asset_ingested` **0**. The embedding is the second
+  half of the same analyze call (counting it would double every analysis the day
+  a limit is enforced) and search is the core loop. Storage stays a separate axis
+  in bytes. Defined once in `packages/shared/src/usage.ts`, imported by the
+  worker that writes `usage_events` and the reader that totals them.
+- **Enforcement is still out of MVP** (spec §13): `plans` ships `beta` 50 GiB/5k ·
+  `creator` 500 GiB/25k · `studio` 2 TiB/100k, all with `enforced = false`. No
+  policy, trigger or code path reads a limit — they exist so the meter has a
+  denominator and so enforcement later reads numbers collected truthfully from
+  the start.
+- **What was actually missing:** `asset_previews`/`asset_edits` stored R2 keys
+  with no size and the export job only `result_key`, so of four byte buckets only
+  originals were measurable; `ingest` wrote no `usage_event` at all; and
+  `cost_usd` had existed since migration 0001 written by nobody. Each is now
+  recorded by the handler that already holds the buffer, and every usage write
+  goes through `apps/worker/src/services/usage.ts`. Historic rows were filled by
+  `apps/worker/src/scripts/backfill-derivative-bytes.ts` (run against prod:
+  146 previews, 6 edit rows, 6 export artifacts — every workspace now reports
+  zero unmeasured files).
+- Migration `20260727000002` (`plans`, `workspaces.plan`, the byte columns,
+  `usage_events.bytes`, and the SECURITY INVOKER `workspace_usage(ws)` RPC) —
+  **on prod 2026-07-27**, verified by ledger + direct object checks (`db diff`
+  skipped: Docker was down — see [ADR 0037](decisions/0037-usage-metering-and-the-credit-unit.md)).
+  pgTAP `010_usage.sql` pins the arithmetic bucket by bucket and asserts that
+  passing another workspace's id returns zeros.
+- **Shape correction (#179, owner's call):** it first shipped as a standalone
+  page with its own header. It is now the homepage's **fifth `ViewMode`**, beside
+  Archived and Trash — one signed-in chrome. New signed-in surfaces belong there
+  as views, not as new layouts.
+- Deliberately left: `Account Settings` / `Billing & Plan` still toast (no pages
+  exist; a link to a 404 is worse), no usage CSV export, no deep link from the
+  storage card into Trash. **Never verified visually** — the page has not been
+  looked at in a browser by anyone but the owner.
+
 ---
 
 ## 3. Working agreements for this build
