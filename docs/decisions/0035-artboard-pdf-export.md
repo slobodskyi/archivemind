@@ -110,6 +110,30 @@ letting text consume the page; `fitScale` can no longer return a negative scale.
 `wrap()` also hard-breaks a single token wider than the column, which previously
 drew past the margin.
 
+### 2026-07-27 — the dialog reports the run before and during it
+
+Three contract additions, all backward-compatible. `exportResultSchema` now
+carries `progress` / `progressLabel` / `doneItems` / `totalItems`: the worker has
+always written a true percentage and a `Rendering i/total` label on every photo,
+but `GET /api/exports` selected only `id, status, payload`, so the dialog showed
+a hardcoded, frozen 40% bar for every job of every size — indistinguishable from
+a dead worker. `POST /api/exports` now answers with a machine-readable code from
+`EXPORT_ERROR_CODES` instead of prose, because every distinct failure (over the
+cap, photos in Trash, expired session) collapsed into one line of generic copy;
+unknown codes still fall back to it, so adding a code is never breaking. And the
+500 cap is now the single `EXPORT_MAX_ASSETS` constant shared by the request
+schema, the payload schema and the dialog copy — it was three unexplained
+literals, and a selection over it produced a bare 400.
+
+The dialog is also a real modal now (`useDialog`, matching Confirm/Rename/Help)
+at `Z.modal` rather than `Z.menu`, and `exportOpen` short-circuits the global
+Delete/Escape/Space handlers — Backspace with the dialog open used to move the
+very photos being exported to Trash, after which the route 404'd with copy that
+gave no hint the keypress had done it. While a render is in flight the dialog is
+deliberately not dismissible: it is currently the only place the finished link
+appears. A stall deadline (no status change for 5 min) turns the previously
+unbounded poll into an actionable error, so that is never a trap.
+
 ### 2026-07-27 — the `grid` layout honours every toggle it is offered
 
 §4 defined `grid` as "2-up with a short caption" and then said what goes under

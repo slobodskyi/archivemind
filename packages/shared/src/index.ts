@@ -533,12 +533,16 @@ export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
 /** R2 max presign lifetime — export deliverables outlive the 1 h preview TTL. */
 export const EXPORT_PRESIGN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+/** Pages per export. One source of truth: the request cap, the payload cap and
+ *  the number the dialog shows the user all read this. */
+export const EXPORT_MAX_ASSETS = 500;
+
 /** POST /api/exports body — export a saved artboard (`groupId`) or an ad-hoc
  *  selection (`assetIds`). Exactly one source is required. */
 export const createExportRequestSchema = z
   .object({
     groupId: uuidSchema.optional(),
-    assetIds: z.array(uuidSchema).min(1).max(500).optional(),
+    assetIds: z.array(uuidSchema).min(1).max(EXPORT_MAX_ASSETS).optional(),
     options: artboardSettingsSchema,
   })
   .refine((v) => v.groupId !== undefined || (v.assetIds !== undefined && v.assetIds.length > 0), {
@@ -555,7 +559,7 @@ export type CreateExportResponse = z.infer<typeof createExportResponseSchema>;
 export const exportJobPayloadSchema = z
   .object({
     group_id: uuidSchema.optional(),
-    asset_ids: z.array(uuidSchema).min(1).max(500).optional(),
+    asset_ids: z.array(uuidSchema).min(1).max(EXPORT_MAX_ASSETS).optional(),
     options: artboardSettingsSchema,
     /** written back by the worker when the PDF lands in R2 */
     result_url: z.string().optional(),
@@ -565,13 +569,33 @@ export const exportJobPayloadSchema = z
   });
 export type ExportJobPayload = z.infer<typeof exportJobPayloadSchema>;
 
-/** GET /api/exports?jobId= — poll/lookup after Realtime signals 'done'. */
+/** GET /api/exports?jobId= — poll/lookup after Realtime signals 'done'. Carries
+ *  the job's real progress: the worker already writes `Rendering 12/40` and a
+ *  true percentage on every photo, but the read path used to drop those columns,
+ *  so the dialog showed a frozen 40% bar for every job of every size. */
 export const exportResultSchema = z.object({
   jobId: uuidSchema,
   status: jobStatusSchema,
   url: z.string().nullable(),
+  progress: z.number().int().min(0).max(100).default(0),
+  progressLabel: z.string().nullable().default(null),
+  doneItems: z.number().int().nullable().default(null),
+  totalItems: z.number().int().nullable().default(null),
 });
 export type ExportResult = z.infer<typeof exportResultSchema>;
+
+/** Error codes POST /api/exports returns as `{ error }` so the dialog can say
+ *  what actually went wrong instead of one generic line. Anything unrecognised
+ *  falls back to generic copy, so adding a code is never a breaking change. */
+export const EXPORT_ERROR_CODES = [
+  "unauthorized",
+  "no_workspace",
+  "invalid_request",
+  "too_many_assets",
+  "no_matching_assets",
+  "group_not_found",
+] as const;
+export type ExportErrorCode = (typeof EXPORT_ERROR_CODES)[number];
 
 /** One caption row as the DB stores it (lowercase enums), for resolveCaptionText. */
 export interface CaptionRowLike {

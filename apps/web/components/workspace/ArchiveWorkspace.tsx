@@ -387,7 +387,7 @@ export default function ArchiveWorkspace({
         onBatchSettled={ws.onUploadBatchSettled}
       />
 
-      {ws.exportOpen && <ExportDialog assetIds={ws.exportIds} onClose={ws.closeExport} />}
+      {ws.exportOpen && <ExportDialog assetIds={ws.exportIds} photos={ws.photos} onClose={ws.closeExport} />}
 
       <CanvasContextMenu
         menu={ws.contextMenu}
