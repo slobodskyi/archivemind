@@ -185,11 +185,22 @@ export default function BulkAiPanel({
             AI operations
           </div>
 
+          {/* Analyze sits first because it RUNS first — captions are written
+              from the facts it finds. The old order (captions on top) read as
+              two unrelated options while the CTA said "Analyze & caption". */}
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            <OpCard
+              icon={<TagIcon width={15} height={15} />}
+              title="Analyze"
+              subtitle="Tags · facts · searchable · 1 call per photo"
+              checked={bulkOps.tags}
+              onToggle={onToggleTags}
+            />
+
             <OpCard
               icon={<SparkleIcon width={15} height={15} />}
               title="Generate captions"
-              subtitle="Multilingual · choose a style"
+              subtitle="1 call per photo per language"
               checked={bulkOps.captions}
               onToggle={onToggleCaptions}
             >
@@ -251,21 +262,17 @@ export default function BulkAiPanel({
                 </div>
               )}
             </OpCard>
-
-            <OpCard
-              icon={<TagIcon width={15} height={15} />}
-              title="Analyze"
-              subtitle="Tags · facts · makes the photo searchable"
-              checked={bulkOps.tags}
-              onToggle={onToggleTags}
-            />
           </div>
 
-          {bulkOps.tags && bulkOps.captions && (
-            <div style={{ marginTop: 10, fontSize: 10.5, lineHeight: 1.45, color: "var(--t3)" }}>
-              Analysis runs first — captions are written from the facts it finds.
-            </div>
-          )}
+          {/* Both are on by default; this explains why they're separable at all
+              rather than leaving the user to guess what the split buys them. */}
+          <div style={{ marginTop: 10, fontSize: 10.5, lineHeight: 1.45, color: "var(--t3)" }}>
+            {bulkOps.tags && bulkOps.captions
+              ? "Analysis runs first — captions are written from the facts it finds."
+              : bulkOps.captions
+                ? "Captioning only — cheaper for re-writing captions in another language."
+                : "Analysis only — no caption text, but the photos become searchable."}
+          </div>
 
           <button
             onClick={onRun}

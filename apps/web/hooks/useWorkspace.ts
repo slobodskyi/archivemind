@@ -703,7 +703,12 @@ export function useWorkspace(
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
-    bulkOps: { captions: false, tags: true },
+    // Both on by default, so the panel's primary action is the same
+    // "Analyze & caption" the drawer offers on a single photo. The checkboxes
+    // exist for the two genuinely separate cases — re-captioning in another
+    // language without paying to re-analyze, and bulk-analyzing purely to make
+    // an archive searchable — not as a choice the user must make every time.
+    bulkOps: { captions: true, tags: true },
     bulkLangs: ["EN"],
     bulkStyle: "Agency",
     bulkPanelOpen: false,
@@ -3126,6 +3131,19 @@ export function useWorkspace(
   const setCanvasRef = useCallback((el: HTMLDivElement | null) => {
     canvasElRef.current = el;
   }, []);
+
+  // The AI panel is a mode over a selection, not a window of its own — so it
+  // ends when the selection does. `bulkPanelOpen` used to latch: dismissing the
+  // panel by clicking empty canvas cleared selectedIds (the panel disappeared,
+  // because bulkShow ANDs the two) but left the flag true, so selecting any
+  // next photo sprang the panel straight back open — the user clicked a tile
+  // expecting its details and got the AI dialog. Covers every path that empties
+  // the selection, not just clearSelection().
+  useEffect(() => {
+    if (state.bulkPanelOpen && state.selectedIds.length === 0) {
+      setState({ bulkPanelOpen: false });
+    }
+  }, [state.bulkPanelOpen, state.selectedIds.length, setState]);
 
   useEffect(() => {
     window.addEventListener("pointermove", move);
