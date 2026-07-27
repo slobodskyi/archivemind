@@ -316,8 +316,21 @@ function buildMarkerElement({
   selected: boolean;
 }): HTMLElement {
   const size = markerSize(count);
+  // MapLibre OWNS wrap.style.transform — it positions every marker by writing
+  // `translate(-50%,-100%) translate(Xpx,Ypx)` onto the element it was handed.
+  // Nothing else may touch it: a hover scale written here wipes the translate
+  // and the marker snaps to the map container's origin until the next
+  // setLngLat puts it back (which is why panning "fixed" it). Everything
+  // visual therefore lives in `inner`, which is ours to transform.
   const wrap = document.createElement("div");
   wrap.style.cssText = `position:relative;width:${size}px;height:${size}px;cursor:pointer;`;
+
+  const inner = document.createElement("div");
+  // Grows from the pin's tip rather than its middle, so the marker stays on the
+  // coordinate it is pointing at while it scales.
+  inner.style.cssText =
+    "position:absolute;inset:0;transform-origin:bottom center;transition:transform .15s;";
+  wrap.appendChild(inner);
 
   if (count > 1) {
     // Two hairline cards peeking out behind the plate — a stack of prints.
@@ -329,7 +342,7 @@ function buildMarkerElement({
       card.style.cssText =
         `position:absolute;inset:0;border:1px solid var(--bd);border-radius:3px;` +
         `background:var(--bg-in);transform:${transform};opacity:${i === 1 ? 0.7 : 0.45};`;
-      wrap.appendChild(card);
+      inner.appendChild(card);
     }
   }
 
@@ -340,7 +353,7 @@ function buildMarkerElement({
     "position:absolute;bottom:-4px;left:50%;width:8px;height:8px;" +
     "transform:translateX(-50%) rotate(45deg);background:var(--bg-in);" +
     "border-right:1px solid var(--bd);border-bottom:1px solid var(--bd);";
-  wrap.appendChild(tail);
+  inner.appendChild(tail);
 
   const plate = document.createElement("div");
   plate.dataset.plate = "";
@@ -350,16 +363,16 @@ function buildMarkerElement({
     `background:${thumb ? `center/cover url(${thumb})` : "var(--bg-in)"};` +
     // A resting shadow, unlike the canvas tiles: these float over a live
     // basemap and need to detach from it.
-    `box-shadow:0 4px 14px rgba(0,0,0,.55);transition:box-shadow .15s,transform .15s;`;
-  wrap.appendChild(plate);
+    `box-shadow:0 4px 14px rgba(0,0,0,.55);transition:box-shadow .15s;`;
+  inner.appendChild(plate);
 
   wrap.addEventListener("pointerenter", () => {
     plate.style.boxShadow = "0 12px 28px rgba(0,0,0,.42), 0 0 0 1px rgba(255,255,255,.06)";
-    wrap.style.transform = "scale(1.06)";
+    inner.style.transform = "scale(1.06)";
   });
   wrap.addEventListener("pointerleave", () => {
     plate.style.boxShadow = "0 4px 14px rgba(0,0,0,.55)";
-    wrap.style.transform = "scale(1)";
+    inner.style.transform = "scale(1)";
   });
 
   if (count > 1) {
@@ -370,7 +383,7 @@ function buildMarkerElement({
       "min-width:18px;height:18px;padding:0 5px;border:1px solid rgba(255,255,255,.12);border-radius:2px;" +
       "background:rgba(8,8,8,.82);color:var(--t1);font-size:9.5px;font-weight:700;line-height:1;" +
       "letter-spacing:.06em;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none;";
-    wrap.appendChild(badge);
+    inner.appendChild(badge);
   }
   return wrap;
 }
