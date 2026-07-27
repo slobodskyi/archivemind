@@ -14,6 +14,7 @@ import {
   exportJobPayloadSchema,
   groupAssetsRequestSchema,
   patchCanvasGroupRequestSchema,
+  patchWorkspaceRequestSchema,
   resolveCaptionText,
   captionJobPayloadSchema,
   captionLangSchema,
@@ -43,6 +44,7 @@ import {
   searchParseSchema,
   searchResponseSchema,
   searchResultSchema,
+  workspaceInfoSchema,
 } from "./index";
 
 /**
@@ -608,6 +610,34 @@ describe("artboard PDF export (ADR 0035)", () => {
     });
     expect(p.result_key).toContain(".pdf");
     expect(exportJobPayloadSchema.safeParse({ options: opts }).success).toBe(false);
+  });
+});
+
+describe("workspace credit block", () => {
+  it("accepts a partial patch and rejects an empty one", () => {
+    expect(patchWorkspaceRequestSchema.safeParse({ credit: "Photo: O. S." }).success).toBe(true);
+    expect(patchWorkspaceRequestSchema.safeParse({ creator: null }).success).toBe(true);
+    expect(patchWorkspaceRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("trims and bounds each field", () => {
+    expect(patchWorkspaceRequestSchema.parse({ credit: "  Photo: O. S.  " }).credit).toBe("Photo: O. S.");
+    expect(patchWorkspaceRequestSchema.safeParse({ credit: "x".repeat(301) }).success).toBe(false);
+    expect(patchWorkspaceRequestSchema.safeParse({ usageTerms: "x".repeat(501) }).success).toBe(false);
+  });
+
+  it("keeps every credit field nullable — no byline is a valid state", () => {
+    const info = workspaceInfoSchema.parse({
+      id: "00000000-0000-0000-0000-00000000aaaa",
+      name: "WS",
+      creator: null,
+      credit: null,
+      copyrightNotice: null,
+      usageTerms: null,
+      canEdit: false,
+    });
+    expect(info.credit).toBeNull();
+    expect(info.canEdit).toBe(false);
   });
 });
 
