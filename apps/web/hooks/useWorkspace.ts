@@ -37,6 +37,7 @@ import {
   hitTestTiles,
   nudgeOffOverlap,
   packGrid,
+  readingOrder,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
   timelineAxisLayout as computeTimelineLayout,
@@ -1963,14 +1964,25 @@ export function useWorkspace(
   const duplicateFiles = useCallback(() => { setContextMenu(null); flashToast("Duplicate — coming soon"); }, [flashToast]);
   /** Open the Export-to-PDF dialog for an explicit set of assets (ADR 0035) — a
    *  frame's content, a folder, or the current selection. The dialog itself does
-   *  the POST /api/exports + poll + download. */
+   *  the POST /api/exports + poll + download.
+   *
+   *  Page order is decided HERE, once, so all four entry points agree: the ids
+   *  are put into the reading order of the layout the user is looking at. Every
+   *  caller used to hand over its own incidental order (click order, marquee hit
+   *  order, or `photos` = newest-first, which is the reverse of the default grid)
+   *  and nothing downstream re-sorted — the route preserves the array and the
+   *  worker re-imposes it, so whatever arrived became the page sequence. */
   const openExportFor = useCallback(
     (ids: string[]) => {
       setContextMenu(null);
       if (ids.length === 0) return flashToast("Nothing to export");
-      setState({ exportOpen: true, exportIds: ids });
+      const s = stateRef.current;
+      // Timeline is a date axis: tiles straddle it but read left-to-right, so it
+      // takes one band. The other views are 2D and band by row.
+      const bandH = s.view === "timeline" ? Infinity : undefined;
+      setState({ exportOpen: true, exportIds: readingOrder(ids, activeTilePositions(s), bandH) });
     },
-    [flashToast, setState],
+    [activeTilePositions, flashToast, setState],
   );
   const exportFiles = useCallback(() => {
     openExportFor(stateRef.current.selectedIds.slice());
