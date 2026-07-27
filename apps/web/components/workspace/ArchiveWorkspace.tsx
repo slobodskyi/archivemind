@@ -422,6 +422,8 @@ export default function ArchiveWorkspace({
         onSaveCaption={ws.saveCaption}
         onEditImage={() => ws.drawerPhoto && ws.openEditor(ws.drawerPhoto.id)}
         onDelete={() => ws.drawerPhoto && ws.deletePhoto(ws.drawerPhoto.id)}
+        onSetFactStatus={ws.setFactStatus}
+        onExport={() => ws.drawerPhoto && ws.openExportFor([ws.drawerPhoto.id])}
       />
 
       <ImageEditor

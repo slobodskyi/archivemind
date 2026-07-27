@@ -15,6 +15,7 @@ import type {
   CanvasUploadPreview,
   ChatMessage,
   ChatResult,
+  FactStatus,
   Language,
   Photo,
   PhotoSource,
@@ -460,6 +461,8 @@ export interface Workspace {
   copyCap: (text: string) => void;
   regen: () => void;
   saveCaption: (text: string) => void;
+  /** Confirm / un-confirm one extracted fact (feeds the caption prompt). */
+  setFactStatus: (factId: string, status: "confirmed" | "likely") => void;
   genSingle: (id: string) => void;
   toolSelect: () => void;
   toolHand: () => void;
@@ -495,6 +498,8 @@ export interface Workspace {
   copyFiles: () => void;
   duplicateFiles: () => void;
   exportFiles: () => void;
+  /** Open the Export-to-PDF dialog for an explicit asset set (ADR 0035). */
+  openExportFor: (ids: string[]) => void;
   exportOpen: boolean;
   exportIds: string[];
   closeExport: () => void;
@@ -1556,6 +1561,51 @@ export function useWorkspace(
     }
     await runAi([photo.id], { captions: true, tags: false }, [s.drawerLang], s.drawerStyle);
   }, [flashToast, runAi]);
+
+  /** Record a human verdict on one extracted fact.
+   *
+   *  Confirmed facts are the only user-supplied ground truth the caption prompt
+   *  quotes (`caption.ts` selects `status = 'confirmed'`), so this is an AI
+   *  input, not a bookkeeping flag — which is why the drawer confirms facts one
+   *  at a time and the old blanket "Confirm facts" button is gone.
+   *
+   *  Optimistic: the dot changes immediately and reverts if the PATCH fails. No
+   *  router.refresh on success — the server payload already agrees, and a
+   *  refresh mid-review would re-render the list under the user's cursor. */
+  const setFactStatus = useCallback(
+    async (factId: string, status: "confirmed" | "likely") => {
+      const uiStatus = status === "confirmed" ? ("confirmed" as const) : ("pending" as const);
+      const patchFact = (next: FactStatus | null) =>
+        setState((prev) => ({
+          photos: prev.photos.map((p) =>
+            p.facts.some((f) => f.id === factId)
+              ? {
+                  ...p,
+                  facts: p.facts.map((f) =>
+                    f.id === factId ? { ...f, status: next ?? f.status } : f,
+                  ),
+                }
+              : p,
+          ),
+        }));
+      const previous = stateRef.current.photos
+        .flatMap((p) => p.facts)
+        .find((f) => f.id === factId)?.status;
+      patchFact(uiStatus);
+      try {
+        const resp = await fetch(`/api/facts/${factId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+      } catch {
+        if (previous) patchFact(previous);
+        flashToast("Couldn't save that — try again");
+      }
+    },
+    [setState, flashToast],
+  );
 
   /** Persist a drawer caption edit — PATCH stamps is_edited=true (spec §8.3),
    *  so bulk regeneration never silently clobbers it. */
@@ -3571,6 +3621,7 @@ export function useWorkspace(
     copyCap,
     regen,
     saveCaption,
+    setFactStatus,
     genSingle,
     toolSelect,
     toolHand,
@@ -3602,6 +3653,7 @@ export function useWorkspace(
     copyFiles,
     duplicateFiles,
     exportFiles,
+    openExportFor,
     exportOpen: state.exportOpen,
     exportIds: state.exportIds,
     closeExport,

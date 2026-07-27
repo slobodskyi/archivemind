@@ -310,7 +310,8 @@ function generatePhotos(): Photo[] {
     captionStyle: p.baseStyle,
     chip: p.chip ?? null,
     tags: p.tags,
-    facts: (p.facts ?? []).map((f): Fact => ({ text: f.text, status: factStatus(f.color) })),
+    // Mock facts have no DB row — null id keeps them out of the confirm flow.
+    facts: (p.facts ?? []).map((f): Fact => ({ id: null, text: f.text, status: factStatus(f.color) })),
     time: p.time ?? "",
     day: p.day ?? "",
     group: p.group as PhotoGroup,
