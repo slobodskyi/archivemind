@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildReadme, planZip } from "./export-zip";
+import { ZIP_MAX_TOTAL_BYTES } from "@archivemind/shared";
+import { assertUnderBudget, buildReadme, planZip } from "./export-zip";
 
 /** Shapes the DB rows renderZip reads. `original_key: null` = a Drive-linked
  *  asset, whose original was never copied into R2 (ADR 0025). */
@@ -9,7 +10,6 @@ const row = (over: Partial<Parameters<typeof planZip>[0][number]> = {}) => ({
   original_key: "ws/originals/x/DSC_0001.NEF",
   byte_size: 25_000_000,
   medium_key: "ws/previews/x/medium.webp",
-  medium_size: 180_000,
   ...over,
 });
 
@@ -25,7 +25,7 @@ describe("planZip — originals", () => {
         substituted: false,
       },
     ]);
-    expect(plan.totalBytes).toBe(25_000_000);
+    expect(plan.knownBytes).toBe(25_000_000);
     expect(plan.missing).toEqual([]);
   });
 
@@ -37,7 +37,11 @@ describe("planZip — originals", () => {
     expect(plan.entries[0].key).toBe("ws/previews/x/medium.webp");
     // Renamed to .webp — shipping preview bytes under a .NEF name would lie.
     expect(plan.entries[0].name).toBe("DSC_0001.webp");
-    expect(plan.totalBytes).toBe(180_000);
+    // asset_previews stores no size (only r2_key/width/height), so a preview
+    // contributes nothing to the pre-flight sum — the running total during the
+    // fetch is what bounds it. Inventing a `byte_size` on that table is exactly
+    // the bug that shipped and broke every ZIP export in production.
+    expect(plan.knownBytes).toBe(0);
   });
 
   it("reports an asset with neither an original nor a preview instead of shipping nothing", () => {
@@ -54,7 +58,7 @@ describe("planZip — web", () => {
     expect(plan.entries[0].name).toBe("DSC_0001.webp");
     // Not a substitution: web-size is what was asked for.
     expect(plan.entries[0].substituted).toBe(false);
-    expect(plan.totalBytes).toBe(180_000);
+    expect(plan.knownBytes).toBe(0); // previews have no stored size
   });
 });
 
@@ -81,13 +85,13 @@ describe("planZip — names and sizes", () => {
       [row({ byte_size: "3000000" }), row({ asset_id: "a2", original_key: "k2", byte_size: "4000000" })],
       "originals",
     );
-    expect(plan.totalBytes).toBe(7_000_000);
+    expect(plan.knownBytes).toBe(7_000_000);
   });
 
   it("treats an unknown size as zero rather than NaN", () => {
     const plan = planZip([row({ byte_size: null })], "originals");
-    expect(plan.totalBytes).toBe(0);
-    expect(Number.isNaN(plan.totalBytes)).toBe(false);
+    expect(plan.knownBytes).toBe(0);
+    expect(Number.isNaN(plan.knownBytes)).toBe(false);
   });
 
   it("keeps the caller's page order", () => {
@@ -128,5 +132,20 @@ describe("buildReadme", () => {
     expect(buildReadme(plan, "web")).toBeNull();
     const withMissing = planZip([row(), row({ asset_id: "a2", medium_key: null })], "web");
     expect(buildReadme(withMissing, "web")).toContain("1024px preview");
+  });
+});
+
+describe("assertUnderBudget", () => {
+  it("allows a bundle at or under the ceiling", () => {
+    expect(() => assertUnderBudget(0)).not.toThrow();
+    expect(() => assertUnderBudget(ZIP_MAX_TOTAL_BYTES)).not.toThrow();
+  });
+
+  it("refuses above it with a size the dialog can show", () => {
+    // A refusal the user can act on beats an OOM — which is a SIGKILL, so the
+    // handler's catch never runs, failOrRetryJob never fires, and reapStaleJobs
+    // requeues the poison job every ~15 minutes forever.
+    expect(() => assertUnderBudget(ZIP_MAX_TOTAL_BYTES + 1)).toThrow(/^export_too_large:/);
+    expect(() => assertUnderBudget(3 * 1024 ** 3)).toThrow("export_too_large:3.0GB");
   });
 });

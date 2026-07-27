@@ -136,6 +136,34 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — the ZIP query invented a column, and nothing was testing SQL
+
+Shipped and immediately broken in production: `renderZip` selected
+`asset_previews.byte_size`, which has never existed on that table (it holds
+`asset_id`, `size`, `r2_key`, `width`, `height`). Every ZIP export failed with
+`column ap.byte_size does not exist`, retried to `MAX_ATTEMPTS` and died — while
+the dialog sat on "Preparing export", because a retry flips the job back to
+`queued` and the stall detector reads that flapping as progress. PDF and CSV were
+unaffected; they never touch that query.
+
+Nothing caught it, and the reason is worth recording: `planZip` is a pure function
+tested over hand-written row objects, `buildZip` is tested over buffers, and **no
+test had ever executed the SQL**. Unit tests around a query cannot see that the
+query is wrong.
+
+Two fixes, one for the bug and one for the class:
+
+1. The size column is gone. A preview simply has no recorded size, so the
+   pre-flight sum now covers originals only and the fetch loop enforces the
+   ceiling on the *actual* running total — strictly better than the estimate it
+   replaces, since it also covers the Drive-substituted previews the sum could
+   never see.
+2. `supabase/tests/009_export_queries.sql` **runs every multi-table export query
+   against the real schema**, and the CI path filter that decides whether to boot
+   Postgres now includes `apps/worker/src/handlers/**`. A TS-only change to a
+   query is exactly how this reached production; those PRs now pay for a real
+   schema too.
+
 ### 2026-07-27 — purge erases the deliverables too, not just the asset
 
 The sweep above bounded a purged photo's survival inside past exports to
@@ -235,11 +263,13 @@ is no multipart upload anywhere in the repo, so the archive is fully in memory. 
 RAW bundle would OOM — and an OOM is a SIGKILL, which skips the handler's catch
 entirely, so `failOrRetryJob` never runs, `MAX_ATTEMPTS` never applies, and
 `reapStaleJobs` requeues the poison job every ~15 minutes forever, taking the
-single-threaded worker down each cycle. So `planZip` sums `files.byte_size`
-**before fetching a single object** and throws `export_too_large` above
-`ZIP_MAX_TOTAL_BYTES`. A refusal the user can act on beats a crash loop.
-Streaming multipart would raise the ceiling later; it is not needed to make this
-safe.
+single-threaded worker down each cycle. So the ceiling is enforced twice:
+`planZip` sums `files.byte_size` **before fetching a single object** (a RAW
+selection is refused for free), and the fetch loop re-checks the *actual* running
+total, because `asset_previews` records no size at all — only `r2_key`, `width`
+and `height` — so a preview-only bundle is invisible to the pre-flight sum.
+A refusal the user can act on beats a crash loop. Streaming multipart would raise
+the ceiling later; it is not needed to make this safe.
 
 ### 2026-07-27 — captions.csv: the ZIP+CSV half of §8.5 was not a subset after all
 
