@@ -40,27 +40,112 @@ const TITLE_SIZE = 11;
 const CAPTION_SIZE = 10;
 const META_SIZE = 8;
 const LINE_GAP = 1.35;
+/** Gap between the photo and the text block below it. */
+const IMG_TEXT_GAP = 16;
+/** The photo never yields the whole page to text — see planPhotoPage. */
+export const MIN_IMG_H = 120;
 const INK = rgb(0.08, 0.08, 0.08);
 const MUTED = rgb(0.42, 0.42, 0.42);
 const PLACEHOLDER = rgb(0.9, 0.9, 0.9);
 
-function wrap(text: string, font: PDFFont, size: number, maxW: number): string[] {
+/** Width of `text` at `size`, in PDF points. Injected so the page geometry below
+ *  is a pure function testable without a real embedded font. */
+export type Measure = (text: string, size: number) => number;
+
+export function wrap(text: string, measure: Measure, size: number, maxW: number): string[] {
   const out: string[] = [];
   for (const paragraph of text.split(/\n+/)) {
     const words = paragraph.split(/\s+/).filter(Boolean);
     let cur = "";
-    for (const w of words) {
-      const trial = cur ? `${cur} ${w}` : w;
-      if (cur && font.widthOfTextAtSize(trial, size) > maxW) {
-        out.push(cur);
-        cur = w;
-      } else {
-        cur = trial;
+    for (const word of words) {
+      // A single token wider than the column (a URL, a long hashtag, CJK with no
+      // spaces) must be hard-broken — otherwise it draws past the margin.
+      for (const w of splitToWidth(word, measure, size, maxW)) {
+        const trial = cur ? `${cur} ${w}` : w;
+        if (cur && measure(trial, size) > maxW) {
+          out.push(cur);
+          cur = w;
+        } else {
+          cur = trial;
+        }
       }
     }
     if (cur) out.push(cur);
   }
   return out;
+}
+
+/** Chop one over-wide token into column-width pieces. Returns [token] untouched
+ *  in the overwhelmingly common case that it already fits. */
+function splitToWidth(token: string, measure: Measure, size: number, maxW: number): string[] {
+  if (measure(token, size) <= maxW) return [token];
+  const pieces: string[] = [];
+  let cur = "";
+  for (const ch of token) {
+    if (cur && measure(cur + ch, size) > maxW) {
+      pieces.push(cur);
+      cur = ch;
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) pieces.push(cur);
+  return pieces;
+}
+
+const blockH = (lines: number, size: number, pad: number): number =>
+  lines ? lines * size * LINE_GAP + pad : 0;
+
+export interface PagePlan {
+  titleLines: string[];
+  capLines: string[];
+  metaLines: string[];
+  /** Height of the whole text block, including its inter-block padding. */
+  textH: number;
+  /** Height available to the photo — always ≥ MIN_IMG_H. */
+  imgAreaH: number;
+  /** True when the caption had to be cut to keep the photo on the page. */
+  captionTruncated: boolean;
+}
+
+/** Lay out one photo page: wrap the text, then split the page between photo and
+ *  text. The text block is bounded so the photo can never be squeezed below
+ *  MIN_IMG_H — an unbounded caption used to drive the remaining height negative,
+ *  which pdf-lib accepts without complaint and draws point-reflected off the top
+ *  of the page. Caption lines that do not fit are dropped with an ellipsis; the
+ *  caption is the only unbounded input (title is one field, meta is one line). */
+export function planPhotoPage(
+  pageW: number,
+  pageH: number,
+  text: { title: string; caption: string; meta: string },
+  measure: Measure,
+): PagePlan {
+  const contentW = pageW - MARGIN * 2;
+  const titleLines = text.title ? wrap(text.title, measure, TITLE_SIZE, contentW) : [];
+  let capLines = text.caption ? wrap(text.caption, measure, CAPTION_SIZE, contentW) : [];
+  const metaLines = text.meta ? wrap(text.meta, measure, META_SIZE, contentW) : [];
+
+  const fixedH = blockH(titleLines.length, TITLE_SIZE, 6) + blockH(metaLines.length, META_SIZE, 4);
+  const budget = pageH - MARGIN * 2 - MIN_IMG_H - IMG_TEXT_GAP - fixedH;
+  const capLineH = CAPTION_SIZE * LINE_GAP;
+  const maxCapLines = Math.max(0, Math.floor((budget - 4) / capLineH));
+
+  let captionTruncated = false;
+  if (capLines.length > maxCapLines) {
+    captionTruncated = true;
+    capLines = capLines.slice(0, maxCapLines);
+    if (capLines.length > 0) capLines[capLines.length - 1] = `${capLines[capLines.length - 1]}…`;
+  }
+
+  const textH = fixedH + blockH(capLines.length, CAPTION_SIZE, 4);
+  const imgAreaH = pageH - MARGIN * 2 - textH - IMG_TEXT_GAP;
+  return { titleLines, capLines, metaLines, textH, imgAreaH, captionTruncated };
+}
+
+/** Fit `img` inside w×h, preserving aspect. Never returns a negative scale. */
+export function fitScale(imgW: number, imgH: number, boxW: number, boxH: number): number {
+  if (imgW <= 0 || imgH <= 0) return 0;
+  return Math.max(0, Math.min(boxW / imgW, boxH / imgH));
 }
 
 /** Draw wrapped lines top-down from `y`, returning the y below the block. */
@@ -146,18 +231,11 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
       capByAsset.set(c.asset_id, arr);
     }
   }
-  const factsByAsset = new Map<string, string[]>();
-  if (options.include.facts) {
-    const fRes = await pool.query<{ asset_id: string; text: string }>(
-      `select asset_id, text from facts where asset_id = any($1) order by asset_id`,
-      [assetIds],
-    );
-    for (const f of fRes.rows) {
-      const arr = factsByAsset.get(f.asset_id) ?? [];
-      arr.push(f.text);
-      factsByAsset.set(f.asset_id, arr);
-    }
-  }
+  // Facts are deliberately NOT rendered: `analyze` only ever writes 'likely' or
+  // 'needs_check', so an unreviewed asset's facts are model guesses by
+  // construction, and a PDF that leaves the building must not print them in the
+  // same register as facts the user confirmed. They belong in the captions CSV,
+  // where they can carry their status column. See ADR 0035 Amendments.
   const exifByAsset = new Map<string, string>();
   if (options.include.exif) {
     const eRes = await pool.query<{
@@ -185,6 +263,8 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
   const font = await doc.embedFont(loadPdfFont(), { subset: true });
+
+  const measure: Measure = (text, sz) => font.widthOfTextAtSize(text, sz);
 
   const size = PAGE_SIZES[options.pageSize];
   const landscape = options.orientation === "landscape";
@@ -218,7 +298,7 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
       const x = MARGIN + col * (cellW + gap);
       const img = await embedMedium(doc, rows[i].medium_key);
       if (img) {
-        const s = Math.min(cellW / img.width, imgH / img.height);
+        const s = fitScale(img.width, img.height, cellW, imgH);
         const w = img.width * s;
         const h = img.height * s;
         page.drawImage(img, { x: x + (cellW - w) / 2, y: yTop - h, width: w, height: h });
@@ -226,7 +306,7 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
         page.drawRectangle({ x, y: yTop - imgH, width: cellW, height: imgH, color: PLACEHOLDER });
       }
       const cap = captionOf(rows[i].asset_id);
-      if (cap) drawLines(page, wrap(cap, font, CAPTION_SIZE, cellW).slice(0, 2), x, yTop - imgH - 2, font, CAPTION_SIZE, MUTED);
+      if (cap) drawLines(page, wrap(cap, measure, CAPTION_SIZE, cellW).slice(0, 2), x, yTop - imgH - 2, font, CAPTION_SIZE, MUTED);
       col += 1;
       if (col >= cols) {
         col = 0;
@@ -239,40 +319,39 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     for (let i = 0; i < rows.length; i++) {
       const page = doc.addPage([pageW, pageH]);
       const row = rows[i];
-      const title = options.include.title ? (row.title ?? "").trim() : "";
-      const cap = captionOf(row.asset_id);
-      const facts = options.include.facts ? factsByAsset.get(row.asset_id) ?? [] : [];
-      const exif = options.include.exif ? exifByAsset.get(row.asset_id) ?? "" : "";
+      const plan = planPhotoPage(
+        pageW,
+        pageH,
+        {
+          title: options.include.title ? (row.title ?? "").trim() : "",
+          caption: captionOf(row.asset_id),
+          meta: options.include.exif ? exifByAsset.get(row.asset_id) ?? "" : "",
+        },
+        measure,
+      );
 
-      // Reserve room below the image for the text block.
-      const titleLines = title ? wrap(title, font, TITLE_SIZE, contentW) : [];
-      const capLines = cap ? wrap(cap, font, CAPTION_SIZE, contentW) : [];
-      const factLines = facts.flatMap((f) => wrap(`• ${f}`, font, META_SIZE, contentW));
-      const metaLines = exif ? wrap(exif, font, META_SIZE, contentW) : [];
-      const textH =
-        (titleLines.length ? titleLines.length * TITLE_SIZE * LINE_GAP + 6 : 0) +
-        (capLines.length ? capLines.length * CAPTION_SIZE * LINE_GAP + 4 : 0) +
-        (factLines.length ? factLines.length * META_SIZE * LINE_GAP + 4 : 0) +
-        (metaLines.length ? metaLines.length * META_SIZE * LINE_GAP + 4 : 0);
-
-      const imgAreaH = pageH - MARGIN * 2 - textH - 16;
       const img = await embedMedium(doc, row.medium_key);
-      let yBelow = pageH - MARGIN;
+      let yBelow: number;
       if (img) {
-        const s = Math.min(contentW / img.width, imgAreaH / img.height);
+        const s = fitScale(img.width, img.height, contentW, plan.imgAreaH);
         const w = img.width * s;
         const h = img.height * s;
         page.drawImage(img, { x: MARGIN + (contentW - w) / 2, y: pageH - MARGIN - h, width: w, height: h });
-        yBelow = pageH - MARGIN - h - 16;
+        yBelow = pageH - MARGIN - h - IMG_TEXT_GAP;
       } else {
-        page.drawRectangle({ x: MARGIN, y: pageH - MARGIN - imgAreaH, width: contentW, height: imgAreaH, color: PLACEHOLDER });
-        yBelow = pageH - MARGIN - imgAreaH - 16;
+        page.drawRectangle({
+          x: MARGIN,
+          y: pageH - MARGIN - plan.imgAreaH,
+          width: contentW,
+          height: plan.imgAreaH,
+          color: PLACEHOLDER,
+        });
+        yBelow = pageH - MARGIN - plan.imgAreaH - IMG_TEXT_GAP;
       }
 
-      if (titleLines.length) yBelow = drawLines(page, titleLines, MARGIN, yBelow, font, TITLE_SIZE, INK) - 6;
-      if (capLines.length) yBelow = drawLines(page, capLines, MARGIN, yBelow, font, CAPTION_SIZE, INK) - 4;
-      if (factLines.length) yBelow = drawLines(page, factLines, MARGIN, yBelow, font, META_SIZE, MUTED) - 4;
-      if (metaLines.length) drawLines(page, metaLines, MARGIN, yBelow, font, META_SIZE, MUTED);
+      if (plan.titleLines.length) yBelow = drawLines(page, plan.titleLines, MARGIN, yBelow, font, TITLE_SIZE, INK) - 6;
+      if (plan.capLines.length) yBelow = drawLines(page, plan.capLines, MARGIN, yBelow, font, CAPTION_SIZE, INK) - 4;
+      if (plan.metaLines.length) drawLines(page, plan.metaLines, MARGIN, yBelow, font, META_SIZE, MUTED);
 
       await progress(8 + Math.round((88 * (i + 1)) / total), `Rendering ${i + 1}/${total}`, i + 1, total);
     }

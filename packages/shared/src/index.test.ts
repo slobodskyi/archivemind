@@ -549,7 +549,13 @@ describe("canvas groups: folders + artboards (ADR 0034)", () => {
     expect(s.orientation).toBe("portrait");
     expect(s.captionLang).toBe("en");
     expect(s.captionStyle).toBe("agency");
-    expect(s.include).toEqual({ caption: true, title: true, facts: false, exif: false });
+    expect(s.include).toEqual({ caption: true, title: true, exif: false });
+  });
+
+  it("strips a stale include.facts flag instead of rejecting the row", () => {
+    // Settings persisted before facts left the PDF must still parse.
+    const s = artboardSettingsSchema.parse({ include: { caption: true, title: true, facts: true, exif: false } });
+    expect(s.include).toEqual({ caption: true, title: true, exif: false });
   });
 
   it("patchCanvasGroupRequest needs at least one field", () => {
