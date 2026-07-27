@@ -103,8 +103,26 @@ const LAND = "#080808"; // --bg
 const WATER = "#101013"; // barely lifted: coastline reads by shape, not brightness
 const HAIRLINE = "rgba(255,255,255,0.07)"; // --bd
 const HAIRLINE_HI = "rgba(255,255,255,0.14)"; // --bdh
-const ROAD = "rgba(255,255,255,0.055)";
-const ROAD_HI = "rgba(255,255,255,0.10)";
+
+/** Composite a white veil onto LAND once, at build time, and ship the result as
+ *  an opaque colour.
+ *
+ *  Roads must never be translucent. A street network crosses itself constantly,
+ *  and every crossing composites the veil a second time — so a city grid renders
+ *  as a field of bright dots at exactly the junctions, which is the opposite of
+ *  the quiet basemap this view wants. Baking the alpha in means an overlap paints
+ *  the same colour it already was, and the network stays flat.
+ *
+ *  The alphas below are the original design intent (5.5% and 10% white); this
+ *  only changes WHEN they are composited, not to what. */
+function overLand(alpha: number): string {
+  const land = 0x08;
+  const c = Math.round(land + (0xff - land) * alpha);
+  return `#${c.toString(16).padStart(2, "0").repeat(3)}`;
+}
+
+const ROAD = overLand(0.055); // #161616
+const ROAD_HI = overLand(0.1); // #212121
 const LABEL = "#959793"; // --t2 resolved — 6.8:1 on LAND
 const LABEL_DIM = "#7a7b78"; // --t2b resolved — 4.7:1, still AA
 const HALO = "rgba(8,8,8,0.9)";
@@ -116,9 +134,12 @@ const PAINT_OVERRIDES: Record<string, Record<string, unknown>> = {
   water: { "fill-color": WATER },
   waterway: { "line-color": WATER },
   building: { "fill-color": "#0b0b0b", "fill-outline-color": "rgba(255,255,255,0.03)" },
-  highway_minor: { "line-color": ROAD },
-  highway_major_inner: { "line-color": ROAD_HI },
-  highway_motorway_inner: { "line-color": ROAD_HI },
+  // line-opacity is pinned as well as the colour: upstream ships
+  // `"line-opacity": 0.9` on highway_minor, which would re-introduce the
+  // compositing an opaque colour exists to avoid.
+  highway_minor: { "line-color": ROAD, "line-opacity": 1 },
+  highway_major_inner: { "line-color": ROAD_HI, "line-opacity": 1 },
+  highway_motorway_inner: { "line-color": ROAD_HI, "line-opacity": 1 },
   boundary_state: { "line-color": HAIRLINE },
   "boundary_country_z0-4": { "line-color": HAIRLINE_HI },
   "boundary_country_z5-": { "line-color": HAIRLINE_HI },
@@ -193,6 +214,14 @@ export function applyArchiveMindTheme<T>(style: T): T {
   }
   return style;
 }
+
+/** Exported so a test can assert the road paint stays opaque. */
+export const ROAD_LAYER_IDS: readonly string[] = [
+  "highway_minor",
+  "highway_major_inner",
+  "highway_motorway_inner",
+];
+export const ROAD_PAINT: Readonly<Record<string, Record<string, unknown>>> = PAINT_OVERRIDES;
 
 /** Exported for the test that guards against overriding a layer that the
  *  upstream style no longer has — a silent no-op otherwise. */

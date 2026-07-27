@@ -104,3 +104,23 @@ them.
 `photo.country` is now unused by any view; it survives only in the source
 browser's search haystack and its inert `"Ukraine"` default in `lib/assets.ts`.
 Removing the field is a separate cleanup.
+
+
+## Amendment — 2026-07-27: roads are opaque, not translucent
+
+The road overrides shipped as `rgba(255,255,255,0.055)` / `0.10` over the near-black
+land. A street network crosses itself constantly, and every crossing composites the
+veil a second time — so a city grid rendered as a field of bright dots at exactly
+the junctions, the opposite of the quiet basemap this view is for.
+
+The same alphas are now composited against LAND once, at build time, and shipped as
+opaque `#161616` / `#212121` (`overLand()`). The design intent is unchanged; only
+*when* the alpha is applied moved. `line-opacity: 1` is pinned alongside, because
+upstream's `dark` style ships `"line-opacity": 0.9` on `highway_minor` — overriding
+only the colour would have left exactly the compositing an opaque colour exists to
+remove. Verified against `tiles.openfreemap.org/styles/dark`; no other road-ish
+layer renders with upstream paint (everything else is in HIDDEN_LAYERS or
+PAINT_OVERRIDES).
+
+Net visual change away from the junctions: `highway_minor` moves from an effective
+#141414 (0.055 × upstream's 0.9) to #161616 — two levels out of 255.
