@@ -354,6 +354,41 @@ export function nudgeOffOverlap(center: CanvasPoint, others: readonly CanvasPoin
   return { x, y };
 }
 
+/** Sort ids into the order a human reads the canvas: top row left-to-right, then
+ *  the next row down. Used to give an export a page order that matches the
+ *  arrangement the user actually built — the four export entry points each
+ *  produced a different, arbitrary order before this (selection-click order,
+ *  marquee hit order, or the underlying `photos` array, which is newest-first
+ *  while the default grid lays out oldest-first, i.e. exactly backwards).
+ *
+ *  Rows are BANDED rather than sorted on `cy` directly, because the default grid
+ *  jitters every centre by ±5px (see assetGallery) — a plain `cy` comparison
+ *  would scramble a visually straight row. Pass `bandH = Infinity` for a layout
+ *  whose reading order is purely horizontal (the Timeline date axis, where tiles
+ *  sit above and below one axis but read left-to-right by date).
+ *
+ *  Ids with no tile (not laid out in the current view) keep their incoming order
+ *  and go last — never dropped. */
+export function readingOrder(
+  ids: readonly string[],
+  pos: Readonly<Record<string, TilePos>>,
+  bandH: number = ASSET_CELL_H,
+): string[] {
+  const placed: { id: string; band: number; cx: number }[] = [];
+  const unplaced: string[] = [];
+  const banded = Number.isFinite(bandH) && bandH > 0;
+  for (const id of ids) {
+    const tile = pos[id];
+    if (!tile) {
+      unplaced.push(id);
+      continue;
+    }
+    placed.push({ id, band: banded ? Math.floor((tile.cy - ASSET_GRID_Y) / bandH) : 0, cx: tile.cx });
+  }
+  placed.sort((a, b) => a.band - b.band || a.cx - b.cx || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return [...placed.map((p) => p.id), ...unplaced];
+}
+
 /** Strict rectangle intersection: touching an edge alone is not a hit. */
 export function hitTestTiles(pos: Readonly<Record<string, TilePos>>, bounds: Bounds): string[] {
   return Object.entries(pos)
