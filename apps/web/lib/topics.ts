@@ -37,9 +37,17 @@ export const TOPIC_CATEGORY_PRIORITY = ["event", "scene", "object"] as const;
  *  third upload. */
 export const TOPIC_AMBIENT_FRACTION = 0.6;
 
-/** At most this many named topic clouds; smaller topics fold into Other so
- *  the canvas stays readable. (Colors come from the shared hash palette and
- *  CAN collide between clouds — the cap bounds cloud count, not colors.) */
+/** At most this many named topic clouds *derived from tags*; smaller ones fold
+ *  into Other so the canvas stays readable. (Colors come from the shared hash
+ *  palette and CAN collide between clouds — the cap bounds cloud count, not
+ *  colors.)
+ *
+ *  It does NOT apply to stored cluster labels (ADR 0038). The cap exists to
+ *  bound the *heuristic's* sprawl — it is result-set-relative and can invent a
+ *  new topic per read. A cluster label is already bounded by the worker's
+ *  `pickK` (≤ 12 per workspace) and is the whole point of ADR 0028: folding a
+ *  photo that HAS a stable semantic home into "Other" threw that away, and
+ *  which clusters survived depended on which project you happened to open. */
 export const TOPIC_CLOUD_CAP = 6;
 
 /** Tagged assets whose tags yield no viable topic. Capitalized on purpose:
@@ -57,12 +65,16 @@ export const TOPIC_OTHER_KEY = "Other";
  * - if every thematic tag the asset has is ambient, re-walk allowing them —
  *   the asset keeps its ambient tag instead of falling to Other;
  * - no tag in any thematic category at all → Other;
- * - finally only the TOPIC_CLOUD_CAP biggest topics keep their name — the
- *   rest fold into Other so the canvas stays readable. Cluster labels and
- *   heuristic topics fold together into one combined set.
+ * - finally only the TOPIC_CLOUD_CAP biggest *heuristic* topics keep their
+ *   name — the rest fold into Other so the canvas stays readable. Stored
+ *   cluster labels are exempt from that fold (ADR 0038): they are already
+ *   bounded per workspace and are not result-set-relative, so folding them
+ *   would discard the stable semantic home ADR 0028 exists to give a photo.
  */
 export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string> {
   const topics = new Map<string, string>();
+  /** Topic keys that came from a stored cluster, never from the heuristic. */
+  const fromCluster = new Set<string>();
 
   // Distinct-asset count per tag NAME. Names merge across categories on
   // purpose: re-analyze can drift a tag's category (the DB unique key is
@@ -87,6 +99,7 @@ export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string>
     const clusterLabel = asset.clusterLabel?.trim();
     if (clusterLabel) {
       topics.set(asset.id, clusterLabel);
+      fromCluster.add(clusterLabel);
       continue;
     }
     if (asset.tags.length === 0) {
@@ -108,11 +121,12 @@ export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string>
     topics.set(asset.id, pick(false) ?? pick(true) ?? TOPIC_OTHER_KEY);
   }
 
-  // Fold everything past the TOPIC_CLOUD_CAP biggest topics into Other
-  // (size desc, name asc — deterministic under any input order).
+  // Fold everything past the TOPIC_CLOUD_CAP biggest HEURISTIC topics into
+  // Other (size desc, name asc — deterministic under any input order). Cluster
+  // labels are counted out of the cap entirely and always kept.
   const sizes = new Map<string, number>();
   for (const topic of topics.values()) {
-    if (topic === UNSORTED_CLOUD_KEY || topic === TOPIC_OTHER_KEY) continue;
+    if (topic === UNSORTED_CLOUD_KEY || topic === TOPIC_OTHER_KEY || fromCluster.has(topic)) continue;
     sizes.set(topic, (sizes.get(topic) ?? 0) + 1);
   }
   const keep = new Set(
@@ -122,7 +136,12 @@ export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string>
       .map(([name]) => name),
   );
   for (const [id, topic] of topics) {
-    if (topic !== UNSORTED_CLOUD_KEY && topic !== TOPIC_OTHER_KEY && !keep.has(topic)) {
+    if (
+      topic !== UNSORTED_CLOUD_KEY &&
+      topic !== TOPIC_OTHER_KEY &&
+      !fromCluster.has(topic) &&
+      !keep.has(topic)
+    ) {
       topics.set(id, TOPIC_OTHER_KEY);
     }
   }

@@ -41,8 +41,10 @@ import {
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
   timelineAxisLayout as computeTimelineLayout,
+  topicAnchorOf,
   topicCloudLayout as computeTopicLayout,
   type Bounds,
+  type CanvasOverride,
   type CloudLayout,
   type Frame,
   type GalleryOverrides,
@@ -296,6 +298,11 @@ type DragSession =
       // moves together: each selected tile's original center, captured at
       // pointer-down and translated by the same (dx,dy). Null = single-tile drag.
       groupCenters: Record<string, { x: number; y: number }> | null;
+      // Topic only (ADR 0038): the cloud each dragged tile belonged to when the
+      // drag started, stamped onto the override so a later re-cluster can tell
+      // that the coordinate is stale. Captured ONCE here rather than recomputed
+      // in move(), which runs per pointer event on top of a full re-pack.
+      anchors: Record<string, string> | null;
     }
   | {
       // Dragging a cloud's label moves every tile in that cloud together; a
@@ -308,6 +315,7 @@ type DragSession =
       origCenters: Record<string, { x: number; y: number }>;
       moved: boolean;
       historyPushed: boolean;
+      anchors: Record<string, string> | null;
     }
   | {
       mode: "sticky";
@@ -507,6 +515,16 @@ export interface Workspace {
   groupFiles: () => void;
   /** Re-arrange the Canvas into a clean grid (selection-aware). */
   tidyUp: () => void;
+  /** Drop the sorting view's drag overrides so tiles glide back into their
+   *  packed clouds / date columns (selection-aware). Topic + Timeline only. */
+  regroupClouds: () => void;
+  /** True when the active sorting view has drags to undo — the Regroup button
+   *  is dead otherwise. */
+  canRegroup: boolean;
+  /** Re-run the workspace's semantic clustering now (ADR 0038). Zero credits. */
+  recluster: () => void;
+  /** Rename one Topic cloud (ADR 0038); null clusterId clouds aren't renameable. */
+  renameCloud: (clusterId: string, label: string) => void;
   addToNewArtboard: () => void;
   addToExistingArtboard: (frameId: string) => void;
 
@@ -994,10 +1012,26 @@ export function useWorkspace(
         moved: false,
         historyPushed: true,
         groupCenters: null,
+        anchors: null, // source nodes are not a Topic cloud — nothing to anchor
       };
     },
     [pushHistory],
   );
+
+  /** The Topic cloud each of `ids` currently sits in (ADR 0038) — stamped onto
+   *  the override at drop time so a later re-cluster can recognise a coordinate
+   *  that no longer belongs to the tile's cloud. Keyed on the stored cluster id
+   *  where there is one, so relabelling and renaming a cloud both leave the
+   *  user's arrangement alone; only genuinely changing cloud invalidates it. */
+  const topicAnchorsFor = useCallback((s: WorkspaceState, ids: readonly string[]): Record<string, string> => {
+    const byId = new Map(s.photos.map((p) => [p.id, p]));
+    const out: Record<string, string> = {};
+    for (const id of ids) {
+      const photo = byId.get(id);
+      if (photo) out[id] = topicAnchorOf(photo);
+    }
+    return out;
+  }, []);
 
   /** Shared by Canvas asset tiles and Map/Topic cloud tiles — select-on-down
    *  (with the same additive/shift-click semantics), then a free-position
@@ -1048,9 +1082,10 @@ export function useWorkspace(
         moved: false,
         historyPushed: false,
         groupCenters,
+        anchors: kind === "topic" ? topicAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id]) : null,
       };
     },
-    [setState, activeTilePositions, startPan],
+    [setState, activeTilePositions, startPan, topicAnchorsFor],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
    *  that matches the active sort, so a tile stays where you drop it within the
@@ -1095,9 +1130,10 @@ export function useWorkspace(
         origCenters,
         moved: false,
         historyPushed: false,
+        anchors: bucket === "topic" ? topicAnchorsFor(s, Object.keys(origCenters)) : null,
       };
     },
-    [startPan],
+    [startPan, topicAnchorsFor],
   );
 
   const onStickyDown = useCallback(
@@ -1170,12 +1206,18 @@ export function useWorkspace(
         const dx = (e.clientX - d.sx) / s.scale,
           dy = (e.clientY - d.sy) / s.scale;
         const bucket = { ...s.galleryOverrides[d.kind] };
+        // `anchors` is non-null only on Topic (ADR 0038); every other bucket
+        // writes a bare point exactly as before.
+        const put = (id: string, x: number, y: number) => {
+          const cloud = d.anchors?.[id];
+          bucket[id] = cloud === undefined ? { x, y } : { x, y, cloud };
+        };
         if (d.groupCenters) {
           for (const gid of Object.keys(d.groupCenters)) {
-            bucket[gid] = { x: d.groupCenters[gid].x + dx, y: d.groupCenters[gid].y + dy };
+            put(gid, d.groupCenters[gid].x + dx, d.groupCenters[gid].y + dy);
           }
         } else {
-          bucket[d.key] = { x: d.orig.x + dx, y: d.orig.y + dy };
+          put(d.key, d.orig.x + dx, d.orig.y + dy);
         }
         setState({
           galleryOverrides: { ...s.galleryOverrides, [d.kind]: bucket },
@@ -1204,7 +1246,9 @@ export function useWorkspace(
           dy = (e.clientY - d.sy) / s.scale;
         const bucketOv = { ...s.galleryOverrides[d.bucket] };
         for (const id of Object.keys(d.origCenters)) {
-          bucketOv[id] = { x: d.origCenters[id].x + dx, y: d.origCenters[id].y + dy };
+          const cloud = d.anchors?.[id];
+          const moved = { x: d.origCenters[id].x + dx, y: d.origCenters[id].y + dy };
+          bucketOv[id] = cloud === undefined ? moved : { ...moved, cloud };
         }
         setState({ galleryOverrides: { ...s.galleryOverrides, [d.bucket]: bucketOv } });
       } else if (d.mode === "sticky") {
@@ -1483,6 +1527,63 @@ export function useWorkspace(
       }
     },
     [setState],
+  );
+
+  /** "Re-cluster" (ADR 0038) — recompute the workspace's Topic clouds now.
+   *
+   *  Costs no credits: the worker's cluster handler is pure CPU over embeddings
+   *  analyze already stored and makes no Gemini call. It shares `activeJobId`
+   *  with the AI runs anyway, because the worker has one lane for every job type
+   *  and workspace — but it says so in its own words rather than borrowing the
+   *  paid-work copy. */
+  const recluster = useCallback(async () => {
+    if (activeJobId.current) {
+      flashToast("A job is already running — wait for it to finish");
+      return;
+    }
+    setState({ proc: { active: true, label: "Regrouping topics…", pct: 3 }, aiBusyIds: [] });
+    try {
+      const resp = await fetch("/api/topics/recluster", { method: "POST" });
+      if (!resp.ok) {
+        const body = (await resp.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? String(resp.status));
+      }
+      const { jobId } = (await resp.json()) as { jobId: string };
+      activeJobId.current = jobId;
+      setState({ proc: { active: true, label: "Regrouping topics…", pct: 5 } });
+    } catch (err) {
+      activeJobId.current = null;
+      setState({ proc: { active: false, label: "", pct: 0 } });
+      flashToast(
+        err instanceof Error && err.message === "cluster_in_flight"
+          ? "Topics are already being regrouped"
+          : "Couldn't start regrouping — try again",
+      );
+    }
+  }, [flashToast, setState]);
+
+  /** Rename one Topic cloud (ADR 0038). The label IS the cloud key the canvas
+   *  groups by, so the refresh is what re-derives every photo's `group`; the
+   *  arrangement survives because overrides are anchored to the cluster id, not
+   *  to the name. */
+  const renameCloud = useCallback(
+    async (clusterId: string, label: string) => {
+      const trimmed = label.trim();
+      if (!trimmed) return;
+      try {
+        const resp = await fetch(`/api/topics/${clusterId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ label: trimmed }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        setState({ focusedCloudKey: null });
+        router.refresh();
+      } catch {
+        flashToast("Couldn't rename that topic — try again");
+      }
+    },
+    [flashToast, router, setState],
   );
 
   /** The one way to start AI work. The plan (which jobs, in what order) comes
@@ -2355,6 +2456,45 @@ export function useWorkspace(
     setContextMenu(null);
   }, [activeTilePositions, pushHistory, setState]);
 
+  /** "Regroup" (ADR 0038) — Tidy up's counterpart for the sorting views: drop
+   *  the drag overrides so the tiles glide back into their packed clouds (or
+   *  their date columns on Timeline).
+   *
+   *  It has to exist because the clouds are recomputed server-side while the
+   *  coordinates are not: analyze re-clusters, a photo changes cloud, and the
+   *  arrangement the user built stops describing anything. The stale-anchor
+   *  rule handles that automatically now, but a user who has simply pulled a
+   *  view apart by hand still needs a way back — and there was none: the bottom
+   *  action bar that hosts Tidy up is Canvas-only, and `tidyUp` writes the
+   *  `asset` bucket, so pointing it at Topic would silently rearrange Canvas.
+   *
+   *  Selection ≥ 2 regroups only those tiles (Figma-style, selection-first, the
+   *  same rule Tidy up follows); otherwise the whole bucket resets. */
+  const regroupClouds = useCallback(() => {
+    const s = stateRef.current;
+    const bucketKey = s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
+    if (!bucketKey) return;
+    const current = s.galleryOverrides[bucketKey];
+    let next: Record<string, CanvasOverride>;
+    if (s.selectedIds.length >= 2) {
+      next = { ...current };
+      for (const id of s.selectedIds) delete next[id];
+      if (Object.keys(next).length === Object.keys(current).length) return; // nothing was moved
+    } else {
+      if (Object.keys(current).length === 0) return; // already the packed default
+      next = {};
+    }
+    pushHistory();
+    setState({
+      galleryOverrides: { ...s.galleryOverrides, [bucketKey]: next },
+      focusedCloudKey: null,
+      tilesAnimating: true,
+    });
+    if (animTimer.current) clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+    setContextMenu(null);
+  }, [pushHistory, setState]);
+
   /** Open the grid context menu at the cursor. A right-click on an unselected
    *  tile selects it first (matching desktop file-manager behaviour) so the menu
    *  acts on what you clicked. */
@@ -3044,13 +3184,40 @@ export function useWorkspace(
       router.refresh();
       return;
     }
-    // The cluster job (ADR 0028) is worker-enqueued after analyze, so it is
-    // never activeJobId and stays out of the analyze/caption progress UI. But
-    // when it finishes it has rewritten topic_clusters, so refresh silently to
-    // pull the stable semantic labels into the Topic view this session — without
-    // it, the user sees heuristic clouds until they navigate away and back.
+    // A cluster job (ADR 0028) arrives two ways now. Enqueued by the analyze
+    // tail it is not activeJobId, stays silent, and only refreshes on 'done' so
+    // the stable semantic labels reach the Topic view this session — without
+    // that, the user sees heuristic clouds until they navigate away and back.
+    // Triggered by the user's own Re-cluster button (ADR 0038) it IS tracked,
+    // and drives the same progress UI every other job does.
     if (job.type === "cluster") {
-      if (job.status === "done") router.refresh();
+      const tracked = job.id === activeJobId.current;
+      if (tracked && (job.status === "queued" || job.status === "running")) {
+        setState({
+          proc: {
+            active: true,
+            label: job.progress_label ?? "Regrouping topics…",
+            pct: Math.max(5, job.progress),
+          },
+        });
+      }
+      if (job.status === "done" || job.status === "failed" || job.status === "canceled") {
+        if (tracked) {
+          activeJobId.current = null;
+          setState({ proc: { active: false, label: "", pct: 0 }, aiBusyIds: [] });
+          // Surface the worker's own words rather than inventing "Topics
+          // regrouped": the sub-MIN_CLUSTER_ASSETS path also completes as
+          // 'done', reporting "Too few analyzed assets to cluster (N)" — and
+          // having just dropped the workspace's clusters, a cheerful success
+          // toast there would be a lie.
+          flashToast(
+            job.status === "done"
+              ? (job.progress_label ?? "Topics regrouped")
+              : "Regrouping topics failed — try again",
+          );
+        }
+        if (job.status === "done") router.refresh();
+      }
       return;
     }
     // Edit jobs (ADR 0030) render fast — locally, no external API — so the
@@ -3717,6 +3884,12 @@ export function useWorkspace(
     closeExport,
     groupFiles,
     tidyUp,
+    regroupClouds,
+    canRegroup:
+      (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
+    recluster,
+    renameCloud,
     addToNewArtboard,
     addToExistingArtboard,
 

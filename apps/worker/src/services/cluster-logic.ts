@@ -20,6 +20,11 @@ export interface ExistingCluster {
   id: string;
   label: string;
   centroid: number[];
+  /** topic_clusters.is_renamed — a human named this cloud (ADR 0038). Its label
+   *  is then never recomputed, and the cluster is never deleted for failing to
+   *  match; it is retained (emptied) so the name survives a corpus dip and can
+   *  be re-adopted later. Optional so existing call sites keep compiling. */
+  isRenamed?: boolean;
 }
 
 /** A freshly computed cluster before it is matched to an existing row. */
@@ -29,14 +34,21 @@ export interface ComputedCluster {
 }
 
 export interface ClusterPlan {
-  /** Matched to an existing cluster — keeps the old id AND label so the Topic
-   *  view does not rename its clouds every run; centroid/size/members refresh. */
-  update: { id: string; label: string; centroid: number[]; size: number; assetIds: string[] }[];
+  /** Matched to an existing cluster — keeps the old id, so a cloud's identity
+   *  (and every override anchored to it) survives the run. `label` is what is
+   *  stored today; `relabel` is the name this run computed for it, or null when
+   *  the label must be left alone (a user renamed it — ADR 0038). */
+  update: { id: string; label: string; relabel: string | null; centroid: number[]; size: number; assetIds: string[] }[];
   /** New clusters with no good match — inserted with a fresh discriminative label. */
   insert: { label: string; centroid: number[]; size: number; assetIds: string[] }[];
   /** Existing clusters that no longer match anything — deleted (FK nulls their
    *  members' assets.cluster_id, dropping them back to the tag heuristic). */
   deleteIds: string[];
+  /** Unmatched clusters a human NAMED. Deleting these would throw the rename
+   *  away for good, so they are retained and emptied (size 0, no members)
+   *  instead — invisible in the Topic view until a future run's centroid
+   *  matches them again, at which point the user's name comes back with it. */
+  retainIds: string[];
 }
 
 /** Below this many analyzed assets we do not cluster at all — the read-time tag
@@ -262,20 +274,159 @@ export function clusterEmbeddings(inputs: readonly ClusterInput[], seedKey: stri
 
 const THEMATIC_CATEGORIES = new Set(["event", "scene", "object"]);
 
+/** Separator between the two tags of a machine-generated label. */
+export const LABEL_JOIN = " · ";
+/** Label for a cluster whose members carry no tags at all. */
+export const UNLABELED = "Unlabeled";
+
+/** Medium / format / framing words. They describe HOW a photo was made, not
+ *  what it is about, so they name no theme — a pile of unrelated phone
+ *  screenshots ends up called "screenshot · smartphone", which tells the reader
+ *  nothing they could not see from the thumbnails.
+ *
+ *  DEMOTED, never banned: a cluster that genuinely is nothing but screenshots
+ *  falls through to the last tier and gets called "screenshot", which is the
+ *  honest name for it. Matching is by NAME, not category — the analyze prompt
+ *  (packages/shared) gives Gemini no vocabulary guidance, so these arrive as
+ *  ordinary `scene`/`object` tags and no category filter can catch them. Every
+ *  stored name is lowercased on insert (analyze.ts), so no case folding here. */
+export const LABEL_STOPLIST: ReadonlySet<string> = new Set([
+  "screenshot",
+  "screen",
+  "screen capture",
+  "smartphone",
+  "phone",
+  "mobile phone",
+  "camera",
+  "photo",
+  "photograph",
+  "photography",
+  "image",
+  "picture",
+  "selfie",
+  "close-up",
+  "closeup",
+  "portrait",
+  "black and white",
+  "monochrome",
+  "grayscale",
+  "blurry",
+  "blur",
+  "grain",
+  "digital",
+  "film",
+  "text",
+]);
+
+/** A candidate must cover at least LABEL_MIN_SUPPORT_NUM/DEN of its cluster AND
+ *  at least LABEL_MIN_COUNT photos before it may name it. Kept as a rational so
+ *  the check stays integer-exact (see `compareCandidates`).
+ *
+ *  This is the fix for the defect that produced "book cover · price tag" over a
+ *  cluster of screenshots: under a pure discriminativeness ratio a tag on ONE
+ *  photo scores clDf/wsDf = 1/1 = 1.0, the maximum possible, and beats a tag
+ *  carried by every member of the cluster. Applied as a RELAXING TIER, never a
+ *  hard gate — a small or noisy cluster degrades to a weaker label, not to
+ *  "Unlabeled". */
+export const LABEL_MIN_SUPPORT_NUM = 1;
+export const LABEL_MIN_SUPPORT_DEN = 4;
+export const LABEL_MIN_COUNT = 2;
+
+/** A second tag joins the label only if it scores at least this share of the
+ *  first (a rational, for the same integer-exactness reason). Without it the
+ *  old `slice(0, 2)` always padded, naming an 80-photo cluster "street · yoga"
+ *  off a tag that covered two of them. */
+export const LABEL_SECOND_TAG_NUM = 2;
+export const LABEL_SECOND_TAG_DEN = 5;
+
+const isStopWord = (name: string): boolean => LABEL_STOPLIST.has(name);
+
+/** Coverage gate: clDf ≥ LABEL_MIN_COUNT and clDf/size ≥ 1/4, without division. */
+function meetsSupport(count: number, clusterSize: number): boolean {
+  return count >= LABEL_MIN_COUNT && count * LABEL_MIN_SUPPORT_DEN >= clusterSize * LABEL_MIN_SUPPORT_NUM;
+}
+
+/** Ranks `a` above `b` for naming a cluster.
+ *
+ *  score(t) = support(t) × lift(t) = (clDf/size) × (clDf/wsDf). `size` is
+ *  constant inside a cluster, so ordering by clDf²/wsDf is equivalent — and
+ *  that is a ratio of two integers, compared here by cross-multiplication so no
+ *  float ordering ever enters the plan (the determinism contract this module
+ *  lives by). Ties fall to cluster frequency, then name, exactly as before.
+ *
+ *  The squared term is what makes a one-photo outlier lose: a tag on 18 of 20
+ *  photos scores 18²/20 = 16.2 against a hapax's 1²/1 = 1. */
+export function compareCandidates(
+  a: string,
+  b: string,
+  clDf: ReadonlyMap<string, number>,
+  wsDf: ReadonlyMap<string, number>,
+): number {
+  const ca = clDf.get(a) ?? 0;
+  const cb = clDf.get(b) ?? 0;
+  const wa = wsDf.get(a) ?? 1;
+  const wb = wsDf.get(b) ?? 1;
+  return cb * cb * wa - ca * ca * wb || cb - ca || (a < b ? -1 : 1);
+}
+
+/** True when `b` scores at least LABEL_SECOND_TAG_NUM/DEN of `a`'s score.
+ *  score(b)/score(a) ≥ n/d ⟺ d·clDf(b)²·wsDf(a) ≥ n·clDf(a)²·wsDf(b). */
+function secondTagEarnsIts(
+  first: string,
+  second: string,
+  clDf: ReadonlyMap<string, number>,
+  wsDf: ReadonlyMap<string, number>,
+): boolean {
+  const c1 = clDf.get(first) ?? 0;
+  const c2 = clDf.get(second) ?? 0;
+  const w1 = wsDf.get(first) ?? 1;
+  const w2 = wsDf.get(second) ?? 1;
+  return LABEL_SECOND_TAG_DEN * c2 * c2 * w1 >= LABEL_SECOND_TAG_NUM * c1 * c1 * w2;
+}
+
+/** The candidate ladder. The FIRST non-empty tier wins; tiers relax one
+ *  constraint each, so every cluster with any tag at all gets some name:
+ *
+ *    1. thematic category · not a medium word · covers the cluster
+ *    2. any category      · not a medium word · covers the cluster
+ *    3. any category      · not a medium word
+ *    4. anything, medium words included
+ *
+ *  Tier 3 is why a 2-photo cluster tagged only `place/kyiv` is still called
+ *  "kyiv" rather than "Unlabeled"; tier 4 is why a cluster that really is all
+ *  screenshots is called "screenshot". */
+export function candidateTiers(
+  clDf: ReadonlyMap<string, number>,
+  thematic: ReadonlySet<string>,
+  clusterSize: number,
+): string[] {
+  const names = [...clDf.keys()];
+  const covers = (n: string) => meetsSupport(clDf.get(n) ?? 0, clusterSize);
+  const tiers: string[][] = [
+    names.filter((n) => !isStopWord(n) && thematic.has(n) && covers(n)),
+    names.filter((n) => !isStopWord(n) && covers(n)),
+    names.filter((n) => !isStopWord(n)),
+    names,
+  ];
+  return tiers.find((t) => t.length > 0) ?? [];
+}
+
 export interface ClusterLabel {
-  /** The default 2-tag label. */
+  /** The label this run computed: one or two tags joined by LABEL_JOIN. */
   label: string;
-  /** Ranked candidate tag names (most discriminative first) — the uniqueness
-   *  pass pulls a 3rd/4th from here to break collisions before it resorts to a
-   *  numeric suffix. */
+  /** Ranked candidate tag names (best first) — `uniqueLabel` draws a different
+   *  second (or first) tag from here to break a collision. */
   pool: string[];
 }
 
-/** Labels each cluster by its most *discriminative* tags: names concentrated in
- *  the cluster relative to the workspace (TF ratio = cluster doc-freq / ws
- *  doc-freq), thematic categories (event/scene/object) preferred, ties broken
- *  by cluster frequency then name. Top-2 joined with " · "; no tags →
- *  "Unlabeled". Gemini is never called — the tags are already there. */
+/** Names each cluster from its own tags. Gemini is never called.
+ *
+ *  A good cloud name has to be BOTH representative (most of the cluster carries
+ *  it) and discriminative (the rest of the workspace does not) — ADR 0028 asked
+ *  only for the second, which is why one photo of a book cover could name a
+ *  cluster of screenshots. `compareCandidates` scores both at once; the tier
+ *  ladder keeps medium/format words out of the running unless nothing else is
+ *  left; and the second tag has to earn its place instead of being padded in. */
 export function labelClusters(
   clusters: readonly ComputedCluster[],
   allInputs: readonly ClusterInput[],
@@ -294,9 +445,11 @@ export function labelClusters(
   return clusters.map((cluster) => {
     const clDf = new Map<string, number>();
     const thematic = new Set<string>();
+    let sized = 0;
     for (const assetId of cluster.assetIds) {
       const input = byAsset.get(assetId);
       if (!input) continue;
+      sized += 1;
       const names = new Set<string>();
       for (const tag of input.tags) {
         names.add(tag.name);
@@ -305,33 +458,42 @@ export function labelClusters(
       for (const name of names) clDf.set(name, (clDf.get(name) ?? 0) + 1);
     }
 
-    const names = [...clDf.keys()];
-    const thematicNames = names.filter((n) => thematic.has(n));
-    const poolNames = thematicNames.length > 0 ? thematicNames : names;
-    poolNames.sort((a, b) => {
-      const ra = (clDf.get(a) ?? 0) / (wsDf.get(a) ?? 1);
-      const rb = (clDf.get(b) ?? 0) / (wsDf.get(b) ?? 1);
-      return rb - ra || (clDf.get(b) ?? 0) - (clDf.get(a) ?? 0) || (a < b ? -1 : 1);
-    });
-
-    const label = poolNames.length > 0 ? poolNames.slice(0, 2).join(" · ") : "Unlabeled";
-    return { label, pool: poolNames };
+    const pool = candidateTiers(clDf, thematic, sized).sort((a, b) => compareCandidates(a, b, clDf, wsDf));
+    if (pool.length === 0) return { label: UNLABELED, pool };
+    // A medium word never gets a partner. Tiers 1-3 exclude stop words
+    // entirely, so a stop-listed best candidate means tier 4 — the cluster
+    // really is defined by its medium — and "screenshot · smartphone" says
+    // nothing "screenshot" does not. One honest word beats two.
+    const pairable = pool.length > 1 && !isStopWord(pool[0]) && secondTagEarnsIts(pool[0], pool[1], clDf, wsDf);
+    return { label: pairable ? `${pool[0]}${LABEL_JOIN}${pool[1]}` : pool[0], pool };
   });
 }
 
-/** Disambiguates a label against those already in use: widen to 3+ tags first
- *  (still meaningful), then fall back to a numeric suffix. Prevents two clusters
- *  collapsing into one Topic cloud, which keys on the label string. */
-function uniqueLabel(base: ClusterLabel, used: Set<string>): string {
-  for (let take = 2; take <= base.pool.length; take++) {
-    const cand = base.pool.slice(0, take).join(" · ");
-    if (!used.has(cand)) return cand;
+/** Disambiguates a label against those already taken this run — two clusters
+ *  sharing a label would merge into ONE Topic cloud, which keys on the string.
+ *
+ *  It differentiates by SWAPPING a tag, never by appending one: the old widening
+ *  loop produced "floor · mat" next to "floor · mat · wall", two names a reader
+ *  cannot tell apart, and could run to a 20-tag label. Two tags is the cap; the
+ *  numeric suffix is the last resort (and the only option for the tagless
+ *  clusters that all resolve to "Unlabeled"). */
+export function uniqueLabel(base: ClusterLabel, used: ReadonlySet<string>): string {
+  if (!used.has(base.label)) return base.label;
+  const pool = base.pool;
+  for (let i = 0; i < pool.length; i++) {
+    for (let j = 0; j < pool.length; j++) {
+      if (i === j) continue;
+      const cand = `${pool[i]}${LABEL_JOIN}${pool[j]}`;
+      if (!used.has(cand)) return cand;
+    }
   }
-  const cand = base.label || "Unlabeled";
-  if (!used.has(cand)) return cand;
+  for (const name of pool) {
+    if (!used.has(name)) return name;
+  }
+  const stem = base.label || UNLABELED;
   let n = 2;
-  while (used.has(`${cand} (${n})`)) n++;
-  return `${cand} (${n})`;
+  while (used.has(`${stem} (${n})`)) n++;
+  return `${stem} (${n})`;
 }
 
 /** Greedy one-to-one centroid matching, highest cosine first. Ties break by
@@ -367,8 +529,14 @@ export function matchClusters(
 
 /** The full plan the handler applies in one transaction. Returns null when the
  *  workspace has too few analyzed assets to cluster (the heuristic covers it).
- *  Matched clusters keep their id + label; new clusters get a unique
- *  discriminative label; dropped clusters are deleted. */
+ *
+ *  Matched clusters keep their **id** — that is what makes a cloud's identity,
+ *  and every canvas override anchored to it, survive a run. Their **name** is
+ *  recomputed unless a human pinned it (ADR 0038): ADR 0028 froze the first
+ *  machine guess forever, which meant a bad name was permanent and any
+ *  improvement to the labeller could never reach an existing workspace. A pin
+ *  (`is_renamed`) is now the way to keep a name, and it also protects the
+ *  cluster from being deleted when its centroid stops matching. */
 export function planClusters(
   inputs: readonly ClusterInput[],
   existing: readonly ExistingCluster[],
@@ -385,15 +553,50 @@ export function planClusters(
     existingSorted.map((e) => e.centroid),
   );
 
+  // Unmatched clusters split by who named them: a machine name is dropped, a
+  // human's is retained (emptied) so the rename outlives a corpus dip.
+  const deleteIds: string[] = [];
+  const retainIds: string[] = [];
+  for (const j of unmatchedExisting) {
+    (existingSorted[j].isRenamed ? retainIds : deleteIds).push(existingSorted[j].id);
+  }
+
+  // ── pass 1: reserve every name that survives this run, before choosing any
+  // new one. `matches` arrives in greedy-similarity order — a FLOAT ordering —
+  // so nothing that decides a label may iterate it. Seeding here and assigning
+  // below in id order keeps the plan a pure function of the corpus.
   const used = new Set<string>();
-  const update = matches
+  for (const m of matches) {
+    const e = existingSorted[m.existingIdx];
+    if (e.isRenamed) used.add(e.label);
+  }
+  for (const id of retainIds) {
+    const e = existingSorted.find((x) => x.id === id);
+    if (e) used.add(e.label);
+  }
+
+  // ── pass 2: assign, iterating in a stable key order (existing id, then
+  // computed index). existingSorted is id-sorted, so existingIdx order IS id
+  // order.
+  const update = [...matches]
+    .sort((a, b) => a.existingIdx - b.existingIdx)
     .map((m) => {
       const c = computed[m.computedIdx];
       const e = existingSorted[m.existingIdx];
-      used.add(e.label);
-      return { id: e.id, label: e.label, centroid: c.centroid, size: c.assetIds.length, assetIds: c.assetIds };
-    })
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
+      let relabel: string | null = null;
+      if (!e.isRenamed) {
+        relabel = uniqueLabel(labels[m.computedIdx], used);
+        used.add(relabel);
+      }
+      return {
+        id: e.id,
+        label: e.label,
+        relabel,
+        centroid: c.centroid,
+        size: c.assetIds.length,
+        assetIds: c.assetIds,
+      };
+    });
 
   const insert = unmatchedComputed.map((idx) => {
     const c = computed[idx];
@@ -402,7 +605,5 @@ export function planClusters(
     return { label, centroid: c.centroid, size: c.assetIds.length, assetIds: c.assetIds };
   });
 
-  const deleteIds = unmatchedExisting.map((j) => existingSorted[j].id).sort();
-
-  return { update, insert, deleteIds };
+  return { update, insert, deleteIds: deleteIds.sort(), retainIds: retainIds.sort() };
 }

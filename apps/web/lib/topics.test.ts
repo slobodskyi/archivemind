@@ -213,9 +213,13 @@ describe("deriveTopics cluster labels (ADR 0028)", () => {
     expect(topics.get("a")).toBe(UNSORTED_CLOUD_KEY);
   });
 
-  it("cluster labels fold into Other beyond the cap, together with heuristic topics", () => {
-    // c00 has 3 members, c01..c06 one each: 7 cluster labels, cap 6 → the
-    // last-by-name singleton folds into Other, exactly like tag topics do.
+  it("cluster labels are never folded into Other, however many there are (ADR 0038)", () => {
+    // 7 cluster labels against a cap of 6. The cap bounds the HEURISTIC's
+    // sprawl — it is result-set-relative and can invent a topic per read — but
+    // a stored cluster is bounded per workspace by the worker's own k, and
+    // folding one discards the stable semantic home ADR 0028 exists to give a
+    // photo. Worse, which clusters survived depended on which project you had
+    // open, since the fold counts only the rows this read returned.
     const pad = (n: number) => `c${String(n).padStart(2, "0")}`;
     const assets: TopicAsset[] = [
       clustered("a0", pad(0)),
@@ -224,11 +228,29 @@ describe("deriveTopics cluster labels (ADR 0028)", () => {
       ...Array.from({ length: TOPIC_CLOUD_CAP }, (_, i) => clustered(`s${i}`, pad(i + 1))),
     ];
     const topics = deriveTopics(assets);
-    const named = new Set(
-      [...topics.values()].filter((t) => t !== TOPIC_OTHER_KEY && t !== UNSORTED_CLOUD_KEY),
-    );
-    expect(named.size).toBe(TOPIC_CLOUD_CAP);
-    expect(topics.get(`s${TOPIC_CLOUD_CAP - 1}`)).toBe(TOPIC_OTHER_KEY);
+    const named = new Set([...topics.values()].filter((t) => t !== TOPIC_OTHER_KEY && t !== UNSORTED_CLOUD_KEY));
+    expect(named.size).toBe(TOPIC_CLOUD_CAP + 1);
+    expect(topics.get(`s${TOPIC_CLOUD_CAP - 1}`)).toBe(pad(TOPIC_CLOUD_CAP));
+    expect([...topics.values()]).not.toContain(TOPIC_OTHER_KEY);
+  });
+
+  it("still caps heuristic topics while cluster labels ride free beside them", () => {
+    // Two clusters plus TOPIC_CLOUD_CAP + 1 distinct tag topics: every cluster
+    // label survives, and exactly TOPIC_CLOUD_CAP tag topics do.
+    const assets: TopicAsset[] = [
+      clustered("k0", "kept-cluster-a"),
+      clustered("k1", "kept-cluster-b"),
+      ...Array.from({ length: TOPIC_CLOUD_CAP + 1 }, (_, i) =>
+        asset(`t${i}`, [["event", `topic-${String(i).padStart(2, "0")}`]]),
+      ),
+    ];
+    const topics = deriveTopics(assets);
+    const named = [...topics.values()].filter((t) => t !== TOPIC_OTHER_KEY && t !== UNSORTED_CLOUD_KEY);
+    expect(named).toContain("kept-cluster-a");
+    expect(named).toContain("kept-cluster-b");
+    const heuristicNames = new Set(named.filter((t) => t.startsWith("topic-")));
+    expect(heuristicNames.size).toBe(TOPIC_CLOUD_CAP);
+    expect([...topics.values()].filter((t) => t === TOPIC_OTHER_KEY)).toHaveLength(1);
   });
 
   it("is deterministic under reorder with mixed clustered and heuristic assets", () => {

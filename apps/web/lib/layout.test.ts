@@ -461,6 +461,116 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     ];
     expect(topicCloudLayout(photos, {})).toEqual(topicCloudLayout(photos.map((p) => ({ ...p })), {}));
   });
+
+  // ── ADR 0038: an override belongs to the cloud it was dropped in ──────────
+
+  const cloudOf = (photos: Photo[], key: string, overrides = {}) =>
+    topicCloudLayout(photos, overrides).clouds.find((c) => c.key === key)!;
+
+  it("applies an override whose anchor still matches the tile's cluster", () => {
+    const photos = [
+      photo("a", { group: "yoga", clusterId: "cl-1" }),
+      photo("b", { group: "yoga", clusterId: "cl-1" }),
+    ];
+    const moved = topicCloudLayout(photos, { a: { x: 4000, y: 400, cloud: "cl-1" } });
+    expect(moved.tiles.a.cx).toBe(4000);
+  });
+
+  it("ignores an override left behind when the worker moved the photo to another cluster", () => {
+    // Dropped while in cl-1; a re-cluster has since put it in cl-2. Honouring
+    // the coordinate would strand the tile thousands of px from its new cloud.
+    const photos = [
+      photo("a", { group: "rubble", clusterId: "cl-2" }),
+      photo("b", { group: "rubble", clusterId: "cl-2" }),
+    ];
+    const layout = topicCloudLayout(photos, { a: { x: 4000, y: 400, cloud: "cl-1" } });
+    expect(layout.tiles.a.cx).not.toBe(4000);
+    expect(layout.tiles.a).toEqual(topicCloudLayout(photos, {}).tiles.a); // re-packed
+  });
+
+  it("a rename does not reset the arrangement — the anchor is the cluster id, not the label", () => {
+    const before = topicCloudLayout([photo("a", { group: "yoga", clusterId: "cl-1" })], {
+      a: { x: 3000, y: 300, cloud: "cl-1" },
+    });
+    const after = topicCloudLayout([photo("a", { group: "Morning practice", clusterId: "cl-1" })], {
+      a: { x: 3000, y: 300, cloud: "cl-1" },
+    });
+    expect(after.tiles.a.cx).toBe(before.tiles.a.cx);
+    expect(after.tiles.a.cy).toBe(before.tiles.a.cy);
+  });
+
+  it("honours a legacy override that predates anchors", () => {
+    const layout = topicCloudLayout([photo("a", { group: "yoga", clusterId: "cl-9" })], { a: { x: 2500, y: 250 } });
+    expect(layout.tiles.a.cx).toBe(2500);
+  });
+
+  it("re-packs an unclustered tile whose heuristic topic changed", () => {
+    const layout = topicCloudLayout([photo("a", { group: "flag" }), photo("b", { group: "flag" })], {
+      a: { x: 4000, y: 400, cloud: "mat" },
+    });
+    expect(layout.tiles.a.cx).not.toBe(4000);
+  });
+
+  // ── ADR 0038: one far-dragged tile must not drag the cloud's name away ────
+
+  it("keeps the label on the cloud's core when a single tile is flung away", () => {
+    const photos = Array.from({ length: 6 }, (_, i) => photo(`m${i}`, { group: "rubble", clusterId: "cl-1" }));
+    const stray = { m0: { x: 6000, y: 400, cloud: "cl-1" } };
+    const clean = cloudOf(photos, "rubble");
+    const strayed = cloudOf(photos, "rubble", stray);
+    const tiles = topicCloudLayout(photos, stray).tiles;
+
+    // What the old all-members bbox would have produced, for scale: the label
+    // sitting ~2600 px away from every tile but one, over empty canvas.
+    const naiveLabelX = (Math.min(...Object.values(tiles).map((t) => t.x)) + Math.max(...Object.values(tiles).map((t) => t.x + t.w))) / 2;
+    expect(naiveLabelX - clean.labelX).toBeGreaterThan(2000);
+
+    // The core anchor stays with the cloud. It shifts a little, because the
+    // core is genuinely the five tiles that are left — it does not follow the
+    // sixth out into the void.
+    expect(Math.abs(strayed.labelX - clean.labelX)).toBeLessThan(clean.bw / 2);
+    expect(strayed.bw).toBeLessThanOrEqual(clean.bw); // a subset can only shrink the bbox
+    expect(strayed.count).toBe(6); // still a member…
+    expect(tiles.m0.cx).toBe(6000); // …and still exactly where it was dropped
+  });
+
+  it("still follows a whole-cloud drag, where every tile moves together", () => {
+    const photos = Array.from({ length: 6 }, (_, i) => photo(`m${i}`, { group: "rubble", clusterId: "cl-1" }));
+    const clean = topicCloudLayout(photos, {});
+    const shifted = Object.fromEntries(
+      photos.map((p) => [p.id, { x: clean.tiles[p.id].cx + 900, y: clean.tiles[p.id].cy + 500, cloud: "cl-1" }]),
+    );
+    const moved = cloudOf(photos, "rubble", shifted);
+    const before = clean.clouds.find((c) => c.key === "rubble")!;
+    expect(moved.labelX).toBeCloseTo(before.labelX + 900, 6);
+    expect(moved.labelY).toBeCloseTo(before.labelY + 500, 6);
+  });
+
+  it("a one-photo cloud reserves its own size, not three times it", () => {
+    // The singleton density ramp: with a flat 0.62 the macro circle for one
+    // tile was ~1.3× its radius plus the gutter, which is what pushed lone
+    // tiles into voids far from everything else.
+    const solo = [photo("only", { group: "solo" })];
+    const cloud = cloudOf(solo, "solo");
+    const tile = topicCloudLayout(solo, {}).tiles.only;
+    expect(cloud.bw).toBe(tile.w);
+    expect(cloud.bh).toBe(tile.h);
+  });
+
+  it("surfaces a cloud's cluster id only when it maps to exactly one cluster", () => {
+    const single = cloudOf([photo("a", { group: "yoga", clusterId: "cl-1" })], "yoga");
+    expect(single.clusterId).toBe("cl-1");
+
+    // Two distinct clusters that happen to share a label render as ONE cloud;
+    // renaming "it" would silently rename only one of them.
+    const collided = cloudOf(
+      [photo("a", { group: "yoga", clusterId: "cl-1" }), photo("b", { group: "yoga", clusterId: "cl-2" })],
+      "yoga",
+    );
+    expect(collided.clusterId).toBeNull();
+
+    expect(cloudOf([photo("a", { group: "mat" })], "mat").clusterId).toBeNull();
+  });
 });
 
 describe("hitTestTiles", () => {
