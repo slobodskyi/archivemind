@@ -68,6 +68,14 @@ export default function ExportDialog({ assetIds, onClose }: ExportDialogProps) {
     [layout, pageSize, captionLang, captionStyle, inc],
   );
 
+  // Describe what the run will actually contain — the old copy promised a
+  // caption under every photo even with the Caption toggle off.
+  const under = useMemo(() => {
+    const on = [inc.title && "title", inc.caption && "caption", inc.exif && "EXIF"].filter(Boolean) as string[];
+    if (on.length === 0) return "photos only";
+    return `${on.join(" + ")} under each`;
+  }, [inc]);
+
   const start = async () => {
     setPhase("working");
     setErr("");
@@ -134,7 +142,7 @@ export default function ExportDialog({ assetIds, onClose }: ExportDialogProps) {
       <div onPointerDown={(e) => e.stopPropagation()} style={CARD}>
         <div style={{ fontSize: 13, fontWeight: 800, color: "var(--t1)", marginBottom: 2 }}>Export to PDF</div>
         <div style={{ fontSize: 11.5, color: "var(--t3)", marginBottom: 16 }}>
-          {count} {count === 1 ? "photo" : "photos"} · each with its caption underneath
+          {count} {count === 1 ? "photo" : "photos"} · {under}
         </div>
 
         {phase === "ready" && url ? (
