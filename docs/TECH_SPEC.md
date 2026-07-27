@@ -59,7 +59,7 @@ Cloudflare R2 (S3-compatible)
 | 8 | Snapshot import, no live sync | Live sync needs broad scopes (`drive.readonly`, watch channels) → CASA + polling infra. Phase 2+. |
 | 9 | Files are workspace-global; projects are M:N curated subsets | "All my files" = workspace; one file can live in many projects. |
 | 10 | Attribute-level recognition only ("man with mustache"), no identity/face-ID | No consent/GDPR burden in MVP; person-attributes are tags. |
-| 11 | No enforced usage limits in MVP, but **every AI action logged** in `usage_events` | Data for the future credits model from day 1. |
+| 11 | No enforced usage limits in MVP, but **every AI action logged** in `usage_events`. The credit model is now **defined and metered, still not enforced** (ADR 0037): `1 credit = 1 AI action on 1 photo`; `plans` carries limits with `enforced = false` on every row | Data for the future credits model from day 1 — and, since 2026-07-27, a definition of what a credit *is*, so today's numbers are the ones a bill would use. |
 | 12 | AI seam = **`generateContent` + `responseSchema`**, not the Interactions API | Calls are single-shot (analyze/caption/search, no multi-turn state) and bulk ingest depends on the **Batch API**, not yet on Interactions. Pin `@google/genai`; re-verify at Phase 2. See ADR 0007. |
 
 ---
@@ -344,13 +344,21 @@ create table usage_events (
   user_id uuid,
   job_id uuid references ai_jobs(id),
   event_type text not null,          -- image_analyzed | caption_generated | embedding |
-                                     -- pdf_processed | search_query | export
+                                     -- pdf_processed | search_query | export |
+                                     -- asset_ingested  (added 20260727000002)
   units int not null default 1,
   model text,
-  cost_usd numeric(10,6),
+  cost_usd numeric(10,6),            -- estimate, from packages/shared USD_PER_UNIT;
+                                     -- internal margin only, never shown to a user
   created_at timestamptz default now()
 );
 create index usage_ws_idx on usage_events (workspace_id, created_at);
+-- Migration 20260727000002 (ADR 0037) adds `usage_events.bytes bigint` (ingest),
+-- a `plans` catalog + `workspaces.plan`, byte columns on `asset_previews` and
+-- `asset_edits`, and the `workspace_usage(ws)` RPC behind the Usage & Storage
+-- view. Like topic_clusters / asset_edits / canvas_groups, those tables live in
+-- their migrations and ADRs rather than in this block, which stays the
+-- migration-0001 design.
 
 -- ============ canvas layouts ============
 create table canvas_layouts (
@@ -543,6 +551,7 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `POST /api/jobs` | `{type:'analyze'|'caption'|'export', assetIds|projectId, options}` → insert `ai_jobs` |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |
 | `GET  /api/search?q=&projectId=` | §8.4 |
+| `GET  /api/usage` | **shipped (ADR 0037)** — the Usage & Storage snapshot: storage by bucket, this month's credits, the analyzed/captioned funnel, per-project and per-source attribution, 30 days of activity. One `workspace_usage()` RPC (SECURITY INVOKER — RLS is the boundary). Only for the client-side view switch; `/account/usage` awaits the same reader server-side |
 | `PATCH /api/captions/:id` | edit text (`is_edited=true`) |
 | `POST /api/assets/:id/tags` · `DELETE` | manual tags (`source='manual'`) |
 | `PATCH /api/facts/:id` | confirm / set status |
@@ -620,6 +629,11 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
 - Attribute-level people recognition only; no face-ID, no identity persistence. Face grouping = post-MVP, opt-in, consent-gated.
 - Product policy stated in UI + ToS: user data is never used to train models.
 - `usage_events` doubles as AI-action audit trail (who ran what, when, on how many files).
+  Since ADR 0037 every write goes through one helper (`apps/worker/src/services/usage.ts`)
+  that also fills `cost_usd`, and `ingest` finally writes a row too — so the trail covers
+  storage growth, not just model calls. The Usage & Storage view reads it through
+  `workspace_usage()`, which is SECURITY INVOKER: RLS, not the `ws` parameter, is what
+  stops one workspace reading another's numbers.
 - Deletion — **shipped 2026-07-23 (ADR 0033):** user delete → `status='deleted'` + `deleted_at` (trigger-stamped) = a **30-day trash** with undo/Restore; `sweep_deleted_assets()` then enqueues a `purge` job that deletes the R2 bytes (original + previews + edited previews) and the DB derivatives, keeping the assets row as a dedup tombstone (`purged_at`, hash/key cleared — ADR 0032 revival stays safe). "Delete permanently"/"Empty trash" purge early. Source file deleted upstream → on fetch failure mark `source_missing`, **keep derivatives** (captions/tags/embeddings survive — archive value; never purged).
 - Project retention: archive (`archived_at`) is reversible and open-ended; trash (`deleted_at`) is a **30-day grace period**, after which `sweep_trashed_projects()` hard-deletes the project on the worker's schedule (§7). The UI states the window, so it must stay enforced. Only the project dies — its assets are workspace-global and survive (rule 9), so no R2 purge is involved. ADR 0019.
 - Privacy Policy + ToS before first external user (GDPR-aware: data location EU where possible — Supabase EU region, R2 EU jurisdiction).
@@ -628,7 +642,7 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
 
 ## 13. Out of MVP (explicit)
 
-Live Drive/Dropbox sync (broad scopes + CASA) · **Drive folder sync** (`drive.readonly` + CASA) · **Dropbox folder import / full-Dropbox OAuth** (production-review clock) · video/audio + transcription · smart event clustering (timeline = chronological by `taken_at`) · face identification / person naming · billing & credit enforcement (tracking only) · public sharing links · NAS/iCloud/Lightroom connectors · similarity organize-mode server clustering (may slip to fast-follow) · OpenAPI doc generation.
+Live Drive/Dropbox sync (broad scopes + CASA) · **Drive folder sync** (`drive.readonly` + CASA) · **Dropbox folder import / full-Dropbox OAuth** (production-review clock) · video/audio + transcription · smart event clustering (timeline = chronological by `taken_at`) · face identification / person naming · **billing & credit *enforcement*** — metering, the credit unit and the `plans` catalog shipped 2026-07-27 (ADR 0037), but `plans.enforced` is false on every row and no code path refuses work for lack of credits; payment and enforcement remain out · public sharing links · NAS/iCloud/Lightroom connectors · similarity organize-mode server clustering (may slip to fast-follow) · OpenAPI doc generation.
 
 **Multi-representation assets** (e.g. RAW + PSD + exports grouped as one asset) are supported by the schema (asset → many files) but the MVP UI treats most assets as single-representation; the multi-rep management UI is post-MVP.
 
