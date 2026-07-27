@@ -136,6 +136,47 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — the dialog asks four questions, not nine
+
+Five PRs each added a control that was individually justified; the sum was nine
+labelled groups and twenty-one buttons rendered by one `seg()` helper, so a
+one-of-three choice, an on/off toggle and Cancel were pixel-identical. Three
+changes, no capability removed:
+
+**Format goes first.** It decides whether the Layout, Page, Under-each and Cover
+groups exist at all and rewrites six copy strings — yet it rendered third, after
+the user had read a page manifest and typed a document name that a CSV
+retroactively makes meaningless.
+
+**Page setup collapses behind a summary that names its own values** —
+`▸ Page setup — A4 · portrait · one per page`. Layout, page size, orientation and
+the cover toggle live there. The summary is built from the live values, never a
+static "More options", so nothing is hidden silently, and the group auto-expands
+whenever anything differs from the contract's defaults.
+
+**Captions read top-down.** The on/off chips now sit ABOVE the language and style
+they gate — the language buttons were `disabled={!inc.caption}` while the only
+control that sets it rendered 32px below them.
+
+Three shapes replace one: a heavier bordered chip for the mode switch, a recessed
+track for one-of-N (PhotoDrawer's caption-style picker), a hug-width chip with a
+check for booleans, and ConfirmModal's ghost for Cancel. All four are patterns
+already shipping in this repo — no library, no Tailwind, ADR 0001 intact.
+
+**And the answers are remembered.** `lib/export-prefs.ts` persists page setup,
+caption language/style and the include toggles to localStorage, keyed per
+workspace like canvas geometry (ADR 0022 — per-user view state, no migration).
+That is what makes the disclosure cost one click ever rather than one per export.
+Written only after a SUCCESSFUL run, and read through `safeParse` with a fallback
+to defaults: this runs in a `useState` initialiser with no error boundary above
+it, so a stale blob must degrade rather than blank the dialog. `format` and
+`zipContents` are deliberately excluded — a sticky `zip` would make the drawer's
+Export button open a dialog titled "Export as ZIP" for one photo.
+
+When nothing is stored yet, the caption language and style are seeded from what
+the SELECTION actually has (`bestCaptionPair`), because the schema default of
+en/agency on a Ukrainian archive is precisely the pair that prints nothing.
+
 ### 2026-07-27 — the ZIP carries the rights block too
 
 A PDF prints the credit in every page footer and the copyright on its cover. A ZIP

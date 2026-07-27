@@ -82,3 +82,50 @@ export function pdfPageCount(photos: number, cover: boolean, layout: ArtboardSet
   if (layout === "grid") return null;
   return photos + (cover ? 1 : 0);
 }
+
+/** The (lang, style) pair the selection actually has the most captions for.
+ *
+ *  The schema default is en/agency, which on a Ukrainian archive means the very
+ *  first export defaults to the one combination that will print nothing. This
+ *  only runs when the user has no saved preference — once they pick, their pick
+ *  wins forever. Ties break toward the schema default so behaviour stays
+ *  predictable, and a selection with no captions at all returns null. */
+export function bestCaptionPair(
+  photos: readonly (Pick<Photo, "captions"> | undefined)[],
+  fallback: { lang: ArtboardSettings["captionLang"]; style: ArtboardSettings["captionStyle"] },
+): { lang: ArtboardSettings["captionLang"]; style: ArtboardSettings["captionStyle"] } | null {
+  const counts = new Map<string, number>();
+  for (const photo of photos) {
+    for (const row of captionRows(photo)) {
+      const k = `${row.lang}|${row.style}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+  }
+  if (counts.size === 0) return null;
+
+  const fallbackKey = `${fallback.lang}|${fallback.style}`;
+  let bestKey = "";
+  let best = -1;
+  for (const [k, n] of counts) {
+    // Strictly greater, except that the fallback pair wins an exact tie.
+    if (n > best || (n === best && k === fallbackKey)) {
+      best = n;
+      bestKey = k;
+    }
+  }
+  const [lang, style] = bestKey.split("|");
+  return {
+    lang: lang as ArtboardSettings["captionLang"],
+    style: style as ArtboardSettings["captionStyle"],
+  };
+}
+
+/** How many of these photos have an exact caption for a pair — shown on each
+ *  button so the choice is informed rather than hidden. */
+export function captionCoverage(
+  photos: readonly (Pick<Photo, "captions"> | undefined)[],
+  lang: ArtboardSettings["captionLang"],
+  style: ArtboardSettings["captionStyle"],
+): number {
+  return photos.filter((p) => captionRows(p).some((r) => r.lang === lang && r.style === style)).length;
+}

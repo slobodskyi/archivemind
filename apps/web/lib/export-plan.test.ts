@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Photo } from "@/types";
-import { captionRows, captionStateFor, pdfPageCount, underLabel } from "./export-plan";
+import {
+  bestCaptionPair,
+  captionCoverage,
+  captionRows,
+  captionStateFor,
+  pdfPageCount,
+  underLabel,
+} from "./export-plan";
 
 /** Only `captions` is read; the rest of Photo is irrelevant here. */
 const withCaptions = (captions: Photo["captions"]): Pick<Photo, "captions"> => ({ captions });
@@ -102,5 +109,39 @@ describe("pdfPageCount", () => {
   it("handles an empty run", () => {
     expect(pdfPageCount(0, false, "one_per_page")).toBe(0);
     expect(pdfPageCount(0, true, "one_per_page")).toBe(1);
+  });
+});
+
+describe("bestCaptionPair", () => {
+  const EN_AG = withCaptions({ EN: { Agency: cap("a") } });
+  const UK_AG = withCaptions({ UK: { Agency: cap("b") } });
+  const UK_SO = withCaptions({ UK: { Social: cap("c") } });
+  const fallback = { lang: "en", style: "agency" } as const;
+
+  it("picks the pair the selection actually has", () => {
+    // A Ukrainian archive: defaulting to en/agency would print nothing at all.
+    expect(bestCaptionPair([UK_AG, UK_AG, EN_AG], fallback)).toEqual({ lang: "uk", style: "agency" });
+  });
+
+  it("returns null when the selection has no captions, leaving the default alone", () => {
+    expect(bestCaptionPair([withCaptions(undefined), undefined], fallback)).toBeNull();
+  });
+
+  it("breaks an exact tie toward the schema default, so behaviour stays predictable", () => {
+    expect(bestCaptionPair([EN_AG, UK_AG], fallback)).toEqual({ lang: "en", style: "agency" });
+  });
+
+  it("counts pairs, not photos — a photo with two captions votes twice", () => {
+    const both = withCaptions({ UK: { Agency: cap("a"), Social: cap("b") } });
+    expect(bestCaptionPair([both, UK_SO], fallback)).toEqual({ lang: "uk", style: "social" });
+  });
+});
+
+describe("captionCoverage", () => {
+  it("counts photos with an exact hit, not caption rows", () => {
+    const both = withCaptions({ UK: { Agency: cap("a"), Social: cap("b") } });
+    expect(captionCoverage([both, UK_SOCIAL, EN_AGENCY], "uk", "agency")).toBe(1);
+    expect(captionCoverage([both, UK_SOCIAL], "uk", "social")).toBe(2);
+    expect(captionCoverage([], "en", "agency")).toBe(0);
   });
 });
