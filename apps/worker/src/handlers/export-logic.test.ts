@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { MIN_IMG_H, fitScale, planPhotoPage, wrap, type Measure } from "./export";
+import {
+  MIN_IMG_H,
+  clampLines,
+  fitScale,
+  planPhotoPage,
+  truncateToWidth,
+  wrap,
+  type Measure,
+} from "./export";
 
 /** Fixed-width stand-in for an embedded font: every glyph is 5pt at size 10, so
  *  widths scale linearly with the font size. Keeps the geometry assertions exact
@@ -93,5 +101,39 @@ describe("planPhotoPage", () => {
   it("wraps a caption to the content width", () => {
     const p = plan({ caption: "z".repeat(400) });
     for (const l of p.capLines) expect(measure(l, 10)).toBeLessThanOrEqual(CONTENT_W);
+  });
+});
+
+describe("clampLines", () => {
+  it("passes short blocks through untouched", () => {
+    expect(clampLines(["a", "b"], 2)).toEqual({ lines: ["a", "b"], truncated: false });
+    expect(clampLines([], 2)).toEqual({ lines: [], truncated: false });
+  });
+
+  it("marks the cut with an ellipsis so a truncated caption is visibly cut", () => {
+    // The grid used to .slice(0, 2), ending a caption mid-word with no signal.
+    expect(clampLines(["one", "two", "three"], 2)).toEqual({ lines: ["one", "two…"], truncated: true });
+  });
+
+  it("handles a zero budget without producing a stray ellipsis", () => {
+    expect(clampLines(["one"], 0)).toEqual({ lines: [], truncated: true });
+  });
+});
+
+describe("truncateToWidth", () => {
+  it("leaves a line that already fits", () => {
+    expect(truncateToWidth("IMG_1.HEIC", measure, 8, 500)).toBe("IMG_1.HEIC");
+    expect(truncateToWidth("", measure, 8, 10)).toBe("");
+  });
+
+  it("ellipsizes to the cell width, ellipsis included in the budget", () => {
+    // measure: 0.5 * size per char → 4pt per char at size 8. 40pt = 10 chars.
+    const out = truncateToWidth("ABCDEFGHIJKLMNOP", measure, 8, 40);
+    expect(out.endsWith("…")).toBe(true);
+    expect(measure(out, 8)).toBeLessThanOrEqual(40);
+  });
+
+  it("returns empty rather than a bare ellipsis when nothing fits", () => {
+    expect(truncateToWidth("ABC", measure, 8, 2)).toBe("");
   });
 });

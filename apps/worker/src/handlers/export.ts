@@ -96,6 +96,27 @@ function splitToWidth(token: string, measure: Measure, size: number, maxW: numbe
 const blockH = (lines: number, size: number, pad: number): number =>
   lines ? lines * size * LINE_GAP + pad : 0;
 
+/** Cut wrapped text down to `max` lines, marking the cut with an ellipsis so a
+ *  truncated caption never reads as a finished sentence. */
+export function clampLines(lines: string[], max: number): { lines: string[]; truncated: boolean } {
+  if (lines.length <= max) return { lines, truncated: false };
+  const kept = lines.slice(0, Math.max(0, max));
+  if (kept.length > 0) kept[kept.length - 1] = `${kept[kept.length - 1]}…`;
+  return { lines: kept, truncated: true };
+}
+
+/** Fit one line to `maxW`, ellipsizing the tail. For the grid's single-line
+ *  title and meta rows, where wrapping onto a second line would break the cell. */
+export function truncateToWidth(text: string, measure: Measure, size: number, maxW: number): string {
+  if (!text || measure(text, size) <= maxW) return text;
+  let out = "";
+  for (const ch of text) {
+    if (measure(`${out}${ch}…`, size) > maxW) break;
+    out += ch;
+  }
+  return out ? `${out}…` : "";
+}
+
 export interface PagePlan {
   titleLines: string[];
   capLines: string[];
@@ -122,20 +143,16 @@ export function planPhotoPage(
 ): PagePlan {
   const contentW = pageW - MARGIN * 2;
   const titleLines = text.title ? wrap(text.title, measure, TITLE_SIZE, contentW) : [];
-  let capLines = text.caption ? wrap(text.caption, measure, CAPTION_SIZE, contentW) : [];
+  const wrappedCap = text.caption ? wrap(text.caption, measure, CAPTION_SIZE, contentW) : [];
   const metaLines = text.meta ? wrap(text.meta, measure, META_SIZE, contentW) : [];
 
   const fixedH = blockH(titleLines.length, TITLE_SIZE, 6) + blockH(metaLines.length, META_SIZE, 4);
   const budget = pageH - MARGIN * 2 - MIN_IMG_H - IMG_TEXT_GAP - fixedH;
   const capLineH = CAPTION_SIZE * LINE_GAP;
-  const maxCapLines = Math.max(0, Math.floor((budget - 4) / capLineH));
-
-  let captionTruncated = false;
-  if (capLines.length > maxCapLines) {
-    captionTruncated = true;
-    capLines = capLines.slice(0, maxCapLines);
-    if (capLines.length > 0) capLines[capLines.length - 1] = `${capLines[capLines.length - 1]}…`;
-  }
+  const { lines: capLines, truncated: captionTruncated } = clampLines(
+    wrappedCap,
+    Math.max(0, Math.floor((budget - 4) / capLineH)),
+  );
 
   const textH = fixedH + blockH(capLines.length, CAPTION_SIZE, 4);
   const imgAreaH = pageH - MARGIN * 2 - textH - IMG_TEXT_GAP;
@@ -278,13 +295,20 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
       : "";
 
   if (options.pageLayout === "grid") {
-    // Contact-sheet: 2 columns, images with a one-line caption under each.
+    // Contact-sheet: 2 columns. Every block the dialog offers is rendered here
+    // too — an index + title line, up to two caption lines, one meta line. The
+    // title matters most: it is the original filename, so "the third one on page
+    // 2" is the only way a client can point at a frame and a photographer can
+    // map the reply back. Title/meta are single lines, ellipsized to the cell.
     const cols = 2;
     const gap = 20;
     const cellW = (contentW - gap * (cols - 1)) / cols;
     const imgH = cellW * 0.7;
-    const capH = options.include.caption ? CAPTION_SIZE * LINE_GAP * 2 + 4 : 6;
-    const rowH = imgH + capH + 14;
+    const GRID_CAP_LINES = 2;
+    const titleH = blockH(options.include.title ? 1 : 0, META_SIZE, 2);
+    const capH = blockH(options.include.caption ? GRID_CAP_LINES : 0, CAPTION_SIZE, 4);
+    const metaH = blockH(options.include.exif ? 1 : 0, META_SIZE, 2);
+    const rowH = imgH + (titleH + capH + metaH || 6) + 14;
 
     let page = doc.addPage([pageW, pageH]);
     let col = 0;
@@ -305,8 +329,18 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
       } else {
         page.drawRectangle({ x, y: yTop - imgH, width: cellW, height: imgH, color: PLACEHOLDER });
       }
+      let y = yTop - imgH - 2;
+      if (options.include.title) {
+        const label = `${i + 1} · ${(rows[i].title ?? "").trim()}`.replace(/ · $/, "");
+        y = drawLines(page, [truncateToWidth(label, measure, META_SIZE, cellW)], x, y, font, META_SIZE, INK) - 2;
+      }
       const cap = captionOf(rows[i].asset_id);
-      if (cap) drawLines(page, wrap(cap, measure, CAPTION_SIZE, cellW).slice(0, 2), x, yTop - imgH - 2, font, CAPTION_SIZE, MUTED);
+      if (cap) {
+        const { lines } = clampLines(wrap(cap, measure, CAPTION_SIZE, cellW), GRID_CAP_LINES);
+        y = drawLines(page, lines, x, y, font, CAPTION_SIZE, MUTED) - 2;
+      }
+      const exif = options.include.exif ? exifByAsset.get(rows[i].asset_id) ?? "" : "";
+      if (exif) drawLines(page, [truncateToWidth(exif, measure, META_SIZE, cellW)], x, y, font, META_SIZE, MUTED);
       col += 1;
       if (col >= cols) {
         col = 0;

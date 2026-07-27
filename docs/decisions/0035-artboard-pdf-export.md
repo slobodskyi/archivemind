@@ -109,3 +109,26 @@ exported pure functions, unit-tested in `export-logic.test.ts`, that reserve
 letting text consume the page; `fitScale` can no longer return a negative scale.
 `wrap()` also hard-breaks a single token wider than the column, which previously
 drew past the margin.
+
+### 2026-07-27 — the `grid` layout honours every toggle it is offered
+
+§4 defined `grid` as "2-up with a short caption" and then said what goes under
+each photo is configurable. Both were shipped, and they contradicted each other:
+the grid branch drew only the image and the caption. `row.title` and the EXIF
+line were read exclusively in the `one_per_page` branch, while the dialog
+rendered all the chips with no reference to the selected layout — they lit up
+when pressed and changed nothing. Since `include.title` defaults **true**, a user
+who picked Grid and touched nothing silently lost the filename, which is the one
+thing that makes a contact sheet referenceable: without it a client cannot say
+"the third one on page 2" and the photographer cannot map the reply back to a
+frame. AGENTS.md already enforces this rule for AI actions — a label must not
+describe work the run will not do — and the same rule applies here.
+
+The grid now draws a `<index> · <title>` line and a meta line, both single lines
+ellipsized to the cell by the new pure `truncateToWidth()`, and the two-line
+caption clamp goes through `clampLines()` so a cut caption ends in an ellipsis
+instead of stopping mid-word. Rather than disabling chips per layout, both
+layouts render all three blocks: no toggle is inert anywhere, so there is nothing
+left to explain in the UI. The dialog's subtitle now lists the enabled blocks
+instead of unconditionally promising "each with its caption underneath" — which
+it said even with Caption switched off.
