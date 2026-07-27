@@ -29,6 +29,7 @@ async function main(): Promise<void> {
   const pool = createPool();
   let previews = 0;
   let edits = 0;
+  let exports = 0;
   let missing = 0;
 
   try {
@@ -89,7 +90,30 @@ async function main(): Promise<void> {
       console.log(`[backfill] edits: ${edits} measured`);
     }
 
-    console.log(`[backfill] done — ${previews} preview(s), ${edits} edit row(s), ${missing} key(s) gone from R2`);
+    // ── export artifacts ────────────────────────────────────────────
+    // Same gap, different home: the export job wrote `result_key` and no size.
+    // `payload ? 'result_key'` is the liveness test — the retention sweeper and
+    // purge both strip that key when they delete the object — so this only ever
+    // measures artifacts that still exist.
+    const { rows: jobs } = await pool.query<{ id: string; result_key: string }>(
+      `select id, payload->>'result_key' as result_key from ai_jobs
+        where type = 'export' and payload ? 'result_key'
+          and payload->>'result_bytes' is null`,
+    );
+    for (const job of jobs) {
+      const bytes = await headObjectSize(job.result_key);
+      if (bytes == null) missing += 1;
+      await pool.query(
+        `update ai_jobs set payload = payload || jsonb_build_object('result_bytes', $2::bigint)
+          where id = $1`,
+        [job.id, bytes ?? 0],
+      );
+      exports += 1;
+    }
+
+    console.log(
+      `[backfill] done — ${previews} preview(s), ${edits} edit row(s), ${exports} export(s), ${missing} key(s) gone from R2`,
+    );
   } finally {
     await pool.end();
   }
