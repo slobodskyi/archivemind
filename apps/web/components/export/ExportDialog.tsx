@@ -288,14 +288,24 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
             doneItems?: number | null;
             totalItems?: number | null;
             error?: string | null;
+            attempts?: number;
           };
-          const seen = `${j.status}:${j.progress ?? 0}:${j.doneItems ?? ""}`;
+          // Deliberately NOT keyed on status: a failing job flips
+          // running→queued→running on every retry, and counting that as movement
+          // is what let a broken export sit on "Preparing export" for twenty
+          // minutes instead of surfacing the failure.
+          const seen = `${j.progress ?? 0}:${j.doneItems ?? ""}:${j.attempts ?? 0}`;
           if (seen !== lastSeen) {
             lastSeen = seen;
             lastChange = Date.now();
           }
           if (typeof j.progress === "number") setProgress(j.progress);
-          if (j.progressLabel) setProgressLabel(j.progressLabel);
+          // attempts increments at claim time, so >1 means an earlier run failed.
+          setProgressLabel(
+            (j.attempts ?? 0) > 1
+              ? `Retrying after a failure — attempt ${j.attempts} of 3`
+              : j.progressLabel || null,
+          );
 
           if (j.status === "done" && j.url) {
             stopPoll();

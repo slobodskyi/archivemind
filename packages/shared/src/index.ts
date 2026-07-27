@@ -688,6 +688,11 @@ export const exportResultSchema = z.object({
   /** ai_jobs.error on a failed job — a worker code like `export_too_large:2.4GB`,
    *  which the dialog maps to actionable copy instead of "the render failed". */
   error: z.string().nullable().default(null),
+  /** ai_jobs.attempts. Incremented at CLAIM time, so a queued job showing 1 has
+   *  already run and failed once. Without it a retry loop is indistinguishable
+   *  from a slow render: the job flips running→queued→running while progress
+   *  stays put, and the dialog reported "Preparing export" for twenty minutes. */
+  attempts: z.number().int().default(0),
 });
 export type ExportResult = z.infer<typeof exportResultSchema>;
 
