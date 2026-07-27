@@ -108,12 +108,26 @@ export function assertUnderBudget(bytes: number): void {
   }
 }
 
-/** The note that explains anything the archive could not deliver as asked. */
-export function buildReadme(plan: ZipPlan, contents: ArtboardSettings["zipContents"]): string | null {
+/** The note shipped inside the archive: who made the work, and anything the
+ *  bundle could not deliver as asked.
+ *
+ *  The rights block is the reason this file is now written even for a perfect
+ *  bundle. A PDF carries the credit in its page footer and the copyright on its
+ *  cover; a ZIP had nowhere to put either, so a client received a folder of
+ *  photographs with no statement of who owns them or how they may be used —
+ *  which for an editorial deliverable is the difference between a credited
+ *  publication and an uncredited one. */
+export function buildReadme(
+  plan: ZipPlan,
+  contents: ArtboardSettings["zipContents"],
+  rights?: WorkspaceRights | null,
+): string | null {
   const substituted = plan.entries.filter((e) => e.substituted);
-  if (substituted.length === 0 && plan.missing.length === 0) return null;
+  const rightsLines = rightsBlock(rights);
+  if (substituted.length === 0 && plan.missing.length === 0 && rightsLines.length === 0) return null;
 
   const lines = ["ArchiveMind export", ""];
+  lines.push(...rightsLines);
   if (substituted.length > 0) {
     lines.push(
       `${substituted.length} file(s) are web-size previews (1024px), not originals.`,
@@ -139,10 +153,32 @@ export function buildReadme(plan: ZipPlan, contents: ArtboardSettings["zipConten
   return lines.join("\n");
 }
 
+export interface WorkspaceRights {
+  creator: string | null;
+  credit: string | null;
+  copyright_notice: string | null;
+  usage_terms: string | null;
+}
+
+/** Labelled rights lines, omitting whatever the workspace has not set. Returns
+ *  [] when nothing is set, so an archive with no byline gets no empty heading. */
+function rightsBlock(rights: WorkspaceRights | null | undefined): string[] {
+  const rows: [string, string | null | undefined][] = [
+    ["Creator", rights?.creator],
+    ["Credit", rights?.credit],
+    ["Copyright", rights?.copyright_notice],
+    ["Usage terms", rights?.usage_terms],
+  ];
+  const set = rows.filter(([, v]) => (v ?? "").trim().length > 0);
+  if (set.length === 0) return [];
+  return [...set.map(([label, v]) => `${label}: ${(v ?? "").trim()}`), ""];
+}
+
 export async function renderZip(
   pool: pg.Pool,
   rows: ExportRow[],
   options: ArtboardSettings,
+  rights: WorkspaceRights | null,
   onProgress: (done: number, total: number) => Promise<void>,
 ): Promise<{ body: Buffer; skipped: number }> {
   const assetIds = rows.map((r) => r.asset_id);
@@ -198,7 +234,7 @@ export async function renderZip(
   }
 
   files.push({ name: "captions.csv", body: await renderCaptionsCsv(pool, rows, options) });
-  const readme = buildReadme(plan, options.zipContents);
+  const readme = buildReadme(plan, options.zipContents, rights);
   if (readme) files.push({ name: "README.txt", body: Buffer.from(readme, "utf8") });
 
   return { body: buildZip(files), skipped: plan.missing.length };

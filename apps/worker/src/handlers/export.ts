@@ -331,6 +331,15 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   const artifact = EXPORT_ARTIFACTS[options.format];
   const key = `${job.workspace_id}/exports/${job.id}.${artifact.ext}`;
 
+  // Who made the work. The PDF prints it in the footer and on the cover; the ZIP
+  // now carries it in README.txt, so a client folder is not an anonymous pile of
+  // files (migration 20260727000001).
+  const { rows: wsRows } = await pool.query<WorkspaceCreditRow>(
+    `select creator, credit, copyright_notice, usage_terms from workspaces where id = $1`,
+    [job.workspace_id],
+  );
+  const ws = wsRows[0] ?? null;
+
   // captions_csv needs no images, no font and no page geometry — it shares only
   // the row collection above and the storage tail below.
   if (options.format === "captions_csv") {
@@ -343,7 +352,7 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   // zip: no font and no page geometry either — just the stored bytes, plus the
   // captions CSV inside so the metadata travels with the pixels.
   if (options.format === "zip") {
-    const { body, skipped } = await renderZip(pool, rows, options, async (done, count) => {
+    const { body, skipped } = await renderZip(pool, rows, options, ws, async (done, count) => {
       await progress(8 + Math.round((88 * done) / count), `Packing ${done}/${count}`, done, count);
     });
     await finishExport({ pool, job, progress }, key, body, artifact.contentType, total, skipped, renderedIds);
@@ -405,11 +414,6 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   // Document metadata: pdf-lib leaves Title empty and sets Producer/Creator to
   // its own URL string, so a saved file showed no name anywhere.
   const docTitle = (payload.title ?? "").trim();
-  const { rows: wsRows } = await pool.query<WorkspaceCreditRow>(
-    `select creator, credit, copyright_notice, usage_terms from workspaces where id = $1`,
-    [job.workspace_id],
-  );
-  const ws = wsRows[0] ?? null;
   if (docTitle) doc.setTitle(docTitle);
   if (ws?.creator) doc.setAuthor(ws.creator);
   if (ws?.copyright_notice) doc.setSubject(ws.copyright_notice);

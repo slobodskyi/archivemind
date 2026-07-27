@@ -136,6 +136,20 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — the ZIP carries the rights block too
+
+A PDF prints the credit in every page footer and the copyright on its cover. A ZIP
+had nowhere to put either, so a client received a folder of photographs with no
+statement of who owns them or how they may be used — which for an editorial
+deliverable is the difference between a credited publication and an uncredited
+one. `buildReadme` now leads with the workspace rights block, and is written even
+for a bundle where nothing went wrong (it previously returned null unless a file
+was substituted or missing). Fields the workspace left blank are omitted rather
+than printed as empty labels.
+
+The dialog's Credit disclosure stays PDF-only regardless, so this adds no control
+to the ZIP path — it just stops that path being silent about ownership.
+
 ### 2026-07-27 — the ZIP query invented a column, and nothing was testing SQL
 
 Shipped and immediately broken in production: `renderZip` selected
