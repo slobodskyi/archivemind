@@ -52,6 +52,9 @@ const LINE_GAP = 1.35;
 const IMG_TEXT_GAP = 16;
 /** The photo never yields the whole page to text — see planPhotoPage. */
 export const MIN_IMG_H = 120;
+const COVER_TITLE_SIZE = 22;
+/** Footer baseline — inside the bottom margin, clear of the content box. */
+const FOOTER_Y = 20;
 const INK = rgb(0.08, 0.08, 0.08);
 const MUTED = rgb(0.42, 0.42, 0.42);
 const PLACEHOLDER = rgb(0.9, 0.9, 0.9);
@@ -171,6 +174,39 @@ export function planPhotoPage(
 export function fitScale(imgW: number, imgH: number, boxW: number, boxH: number): number {
   if (imgW <= 0 || imgH <= 0) return 0;
   return Math.max(0, Math.min(boxW / imgW, boxH / imgH));
+}
+
+export interface WorkspaceCreditRow {
+  creator: string | null;
+  credit: string | null;
+  copyright_notice: string | null;
+  usage_terms: string | null;
+}
+
+/** The one-line credit a page footer carries: the explicit credit line if the
+ *  workspace set one, else the creator's name, else nothing. */
+export function footerCredit(ws: WorkspaceCreditRow | null): string {
+  return (ws?.credit ?? ws?.creator ?? "").trim();
+}
+
+/** Cover-page body lines: what the document is, then the rights block. Pure so
+ *  the composition is testable without pdf-lib. */
+export function coverLines(
+  count: number,
+  range: { from: string | null; to: string | null },
+  ws: WorkspaceCreditRow | null,
+): string[] {
+  const lines: string[] = [`${count} ${count === 1 ? "photograph" : "photographs"}`];
+  const from = range.from?.slice(0, 10);
+  const to = range.to?.slice(0, 10);
+  if (from && to) lines.push(from === to ? from : `${from} — ${to}`);
+  else if (from) lines.push(from);
+  for (const v of [ws?.creator, ws?.credit, ws?.copyright_notice, ws?.usage_terms]) {
+    const t = v?.trim();
+    // creator and credit often say the same thing; don't print it twice.
+    if (t && !lines.includes(t)) lines.push(t);
+  }
+  return lines;
 }
 
 /** Draw wrapped lines top-down from `y`, returning the y below the block. */
@@ -363,6 +399,19 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
 
   const measure: Measure = (text, sz) => font.widthOfTextAtSize(text, sz);
 
+  // Document metadata: pdf-lib leaves Title empty and sets Producer/Creator to
+  // its own URL string, so a saved file showed no name anywhere.
+  const docTitle = (payload.title ?? "").trim();
+  const { rows: wsRows } = await pool.query<WorkspaceCreditRow>(
+    `select creator, credit, copyright_notice, usage_terms from workspaces where id = $1`,
+    [job.workspace_id],
+  );
+  const ws = wsRows[0] ?? null;
+  if (docTitle) doc.setTitle(docTitle);
+  if (ws?.creator) doc.setAuthor(ws.creator);
+  if (ws?.copyright_notice) doc.setSubject(ws.copyright_notice);
+  doc.setCreationDate(new Date());
+
   const size = PAGE_SIZES[options.pageSize];
   const landscape = options.orientation === "landscape";
   const pageW = landscape ? size.h : size.w;
@@ -468,6 +517,46 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
       await progress(8 + Math.round((88 * (i + 1)) / total), `Rendering ${i + 1}/${total}`, i + 1, total);
     }
   }
+
+  if (options.cover) {
+    const { rows: range } = await pool.query<{ from: string | null; to: string | null }>(
+      `select min(taken_at)::text as from, max(taken_at)::text as to
+         from asset_exif where asset_id = any($1)`,
+      [assetIds],
+    );
+    const cover = doc.insertPage(0, [pageW, pageH]);
+    let y = pageH - MARGIN * 2;
+    if (docTitle) {
+      y = drawLines(cover, wrap(docTitle, measure, COVER_TITLE_SIZE, contentW), MARGIN, y, font, COVER_TITLE_SIZE, INK) - 18;
+    }
+    drawLines(cover, coverLines(total, range[0] ?? { from: null, to: null }, ws), MARGIN, y, font, CAPTION_SIZE, MUTED);
+  }
+
+  // Footer on every page: "3 / 40" plus the credit line. `drawText` appeared
+  // exactly once in this whole file before, so a 60-page client PDF was literally
+  // uncitable — nobody could say "page 7".
+  const pages = doc.getPages();
+  const credit = footerCredit(ws);
+  pages.forEach((page, i) => {
+    const label = `${i + 1} / ${pages.length}`;
+    const { width } = page.getSize();
+    page.drawText(label, {
+      x: width - MARGIN - measure(label, META_SIZE),
+      y: FOOTER_Y,
+      size: META_SIZE,
+      font,
+      color: MUTED,
+    });
+    if (credit) {
+      page.drawText(truncateToWidth(credit, measure, META_SIZE, width - MARGIN * 2 - 60), {
+        x: MARGIN,
+        y: FOOTER_Y,
+        size: META_SIZE,
+        font,
+        color: MUTED,
+      });
+    }
+  });
 
   await finishExport({ pool, job, progress }, key, Buffer.from(await doc.save()), artifact.contentType, total, skipped);
 }

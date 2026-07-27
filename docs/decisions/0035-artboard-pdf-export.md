@@ -136,6 +136,44 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — it reads as a document now: cover, footer, metadata, filename
+
+`drawText` appeared exactly **once** in the whole worker before this — inside
+`drawLines`. So a 60-page client PDF had no page numbers and was literally
+uncitable: nobody could say "the third one on page 7". `doc.setTitle` was never
+called either (pdf-lib sets Producer/Creator to its own URL string and a
+CreationDate, so the timestamp existed but was never rendered), and the download
+saved as the job's uuid.
+
+Four additions:
+
+- **Metadata** — `setTitle` from the new `title` field on the export request,
+  `setAuthor` from `workspaces.creator`, `setSubject` from the copyright notice.
+  The title is client-supplied because the route resolves a `project_id` only in
+  the `groupId` branch, which no client reaches; the dialog prefills it with the
+  current project's label and lets the user edit it.
+- **A footer on every page** — `i / n` right-aligned, the credit line
+  left-aligned, at `FOOTER_Y` inside the bottom margin so it never collides with
+  the content box.
+- **An optional cover page** (`options.cover`, default **false** — an extra page
+  nobody asked for is a surprise): title, photo count, the date range from
+  `min/max(asset_exif.taken_at)`, then the rights block. `coverLines()` is pure
+  and tested, including the case where `creator` and `credit` say the same thing
+  and should not print twice.
+- **A human filename** — `ResponseContentDisposition` signed into the presigned
+  URL by `presignGet(key, filename)`. It has to be signed in: the `download`
+  attribute on an `<a>` is ignored cross-origin and the presigned URL is on the R2
+  host. `exportFilename()` lives in shared so the name cannot drift, and the
+  header carries both an ASCII fallback and RFC 5987 `filename*` so a Cyrillic
+  title survives. Passing a filename also opts out of the signing-date bucket,
+  which exists to keep *preview* URLs byte-identical for the browser cache and has
+  no bearing on a one-off deliverable.
+
+The credit block itself is edited in the export dialog (migration
+`20260727000001`): the app has no settings page, and this is the only place a
+byline matters. A non-owner sees the values read-only, because
+`workspaces_update` is `is_owner`.
+
 ### 2026-07-27 — the ZIP bundle: "pick some files, get a zip"
 
 The simplest thing a user expects of an archive tool, and the last piece of
