@@ -392,6 +392,7 @@ export default function ArchiveWorkspace({
           assetIds={ws.exportIds}
           photos={ws.photos}
           defaultTitle={ws.projLabel === "Projects" ? "" : ws.projLabel}
+          workspaceId={workspaceId}
           onClose={ws.closeExport}
         />
       )}

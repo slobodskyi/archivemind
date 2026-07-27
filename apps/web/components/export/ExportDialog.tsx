@@ -5,11 +5,14 @@ import { useDialog } from "@/hooks/useDialog";
 import {
   LANG_UI,
   STYLE_UI,
+  bestCaptionPair,
+  captionCoverage,
   captionStateFor,
   pdfPageCount,
   underLabel,
   type CaptionState,
 } from "@/lib/export-plan";
+import { isNonDefaultPageSetup, loadPrefs, savePrefs } from "@/lib/export-prefs";
 import { photoSrc } from "@/lib/img";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 
@@ -20,6 +23,8 @@ interface ExportDialogProps {
   photos: Photo[];
   /** Suggested document name — the current project's label. */
   defaultTitle?: string;
+  /** Scopes the remembered page/caption preferences (see lib/export-prefs). */
+  workspaceId: string;
   onClose: () => void;
 }
 
@@ -136,9 +141,18 @@ const SR_ONLY: React.CSSProperties = {
  *
  *  Mounted only while open, so its state resets naturally each time (the parent
  *  gates it with `&&`). */
-export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }: ExportDialogProps) {
+export default function ExportDialog({
+  assetIds,
+  photos,
+  defaultTitle,
+  workspaceId,
+  onClose,
+}: ExportDialogProps) {
+  // Read once, lazily: the dialog is mount-gated so this runs on every open, and
+  // localStorage in a render body would run on every render.
+  const [{ prefs, stored }] = useState(() => loadPrefs(workspaceId));
   const [title, setTitle] = useState(defaultTitle ?? "");
-  const [cover, setCover] = useState(false);
+  const [cover, setCover] = useState(prefs.cover);
   /** Workspace credit block — fetched lazily, edited here because the app has no
    *  settings page and this is the only place a byline matters. `null` means not
    *  loaded (or the load failed), which is NOT the same as "you may not edit". */
@@ -147,12 +161,25 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
   const [creditOpen, setCreditOpen] = useState(false);
   const [format, setFormat] = useState<ArtboardSettings["format"]>("pdf");
   const [zipContents, setZipContents] = useState<ArtboardSettings["zipContents"]>("originals");
-  const [layout, setLayout] = useState<ArtboardSettings["pageLayout"]>("one_per_page");
-  const [pageSize, setPageSize] = useState<ArtboardSettings["pageSize"]>("A4");
-  const [orientation, setOrientation] = useState<ArtboardSettings["orientation"]>("portrait");
-  const [captionLang, setCaptionLang] = useState<ArtboardSettings["captionLang"]>("en");
-  const [captionStyle, setCaptionStyle] = useState<ArtboardSettings["captionStyle"]>("agency");
-  const [inc, setInc] = useState({ caption: true, title: true, exif: false });
+  const [layout, setLayout] = useState(prefs.pageLayout);
+  const [pageSize, setPageSize] = useState(prefs.pageSize);
+  const [orientation, setOrientation] = useState(prefs.orientation);
+  // Seeded from what the SELECTION actually has when there is no saved
+  // preference: the schema default is en/agency, which on a Ukrainian archive is
+  // the one pair that prints nothing. A saved preference always wins.
+  const [seeded] = useState(() => {
+    const chosen = { lang: prefs.captionLang, style: prefs.captionStyle };
+    if (stored) return chosen; // an explicit choice is never overridden by a guess
+    const inRun = new Set(assetIds);
+    return bestCaptionPair(
+      photos.filter((p) => inRun.has(p.id)),
+      chosen,
+    ) ?? chosen;
+  });
+  const [captionLang, setCaptionLang] = useState(seeded.lang);
+  const [captionStyle, setCaptionStyle] = useState(seeded.style);
+  const [inc, setInc] = useState(prefs.include);
+  const [setupOpen, setSetupOpen] = useState(() => isNonDefaultPageSetup(prefs));
   const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("config");
   const [url, setUrl] = useState<string | null>(null);
@@ -397,6 +424,17 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
 
           if (j.status === "done" && j.url) {
             stopPoll();
+            // Remembered only on success — settings that produced a failure are
+            // not worth carrying into the next export.
+            savePrefs(workspaceId, {
+              pageLayout: layout,
+              pageSize,
+              orientation,
+              captionLang,
+              captionStyle,
+              include: inc,
+              cover,
+            });
             setUrl(j.url);
             setPhase("ready");
           } else if (j.status === "failed" || j.status === "canceled") {
@@ -428,21 +466,100 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
       setErr("Couldn't start the export. Please try again.");
       setPhase("error");
     }
-  }, [ids, title, options, stopPoll]);
+  }, [ids, title, options, stopPoll, workspaceId, layout, pageSize, orientation, captionLang, captionStyle, inc, cover]);
 
-  const seg = (active: boolean, disabled = false): React.CSSProperties => ({
+  // Three shapes, because these are three different kinds of control and they
+  // used to be pixel-identical: a one-of-N choice, an on/off toggle and a way
+  // out of the dialog all rendered as the same accent-bordered segment. Every
+  // treatment below is lifted from a pattern already shipping in this repo.
+
+  /** The mode switch. Deliberately the heaviest thing in the dialog — it decides
+   *  which of the groups below exist at all. */
+  const modeChip = (active: boolean): React.CSSProperties => ({
     flex: 1,
-    height: 30,
+    height: 32,
     border: `1px solid ${active ? "var(--ac)" : "var(--bd)"}`,
     background: active ? "color-mix(in srgb, var(--ac) 14%, transparent)" : "transparent",
     color: active ? "var(--ac)" : "var(--t2)",
     borderRadius: 2,
     fontSize: 11,
     fontWeight: 700,
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.5 : 1,
+    cursor: "pointer",
     fontFamily: "inherit",
   });
+
+  /** One-of-N, in a recessed track (PhotoDrawer's caption style picker). The
+   *  track is the group; the raised item is the answer. */
+  const TRACK: React.CSSProperties = {
+    display: "flex",
+    gap: 2,
+    background: "var(--bg-in)",
+    borderRadius: 2,
+    padding: 2,
+  };
+  const trackBtn = (active: boolean, disabled = false): React.CSSProperties => ({
+    flex: 1,
+    height: 26,
+    border: 0,
+    borderRadius: 2,
+    fontSize: 11.5,
+    fontFamily: "inherit",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
+    background: active ? "var(--bg-el)" : "transparent",
+    color: active ? "#fff" : "var(--t2b)",
+  });
+
+  /** A boolean. Hugs its label and carries a check, so it never reads as one
+   *  half of a choice the way "No cover | Add cover" did. */
+  const chip = (active: boolean): React.CSSProperties => ({
+    height: 28,
+    padding: "0 10px",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    border: `1px solid ${active ? "var(--ac)" : "var(--bd)"}`,
+    background: active ? "color-mix(in srgb, var(--ac) 14%, transparent)" : "transparent",
+    color: active ? "var(--ac)" : "var(--t2)",
+    borderRadius: 2,
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  });
+
+  /** Dismissals (ConfirmModal's Cancel). Not a choice; must not look like one. */
+  const ghost: React.CSSProperties = {
+    height: 34,
+    padding: "0 16px",
+    background: "transparent",
+    color: "var(--t2b)",
+    border: "1px solid var(--bd)",
+    borderRadius: 2,
+    fontSize: 12,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  };
+
+  /** The collapsed-group header, shared by Page setup and Credit. */
+  const disclosure = (open: boolean, marginBottom: number): React.CSSProperties => ({
+    ...LABEL,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: open ? marginBottom : 0,
+    background: "transparent",
+    border: 0,
+    padding: 0,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  });
+  const SUMMARY: React.CSSProperties = {
+    fontWeight: 400,
+    textTransform: "none",
+    letterSpacing: 0,
+    color: "var(--t2)",
+  };
 
   const dot = (state: CaptionState): React.CSSProperties => ({
     width: 6,
@@ -463,6 +580,24 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
           : "";
 
   const shortfall = outcome && outcome.rendered < outcome.requested ? outcome : null;
+
+  /** The photos actually in the run — used for caption coverage counts. */
+  const runPhotos = useMemo(() => items.map((i) => i.photo), [items]);
+
+  /** Names every value it is hiding, so the collapsed group is a summary rather
+   *  than a mystery. */
+  const setupSummary = useMemo(
+    () =>
+      [
+        pageSize,
+        orientation,
+        layout === "one_per_page" ? "one per page" : "grid",
+        cover ? "cover page" : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    [pageSize, orientation, layout, cover],
+  );
 
   return (
     <div
@@ -530,7 +665,7 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
               >
                 Download {fmt}
               </a>
-              <button onClick={onClose} style={{ ...seg(false), height: 32 }}>
+              <button onClick={onClose} style={{ ...ghost, height: 32, width: "100%" }}>
                 Close
               </button>
             </div>
@@ -578,6 +713,61 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
         ) : (
           <>
             <div style={{ ...BODY, display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* FORMAT FIRST: it decides which groups below exist at all and
+                  rewrites the title, the list heading and the CTA. It used to
+                  render third — after a page manifest and a document name that
+                  a CSV retroactively makes meaningless. */}
+              <div>
+                <div style={LABEL} id={`${groupId}-format`}>
+                  Format
+                </div>
+                <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-format`}>
+                  <button style={modeChip(isDoc)} aria-pressed={isDoc} onClick={() => setFormat("pdf")}>
+                    PDF document
+                  </button>
+                  <button style={modeChip(isCsv)} aria-pressed={isCsv} onClick={() => setFormat("captions_csv")}>
+                    Captions CSV
+                  </button>
+                  <button style={modeChip(isZip)} aria-pressed={isZip} onClick={() => setFormat("zip")}>
+                    ZIP
+                  </button>
+                </div>
+                {isCsv && (
+                  <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
+                    One row per photo: filename, full EXIF, place, tags, the AI description, facts split
+                    by review status, and the captions in all three languages of the chosen style.
+                  </div>
+                )}
+                {isZip && (
+                  <div style={{ marginTop: 8 }}>
+                    <span style={SR_ONLY} id={`${groupId}-zip`}>
+                      What the archive contains
+                    </span>
+                    <div style={TRACK} role="group" aria-labelledby={`${groupId}-zip`}>
+                      <button
+                        style={trackBtn(zipContents === "originals")}
+                        aria-pressed={zipContents === "originals"}
+                        onClick={() => setZipContents("originals")}
+                      >
+                        Originals
+                      </button>
+                      <button
+                        style={trackBtn(zipContents === "web")}
+                        aria-pressed={zipContents === "web"}
+                        onClick={() => setZipContents("web")}
+                      >
+                        Web-size
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
+                      {zipContents === "originals"
+                        ? "The files as uploaded. Photos imported from Google Drive have no copy here — those come as web-size previews, listed in README.txt."
+                        : "1024px previews of everything — small enough to email."}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {assetIds.length > 0 && (
                 <div>
                   <div style={LABEL}>{isDoc ? "Pages, in order" : "Rows, in order"}</div>
@@ -702,163 +892,13 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
                 </div>
               </div>
 
+              {/* CAPTIONS: the on/off chips come FIRST and the language and style
+                  are nested under them. They used to be the other way round, so
+                  the lang buttons were greyed out by a toggle 32px BELOW them. */}
               <div>
-                <div style={LABEL} id={`${groupId}-format`}>
-                  Format
-                </div>
-                <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-format`}>
-                  <button style={seg(isDoc)} aria-pressed={isDoc} onClick={() => setFormat("pdf")}>
-                    PDF document
-                  </button>
-                  <button style={seg(isCsv)} aria-pressed={isCsv} onClick={() => setFormat("captions_csv")}>
-                    Captions CSV
-                  </button>
-                  <button style={seg(isZip)} aria-pressed={isZip} onClick={() => setFormat("zip")}>
-                    ZIP
-                  </button>
-                </div>
-                {isCsv && (
-                  <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
-                    One row per photo: filename, full EXIF, place, tags, the AI description, facts split
-                    by review status, and the captions in all three languages of the chosen style.
-                  </div>
-                )}
-                {isZip && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-zip`}>
-                      <span style={SR_ONLY} id={`${groupId}-zip`}>
-                        What the archive contains
-                      </span>
-                      <button
-                        style={seg(zipContents === "originals")}
-                        aria-pressed={zipContents === "originals"}
-                        onClick={() => setZipContents("originals")}
-                      >
-                        Originals
-                      </button>
-                      <button
-                        style={seg(zipContents === "web")}
-                        aria-pressed={zipContents === "web"}
-                        onClick={() => setZipContents("web")}
-                      >
-                        Web-size
-                      </button>
-                    </div>
-                    <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
-                      {zipContents === "originals"
-                        ? "The files as uploaded. Photos imported from Google Drive have no copy here — those come as web-size previews, listed in README.txt."
-                        : "1024px previews of everything — small enough to email."}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {isDoc && (
-                <>
-                  <div>
-                    <div style={LABEL} id={`${groupId}-layout`}>
-                      Layout
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-layout`}>
-                      <button
-                        style={seg(layout === "one_per_page")}
-                        aria-pressed={layout === "one_per_page"}
-                        onClick={() => setLayout("one_per_page")}
-                      >
-                        One per page
-                      </button>
-                      <button
-                        style={seg(layout === "grid")}
-                        aria-pressed={layout === "grid"}
-                        onClick={() => setLayout("grid")}
-                      >
-                        Grid
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={LABEL} id={`${groupId}-page`}>
-                      Page
-                    </div>
-                    <div
-                      style={{ display: "flex", gap: 6, marginBottom: 6 }}
-                      role="group"
-                      aria-labelledby={`${groupId}-page`}
-                    >
-                      <button style={seg(pageSize === "A4")} aria-pressed={pageSize === "A4"} onClick={() => setPageSize("A4")}>
-                        A4
-                      </button>
-                      <button
-                        style={seg(pageSize === "Letter")}
-                        aria-pressed={pageSize === "Letter"}
-                        onClick={() => setPageSize("Letter")}
-                      >
-                        Letter
-                      </button>
-                    </div>
-                    <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-page`}>
-                      <button
-                        style={seg(orientation === "portrait")}
-                        aria-pressed={orientation === "portrait"}
-                        onClick={() => setOrientation("portrait")}
-                      >
-                        Portrait
-                      </button>
-                      <button
-                        style={seg(orientation === "landscape")}
-                        aria-pressed={orientation === "landscape"}
-                        onClick={() => setOrientation("landscape")}
-                      >
-                        Landscape
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div>
-                <div style={LABEL} id={`${groupId}-caption`}>
-                  {isDoc ? "Caption language / style" : "Caption style"}
-                </div>
-                {!isDoc ? (
-                  <div style={{ fontSize: 10.5, color: "var(--t3)", marginBottom: 6 }}>
-                    All three languages are included as their own columns.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }} role="group" aria-labelledby={`${groupId}-caption`}>
-                    {LANGS.map((l) => (
-                      <button
-                        key={l.key}
-                        style={seg(captionLang === l.key, !inc.caption)}
-                        aria-pressed={captionLang === l.key}
-                        disabled={!inc.caption}
-                        onClick={() => setCaptionLang(l.key)}
-                      >
-                        {l.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-caption`}>
-                  {STYLES.map((s) => (
-                    <button
-                      key={s.key}
-                      style={seg(captionStyle === s.key, isDoc && !inc.caption)}
-                      aria-pressed={captionStyle === s.key}
-                      disabled={isDoc && !inc.caption}
-                      onClick={() => setCaptionStyle(s.key)}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {isDoc && (
-                <div>
-                  <div style={LABEL}>Under each photo</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <div style={LABEL}>Captions</div>
+                {isDoc && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                     {(
                       [
                         ["caption", "Caption"],
@@ -868,60 +908,143 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
                     ).map(([key, label]) => (
                       <button
                         key={key}
-                        style={{ ...seg(inc[key]), flex: "0 0 auto", padding: "0 12px" }}
+                        style={chip(inc[key])}
                         aria-pressed={inc[key]}
                         onClick={() => setInc((p) => ({ ...p, [key]: !p[key] }))}
                       >
+                        <span aria-hidden="true">{inc[key] ? "✓" : "+"}</span>
                         {label}
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
-
-              {isDoc && (
-                <div>
-                  <div style={LABEL}>Cover page</div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      style={{ ...seg(cover), flex: "0 0 auto", padding: "0 12px" }}
-                      aria-pressed={cover}
-                      onClick={() => setCover((v) => !v)}
-                    >
-                      Add cover
-                    </button>
+                )}
+                {isDoc && !inc.caption ? (
+                  <div style={{ fontSize: 10.5, color: "var(--t3)" }}>
+                    Captions are off — turn Caption on to pick a language and style.
                   </div>
+                ) : (
+                  <>
+                    {isDoc ? (
+                      <div style={{ ...TRACK, marginBottom: 6 }} role="group" aria-labelledby={`${groupId}-caption`}>
+                        <span style={SR_ONLY} id={`${groupId}-caption`}>
+                          Caption language
+                        </span>
+                        {LANGS.map((l) => {
+                          const n = captionCoverage(runPhotos, l.key, captionStyle);
+                          return (
+                            <button
+                              key={l.key}
+                              style={trackBtn(captionLang === l.key)}
+                              aria-pressed={captionLang === l.key}
+                              title={`${LANG_UI[l.key]} · ${STYLE_UI[captionStyle]}: ${n} of ${count}`}
+                              onClick={() => setCaptionLang(l.key)}
+                            >
+                              {l.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 10.5, color: "var(--t3)", marginBottom: 6 }}>
+                        All three languages are included as their own columns.
+                      </div>
+                    )}
+                    <div style={TRACK} role="group" aria-labelledby={`${groupId}-style`}>
+                      <span style={SR_ONLY} id={`${groupId}-style`}>
+                        Caption style
+                      </span>
+                      {STYLES.map((st) => (
+                        <button
+                          key={st.key}
+                          style={trackBtn(captionStyle === st.key)}
+                          aria-pressed={captionStyle === st.key}
+                          onClick={() => setCaptionStyle(st.key)}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* PAGE SETUP: four controls almost nobody changes twice, folded
+                  behind a summary that NAMES their current values — so nothing
+                  is hidden silently. Auto-expands when anything is non-default. */}
+              {isDoc && (
+                <div>
+                  <button onClick={() => setSetupOpen((v) => !v)} aria-expanded={setupOpen} style={disclosure(setupOpen, 8)}>
+                    {setupOpen ? "▾" : "▸"} Page setup <span style={SUMMARY}>— {setupSummary}</span>
+                  </button>
+                  {setupOpen && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={TRACK} role="group" aria-labelledby={`${groupId}-layout`}>
+                        <span style={SR_ONLY} id={`${groupId}-layout`}>
+                          Page layout
+                        </span>
+                        <button
+                          style={trackBtn(layout === "one_per_page")}
+                          aria-pressed={layout === "one_per_page"}
+                          onClick={() => setLayout("one_per_page")}
+                        >
+                          One per page
+                        </button>
+                        <button style={trackBtn(layout === "grid")} aria-pressed={layout === "grid"} onClick={() => setLayout("grid")}>
+                          Grid
+                        </button>
+                      </div>
+                      <div style={TRACK} role="group" aria-labelledby={`${groupId}-size`}>
+                        <span style={SR_ONLY} id={`${groupId}-size`}>
+                          Page size
+                        </span>
+                        <button style={trackBtn(pageSize === "A4")} aria-pressed={pageSize === "A4"} onClick={() => setPageSize("A4")}>
+                          A4
+                        </button>
+                        <button
+                          style={trackBtn(pageSize === "Letter")}
+                          aria-pressed={pageSize === "Letter"}
+                          onClick={() => setPageSize("Letter")}
+                        >
+                          Letter
+                        </button>
+                      </div>
+                      <div style={TRACK} role="group" aria-labelledby={`${groupId}-orient`}>
+                        <span style={SR_ONLY} id={`${groupId}-orient`}>
+                          Orientation
+                        </span>
+                        <button
+                          style={trackBtn(orientation === "portrait")}
+                          aria-pressed={orientation === "portrait"}
+                          onClick={() => setOrientation("portrait")}
+                        >
+                          Portrait
+                        </button>
+                        <button
+                          style={trackBtn(orientation === "landscape")}
+                          aria-pressed={orientation === "landscape"}
+                          onClick={() => setOrientation("landscape")}
+                        >
+                          Landscape
+                        </button>
+                      </div>
+                      <div>
+                        <button style={chip(cover)} aria-pressed={cover} onClick={() => setCover((v) => !v)}>
+                          <span aria-hidden="true">{cover ? "✓" : "+"}</span>
+                          Cover page
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
               {isDoc && (
                 <div>
-                  <button
-                    onClick={() => setCreditOpen((v) => !v)}
-                    aria-expanded={creditOpen}
-                    style={{
-                      ...LABEL,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      marginBottom: creditOpen ? 8 : 0,
-                      background: "transparent",
-                      border: 0,
-                      padding: 0,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
+                  <button onClick={() => setCreditOpen((v) => !v)} aria-expanded={creditOpen} style={disclosure(creditOpen, 8)}>
                     {creditOpen ? "▾" : "▸"} Credit{" "}
-                    {credit?.credit || credit?.creator ? (
-                      <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--t2)" }}>
-                        — {credit.credit ?? credit.creator}
-                      </span>
-                    ) : (
-                      <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--t3)" }}>
-                        — not set
-                      </span>
-                    )}
+                    <span style={credit?.credit || credit?.creator ? SUMMARY : { ...SUMMARY, color: "var(--t3)" }}>
+                      — {credit?.credit ?? credit?.creator ?? "not set"}
+                    </span>
                   </button>
                   {creditOpen && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -951,7 +1074,7 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
                         {creditFailed
                           ? "Couldn't load the credit block — reload the page to try again."
                           : credit?.canEdit
-                            ? "The credit line (or Creator) prints in the footer of every page. Copyright and Usage terms print on the cover — turn Add cover on to include them."
+                            ? "The credit line (or Creator) prints in the footer of every page. Copyright and Usage terms print on the cover — turn Cover page on to include them."
                             : credit
                               ? "Only the workspace owner can change these."
                               : "Loading…"}
@@ -970,7 +1093,7 @@ export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }
                 </div>
               )}
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={onClose} style={{ ...seg(false), flex: "0 0 auto", padding: "0 16px", height: 34 }}>
+                <button onClick={onClose} style={ghost}>
                   Cancel
                 </button>
                 <button
