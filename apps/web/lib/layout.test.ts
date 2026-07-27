@@ -8,6 +8,7 @@ import {
   hitTestTiles,
   nudgeOffOverlap,
   packGrid,
+  readingOrder,
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
   timelineAxisLayout,
@@ -516,5 +517,67 @@ describe("packGrid", () => {
     expect(packGrid(["x"], {})).toEqual({});
     const positions = { a: tile(10, 20), b: tile(30, 40), c: tile(50, 60) };
     expect(packGrid(["a", "b", "c"], positions)).toEqual(packGrid(["a", "b", "c"], { ...positions }));
+  });
+});
+
+describe("readingOrder", () => {
+  /** Tile centred at (cx, cy) — readingOrder only reads the centre. */
+  const at = (cx: number, cy: number): TilePos => ({ x: cx - 56, y: cy - 42, w: 112, h: 84, cx, cy });
+
+  // Default-grid centres: ASSET_GRID_Y 90 + row*176 + 88, ASSET_GRID_X 80 + col*184 + 92.
+  const gridCentre = (col: number, row: number) => at(80 + col * 184 + 92, 90 + row * 176 + 88);
+
+  it("reads the top row left-to-right, then the next row down", () => {
+    const pos = {
+      topRight: gridCentre(2, 0),
+      bottomLeft: gridCentre(0, 1),
+      topLeft: gridCentre(0, 0),
+      topMid: gridCentre(1, 0),
+    };
+    expect(readingOrder(["bottomLeft", "topMid", "topRight", "topLeft"], pos)).toEqual([
+      "topLeft",
+      "topMid",
+      "topRight",
+      "bottomLeft",
+    ]);
+  });
+
+  it("is immune to the default grid's ±5px centre jitter", () => {
+    // assetGallery offsets every centre by (hash % 11) - 5, so a visually
+    // straight row is never flat in `cy`. Banding must still keep it one row.
+    const pos = {
+      a: at(80 + 0 * 184 + 92, 90 + 88 + 5),
+      b: at(80 + 1 * 184 + 92, 90 + 88 - 5),
+      c: at(80 + 2 * 184 + 92, 90 + 88 + 2),
+    };
+    expect(readingOrder(["c", "a", "b"], pos)).toEqual(["a", "b", "c"]);
+  });
+
+  it("puts a dragged-down tile after the row it left", () => {
+    const pos = { a: gridCentre(0, 0), b: gridCentre(1, 0), moved: at(80 + 92, 90 + 3 * 176 + 88) };
+    expect(readingOrder(["moved", "b", "a"], pos)).toEqual(["a", "b", "moved"]);
+  });
+
+  it("sorts purely left-to-right when banding is disabled (Timeline date axis)", () => {
+    // Tiles straddle the axis: y says above/below, x says which day.
+    const pos = { day1Below: at(100, 700), day1Above: at(110, 200), day2Above: at(400, 210) };
+    expect(readingOrder(["day2Above", "day1Below", "day1Above"], pos, Infinity)).toEqual([
+      "day1Below",
+      "day1Above",
+      "day2Above",
+    ]);
+  });
+
+  it("appends ids with no tile instead of dropping them, keeping their order", () => {
+    const pos = { placed: gridCentre(0, 0) };
+    expect(readingOrder(["ghost2", "placed", "ghost1"], pos)).toEqual(["placed", "ghost2", "ghost1"]);
+    expect(readingOrder(["x", "y"], {})).toEqual(["x", "y"]);
+    expect(readingOrder([], {})).toEqual([]);
+  });
+
+  it("breaks exact ties by id so the same arrangement always exports the same order", () => {
+    const pos = { b: at(300, 300), a: at(300, 300) };
+    expect(readingOrder(["b", "a"], pos)).toEqual(["a", "b"]);
+    expect(readingOrder(["a", "b"], pos)).toEqual(["a", "b"]);
   });
 });
