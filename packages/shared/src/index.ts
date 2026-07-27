@@ -560,6 +560,37 @@ export const canvasGroupsResponseSchema = z.object({
 });
 export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
 
+// ── Workspace credit / rights block (migration 20260727000001) ───────────────
+//
+// The byline an exported deliverable carries. Workspace-level: the product's user
+// is a documentary photographer whose whole archive runs under one credit
+// (TECH_SPEC §1). Read by every member (workspaces_select = is_member), written
+// only by an owner (workspaces_update = is_owner) — the route does not re-check,
+// RLS is the gate, so `canEdit` on the read is advisory UI state, not security.
+
+export const workspaceCreditSchema = z.object({
+  creator: z.string().trim().max(200).nullable(),
+  credit: z.string().trim().max(300).nullable(),
+  copyrightNotice: z.string().trim().max(300).nullable(),
+  usageTerms: z.string().trim().max(500).nullable(),
+});
+export type WorkspaceCredit = z.infer<typeof workspaceCreditSchema>;
+
+/** GET /api/workspace. `canEdit` tells the client whether to offer the fields at
+ *  all, so a non-owner is not handed inputs whose save will silently no-op. */
+export const workspaceInfoSchema = workspaceCreditSchema.extend({
+  id: uuidSchema,
+  name: z.string(),
+  canEdit: z.boolean(),
+});
+export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
+
+/** PATCH /api/workspace — any subset; empty strings clear a field to null. */
+export const patchWorkspaceRequestSchema = workspaceCreditSchema
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, { message: "at least one field is required" });
+export type PatchWorkspaceRequest = z.infer<typeof patchWorkspaceRequestSchema>;
+
 // ── Artboard PDF export (ADR 0035) — POST /api/exports → ai_jobs type='export' ─
 //
 // Not routed through POST /api/jobs (like edit/purge, export gets its own
