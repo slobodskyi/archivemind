@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ROAD_LAYER_IDS,
+  ROAD_PAINT,
   applyArchiveMindTheme,
   BASEMAP_ATTRIBUTION,
   HIDDEN_LAYER_IDS,
@@ -148,5 +150,38 @@ describe("map theme — restraint", () => {
 
   it("keeps every themed id real", () => {
     expect(THEMED_LAYER_IDS.filter((id) => !UPSTREAM_LAYER_IDS.includes(id))).toEqual([]);
+  });
+});
+
+describe("map theme — roads are opaque", () => {
+  it("paints every road layer with a solid colour, never rgba", () => {
+    // A street network crosses itself constantly. A translucent line composites
+    // twice at every junction, so a city grid renders as a field of bright dots
+    // at exactly the crossings — which is what "the overlaps look brighter"
+    // was pointing at.
+    for (const id of ROAD_LAYER_IDS) {
+      const color = ROAD_PAINT[id]?.["line-color"];
+      expect(typeof color, `${id} line-color`).toBe("string");
+      expect(String(color), `${id} must not be translucent`).toMatch(/^#[0-9a-f]{6}$/);
+    }
+  });
+
+  it("pins line-opacity to 1, because upstream sets 0.9 on highway_minor", () => {
+    // Verified against tiles.openfreemap.org/styles/dark: highway_minor ships
+    // `"line-opacity": 0.9`. Overriding only the colour would leave the
+    // compositing an opaque colour exists to remove.
+    for (const id of ROAD_LAYER_IDS) {
+      expect(ROAD_PAINT[id]?.["line-opacity"], `${id} line-opacity`).toBe(1);
+    }
+  });
+
+  it("keeps the two road tiers distinguishable, and both darker than a label", () => {
+    const minor = String(ROAD_PAINT.highway_minor?.["line-color"]);
+    const major = String(ROAD_PAINT.highway_major_inner?.["line-color"]);
+    const level = (hex: string) => parseInt(hex.slice(1, 3), 16);
+    expect(level(minor)).toBeLessThan(level(major));
+    // Roads are texture, not content: they must stay well below the label ramp
+    // (--t2b resolves to #7a7b78) or they compete with the photo markers.
+    expect(level(major)).toBeLessThan(0x7a);
   });
 });
