@@ -16,6 +16,7 @@ import {
 import type pg from "pg";
 import { getObjectBuffer, putObject } from "../services/r2";
 import { loadPdfFont } from "../services/pdf-font";
+import { recordUsage } from "../services/usage";
 import { renderCaptionsCsv } from "./export-csv";
 import { renderZip } from "./export-zip";
 import type { HandlerContext } from "./index";
@@ -601,8 +602,18 @@ async function finishExport(
   // `group_id` export carries no asset list at all, and group membership can
   // change after the render, so the only reliable record is what the job itself
   // put in the file. See purgeExportArtifacts (ADR 0033 + 0035 amendments).
+  // `result_bytes` rides along for the same reason `exported_asset_ids` does:
+  // the artifact is stored data that nothing else measures. The Usage page reads
+  // it (workspace_usage), and `payload ? 'result_key'` stays the liveness test —
+  // sweepExpiredExports strips that key when it deletes the object, so an
+  // expired artifact drops out of the storage total on its own.
   await pool.query(`update ai_jobs set payload = payload || $1::jsonb where id = $2`, [
-    JSON.stringify({ result_key: key, skipped_previews: skipped, exported_asset_ids: assetIds }),
+    JSON.stringify({
+      result_key: key,
+      result_bytes: body.length,
+      skipped_previews: skipped,
+      exported_asset_ids: assetIds,
+    }),
     job.id,
   ]);
 
@@ -612,11 +623,16 @@ async function finishExport(
   // invocation (N R2 GETs + N sharp transcodes + a stored artifact), and
   // recording the page count is what makes the R2 growth attributable to a
   // workspace after the fact — and which format users actually pick.
-  await pool.query(
-    `insert into usage_events (workspace_id, user_id, job_id, event_type, units)
-     values ($1, $2, $3, 'export', $4)`,
-    [job.workspace_id, job.user_id, job.id, total],
-  );
+  await recordUsage(pool, [
+    {
+      workspaceId: job.workspace_id,
+      userId: job.user_id,
+      jobId: job.id,
+      type: "export",
+      units: total,
+      bytes: body.length,
+    },
+  ]);
 
   if (skipped > 0) {
     console.log(`[export] ${job.id}: ${skipped}/${total} page(s) had no usable preview`);

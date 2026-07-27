@@ -8,6 +8,7 @@ import { DriveFileError, downloadDriveFile, getDriveFileMeta } from "../services
 import { heicToRaw } from "../services/heic";
 import { makePreviews, previewKey, type PreviewInput } from "../services/previews";
 import { deleteObject, getObjectBuffer, putObject } from "../services/r2";
+import { recordUsage } from "../services/usage";
 import { isRawFilename, rawToJpeg } from "../services/raw";
 import { DriveTokenError, DriveTokenSource } from "../services/tokens";
 import type { HandlerContext } from "./index";
@@ -166,6 +167,13 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
   // (drive_file_not_found → source_missing). Retrying can't heal it, so it must
   // NOT drive the wholly-failed job retry — but the user still needs to see it.
   let missing = 0;
+  // Bytes this run actually added to OUR storage, for the `asset_ingested`
+  // usage_event below. Drive-linked originals are excluded on purpose: they
+  // stay in Drive (§6, r2_key stays null), so a Drive import costs the
+  // workspace its previews and nothing else — which is exactly what the Usage
+  // page's by-source breakdown is there to show.
+  let storedBytes = 0;
+  let ingested = 0;
 
   for (const row of rows) {
     const label = row.title ?? row.asset_id;
@@ -440,14 +448,25 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
       for (const p of await makePreviews(decoded.input)) {
         const key = previewKey(row.workspace_id, row.asset_id, p.size);
         await putObject(key, p.data, "image/webp");
+        // byte_size is recorded here because here is the only place that knows
+        // it for free — the buffer we just uploaded. Reconstructing it later
+        // costs an R2 HeadObject per preview (see
+        // scripts/backfill-derivative-bytes.ts, which pays that price once for
+        // every row written before migration 20260727000002).
         await pool.query(
-          `insert into asset_previews (asset_id, size, r2_key, width, height)
-           values ($1,$2,$3,$4,$5)
+          `insert into asset_previews (asset_id, size, r2_key, width, height, byte_size)
+           values ($1,$2,$3,$4,$5,$6)
            on conflict (asset_id, size) do update set
-             r2_key=excluded.r2_key, width=excluded.width, height=excluded.height`,
-          [row.asset_id, p.size, key, p.width, p.height],
+             r2_key=excluded.r2_key, width=excluded.width, height=excluded.height,
+             byte_size=excluded.byte_size`,
+          [row.asset_id, p.size, key, p.width, p.height, p.data.length],
         );
+        storedBytes += p.data.length;
       }
+      // The original counts only when WE hold it: uploads and Dropbox (fetched
+      // into R2 above) do, Drive-linked files do not.
+      if (row.r2_key) storedBytes += buf.length;
+      ingested += 1;
     } catch (err) {
       // content_hash was written above (before EXIF/previews), so this asset
       // now has a hash but zero previews — an unrenderable shell. Left as-is it
@@ -469,6 +488,24 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
   }
 
   await progress(100, ingestProgressLabel(done, deduped, failed, missing), done, rows.length);
+
+  // Ingest was the last job type writing no usage_events row, which is why
+  // storage growth could be totalled at a point in time but never attributed
+  // over one ("you added 4 GB in July"). Costs 0 credits — no model runs here
+  // (packages/shared CREDIT_COST) — so this row exists for the storage timeline
+  // and the activity log, not for billing.
+  if (ingested > 0) {
+    await recordUsage(pool, [
+      {
+        workspaceId: job.workspace_id,
+        userId: job.user_id,
+        jobId: job.id,
+        type: "asset_ingested",
+        units: ingested,
+        bytes: storedBytes,
+      },
+    ]).catch((err) => console.log(`[ingest] usage not recorded: ${String(err)}`));
+  }
 
   // #119: a run in which EVERY asset failed must be a FAILED job, not a silent
   // 'done' with error=null (the mechanism that hid the iPhone HEIC bug #113).

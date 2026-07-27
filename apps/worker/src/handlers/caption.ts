@@ -7,6 +7,7 @@ import {
 } from "@archivemind/shared";
 import { analyzeModel, generateCaption } from "../services/gemini";
 import { getObjectBuffer } from "../services/r2";
+import { recordUsage } from "../services/usage";
 import type { HandlerContext } from "./index";
 
 /** Captions (spec §8.3), per asset × lang: medium preview + known metadata
@@ -122,11 +123,16 @@ export async function captionHandler({ pool, job, progress }: HandlerContext): P
            where captions.is_edited = false`,
         [row.asset_id, lang, style, text, analyzeModel()],
       );
-      await pool.query(
-        `insert into usage_events (workspace_id, user_id, job_id, event_type, units, model)
-         values ($1, $2, $3, 'caption_generated', 1, $4)`,
-        [row.workspace_id, job.user_id, job.id, analyzeModel()],
-      );
+      await recordUsage(pool, [
+        {
+          workspaceId: row.workspace_id,
+          userId: job.user_id,
+          jobId: job.id,
+          type: "caption_generated",
+          units: 1,
+          model: analyzeModel(),
+        },
+      ]);
       done += 1;
       generated += 1;
     }

@@ -60,8 +60,17 @@ READ PATH (Server Components import these and await them directly):
                             — ensureWorkspace() + getProjectCards()
   app/projects/[id]/page.tsx  canvas — getProjectCards() + lib/api.ts getPhotos()
         |                    ("all" = whole workspace; else the project's M:N assets)
+  app/account/usage/page.tsx  Usage & Storage (ADR 0037) — lib/usage.ts
+        |                    getWorkspaceUsage() → ONE workspace_usage() RPC
+        |                    (SECURITY INVOKER, RLS is the boundary) returning
+        |                    storage by bucket, credits this month, the
+        |                    analyzed/captioned funnel, per-project and
+        |                    per-source attribution, 30 days of activity.
+        |                    Both account menus link here; Settings/Billing
+        |                    still toast, so they stay buttons
         v
   components/home/HomeClient.tsx · components/workspace/ArchiveWorkspace.tsx
+  components/account/UsageView.tsx
 
 WRITE PATH (client → HTTP → route handlers; nothing client-side touches the DB):
   app/api/uploads/presign · uploads/complete   drag-drop → R2 → ingest job
@@ -154,6 +163,8 @@ These are the mockup's shapes. The **target** model differs — see the note bel
 - **Drawer** — the right-side photo detail panel. Its preview carries an **Edit** button (real sources with previews) that opens the **image editor** (`components/editor/ImageEditor.tsx`) — Tier-0 non-destructive crop/rotate/straighten/flip (ADR 0030). The client only builds a `recipe`; the worker renders the edited previews. An edited asset shows "Edited" and offers Revert. The opposite corner carries the **Delete** pill (ADR 0033) — Move to Trash with the same undo toast as the tile/action-bar/right-click deletes; a big selection confirms first, and the homepage Trash view is where photos are restored or purged for good. An unprocessed photo shows one **Analyze & caption** button (analyze chained into caption — see AI actions below); once there are captions the block offers **Generate**/**Regenerate** per lang × style.
 - **Facts** — bullets the analyze job extracts, each carrying a `fact_status` (`confirmed` / `likely` / `needs_check`, surfaced as the drawer's three dot colors). **Confirming is an AI action, not bookkeeping:** `apps/worker/src/handlers/caption.ts` prompts with `select text from facts where asset_id = $1 and status = 'confirmed'`, so a confirmed fact is the only user-supplied ground truth that reaches caption generation. Confirmation is per-fact (`PATCH /api/facts/[id]`, RLS `facts_update` = `is_editor_of_asset`); there is deliberately no confirm-all, which would launder unreviewed model output into the next generation's input. Facts carry their DB `id` through `lib/assets.ts` for exactly this; mock rows and the "Analyze to extract facts" placeholder carry `id: null` and get no control.
 - **AI actions** — every AI entry point (tile ✨ badge, action-bar ✨, left toolbar, right-click menu, drawer) plans its run through the single pure `lib/ai-ops.ts` `planAiRun`, which returns both the jobs to enqueue *and* the button text, so a label can't describe work the run won't do. `ops.tags` → `analyze`, `ops.captions` → `caption`, both → analyze **chained** into caption (the caption prompt reads the facts analyze writes, so they can't be one job; `useWorkspace`'s `followUpCaption` ref fires the second leg when the first reports done). Two operations exist because two job types exist — the panel's old "Detect & group faces" checkbox had neither a job type nor a handler and is gone. Tile badges read `photo.processed` (= `ai_processed_at`, written by analyze only) and clicking one analyzes that photo; `aiBusyIds` marks the tiles inside the running job.
+
+- **Credit** — the usage unit, defined once in `packages/shared/src/usage.ts` and read by both the worker (which writes `usage_events`) and `lib/usage.ts` (which totals them). **1 credit = 1 AI action on 1 photo:** `analyze` costs 1, a caption costs 1 *per language*, and `embedding` / `search_query` / `export` / `asset_ingested` cost **0** — the embedding is the second half of the same analyze call (charging it would double every analysis), and search is the core loop. Storage is a separate axis in bytes, never converted to credits. Limits live in the `plans` table (`beta` / `creator` / `studio`) and are **display-only**: `plans.enforced` is false everywhere and nothing refuses work for lack of credits (ADR 0037, TECH_SPEC §13 "tracking only"). `usage_events.cost_usd` carries a per-unit USD *estimate* for margin reasoning and is never shown to a user.
 
 > **Target model (TECH_SPEC v1.2 / ADR 0011):** the mockup's flat `Photo` becomes
 > **Asset ≠ File** — an `asset` is the canonical entity (one shot/document) and
