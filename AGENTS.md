@@ -10,7 +10,8 @@ AI-powered creator archive workspace — infinite-canvas photo archive UI.
 A **pnpm + turborepo monorepo**, live in production (Phases 0–2 shipped 2026-07-10,
 plus Phase 5's homepage + real projects pulled forward, Phases 3–4 (captions,
 search) done 2026-07-17/20, and Phase 6's **cloud imports** done 2026-07-21 —
-Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
+Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Phase 7's
+**export** done 2026-07-27 — three formats, closes #25.
 `docs/PLAN.md` is canonical for phase status — trust it over this line):
 - `apps/web` — Next.js (App Router) + TypeScript + Tailwind, deployed on Vercel:
   real auth (email+password **and Google OAuth** — #89, 2026-07-20), drag-and-drop
@@ -20,7 +21,10 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   drop-in → the same `POST /api/imports`; **zero OAuth** — no connection row, the
   ~4 h direct links ride in the ingest payload and the worker fetches each original
   once into R2 — ADR 0008, #105–#107), a real homepage of project cards,
-  and Canvas/Timeline/Map/Topic all rendering the caller's real assets.
+  and Canvas/Timeline/Map/Topic all rendering the caller's real assets. Work gets **out**
+  through one dialog: `POST /api/exports` → an `export` job → a PDF, a captions CSV or a
+  ZIP of the files (ADR 0035 + its Amendments). Page order is the canvas reading order,
+  not the order the ids happened to arrive in.
   `/` now serves **two** audiences (ADR 0036): `proxy.ts` exempts it by exact
   match and `app/page.tsx` forks on the session — no claims renders the public
   marketing landing (`components/landing/`), a signed-in caller still gets the
@@ -76,6 +80,11 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008).
   web reader (which totals them) import this, so the meter and the future bill
   cannot drift apart. Limits live in the `plans` table and are display-only —
   `plans.enforced` is false everywhere and nothing refuses work (ADR 0037).
+  30-day photo-trash window or by "Delete permanently" — ADR 0033), edit (renders the
+  stored crop/rotate recipe into separate previews, ADR 0030) and export. There are
+  **seven handlers, one per member of `jobTypeSchema`** — nothing can sit in the queue
+  without one.
+- `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),
 Cloudflare R2 (all binaries), and a **worker on Railway** for heavy jobs
@@ -88,7 +97,10 @@ design from this file:**
 - `docs/TECH_SPEC.md` (v1.2) — canonical for the domain model (**Asset ≠ File**),
   architecture, schema, models, and security. Single source of truth.
 - `docs/PLAN.md` — the phase-by-phase build order (Phase 0–7).
-- `docs/decisions/` — the "why" behind each call. Some ADRs supersede earlier ones in
+- `docs/decisions/` — the "why" behind each call. **Read an ADR to its end:** several now
+  carry `## Amendments` sections that correct the Decision above them (0035 heavily, plus
+  0027 and 0033) — the head of the file can state the opposite of what ships. Some ADRs
+  also supersede earlier ones in
   part: for the Timeline/Map/Topic views, 0016 → 0017 → 0018 → 0022 → 0023 → 0024,
   with **0027** now superseding the Map half and **0028** the Topic half — read
   **0022** (unified cloud canvas +
@@ -124,8 +136,11 @@ script (packages without it are skipped). CI runs them as one job named `checks`
 a type error.
 
 The pgTAP suites (`supabase/tests/*.sql`) run in CI as the required `db-tests`
-check (fast-skips on non-DB PRs; full run when `supabase/**` changes — ADR 0020,
-required since 2026-07-17). `supabase test db` locally is the fast pre-flight
+check (fast-skips on PRs that touch neither; full run when `supabase/**` **or**
+`apps/worker/src/handlers/**` / `retention.ts` changes — ADR 0020, required since
+2026-07-17). The worker paths are in the filter because `supabase/tests/009_export_queries.sql`
+EXECUTES the SQL those handlers embed: a TS-only query change shipped
+`column ap.byte_size does not exist` to production once already. `supabase test db` locally is the fast pre-flight
 when you touch `supabase/**`, not the only line of defence anymore.
 
 ## Conventions

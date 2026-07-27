@@ -11,7 +11,13 @@ can't infer on its own.
   `chore/<short-name>`.
 - Rebase your own branch onto `main` before opening a PR. Never rebase a branch
   the other person has already pulled from.
-- Squash-merge into `main`; delete the branch after merge.
+- Squash-merge into `main`; delete the branch after merge. **One documented
+  exception:** a deep stack of PRs, each branched off the previous, cannot be
+  squashed in order — every squash rewrites `main` and forces the next branch into
+  a conflicted rebase. Rebase-merging the TOP PR replays the whole stack onto
+  `main` with each commit's message intact (PR #168 did this for eleven), then the
+  others are closed, not merged, because rebase rewrote their SHAs. Do not reach
+  for this to skip a rebase on a single PR.
 
 ## Branch protection
 `main` is protected by a GitHub repository ruleset (not classic branch
@@ -42,8 +48,12 @@ branch is merged.
 ## Before opening a PR
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` all pass (from the
   repo root; they fan out via turborepo). CI runs exactly these four.
-- If you touched `supabase/**`, run `supabase db reset && supabase test db`
-  locally as the fast pre-flight — CI runs the same pgTAP suites as the required
+- If you touched `supabase/**` **or the worker's SQL-bearing files**
+  (`apps/worker/src/handlers/**`, `retention.ts`), run
+  `supabase db reset && supabase test db` locally as the fast pre-flight — the CI
+  filter now covers both, because `009_export_queries.sql` executes the SQL those
+  handlers embed, and a TS-only query change once shipped
+  `column ap.byte_size does not exist` to production. CI runs the same pgTAP suites as the required
   `db-tests` check, so a red suite now blocks the merge on its own (ADR 0020;
   supersedes ADR 0013's local-only discipline).
 - The diff does only what the PR describes — no unrelated drive-by changes.
@@ -75,7 +85,11 @@ Pushing to prod is the owner's job and follows one rule: **only from a clean `ma
 checkout, and always `supabase db push --dry-run` first** (`db push` reads the files on
 disk and knows nothing about git — from a feature branch it will happily ship an
 unmerged migration). Verify after with `supabase migration list --linked` **and**
-`supabase db diff --linked` — `db push` has been observed printing a `pgdelta`
+`supabase db diff --linked`. Note the two have different prerequisites: `db push`
+needs no Docker (it only warns it could not cache its catalog), while `db diff`
+and `db dump` build a shadow database and fail without the daemon — so the third
+leg of this runbook is the one that gets skipped by accident. Start Docker first,
+and say plainly if you did not. — `db push` has been observed printing a `pgdelta`
 certificate error while having succeeded, so its own output proves nothing either way.
 
 ## Documenting decisions

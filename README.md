@@ -11,17 +11,19 @@ with AI content understanding (what) — e.g. *"mustached men I shot in Odesa."*
 
 **Live in production** (Phases 0–4 shipped, plus the homepage + real projects pulled
 forward from Phase 5 and Phase 6's cloud imports — Google Drive and Dropbox — shipped
-2026-07-21; Phase 5's remainder, canvas at scale, is next; see
-[`docs/PLAN.md`](docs/PLAN.md)):
+2026-07-21, Phase 5's canvas-at-scale work 2026-07-23, and Phase 7's export
+2026-07-27; see [`docs/PLAN.md`](docs/PLAN.md), which is canonical for phase status):
 [`apps/web`](apps/web) on Vercel (auth by email+password or Google, drag-and-drop upload
 to R2, **import straight from Google Drive or Dropbox**, a homepage of real projects, and
 all four canvas views rendering your actual archive), [`apps/worker`](apps/worker) on
 Railway (ingest: dedup/EXIF/previews incl. HEIC/RAW, with originals streamed from Google
 Drive and fetched once from Dropbox Chooser links; analyze: Gemini tags + embeddings,
-user-triggered; caption: styled multilingual captions; plus the trashed-project retention
-sweep),
+user-triggered; caption: styled multilingual captions; cluster, edit, purge, and export —
+a PDF, a captions CSV or a ZIP of the files; plus three retention sweeps on one 6-hourly
+tick, including the one that ages export artifacts out of R2),
 [`packages/shared`](packages/shared) (zod contracts). Chat is a real semantic search
-surface — text query → embedding → `search_assets` over your analyzed photos.
+surface — hybrid, not embedding-only: image-embedding cosine alongside full-text search
+over the AI description and facts, narrowed by parsed date, place and EXIF filters.
 
 ## Getting started
 
@@ -36,6 +38,7 @@ Other commands (all must pass before merging):
 pnpm build         # production build (turbo run build)
 pnpm lint          # ESLint (turbo run lint)
 pnpm typecheck     # tsc --noEmit, strict (turbo run typecheck)
+pnpm test          # Vitest unit/contract tests (turbo run test)
 ```
 
 ## Documentation

@@ -125,3 +125,19 @@ Two follow-ups fall out of this and are tracked separately: a
 `check ((gps_lat is null) = (gps_lon is null))` constraint on `asset_exif`, so
 the half-populated row this ADR defends against becomes unrepresentable rather
 than merely handled; and the Cyrillic place-term change above.
+
+
+## Amendment — 2026-07-27: exports carry the labels but not the credit
+
+The Consequences require the GeoNames credit to appear in the product "because the
+derived labels are user-facing, in search results, captions and exports". Exports went
+live today in three formats, and all three carry the derived label while none carries
+the attribution: the PDF prints `gps_label` in its EXIF line and on the cover, and the
+captions CSV ships a whole `place` column. The map's attribution control (which does
+credit GeoNames) does not travel inside a file a photographer emails to a client.
+
+Recorded rather than silently patched: adding a credit line to someone's deliverable
+changes what they hand over, which is the owner's call, not a docs cleanup. The cheap
+options are one line in the ZIP's `README.txt` (which already carries a rights block),
+a trailing `attribution` column or comment row in the CSV, and the PDF's existing footer
+or cover. CC BY 4.0 asks for attribution "in any reasonable manner for the medium".

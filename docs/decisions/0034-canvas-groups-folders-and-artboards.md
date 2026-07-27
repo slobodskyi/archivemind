@@ -81,3 +81,23 @@ contracts already support artboards even though the client still draws frames.
   single-user MVP; a collaborative build would want confirmation/rollback.
 - `canvas_group_assets` has a real `position` column (unlike `project_assets`),
   because artboard page order is meaningful — reused by ADR 0035.
+
+
+## Amendment — 2026-07-27: page order no longer waits on server-backed artboards
+
+§5 kept artboards as client `Frame` rects and treated the ordered member list as the
+thing only a server group could provide. Half of that held: membership still wants a
+row. Ordering did not — `readingOrder()` (`apps/web/lib/layout.ts`) derives a stable
+page order from the tile geometry the user already arranged, banding by row and then
+sorting left-to-right, and `openExportFor` applies it once so all four export entry
+points inherit it.
+
+That matters because the previous behaviour was worse than "arbitrary": the artboard's
+own ↑ button emitted `s.photos` order (newest-first) while the default grid lays out
+oldest-first, so an untouched artboard exported in the exact REVERSE of its reading
+order — and a marquee over the same tiles produced the opposite sequence again.
+
+Promoting artboards to `kind='artboard'` rows is still the right follow-up, but for
+**durability** — surviving a cache clear, existing on another device, working on the
+`all` canvas — not for ordering. `canvas_group_assets.position` remains honoured by the
+worker and unreachable from any client.
