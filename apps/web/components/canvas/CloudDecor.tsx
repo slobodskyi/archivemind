@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { hexA, type CloudLayout } from "@/lib/layout";
 
 /** Extra margin the blurred backdrop blob extends past each cloud's tile bbox. */
@@ -127,20 +127,122 @@ interface CloudLabelsProps {
   /** Pointer-down on a label: drag it to move the whole cloud, or click (no
    *  drag) to focus it and fade the rest (ADR 0024). */
   onCloudLabelDown: (e: React.PointerEvent, cloudKey: string) => void;
+  /** Double-click to rename (ADR 0038). Supplied only on Topic, and only ever
+   *  called for a cloud that maps to exactly one stored cluster — Timeline's
+   *  labels are dates and a heuristic topic has no row to rename. */
+  onRenameCloud?: (clusterId: string, label: string) => void;
 }
 
-/** The cloud group labels (date / country / topic), rendered *on top* of the
- *  tiles. Draggable — grab a label to move its whole cloud — and clickable to
- *  focus that cloud (fades the others). Shown immediately with the backdrop. */
-function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown }: CloudLabelsProps) {
+/** How long after a label press a second press still counts as a double-click. */
+const RENAME_DOUBLE_CLICK_MS = 400;
+/** …and how far apart, in screen px, the two presses may land. */
+const RENAME_DOUBLE_CLICK_SLOP = 6;
+
+/** The cloud group labels (date / topic), rendered *on top* of the tiles.
+ *  Draggable — grab a label to move its whole cloud — clickable to focus that
+ *  cloud (fades the others), and on Topic double-clickable to rename it.
+ *  Shown immediately with the backdrop. */
+function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown, onRenameCloud }: CloudLabelsProps) {
+  const [editing, setEditing] = useState<{ key: string; clusterId: string } | null>(null);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const lastPress = useRef<{ key: string; at: number; x: number; y: number } | null>(null);
+
+  // `commit` closes over `draft`/`editing`, but the outside-press listener below
+  // is registered once per edit — keep the latest in a ref so it never fires a
+  // stale draft.
+  const commit = useCallback(() => {
+    if (!editing) return;
+    setEditing(null);
+    // The cloud can vanish under an open editor: a finishing cluster or analyze
+    // job refreshes the page data, the labels change, and the key this edit was
+    // opened on no longer exists. Writing anyway would PATCH a stale cluster —
+    // pinning a name the user never confirmed, or 404-ing with a toast attached
+    // to whatever they happened to click next.
+    if (!layout.clouds.some((c) => c.key === editing.key)) return;
+    const trimmed = draft.trim();
+    // No "unchanged, skip the write" shortcut: the PATCH also sets is_renamed,
+    // and pinning is the point. Confirming a machine name you like is exactly
+    // how you stop the next re-cluster from relabelling it.
+    if (trimmed) onRenameCloud?.(editing.clusterId, trimmed);
+  }, [draft, editing, layout.clouds, onRenameCloud]);
+  const commitRef = useRef(commit);
+  useEffect(() => {
+    commitRef.current = commit;
+  }, [commit]);
+
+  // Commit when the press lands anywhere outside the input. `onBlur` alone is
+  // not enough: the label and tile pointer-down handlers both call
+  // preventDefault(), which suppresses the compat mousedown and therefore the
+  // focus change — so clicking another cloud or a photo fires NO blur and left
+  // a still-focused, still-keystroke-swallowing input behind. A capture-phase
+  // pointerdown listener runs before any of those handlers and is not affected
+  // by their preventDefault.
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: PointerEvent) => {
+      const el = inputRef.current;
+      if (el && e.target instanceof Node && el.contains(e.target)) return;
+      commitRef.current();
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [editing]);
+
+  // A cloud that disappears under an open editor (a re-cluster landing
+  // mid-rename) needs no cleanup effect: the input unmounts with it, because
+  // `isEditing` is only ever true for a cloud this render is drawing, and
+  // `commit` clears the state and writes nothing on the next press.
+
   return (
     <>
       {layout.clouds.map((c) => {
-        const dim = focusedCloudKey && c.key !== focusedCloudKey ? DIM : 1;
+        const isEditing = editing?.key === c.key;
+        const dim = focusedCloudKey && c.key !== focusedCloudKey && !isEditing ? DIM : 1;
+        const renameable = !!onRenameCloud && !!c.clusterId;
         return (
           <div
             key={`label-${c.key}`}
-            onPointerDown={(e) => onCloudLabelDown(e, c.key)}
+            // The rename opens from the SECOND press rather than from a
+            // `dblclick`, for two reasons. `dblclick` fires only after both
+            // pointerups, and each of those toggles cloud focus (ADR 0024) —
+            // so every rename attempt used to dim the whole canvas and undim it
+            // again before the editor appeared. And a `dblclick` handler on this
+            // wrapper still fires for a double-click *inside* the input, where
+            // it reset the draft to the cloud's old name and silently threw away
+            // what had been typed. Taking over the press means neither can
+            // happen: no drag is armed, no focus toggle, no dblclick handler.
+            onPointerDown={
+              isEditing
+                ? // Still swallow presses on the wrapper's own padding while
+                  // editing: the capture-phase listener above has already
+                  // committed by the time this runs, but letting it through to
+                  // onCanvasDown would also clear the selection.
+                  (e) => e.stopPropagation()
+                : (e) => {
+                    const prev = lastPress.current;
+                    const second =
+                      renameable &&
+                      e.button === 0 &&
+                      prev?.key === c.key &&
+                      e.timeStamp - prev.at < RENAME_DOUBLE_CLICK_MS &&
+                      // Native double-click semantics: the two presses have to
+                      // land in the same place. Without this, nudging a label
+                      // and then clicking it opens the editor instead of
+                      // focusing the cloud.
+                      Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < RENAME_DOUBLE_CLICK_SLOP;
+                    lastPress.current = { key: c.key, at: e.timeStamp, x: e.clientX, y: e.clientY };
+                    if (second && c.clusterId) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      lastPress.current = null;
+                      setEditing({ key: c.key, clusterId: c.clusterId });
+                      setDraft(c.label);
+                      return;
+                    }
+                    onCloudLabelDown(e, c.key);
+                  }
+            }
             style={{
               position: "absolute",
               left: c.labelX,
@@ -152,16 +254,56 @@ function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown }: CloudLab
               fontWeight: 700,
               letterSpacing: "0.05em",
               color: c.color,
-              textShadow: `0 0 12px ${hexA(c.color, 0.55)}, 0 1px 3px rgba(0,0,0,0.7)`,
+              textShadow: isEditing ? "none" : `0 0 12px ${hexA(c.color, 0.55)}, 0 1px 3px rgba(0,0,0,0.7)`,
+              // `dim` already exempts the cloud being edited: a rename opens on
+              // the second press, after the first has focused some cloud, so
+              // without the exemption the input could render at 22% opacity —
+              // an all-but-invisible box still swallowing every keystroke.
               opacity: dim,
               transition: "opacity .2s ease",
-              cursor: "grab",
+              cursor: isEditing ? "text" : "grab",
               touchAction: "none",
               userSelect: "none",
               WebkitUserSelect: "none",
+              // Tiles carry z-index 2/12/30; an un-indexed label paints under
+              // any tile that overlaps it, which would bury the input.
+              zIndex: isEditing ? 31 : undefined,
             }}
           >
-            {c.label.toUpperCase()}
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => {
+                  // Escape is handled on `window` with no is-typing guard, so
+                  // without this it would also close the drawer / chat / trash.
+                  e.stopPropagation();
+                  if (e.key === "Enter") commit();
+                  else if (e.key === "Escape") setEditing(null);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                style={{
+                  font: "inherit",
+                  letterSpacing: "inherit",
+                  color: "var(--t1)",
+                  background: "var(--bg-el)",
+                  border: `1px solid ${c.color}`,
+                  borderRadius: 2,
+                  padding: "0 4px",
+                  width: Math.max(90, draft.length * 10),
+                  outline: "none",
+                  textTransform: "uppercase",
+                  userSelect: "text",
+                  WebkitUserSelect: "text",
+                  touchAction: "auto",
+                }}
+              />
+            ) : (
+              c.label.toUpperCase()
+            )}
           </div>
         );
       })}

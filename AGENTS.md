@@ -47,7 +47,19 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   worker k-means over embeddings; "yoga"/"stretching"/"йога" become one cloud,
   stable across sessions and identical in every project), with the read-time tag
   heuristic (`lib/topics.ts`, ADR 0023) as the fallback for not-yet-clustered
-  assets and `Unsorted` for the unanalyzed. The chat panel IS
+  assets and `Unsorted` for the unanalyzed. **Topic holds itself together now
+  (ADR 0038):** a drag override records the cluster it was dropped in
+  (`Photo.clusterId` — the id, not the label, so a rename never resets an
+  arrangement) and is ignored once that changes, so a re-cluster re-packs those
+  tiles instead of stranding them; a cloud's label/backdrop anchor on the
+  cloud's *core*, so one far-dragged tile can no longer drag the name into empty
+  canvas; **Regroup** (`SortingActionBar`, Topic + Timeline) drops the
+  overrides; **Re-cluster** (`POST /api/topics/recluster`, zero credits)
+  recomputes the clouds on demand; and **double-clicking a cloud's label renames
+  it** (`PATCH /api/topics/[id]` + `topic_clusters.is_renamed` — a pinned name
+  survives every re-cluster, and its cluster is never deleted for failing to
+  match). Cluster labels are also exempt from the `TOPIC_CLOUD_CAP` "Other"
+  fold, which now bounds only the heuristic. The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
   description/facts) outrank cosine-only rows and read as "strong", the rest
@@ -107,9 +119,12 @@ design from this file:**
   tag-driven connecting lines, now Topic-only), **0023** (tag-derived Topic clouds,
   now the *fallback*), **0028** (Topic clouds cluster by stored embedding k-means —
   the primary source of a photo's Topic now),
-  **0024** (Timeline as a per-day date axis; cloud focus/whole-cloud drag) and
+  **0024** (Timeline as a per-day date axis; cloud focus/whole-cloud drag),
   **0027** (Map as a real MapLibre geographic map over EXIF GPS; ADR 0026 for the
-  offline reverse geocoding that labels it) for what ships today.
+  offline reverse geocoding that labels it) and **0038** (Topic legibility —
+  cluster-anchored overrides, core-anchored labels, Regroup / Re-cluster /
+  rename; it amends the label ranking and the label-stability rule in 0028 and
+  the "Other" fold in 0023) for what ships today.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

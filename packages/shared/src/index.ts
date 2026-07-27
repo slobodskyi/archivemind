@@ -26,8 +26,11 @@ export type MemberRole = z.infer<typeof memberRoleSchema>;
 
 // Job queue contracts per TECH_SPEC §4 `job_type` / `job_status` — the wire
 // format between web (enqueue via POST /api/jobs) and the worker (claim loop).
-// `cluster` (ADR 0028) is worker-only: enqueued at the tail of analyze, never
-// via POST /api/jobs (deliberately absent from createJobRequestSchema).
+// `cluster` (ADR 0028) is enqueued at the tail of analyze and — since ADR 0038
+// — by the user's Re-cluster button via POST /api/topics/recluster. It stays
+// out of createJobRequestSchema because that union is asset-id-shaped and a
+// cluster run is workspace-scoped, the same reason edit/purge/export each got
+// their own route.
 // `edit` (ADR 0030) is enqueued by the dedicated POST /api/assets/[id]/edit
 // route (not POST /api/jobs) — the worker renders the edited previews.
 // `purge` (ADR 0033) is enqueued by the DB sweep (sweep_deleted_assets) and by
@@ -183,13 +186,28 @@ export type AnalyzeJobPayload = IngestJobPayload;
 
 /** ai_jobs.payload for type='cluster'. Workspace-scoped, not asset-scoped: the
  *  job re-clusters every analyzed asset in the workspace so topics stay stable
- *  across sessions and identical in every project. No web enqueue path exists
- *  (the tag heuristic in lib/topics.ts covers the un-clustered window), so this
- *  is only ever produced by the worker's analyze tail. */
+ *  across sessions and identical in every project.
+ *
+ *  Produced by the worker's analyze tail AND — since ADR 0038 — by the user's
+ *  own "Re-cluster" button (POST /api/topics/recluster, which builds the
+ *  payload from the caller's server-resolved workspace, never from the body).
+ *  It stays out of `createJobRequestSchema` because every arm of that union is
+ *  asset-id-shaped; a workspace-scoped job gets its own route, exactly like
+ *  `edit`, `purge` and `export`. */
 export const clusterJobPayloadSchema = z.object({
   workspace_id: uuidSchema,
 });
 export type ClusterJobPayload = z.infer<typeof clusterJobPayloadSchema>;
+
+/** PATCH /api/topics/[id] — rename a Topic cloud (ADR 0038). The label is the
+ *  cloud key the canvas groups by, so it is trimmed and bounded here rather
+ *  than in SQL (the schema carries no CHECK constraints by convention); the
+ *  route writes `label` + `is_renamed` and nothing else, because the column
+ *  grant on topic_clusters permits exactly those two. */
+export const renameTopicClusterRequestSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+});
+export type RenameTopicClusterRequest = z.infer<typeof renameTopicClusterRequestSchema>;
 
 // ── Purge (ADR 0033) — trash retention's second half ─────────────────────────
 

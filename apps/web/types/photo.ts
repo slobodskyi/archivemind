@@ -89,6 +89,13 @@ export interface Photo {
   /** Display-only 'Mon DD'. */
   day: string;
   group: PhotoGroup;
+  /** The stored semantic cluster this photo belongs to (`assets.cluster_id`,
+   *  ADR 0028), or null when it is unclustered and `group` came from the tag
+   *  heuristic. The cloud *key* is the label string, which changes whenever the
+   *  worker relabels or a user renames — this id does not, which is why the
+   *  Topic canvas anchors its drag overrides to it (ADR 0038). Absent on mock
+   *  rows. */
+  clusterId?: string | null;
   country: string;
   source: PhotoSource;
   /** True when a non-destructive edit (ADR 0030) is applied — `src`/`srcMedium`

@@ -19,6 +19,7 @@ import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
 import ChatPanel from "@/components/chat/ChatPanel";
 import LeftToolbar from "@/components/toolbar/LeftToolbar";
+import SortingActionBar from "@/components/toolbar/SortingActionBar";
 import WorkspaceActionBar from "@/components/toolbar/WorkspaceActionBar";
 import Minimap from "@/components/toolbar/Minimap";
 import TrashPanel from "@/components/trash/TrashPanel";
@@ -141,7 +142,16 @@ export default function ArchiveWorkspace({
           openContextMenu={ws.openContextMenu}
           analyzePhoto={ws.analyzePhoto}
         />
-        {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} focusedCloudKey={ws.focusedCloudKey} onCloudLabelDown={ws.onCloudLabelDown} />}
+        {ws.cloudDecor && (
+          <CloudLabels
+            layout={ws.cloudDecor}
+            focusedCloudKey={ws.focusedCloudKey}
+            onCloudLabelDown={ws.onCloudLabelDown}
+            // Topic only (ADR 0038): Timeline's labels are dates, and only a
+            // cloud backed by exactly one stored cluster has a row to rename.
+            onRenameCloud={ws.isSenseView ? ws.renameCloud : undefined}
+          />
+        )}
       </PanZoomCanvas>
 
       {/* MAP is the one view that is not a sort of the canvas tiles — it is a
@@ -300,6 +310,23 @@ export default function ArchiveWorkspace({
           onExport={ws.exportFiles}
           onGroup={ws.groupFiles}
           onDelete={ws.deleteSelected}
+        />
+      )}
+
+      {/* The sorting views get their own, much narrower bar (ADR 0038): the
+          Workspace one above acts on the `asset` bucket and a selection these
+          views don't frame, so widening its gate would have Tidy up silently
+          rearranging Canvas from inside Topic. Gated on isSenseView/
+          isTimelineView, not on `view` — both also require a real project, and
+          `view` can still read "sense" in all-files mode where no cloud exists. */}
+      {(ws.isSenseView || ws.isTimelineView) && (
+        <SortingActionBar
+          showRecluster={ws.isSenseView}
+          canRegroup={ws.canRegroup}
+          busy={ws.proc.active}
+          selCount={ws.selectedIds.size}
+          onRegroup={ws.regroupClouds}
+          onRecluster={ws.recluster}
         />
       )}
 

@@ -2,7 +2,15 @@
 
 Date: 2026-07-22
 
-Status: Accepted
+Status: Accepted; amended by
+[0038](0038-topic-view-legibility.md) in three places — the **label ranking**
+(discriminativeness alone let a one-photo tag name a whole cluster), the
+**"matched clusters keep their label" rule** (a machine label is now recomputed
+unless a human pinned it via `is_renamed`, and a pinned cluster is never deleted
+for failing to match), and the **"no web enqueue path"** for the `cluster` job
+(`POST /api/topics/recluster` is now the user's Re-cluster button). The
+algorithm, the storage, the stability matching and the zero-Gemini property all
+stand as written.
 
 Supersedes in part [0023](0023-topic-clouds-derived-from-tags.md): the tag
 heuristic is now the *fallback*, not the primary source, of a photo's Topic

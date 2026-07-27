@@ -7,7 +7,12 @@ Status: Accepted; superseded in part by
 is now the **fallback**, used only for assets not yet covered by a stored
 embedding cluster (and for workspaces under the clustering floor). It is no
 longer the primary source of a photo's Topic cloud, but every rule here still
-governs that fallback path verbatim.
+governs that fallback path verbatim. Amended by
+[0038](0038-topic-view-legibility.md): the `TOPIC_CLOUD_CAP` fold now applies
+**only** to these heuristic topics — a stored cluster label is never folded into
+`Other` — and the "cheap future fix" this ADR's Consequences section proposed
+for stale drag overrides (store the cloud key beside the override) is what 0038
+implements, anchored on the cluster id rather than the label.
 
 Supersedes the "Topic renders one `archive` cloud on real data" part of
 [0018](0018-cloud-clusters-map-topic-default-zoom.md) /

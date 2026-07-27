@@ -72,12 +72,31 @@ export function mkBez(sx: number, sy: number, ex: number, ey: number, seed: numb
 // tile opens the Finder-style browser sidebar instead (see
 // components/sidebar/SourceBrowserSidebar.tsx and groupBySourceFolder below).
 
+/** Where a user dropped one tile, in canvas coordinates.
+ *
+ *  `cloud` is the Topic view's staleness anchor (ADR 0038): the cluster the
+ *  tile belonged to when it was dragged. Topic clouds are recomputed by the
+ *  worker, so a tile can change cloud while its dropped coordinate does not —
+ *  and ADR 0023 already named the consequence ("a dragged tile whose topic
+ *  later changes stays at its old coordinates as a member of the *new* cloud,
+ *  stretching that cloud's backdrop/label toward it"). Recording the anchor
+ *  lets the layout ignore an override whose cloud moved on underneath it, so a
+ *  re-cluster re-packs those tiles instead of stranding them.
+ *
+ *  Optional, and shared by every bucket, on purpose: the drag path writes all
+ *  five through one computed key, and a persisted override from before this
+ *  field existed simply has no anchor and is honoured as-is (localStorage
+ *  `v` gate untouched — bumping it would also throw away artboards and notes). */
+export interface CanvasOverride extends CanvasPoint {
+  cloud?: string;
+}
+
 export interface GalleryOverrides {
-  source: Record<string, { x: number; y: number }>;
-  asset: Record<string, CanvasPoint>;
-  map: Record<string, CanvasPoint>;
-  topic: Record<string, CanvasPoint>;
-  timeline: Record<string, CanvasPoint>;
+  source: Record<string, CanvasOverride>;
+  asset: Record<string, CanvasOverride>;
+  map: Record<string, CanvasOverride>;
+  topic: Record<string, CanvasOverride>;
+  timeline: Record<string, CanvasOverride>;
 }
 
 export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {}, map: {}, topic: {}, timeline: {} };
@@ -503,6 +522,11 @@ export interface CloudNode {
   label: string;
   color: string;
   count: number;
+  /** The `topic_clusters` row behind this cloud, when there is exactly one —
+   *  what makes it renameable (ADR 0038). Null for a heuristic topic, for
+   *  Unsorted/Other, for every Timeline day, and for the (possible) case of two
+   *  distinct clusters that share a label and therefore render as one cloud. */
+  clusterId?: string | null;
   /** Label anchor: top-center of the cloud's *current* tile bbox (override-aware),
    *  so the label sits on the colored backdrop above the tiles — visible, and
    *  always tracking the group as its files move (ADR 0022). */
@@ -572,6 +596,32 @@ const CLOUD_CANVAS_CY = 520;
  *  gives the macro cluster circle enough room that packCircles doesn't have
  *  to fight for space (which is what caused overlap before). */
 const CLOUD_PACK_DENSITY = 0.62;
+
+/** The packing slack above is an asymptotic figure: it is what a *pile* of
+ *  circles needs. Applied flat it made a one-photo cloud reserve a circle ~1.3×
+ *  its own radius plus the gutter — roughly three times its own area — and the
+ *  Topic canvas is full of one- and two-photo clouds (Unsorted, Other, the tail
+ *  of every cluster run), so the macro packer pushed everything apart and left
+ *  lone tiles floating in voids. Ramp it instead: exactly 1.0 for a singleton
+ *  (the macro circle IS the tile), converging on CLOUD_PACK_DENSITY as the
+ *  cloud grows. */
+function cloudPackDensity(memberCount: number): number {
+  return CLOUD_PACK_DENSITY + (1 - CLOUD_PACK_DENSITY) / Math.max(1, memberCount);
+}
+
+/** How far from a cloud's own median a tile may sit and still count towards the
+ *  cloud's label anchor and backdrop, as a multiple of the cloud's packed
+ *  radius. Beyond it the tile is still a member and still drawn where it was
+ *  dropped — it just stops dragging the *name* with it. */
+const CLOUD_CORE_SPAN = 2.2;
+
+/** Median of a numeric list. Deterministic (sorted copy, lower-middle element
+ *  for even counts) — an L1 center, which is what makes the core robust: one
+ *  tile flung across the canvas moves a mean, but not a median. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.ceil(sorted.length / 2) - 1)];
+}
 
 /** A tile's own bounding-circle radius (half its diagonal) plus the fixed
  *  gutter — using the *actual* rendered size (not a guessed constant) is
@@ -646,10 +696,16 @@ function buildCloudLayout(
   primaryOf: (p: Photo) => string,
   colorOf: (key: string) => string,
   labelOf: (key: string) => string,
-  overrides: Record<string, CanvasPoint>,
+  overrides: Record<string, CanvasOverride>,
   /** Frames (artboards) on the canvas — any tile whose center lands inside one
    *  is detached from the connecting-line web (ADR 0022). */
   frames: readonly Frame[],
+  /** The identity a tile's override is anchored to (ADR 0038). An override
+   *  whose recorded `cloud` no longer equals this is STALE — the photo changed
+   *  cloud under it — and is ignored, so the tile re-packs with its new cloud
+   *  instead of stranding itself (and its cloud's label) across the canvas.
+   *  Null means "this view does not re-cluster", and every override applies. */
+  anchorOf: ((p: Photo) => string) | null,
 ): CloudLayout {
   const byPrimary: Record<string, Photo[]> = {};
   photos.forEach((p) => {
@@ -665,8 +721,10 @@ function buildCloudLayout(
   // they need is sum(π·r²), so the enclosing radius is sqrt(that / density).
   const macroSized = primaryKeys.map((k) => {
     const sumR2 = byPrimary[k].reduce((acc, p) => acc + cloudTileRadius(p) ** 2, 0);
-    return { key: k, r: Math.sqrt(sumR2 / CLOUD_PACK_DENSITY) + CLOUD_TILE_GAP };
+    return { key: k, r: Math.sqrt(sumR2 / cloudPackDensity(byPrimary[k].length)) + CLOUD_TILE_GAP };
   });
+  const macroRadius: Record<string, number> = {};
+  for (const s of macroSized) macroRadius[s.key] = s.r;
   const macroPos = packCircles(
     macroSized.map((s) => ({ key: s.key, r: s.r })),
     CLOUD_CANVAS_CX,
@@ -685,28 +743,57 @@ function buildCloudLayout(
       hx,
       hy,
     );
-    // Label anchor + backdrop bbox are derived from the *live* tile positions
-    // (override-aware), not the fixed macro hub — so both track the group as
-    // its files are dragged and never strand (ADR 0022).
+    items.forEach((p) => {
+      const ov = overrides[p.id];
+      // Stale-anchor check (ADR 0038): honour an override only while the tile
+      // is still in the cloud it was dropped in. An override written before
+      // anchors existed carries no `cloud` and always applies.
+      const fresh = ov && (!anchorOf || ov.cloud === undefined || ov.cloud === anchorOf(p));
+      const pt = fresh ? ov : packed[p.id];
+      const size = assetTileSize(p);
+      tiles[p.id] = { x: pt.x - size.w / 2, y: pt.y - size.h / 2, w: size.w, h: size.h, cx: pt.x, cy: pt.y };
+      tileCluster[p.id] = k;
+    });
+
+    // Label anchor + backdrop bbox track the *live* tile positions, not the
+    // fixed macro hub, so both follow the group as its files are dragged and
+    // never strand (ADR 0022). But taken over ALL members, one tile dragged
+    // across the canvas stretched the bbox with it and slid the cloud's name
+    // into empty space — measurably: a 581 px cloud became 1856 px wide and its
+    // label moved 638 px off its own tiles. So the anchor is computed over the
+    // cloud's CORE: members within CLOUD_CORE_SPAN packed radii of the cloud's
+    // median position. A whole-cloud drag moves every tile together, so the
+    // median moves with it and the label still follows (ADR 0024); a single
+    // outlier moves neither. The tile itself is untouched — it stays exactly
+    // where the user dropped it.
+    const centers = items.map((p) => tiles[p.id]);
+    const mx = median(centers.map((t) => t.cx));
+    const my = median(centers.map((t) => t.cy));
+    const coreLimit = CLOUD_CORE_SPAN * macroRadius[k];
+    const core = centers.filter((t) => Math.hypot(t.cx - mx, t.cy - my) <= coreLimit);
+    const anchorTiles = core.length > 0 ? core : centers;
+
     let xl = Infinity,
       yt = Infinity,
       xr = -Infinity,
       yb = -Infinity;
-    items.forEach((p) => {
-      const pt = overrides[p.id] ?? packed[p.id];
-      const size = assetTileSize(p);
-      tiles[p.id] = { x: pt.x - size.w / 2, y: pt.y - size.h / 2, w: size.w, h: size.h, cx: pt.x, cy: pt.y };
-      tileCluster[p.id] = k;
-      xl = Math.min(xl, pt.x - size.w / 2);
-      yt = Math.min(yt, pt.y - size.h / 2);
-      xr = Math.max(xr, pt.x + size.w / 2);
-      yb = Math.max(yb, pt.y + size.h / 2);
-    });
+    for (const t of anchorTiles) {
+      xl = Math.min(xl, t.x);
+      yt = Math.min(yt, t.y);
+      xr = Math.max(xr, t.x + t.w);
+      yb = Math.max(yb, t.y + t.h);
+    }
+
+    // A cloud is renameable only when it maps to exactly one stored cluster —
+    // two clusters sharing a label render as one cloud, and renaming "it" would
+    // silently rename only one of them.
+    const clusterIds = new Set(items.map((p) => p.clusterId).filter((id): id is string => !!id));
     clouds.push({
       key: k,
       label: labelOf(k),
       color: colorOf(k),
       count: items.length,
+      clusterId: clusterIds.size === 1 ? [...clusterIds][0] : null,
       labelX: (xl + xr) / 2,
       labelY: yt,
       bx: xl,
@@ -847,13 +934,22 @@ function buildCloudLayout(
   return { clouds, tiles, edges, tileCloud: tileCluster, bounds: positionsBounds(tiles) };
 }
 
-/** Topic: clouds are `photo.group` — for real assets a tag-derived topic
- *  (ADR 0023) labeled by its own key (the tag name; `Other`/`Unsorted` for the
- *  buckets); only retired mock seed groups still resolve through GROUPS.
- *  Lines are shared-AI-tag relations (ADR 0022). */
+/** The identity a Topic override is anchored to (ADR 0038). The stored cluster
+ *  id when the photo has one — it survives a relabel AND a user rename, so
+ *  neither resets the user's arrangement — else the derived topic key, so a
+ *  heuristic topic that changes still re-packs. Exported for the drag path,
+ *  which has to stamp the same value it will later be compared against. */
+export function topicAnchorOf(photo: Pick<Photo, "clusterId" | "group">): string {
+  return photo.clusterId ?? photo.group;
+}
+
+/** Topic: clouds are `photo.group` — for real assets the stored cluster label
+ *  (ADR 0028) or a tag-derived topic (ADR 0023), labeled by its own key
+ *  (`Other`/`Unsorted` for the buckets); only retired mock seed groups still
+ *  resolve through GROUPS. Lines are shared-AI-tag relations (ADR 0022). */
 export function topicCloudLayout(
   photos: readonly Photo[],
-  topicOverrides: Record<string, CanvasPoint>,
+  topicOverrides: Record<string, CanvasOverride>,
   frames: readonly Frame[] = [],
 ): CloudLayout {
   return buildCloudLayout(
@@ -863,6 +959,7 @@ export function topicCloudLayout(
     (key) => GROUPS[key as PhotoGroup]?.label ?? key,
     topicOverrides,
     frames,
+    topicAnchorOf,
   );
 }
 

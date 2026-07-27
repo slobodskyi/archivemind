@@ -193,6 +193,10 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
     time: `${pad(takenAt.getMonth() + 1)}-${pad(takenAt.getDate())} ${pad(takenAt.getHours())}:${pad(takenAt.getMinutes())}`,
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
     group: topic,
+    // The cluster's stable identity, kept alongside its (renameable, relabelable)
+    // label so the Topic canvas can anchor drag overrides to something that does
+    // not change when the cloud is renamed — ADR 0038.
+    clusterId: a.cluster_id,
     country: "Ukraine",
     source: gdrive ? "gdrive" : dropbox ? "dropbox" : "upload",
     edited,
