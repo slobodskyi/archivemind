@@ -6,12 +6,14 @@ import {
   uuidSchema,
   type ExportResult,
 } from "@archivemind/shared";
+import { presignGet } from "@/lib/r2";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
 /** Artboard / selection → PDF export (ADR 0035). POST enqueues an 'export' job
- *  (the worker renders the PDF into R2 and writes payload.result_url); GET polls
- *  that URL once Realtime reports the job done. RLS scopes every query.
+ *  (the worker renders the PDF into R2 and writes payload.result_key); GET polls
+ *  the job and presigns that key per request once Realtime reports it done, so no
+ *  bearer URL is ever stored or broadcast. RLS scopes every query.
  *
  *  Failures answer with a machine-readable `error` code from
  *  EXPORT_ERROR_CODES — the dialog maps it to copy, because every distinct
@@ -117,8 +119,14 @@ export async function GET(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!job) return NextResponse.json({ error: "export_not_found" }, { status: 404 });
 
-  const payload = (job.payload ?? {}) as { result_url?: unknown };
-  const url = typeof payload.result_url === "string" ? payload.result_url : null;
+  // Presign per request rather than echoing a stored URL. The worker writes only
+  // the R2 key, so (a) no 7-day bearer URL sits in a row every workspace member
+  // can read and that broadcasts on update, and (b) the link cannot rot — the old
+  // stored URL died on day 8 while this route kept serving it with status 'done'
+  // and no way to mint another. A cleared key means the retention sweep has
+  // deleted the object, so there is deliberately nothing to offer.
+  const payload = (job.payload ?? {}) as { result_key?: unknown };
+  const url = typeof payload.result_key === "string" ? await presignGet(payload.result_key) : null;
   const body: ExportResult = {
     jobId: job.id as string,
     status: exportResultSchema.shape.status.parse(job.status),

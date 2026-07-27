@@ -2,7 +2,6 @@ import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf
 import fontkit from "@pdf-lib/fontkit";
 import sharp from "sharp";
 import {
-  EXPORT_PRESIGN_TTL_SECONDS,
   artboardSettingsSchema,
   exportJobPayloadSchema,
   resolveCaptionText,
@@ -11,14 +10,15 @@ import {
   type CaptionRowLike,
   type CaptionStyleKey,
 } from "@archivemind/shared";
-import { getObjectBuffer, presignGetLong, putObject } from "../services/r2";
+import { getObjectBuffer, putObject } from "../services/r2";
 import { loadPdfFont } from "../services/pdf-font";
 import type { HandlerContext } from "./index";
 
 /** Artboard → PDF export (ADR 0035). Reads a group's ordered members (or an
  *  ad-hoc selection), renders each photo with its caption underneath into a PDF,
- *  stores it in R2 under {workspace_id}/exports/{job_id}.pdf, and writes a 7-day
- *  presigned URL back into ai_jobs.payload.result_url (the client polls
+ *  stores it in R2 under {workspace_id}/exports/{job_id}.pdf, and writes
+ *  its R2 key into ai_jobs.payload.result_key — the web route presigns that per
+ *  request, so no bearer URL is ever stored or broadcast (the client polls
  *  GET /api/exports?jobId= once Realtime reports 'done').
  *
  *  Source images are the MEDIUM previews (edited-medium when an edit exists) —
@@ -391,13 +391,21 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     }
   }
 
-  // 4. Store + hand back a long-lived presigned URL via the job payload.
+  // 4. Store the artifact and hand back its KEY, not a URL.
+  //
+  // This used to write a 7-day presigned URL into ai_jobs.payload. Two problems:
+  // `ai_jobs` RLS is is_member(workspace_id) with no column restriction AND the
+  // payload UPDATE fires the Realtime broadcast trigger, so that bearer URL —
+  // which bypasses RLS for anyone holding it — was readable by every member of
+  // the workspace and pushed to all of them on completion. And it rotted: from
+  // day 8 the GET route handed back a dead signature with status 'done' and
+  // there was no way to mint another. The key is durable; the web route presigns
+  // it per request for the caller who is entitled to it.
   const pdf = Buffer.from(await doc.save());
   const key = `${job.workspace_id}/exports/${job.id}.pdf`;
   await putObject(key, pdf, "application/pdf");
-  const url = await presignGetLong(key, EXPORT_PRESIGN_TTL_SECONDS);
   await pool.query(`update ai_jobs set payload = payload || $1::jsonb where id = $2`, [
-    JSON.stringify({ result_url: url }),
+    JSON.stringify({ result_key: key }),
     job.id,
   ]);
   await progress(100, "Export ready", total, total);

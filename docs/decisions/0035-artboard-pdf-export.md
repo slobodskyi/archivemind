@@ -110,6 +110,49 @@ letting text consume the page; `fitScale` can no longer return a negative scale.
 `wrap()` also hard-breaks a single token wider than the column, which previously
 drew past the margin.
 
+### 2026-07-27 — the artifact is keyed, presigned per request, and swept
+
+Decision §1 stored a **7-day presigned URL** in `ai_jobs.payload.result_url`.
+That was wrong twice over.
+
+*Exposure.* `ai_jobs` RLS is `is_member(workspace_id)` with no column
+restriction, and the `payload` UPDATE fires the Realtime broadcast trigger. So a
+bearer URL — which bypasses RLS entirely for anyone holding it — was readable by
+every member of the workspace, viewers included, and pushed to all of them on
+completion.
+
+*Rot.* From day 8 the stored signature was dead, while `GET /api/exports`
+happily returned it alongside `status: "done"`. There was no re-presign path,
+even though the key is deterministic.
+
+The worker now writes only `payload.result_key`, and the GET route presigns it
+per request for the caller who is entitled to it. `EXPORT_PRESIGN_TTL_SECONDS`
+is replaced by `EXPORT_RETENTION_DAYS`: the policy is the **artifact's** lifetime,
+not a URL's, and a download link is always freshly minted.
+
+That lifetime is now enforced. Nothing had ever deleted an export: `retention.ts`
+had two sweeps that touch R2 not at all, `purge.ts` collects keys only from
+`files` / `asset_previews` / `asset_edits`, and there is no bucket lifecycle rule
+in the repo. Since the key derives from the **job** id, every re-export minted
+another object, so ten iterations left ten PDFs — all unreachable the moment the
+job id was forgotten. TECH_SPEC §8.5 wrote "(presigned GET, cleanup later)";
+`sweepExpiredExports` on the existing 6-hourly tick is later. It clears the key
+per row after the delete succeeds, so a mid-sweep failure retries rather than
+orphaning objects whose keys it had already dropped.
+
+One consequence worth naming: an exported PDF embeds a JPEG copy of each photo,
+so a purged asset's pixels survive inside any export made from it. That window
+is now bounded by `EXPORT_RETENTION_DAYS` rather than unbounded. Making it
+immediate means teaching `purge.ts` to find the exports containing an asset —
+straightforward for the `asset_ids` payload shape, approximate for `group_id`
+(membership can change after the export) — and belongs with the GDPR erasure
+work, not here.
+
+Finally, a finished export can no longer strand: the Realtime handler has an
+`export` branch that raises a toast with a Download action when the job completes
+and the dialog is gone. The broadcast is workspace-scoped, so this survives the
+reload that used to lose the only copy of the job id.
+
 ### 2026-07-27 — the dialog reports the run before and during it
 
 Three contract additions, all backward-compatible. `exportResultSchema` now

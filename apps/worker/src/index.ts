@@ -12,7 +12,7 @@ import {
   type Job,
 } from "./queue";
 import { backfillGeoLabels } from "./geo-backfill";
-import { sweepDeletedAssets, sweepTrashedProjects } from "./retention";
+import { sweepDeletedAssets, sweepExpiredExports, sweepTrashedProjects } from "./retention";
 import { checkExifToolAvailable } from "./services/exif";
 
 /** Poll loop + graceful shutdown (TECH_SPEC §7).
@@ -86,6 +86,9 @@ async function main(): Promise<void> {
     sweepDeletedAssets(pool)
       .then((n) => n > 0 && log(`sweeper enqueued purge for ${n} expired trashed asset(s)`))
       .catch((e: unknown) => log(`asset sweeper failed: ${String(e)}`));
+    sweepExpiredExports(pool)
+      .then((n) => n > 0 && log(`sweeper deleted ${n} expired export artifact(s)`))
+      .catch((e: unknown) => log(`export sweeper failed: ${String(e)}`));
   };
   // Once on boot as well as on the timer: redeploys can be more frequent than
   // SWEEP_EVERY_MS, and a timer-only sweep would then never fire.

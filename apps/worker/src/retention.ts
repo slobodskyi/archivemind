@@ -1,4 +1,6 @@
+import { EXPORT_RETENTION_DAYS } from "@archivemind/shared";
 import type pg from "pg";
+import { deleteObject } from "./services/r2";
 
 /** Retention sweeps — periodic maintenance that isn't queue work, so it lives
  *  here rather than in queue.ts. Scheduled from index.ts alongside the reaper. */
@@ -24,4 +26,39 @@ export async function sweepDeletedAssets(pool: pg.Pool): Promise<number> {
     "select sweep_deleted_assets() as enqueued",
   );
   return rows[0]?.enqueued ?? 0;
+}
+
+/** Delete the R2 objects behind expired exports (ADR 0035 Amendments).
+ *
+ *  Nothing used to remove these, ever: the two sweeps above touch R2 not at all,
+ *  purge.ts collects keys only from files/asset_previews/asset_edits, and there
+ *  is no bucket lifecycle rule in the repo. Because the key derives from the JOB
+ *  id, every re-export of the same artboard minted another object — so ten
+ *  iterations left ten PDFs, all unreachable once the job id was forgotten.
+ *  TECH_SPEC §8.5 said "(presigned GET, cleanup later)"; this is later.
+ *
+ *  The `ai_jobs` row survives as the record of the export; only the artifact and
+ *  its key go, so `GET /api/exports` stops offering a download for bytes that no
+ *  longer exist. Deletes run one at a time and clear the key individually: a
+ *  failure mid-way leaves the rest for the next sweep rather than orphaning the
+ *  objects whose keys it had already dropped. */
+export async function sweepExpiredExports(pool: pg.Pool): Promise<number> {
+  const { rows } = await pool.query<{ id: string; result_key: string }>(
+    `select id, payload->>'result_key' as result_key
+       from ai_jobs
+      where type = 'export'
+        and payload ? 'result_key'
+        and coalesce(finished_at, created_at) < now() - ($1 || ' days')::interval
+      limit 500`,
+    [String(EXPORT_RETENTION_DAYS)],
+  );
+
+  let removed = 0;
+  for (const row of rows) {
+    if (!row.result_key) continue;
+    await deleteObject(row.result_key); // idempotent: deleting a missing key succeeds
+    await pool.query(`update ai_jobs set payload = payload - 'result_key' where id = $1`, [row.id]);
+    removed += 1;
+  }
+  return removed;
 }
