@@ -1,14 +1,17 @@
 import { redirect } from "next/navigation";
-import UsageView from "@/components/account/UsageView";
+import HomeClient from "@/components/home/HomeClient";
 import { ensureWorkspace } from "@/lib/bootstrap";
+import { getProjectCards } from "@/lib/projects";
 import { createClient } from "@/lib/supabase/server";
 import { getWorkspaceUsage } from "@/lib/usage";
 
-/** Usage & Storage — the account area's first real page (the header and
- *  homepage menus have pointed at a "coming soon" toast since the mockup).
+/** Usage & Storage as a deep link. It renders the homepage shell with the
+ *  Usage view preselected rather than a layout of its own — the account menus
+ *  and the sidebar must land in the same place, and a second chrome for the
+ *  same signed-in surface is how an app starts feeling like two apps.
  *
  *  Guarded by proxy.ts like every non-public route, so the only auth work left
- *  here is resolving the caller for `ensureWorkspace` — a first-ever visit that
+ *  is resolving the caller for `ensureWorkspace` — a first-ever visit that
  *  lands here before the homepage still needs its workspace bootstrapped.
  *
  *  Dynamic by nature: it reads live aggregates, and caching a usage meter is
@@ -26,10 +29,29 @@ export default async function UsagePage() {
   if (!user) redirect("/auth/reset");
 
   await ensureWorkspace(supabase, user);
-  const usage = await getWorkspaceUsage(supabase);
+
+  // Parallel, like the homepage: the sidebar needs the project list whichever
+  // view is showing, and the meters need the snapshot.
+  const [projects, usage, { data: profile }] = await Promise.all([
+    getProjectCards(supabase),
+    getWorkspaceUsage(supabase),
+    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
+  ]);
+
   // No membership at all: nothing to meter. The homepage bootstraps and
   // explains itself far better than an empty dashboard would.
   if (!usage) redirect("/");
 
-  return <UsageView usage={usage} />;
+  const name = profile?.display_name ?? user.email?.split("@")[0] ?? "You";
+  const email = user.email ?? "";
+  const initials = name.slice(0, 2).toUpperCase();
+
+  return (
+    <HomeClient
+      account={{ initials, name, email }}
+      projects={projects}
+      initialView="usage"
+      initialUsage={usage}
+    />
+  );
 }

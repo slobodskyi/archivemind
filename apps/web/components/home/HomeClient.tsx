@@ -9,6 +9,8 @@ import {
   type TrashedAsset,
 } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
+import type { UsageSnapshot } from "@/lib/usage";
+import UsageView, { UsagePlanPill } from "@/components/account/UsageView";
 import Toast from "@/components/modals/Toast";
 import DataSourcesModal from "@/components/modals/DataSourcesModal";
 import { useGdriveConnection } from "@/hooks/useGdriveConnection";
@@ -26,6 +28,7 @@ import {
   ArchiveIcon,
   TrashIcon,
   UpgradeIcon,
+  UsageIcon,
   MoreIcon,
   LogsIcon,
   HelpIcon,
@@ -48,13 +51,18 @@ function cardColor(id: string): string {
   return CARD_COLORS[h % CARD_COLORS.length];
 }
 
-type ViewMode = "projects" | "recents" | "archived" | "trash";
+/** `usage` is a view here rather than its own page (ADR 0037): the sidebar is
+ *  where people already look for Trash, and Trash is half of what the storage
+ *  card is about. /account/usage exists as the deep link the account menus
+ *  point at, and renders this same shell with the view preselected. */
+export type ViewMode = "projects" | "recents" | "archived" | "trash" | "usage";
 
 const VIEW_TITLE: Record<ViewMode, string> = {
   projects: "Projects",
   recents: "Recents",
   archived: "Archived",
   trash: "Trash",
+  usage: "Usage & Storage",
 };
 
 const VIEW_EMPTY: Record<ViewMode, string> = {
@@ -62,6 +70,9 @@ const VIEW_EMPTY: Record<ViewMode, string> = {
   recents: "No recently opened projects yet.",
   archived: "No archived projects — archive a project to tuck it away without deleting it.",
   trash: "Trash is empty — deleted projects and photos stay here for 30 days before they're removed for good.",
+  // Never shown: the usage view renders its own body, which is meaningful even
+  // for an empty archive (a zeroed meter is still an answer).
+  usage: "",
 };
 
 /** Whole days until the sweep claims something deleted at `deletedAt`; null
@@ -97,16 +108,25 @@ function recordRecentProject(id: string) {
 export default function HomeClient({
   account,
   projects,
+  initialView = "projects",
+  initialUsage = null,
 }: {
   account: Account;
   projects: ProjectCard[];
+  /** Preselected view for a deep link (/account/usage). */
+  initialView?: ViewMode;
+  /** Server-fetched snapshot for that deep link, so the meters don't flash
+   *  empty on a direct load. Null when arriving via the sidebar, where the
+   *  view fetches on demand like Archived and Trash do. */
+  initialUsage?: UsageSnapshot | null;
 }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [view, setView] = useState<ViewMode>("projects");
+  const [view, setView] = useState<ViewMode>(initialView);
+  const [usage, setUsage] = useState<UsageSnapshot | null>(initialUsage);
   const [query, setQuery] = useState("");
   const [recentIds, setRecentIds] = useState<string[]>([]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
@@ -154,6 +174,19 @@ export default function HomeClient({
       return [];
     }
   }
+
+  /** Same lazy shape as Archived/Trash: switch first, fill in when it lands.
+   *  Re-fetched on every open rather than cached — the whole point of the view
+   *  is a number that changed since you last looked. */
+  const openUsage = () => {
+    setView("usage");
+    void fetch("/api/usage")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setUsage(d.usage as UsageSnapshot))
+      .catch(() => {
+        /* leaves whatever was already on screen; the view shows its own note */
+      });
+  };
 
   const openArchived = () => {
     setView("archived");
@@ -206,7 +239,9 @@ export default function HomeClient({
       ? activeProjects
       : view === "archived"
         ? (archivedProjects ?? [])
-        : (trashProjects ?? []);
+        : view === "trash"
+          ? (trashProjects ?? [])
+          : []; // usage renders its own body, not project cards
 
   const q = query.trim().toLowerCase();
   const visibleProjects = q ? baseList.filter((p) => p.name.toLowerCase().includes(q)) : baseList;
@@ -368,6 +403,10 @@ export default function HomeClient({
           <NavItem label="Logs" icon={<LogsIcon />} onClick={() => flash("Activity log coming soon")} />
           <NavItem label="Help" icon={<HelpIcon />} onClick={() => setHelpOpen(true)} />
           <NavItem label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => flash("Privacy Policy coming soon")} />
+          {/* Directly above Archived/Trash on purpose: the storage meter's
+              biggest reclaimable slice IS the Trash, and this is where people
+              already look for it. */}
+          <NavItem label="Usage & Storage" active={view === "usage"} icon={<UsageIcon />} onClick={openUsage} />
           <NavItem label="Upgrade" icon={<UpgradeIcon />} onClick={() => flash("Upgrade plans — coming soon")} />
           <NavItem label="Archived" active={view === "archived"} icon={<ArchiveIcon />} onClick={openArchived} />
           <NavItem label="Trash" active={view === "trash"} icon={<TrashIcon />} onClick={openTrash} />
@@ -378,6 +417,7 @@ export default function HomeClient({
       <main style={{ flex: 1, height: "100%", overflowY: "auto", padding: "26px 30px" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
           <h1 style={{ fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0 }}>{VIEW_TITLE[view]}</h1>
+          {view === "usage" && <UsagePlanPill plan={usage?.plan ?? null} />}
           {(view === "projects" || view === "recents") && !creating && (
             <button
               onClick={() => setCreating(true)}
@@ -417,7 +457,14 @@ export default function HomeClient({
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
+        {view === "usage" &&
+          (usage ? (
+            <UsageView usage={usage} />
+          ) : (
+            <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--tm)" }}>Measuring your archive…</div>
+          ))}
+
+        <div style={{ display: view === "usage" ? "none" : "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
           {visibleProjects.map((p) => (
             <ProjectCardView
               key={p.id}
@@ -470,7 +517,8 @@ export default function HomeClient({
           </section>
         )}
 
-        {visibleProjects.length === 0 &&
+        {view !== "usage" &&
+          visibleProjects.length === 0 &&
           visibleTrashAssets.length === 0 &&
           !((view === "projects" || view === "recents") && creating) && (
           <div style={{ marginTop: 26, fontSize: 12.5, color: "var(--tm)" }}>
