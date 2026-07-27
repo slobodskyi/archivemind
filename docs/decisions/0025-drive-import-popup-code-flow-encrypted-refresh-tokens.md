@@ -132,3 +132,22 @@ Accepted costs, each deliberate:
 
 Dropbox (#24) is untouched by all of this: it stays on the Chooser path of
 ADR 0008 (no OAuth, originals fetched once into R2).
+
+
+## Amendment — 2026-07-27: the "every later re-analyze/re-process/export" list was wrong
+
+The Context argues for durable refresh tokens because "Drive bytes are needed not just
+during the import but at every later re-analyze/re-process/export". Only the first of
+those is true today, and it was never true of the other two: `services/gdrive` is
+imported by exactly one module, `handlers/ingest.ts`. Analyze reads the medium preview
+from R2, `edit` renders from the same preview, and export embeds
+`coalesce(edited_medium_key, ap.r2_key)` — none of them can even reach Drive.
+
+**The decision stands on its remaining leg**, which is the load-bearing one: an access
+token lives ~1 h, and ingest retries, backfills and re-imports outlive that by far, so a
+refresh token still has to be stored durably and encrypted. The over-broad consumer list
+mattered only as a false promise about what a Drive-linked asset can become later —
+which the ZIP export made concrete today: with no original in R2 and no path to fetch
+one, `zipContents: 'originals'` ships that asset's 1024px preview instead, renamed
+`.webp` and named in the archive's `README.txt`. That is the honest shape of "originals
+stay yours", and it is worth knowing before promising a client a folder of originals.

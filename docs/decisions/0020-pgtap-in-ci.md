@@ -80,3 +80,17 @@ just reports.
 - `supabase test db` still works locally exactly as before; ADR 0013's
   "migrations owner runs it locally" is now a fast pre-flight rather than the
   only line of defence.
+
+
+## Amendment — 2026-07-27: the filter covers the worker's SQL too
+
+The Decision's filter step matched `supabase/**` alone. It now matches
+`^(supabase/|apps/worker/src/handlers/|apps/worker/src/retention\.ts)`.
+
+The reason is a bug that reached production: `renderZip` selected
+`asset_previews.byte_size`, a column that has never existed, and every ZIP export failed.
+Twenty-six green unit tests missed it because they exercised the pure planner and the zip
+writer — **nothing executed the SQL**. `supabase/tests/009_export_queries.sql` now runs
+every multi-table export query against the real schema, and a TypeScript-only change to
+one of those queries has to boot Postgres to prove itself, which under the old filter it
+never would have.

@@ -18,7 +18,7 @@ AI archive workspace for documentary photographers / photojournalists whose file
 3. Files appear on the infinite canvas (neural view: source → folder clusters). "Organize" re-clusters by source / date / place / similarity; manual drags persist as overrides; undo/redo client-side.
 4. Create projects; add files from any source (M:N).
 5. Run AI actions on selection or project: **Smart analyze** (tags + embeddings + draft facts), **Generate captions** (EN/UK/RU × Social/Agency/Archival, promptable), **Smart search** (NL → metadata filters + semantic).
-6. Review in drawer (captions, tags, EXIF, facts) → confirm facts → export selection (ZIP + CSV sidecar).
+6. Review in drawer (captions, tags, EXIF, facts) → confirm facts → export the selection — a laid-out PDF, a captions CSV, or a ZIP of the files.
 
 **Import model:** snapshot import (no live sync). Google Drive originals stay in the source (worker streams the bytes at processing time); Dropbox originals and local uploads are stored in full in R2 (Dropbox direct links can't be re-fetched — ADR 0008). We always keep derivatives (previews, EXIF, tags, captions, embeddings). "Add more files" = re-open picker.
 
@@ -121,6 +121,10 @@ create table profiles (
 create table workspaces (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  -- the byline exported deliverables carry (20260727000001). Read by every
+  -- member, written only by the owner — no new policy, workspaces_update is
+  -- already is_owner. Nullable: an archive with no byline is a valid state.
+  creator text, credit text, copyright_notice text, usage_terms text,
   created_by uuid references profiles(id),
   created_at timestamptz default now()
 );
@@ -313,6 +317,8 @@ create index embeddings_ws_idx   on embeddings (workspace_id);
 
 -- ============ jobs & usage ============
 create type job_type   as enum ('ingest','analyze','caption','export');
+-- appended since init, each by its own migration: 'cluster' (20260722000001),
+-- 'edit' (20260722000003), 'purge' (20260723000001). Seven values, seven handlers.
 create type job_status as enum ('queued','running','done','failed','canceled');
 
 create table ai_jobs (
@@ -415,7 +421,9 @@ create policy assets_write  on assets for all
                                                   --  before the files row exists — NOT files.id)
 {workspace_id}/previews/{asset_id}/thumb.webp     -- per ASSET; 256px long edge
 {workspace_id}/previews/{asset_id}/medium.webp    -- per ASSET; 1024px long edge
-{workspace_id}/exports/{job_id}.zip               -- export bundles (presigned GET, cleanup later)
+{workspace_id}/exports/{job_id}.{pdf|csv|zip}     -- extension per options.format; only the KEY is
+                                                  -- stored (payload.result_key), presigned per request;
+                                                  -- swept after EXPORT_RETENTION_DAYS
 ```
 
 - Uploads: browser → `POST /api/uploads/presign` → presigned PUT direct to R2 → `POST /api/uploads/complete`. Multipart (>100 MB) uses a **fixed chunk size (~50 MiB; all parts equal except the last)**; bucket CORS must set `ExposeHeaders: ["ETag"]` (else the browser can't complete multipart); no unsigned headers on part PUTs; no POST-policy uploads (unsupported on R2). Max presigned TTL 7 days.
@@ -441,7 +449,7 @@ returning *;
 - **Loop:** poll every 2s when idle; process; update `progress/progress_label/done_items` every N items (Realtime propagates to UI).
 - **Retry:** on error, if `attempts < 3` → `status='queued', run_after = now() + (attempts * interval '2 min')`, else `failed` + `error`.
 - **Reaper:** every 5 min, `running` jobs with `claimed_at < now() - interval '15 min'` → back to `queued` (crash recovery).
-- **Retention sweeper:** on boot, then every 6 h, `select sweep_trashed_projects()` — hard-deletes projects past the 30-day trash window (§12). Not an `ai_jobs` type: it's neither user-triggered nor per-asset. Failures are logged and retried on the next tick. See ADR 0019.
+- **Retention sweeper:** on boot, then every 6 h, three independent sweeps, each caught separately so one failure cannot stall the others: `sweep_trashed_projects()` (hard-deletes projects past the 30-day window, §12), `sweep_deleted_assets()` (enqueues `purge` jobs), and `sweepExpiredExports()` — the only sweep that touches R2 itself, deleting export artifacts past `EXPORT_RETENTION_DAYS` and stripping their `result_key`. Not an `ai_jobs` type: it's neither user-triggered nor per-asset. Failures are logged and retried on the next tick. See ADR 0019.
 - **Idempotency:** handlers upsert by natural keys (`asset_previews` PK, `captions (asset_id,lang,style)`, `embeddings (asset_id,kind,chunk_index)`) — safe to re-run.
 - **Rate limiting:** exponential backoff on 429/5xx around every Gemini call (`services/gemini.ts`) — shipped. A worker-side parallelism cap is **not** implemented: analyze (like ingest) runs sequentially by design, so there is nothing to cap yet.
 - Graceful shutdown: finish current item, release job back to `queued`.
@@ -489,9 +497,12 @@ Log `search_query` usage_event. Latency budget: 1 analyze-model call + 1 embed +
 ### 8.5 Export (`type='export'`)
 **Shipped shape (ADR 0035 + its Amendments) — this paragraph is the current contract.**
 Payload: `{group_id | asset_ids, options}` where `options` is `artboardSettingsSchema`
-(`format`, page layout/size/orientation, caption lang×style, `include`). Two formats today:
+(`format`, page layout/size/orientation, caption lang×style, `include`, `cover`, `zipContents`). Three formats:
 
 - `format: 'pdf'` — a laid-out document, one photo per page or a 2-up contact sheet,
+  with an optional cover (title, count, date range, rights block), a `i / n` + credit
+  footer on every page, real PDF metadata and a human download filename signed into the
+  URL via `ResponseContentDisposition`,
   rendered from the **medium previews** (edited-medium when present). Facts are
   deliberately not printed; see the ADR amendment.
 - `format: 'captions_csv'` — the caption spreadsheet this section originally
@@ -510,11 +521,15 @@ Artifacts are deleted by `sweepExpiredExports` after `EXPORT_RETENTION_DAYS`.
 - `format: 'zip'` — the bundle: `zipContents: 'originals'` ships the stored file for
   every source that has one in R2 (upload, Dropbox) and falls back to the web-size
   preview for Drive-linked assets, which have no original in R2 (ADR 0025), naming
-  each substitution in a `README.txt` inside the archive; `zipContents: 'web'` ships
+  each substitution in a `README.txt` inside the archive — which is written even for a
+  perfect bundle, because it also carries the workspace rights block (a ZIP has no footer
+  and no cover, so it would otherwise reach a client with no statement of ownership); `zipContents: 'web'` ships
   1024px previews for everything. `captions.csv` is included either way. STORE-only,
   no compression (the payloads are already entropy-coded) and no zip dependency —
   `services/zip.ts` over `node:zlib`'s `crc32`. Total size is summed from
-  `files.byte_size` BEFORE any fetch and refused above `ZIP_MAX_TOTAL_BYTES`, because
+  `files.byte_size` BEFORE any fetch **and** re-checked against the running total as bytes
+  arrive — the pre-flight sum is a lower bound that cannot see previews at all, since
+  `asset_previews` records no size — and refused above `ZIP_MAX_TOTAL_BYTES`, because
   `putObject` is Buffer-only and an OOM would be a SIGKILL that `reapStaleJobs` then
   requeues forever.
 
@@ -548,13 +563,15 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `assets` + `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
 | `POST /api/projects` · `GET /api/projects` · `PATCH /api/projects/:id` | CRUD incl. `caption_prompt`. **Shipped:** `GET` takes `?scope=active\|archived\|trash`; `PATCH` does rename **and** archive/trash (`{name}` / `{archived}` / `{deleted}` → `archived_at`/`deleted_at`, ADR 0019). `caption_prompt` is not wired yet (Phase 3). |
 | `POST /api/projects/:id/assets` · `DELETE .../assets/:assetId` | M:N add/remove |
-| `POST /api/jobs` | `{type:'analyze'|'caption'|'export', assetIds|projectId, options}` → insert `ai_jobs` |
+| `POST /api/jobs` | `{type:'ingest'|'analyze'|'caption', assetIds}` → insert `ai_jobs`. **Not** export/edit/purge/cluster: each of those has its own route (or is worker-only), and `createJobRequestSchema` is a discriminated union that rejects them |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |
 | `GET  /api/search?q=&projectId=` | §8.4 |
 | `GET  /api/usage` | **shipped (ADR 0037)** — the Usage & Storage snapshot: storage by bucket, this month's credits, the analyzed/captioned funnel, per-project and per-source attribution, 30 days of activity. One `workspace_usage()` RPC (SECURITY INVOKER — RLS is the boundary). Only for the client-side view switch; `/account/usage` awaits the same reader server-side |
 | `PATCH /api/captions/:id` | edit text (`is_edited=true`) |
 | `POST /api/assets/:id/tags` · `DELETE` | manual tags (`source='manual'`) |
 | `PATCH /api/facts/:id` | confirm / set status |
+| `POST /api/exports` · `GET /api/exports?jobId=` | **shipped (ADR 0035 + Amendments)** — enqueue an `export` job for a selection (or a saved artboard) with `options.format`; 400 `too_many_assets` over `EXPORT_MAX_ASSETS`, 429 `export_backlog` over `EXPORT_MAX_IN_FLIGHT`. GET presigns `payload.result_key` **per request** and returns the job's real progress + `attempts` |
+| `GET  /api/workspace` · `PATCH /api/workspace` | **shipped** — the credit/rights block (creator · credit · copyright · usage terms, migration 20260727000001). No settings page exists, so the export dialog is its only editor; RLS is the gate (read = member, write = owner) |
 
 Contracts as zod schemas in `packages/shared` (single source for web + worker). `docs/openapi.yaml` generated later — not an MVP gate.
 
@@ -612,14 +629,14 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
 
 - **Gemini credentials:** use a **service-account-bound AUTH key** (not a standard API key) for `GEMINI_API_KEY` on both web and worker — scopes access to the billing project and keeps user photos off the free tier. Billing enabled from day 1 (Tier 1+).
 - Environments: `dev` (local supabase or separate project) + `prod`. Migrations: Supabase CLI, applied by the **single migrations owner**, PR-gated.
-- CI (GitHub Actions): lint + typecheck + build on PR (per existing team playbook: trunk-based, squash-merge, verification-gated).
+- CI (GitHub Actions): one required `checks` job running `lint typecheck test build` (a red test blocks merge exactly like a type error), plus the required `db-tests` pgTAP job, which fast-skips unless `supabase/**` or the worker's SQL-bearing files change (ADR 0020).
 
 ---
 
 ## 12. Security & privacy checklist
 
 - RLS on all tables (§5); `viewer` role read-only enforced in policies.
-- Encrypted OAuth tokens; short-TTL presigned URLs (15 min PUT / 1 h GET; 7 d exports).
+- Encrypted OAuth tokens; short-TTL presigned URLs (15 min PUT / 1 h GET). **No long-lived export URL exists:** the worker stores only the R2 key and `GET /api/exports` presigns it per request — a 7-day URL parked in `ai_jobs.payload` was readable by every workspace member and broadcast to all of them on update.
 - Auth surface (ADR 0021): post-auth `?next=` targets are validated to a same-origin
   absolute path (`lib/safe-redirect.ts`) — no open redirect off the trusted callback.
   Failures reach `/login` as a **reason code only**; the provider's `error_description`
@@ -635,6 +652,7 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
   `workspace_usage()`, which is SECURITY INVOKER: RLS, not the `ws` parameter, is what
   stops one workspace reading another's numbers.
 - Deletion — **shipped 2026-07-23 (ADR 0033):** user delete → `status='deleted'` + `deleted_at` (trigger-stamped) = a **30-day trash** with undo/Restore; `sweep_deleted_assets()` then enqueues a `purge` job that deletes the R2 bytes (original + previews + edited previews) and the DB derivatives, keeping the assets row as a dedup tombstone (`purged_at`, hash/key cleared — ADR 0032 revival stays safe). "Delete permanently"/"Empty trash" purge early. Source file deleted upstream → on fetch failure mark `source_missing`, **keep derivatives** (captions/tags/embeddings survive — archive value; never purged).
+- Deletion — **shipped 2026-07-23 (ADR 0033):** user delete → `status='deleted'` + `deleted_at` (trigger-stamped) = a **30-day trash** with undo/Restore; `sweep_deleted_assets()` then enqueues a `purge` job that deletes the R2 bytes (original + previews + edited previews), every export artifact the photo was rendered into (a PDF embeds a JPEG of it — leaving that behind is not erasure), and the DB derivatives, keeping the assets row as a dedup tombstone (`purged_at`, hash/key cleared — ADR 0032 revival stays safe). "Delete permanently"/"Empty trash" purge early. Source file deleted upstream → on fetch failure mark `source_missing`, **keep derivatives** (captions/tags/embeddings survive — archive value; never purged).
 - Project retention: archive (`archived_at`) is reversible and open-ended; trash (`deleted_at`) is a **30-day grace period**, after which `sweep_trashed_projects()` hard-deletes the project on the worker's schedule (§7). The UI states the window, so it must stay enforced. Only the project dies — its assets are workspace-global and survive (rule 9), so no R2 purge is involved. ADR 0019.
 - Privacy Policy + ToS before first external user (GDPR-aware: data location EU where possible — Supabase EU region, R2 EU jurisdiction).
 

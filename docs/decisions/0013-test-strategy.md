@@ -54,3 +54,14 @@ conventions, not pixels).
   deferred here and never picked up — PR #74 then shipped migration
   `20260713000001` through green CI with no coverage of its own columns. ADR
   0020 closes that hole; the gap it left open is the reason that ADR exists.
+
+
+## Amendment — 2026-07-27: the RLS gate widened past `supabase/**`
+
+Layer 3 describes the pgTAP gate as firing for migration PRs. Since today it also fires
+for `apps/worker/src/handlers/**` and `retention.ts`, because
+`supabase/tests/009_export_queries.sql` executes the SQL those handlers embed — the
+suite is no longer only about RLS, it is also the only place a hand-written query meets
+a real schema. The prompt was a production incident: an export query selected a column
+that has never existed, and every unit test around it passed because none of them ran
+SQL. See ADR 0020's amendment.

@@ -92,3 +92,19 @@ rendered edited previews in a new `asset_edits` table. The originals in
 - Editing does **not** re-run analyze: tags/embeddings still describe the
   original composition (AI stays button-only). A crop can therefore drift from
   its tags until the user re-analyzes — an accepted Tier-0 limitation.
+
+
+## Amendment — 2026-07-27: export shipped, and it does not re-render the original
+
+The Consequences predicted that "when export ships it re-applies the stored recipe to
+the true original (fetched from Drive for gdrive at that point)". Export shipped today
+and does none of that: the PDF embeds `coalesce(ae.edited_medium_key, ap.r2_key)` — the
+edited **medium** — and the ZIP ships the stored original, which is unedited by
+construction (that is what non-destructive means).
+
+The deferral this ADR recorded therefore became user-visible rather than resolved, and
+the cost is concrete: `edit-render` renders from the 1024px medium with
+`withoutEnlargement`, so a 50% crop leaves ~512px, which on a full-page A4 is ~72 ppi
+against the ~300 ppi photographers treat as the print baseline. A `large` (2048px)
+preview tier plus a backfill is the fix; full-resolution re-render from `files.r2_key`
+stays out of reach for Drive-linked assets either way (ADR 0025).
