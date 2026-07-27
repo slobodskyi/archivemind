@@ -20,11 +20,15 @@ interface ProjectAssetViewProps {
   focusedCloudKey: string | null;
   /** Tile id → cloud key, for the fade above. Empty on the unsorted Canvas. */
   tileCloud: Record<string, string>;
+  /** Assets inside the AI job that is running right now. */
+  aiBusyIds: Set<string>;
   onTileDown: (event: React.PointerEvent, id: string, center: CanvasPoint) => void;
   setHover: (id: string | null) => void;
   openDrawer: (id: string) => void;
   deletePhoto: (id: string) => void;
   openContextMenu: (x: number, y: number, targetId: string | null) => void;
+  /** Analyze one photo straight from its tile badge. */
+  analyzePhoto: (id: string) => void;
 }
 
 function ProjectAssetView({
@@ -37,11 +41,13 @@ function ProjectAssetView({
   animating,
   focusedCloudKey,
   tileCloud,
+  aiBusyIds,
   onTileDown,
   setHover,
   openDrawer,
   deletePhoto,
   openContextMenu,
+  analyzePhoto,
 }: ProjectAssetViewProps) {
   const previewByAsset = useMemo(
     () => new Map(previews.flatMap((preview) => preview.assetId ? [[preview.assetId, preview]] : [])),
@@ -86,6 +92,18 @@ function ProjectAssetView({
               e.stopPropagation();
               deletePhoto(photo.id);
             }}
+            analyzed={photo.processed}
+            aiBusy={aiBusyIds.has(photo.id)}
+            // Mock rows have no asset to enqueue against — they get the plain
+            // indicator, not a button that would 404 in the jobs API.
+            onAnalyze={
+              isRealSource(photo.source)
+                ? (e) => {
+                    e.stopPropagation();
+                    analyzePhoto(photo.id);
+                  }
+                : undefined
+            }
           />
         );
       })}

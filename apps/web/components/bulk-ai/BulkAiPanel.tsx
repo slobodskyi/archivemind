@@ -1,45 +1,28 @@
 import { CheckIcon, CloseIcon, SparkleIcon, TagIcon } from "@/components/icons/icons";
-import type { CaptionStyle } from "@/types";
+import { planAiRun, type AiOps } from "@/lib/ai-ops";
+import type { CaptionStyle, Language } from "@/types";
 
 interface BulkAiPanelProps {
   show: boolean;
   idle: boolean;
-  count: number;
+  /** Selected asset ids — the panel plans the run over these, so its button
+   *  text is derived from the very same call the click will make. */
+  selectedIds: string[];
   thumbs: { src: string; ml: number }[];
-  bulkOps: { captions: boolean; tags: boolean; faces: boolean };
-  bulkLangs: string[];
+  bulkOps: AiOps;
+  bulkLangs: Language[];
   bulkStyle: CaptionStyle;
   proc: { active: boolean; label: string; pct: number };
   onClear: () => void;
   onToggleCaptions: () => void;
   onToggleTags: () => void;
-  onToggleFaces: () => void;
-  onToggleLang: (l: string) => void;
+  onToggleLang: (l: Language) => void;
   onSetStyle: (s: CaptionStyle) => void;
   onRun: () => void;
 }
 
-const LANGS = ["EN", "UK", "RU"];
-const STYLES: CaptionStyle[] = ["Agency", "Archival"];
-
-function FaceIcon({ width = 15, height = 15 }: { width?: number; height?: number }) {
-  return (
-    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 20a5 5 0 0 0-10 0" />
-      <circle cx={12} cy={9} r={3.2} />
-    </svg>
-  );
-}
-
-function ConsentIcon() {
-  return (
-    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 4l9 16H3z" />
-      <path d="M12 10v4" />
-      <path d="M12 17h.01" />
-    </svg>
-  );
-}
+const LANGS: Language[] = ["EN", "UK", "RU"];
+const STYLES: CaptionStyle[] = ["Social", "Agency", "Archival"];
 
 interface OpCardProps {
   icon: React.ReactNode;
@@ -106,10 +89,15 @@ function OpCard({ icon, title, subtitle, checked, onToggle, children }: OpCardPr
   );
 }
 
+/** Bulk AI over the current selection. Every control here now actually drives
+ *  the job that runs — the captions checkbox, the language chips and the style
+ *  toggle used to render above a button hardcoded to `analyze`, so choosing
+ *  "Generate captions · UK · Archival" and pressing it produced tags and no
+ *  caption. The CTA also names the work instead of always saying "Analyze". */
 export default function BulkAiPanel({
   show,
   idle,
-  count,
+  selectedIds,
   thumbs,
   bulkOps,
   bulkLangs,
@@ -118,12 +106,18 @@ export default function BulkAiPanel({
   onClear,
   onToggleCaptions,
   onToggleTags,
-  onToggleFaces,
   onToggleLang,
   onSetStyle,
   onRun,
 }: BulkAiPanelProps) {
   if (!show) return null;
+
+  const count = selectedIds.length;
+  const noun = count === 1 ? "photo" : "photos";
+  // Same call the click makes, so the button cannot promise work the run won't
+  // do — and `calls` is the real model-call count, not the old flat "~$0.01".
+  const plan = planAiRun(selectedIds, bulkOps, bulkLangs, bulkStyle);
+  const blocked = plan.blocked !== null;
 
   return (
     <div
@@ -174,7 +168,9 @@ export default function BulkAiPanel({
                   />
                 ))}
               </div>
-              <span style={{ fontSize: 14, fontWeight: 400, color: "var(--t1)" }}>{count} photos selected</span>
+              <span style={{ fontSize: 14, fontWeight: 400, color: "var(--t1)" }}>
+                {count} {noun} selected
+              </span>
             </div>
             <button
               onClick={onClear}
@@ -258,28 +254,22 @@ export default function BulkAiPanel({
 
             <OpCard
               icon={<TagIcon width={15} height={15} />}
-              title="Detect tags"
-              subtitle="People · objects · scene · place"
+              title="Analyze"
+              subtitle="Tags · facts · makes the photo searchable"
               checked={bulkOps.tags}
               onToggle={onToggleTags}
             />
-
-            <OpCard
-              icon={<FaceIcon />}
-              title="Detect & group faces"
-              subtitle={
-                <>
-                  <ConsentIcon />
-                  Consent required
-                </>
-              }
-              checked={bulkOps.faces}
-              onToggle={onToggleFaces}
-            />
           </div>
+
+          {bulkOps.tags && bulkOps.captions && (
+            <div style={{ marginTop: 10, fontSize: 10.5, lineHeight: 1.45, color: "var(--t3)" }}>
+              Analysis runs first — captions are written from the facts it finds.
+            </div>
+          )}
 
           <button
             onClick={onRun}
+            disabled={blocked}
             style={{
               display: "flex",
               alignItems: "center",
@@ -288,26 +278,26 @@ export default function BulkAiPanel({
               width: "100%",
               height: 40,
               marginTop: 13,
-              background: "var(--ac)",
-              border: 0,
+              background: blocked ? "var(--bg-el)" : "var(--ac)",
+              border: blocked ? "1px solid var(--bd)" : 0,
               borderRadius: 2,
-              color: "#050505",
+              color: blocked ? "var(--t3)" : "#050505",
               fontSize: 11,
               fontWeight: 700,
               letterSpacing: "0.07em",
               fontFamily: "inherit",
-              cursor: "pointer",
+              cursor: blocked ? "not-allowed" : "pointer",
             }}
           >
             <SparkleIcon width={15} height={15} />
-            Analyze {count} photos
+            {plan.cta}
           </button>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 9, fontSize: 10.5, color: "var(--tm)" }}>
             <span>
-              {[bulkOps.captions && "Captions", bulkOps.tags && "Tags", bulkOps.faces && "Faces"].filter(Boolean).join(" · ") || "No operations selected"}
+              {blocked ? "Nothing to run" : `${plan.calls} AI ${plan.calls === 1 ? "call" : "calls"}`}
             </span>
             <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--tm)" }} />
-            <span>~$0.01 · Gemini Flash-Lite</span>
+            <span>Gemini Flash-Lite</span>
           </div>
         </div>
       )}

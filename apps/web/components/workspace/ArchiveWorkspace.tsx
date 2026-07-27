@@ -133,11 +133,13 @@ export default function ArchiveWorkspace({
           animating={ws.tilesAnimating}
           focusedCloudKey={ws.focusedCloudKey}
           tileCloud={ws.tileCloud}
+          aiBusyIds={ws.aiBusyIds}
           onTileDown={ws.onTileDown}
           setHover={ws.setHover}
           openDrawer={ws.openDrawer}
           deletePhoto={ws.deletePhoto}
           openContextMenu={ws.openContextMenu}
+          analyzePhoto={ws.analyzePhoto}
         />
         {ws.cloudDecor && <CloudLabels layout={ws.cloudDecor} focusedCloudKey={ws.focusedCloudKey} onCloudLabelDown={ws.onCloudLabelDown} />}
       </PanZoomCanvas>
@@ -289,8 +291,10 @@ export default function ArchiveWorkspace({
         <WorkspaceActionBar
           tool={ws.tool}
           selCount={ws.selectedIds.size}
+          aiOpen={ws.bulkPanelOpen}
           onArtboard={ws.toolFrame}
           onTidy={ws.tidyUp}
+          onAi={ws.toggleBulkPanel}
           onCopy={ws.copyFiles}
           onDuplicate={ws.duplicateFiles}
           onExport={ws.exportFiles}
@@ -350,7 +354,7 @@ export default function ArchiveWorkspace({
       <BulkAiPanel
         show={ws.bulkShow}
         idle={ws.bulkIdle}
-        count={ws.bulkCount}
+        selectedIds={ws.bulkSelectedIds}
         thumbs={ws.bulkThumbs}
         bulkOps={ws.bulkOps}
         bulkLangs={ws.bulkLangs}
@@ -359,7 +363,6 @@ export default function ArchiveWorkspace({
         onClear={ws.clearSelection}
         onToggleCaptions={ws.toggleBulkCaptions}
         onToggleTags={ws.toggleBulkTags}
-        onToggleFaces={ws.toggleBulkFaces}
         onToggleLang={ws.toggleBulkLang}
         onSetStyle={ws.setBulkStyle}
         onRun={ws.runBulk}

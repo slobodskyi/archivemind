@@ -1,12 +1,16 @@
 import { memo } from "react";
 import type { Tool } from "@/types";
-import { FrameToolIcon, CopyIcon, TrashIcon } from "@/components/icons/icons";
+import { FrameToolIcon, CopyIcon, TrashIcon, SparkleIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
   tool: Tool;
   selCount: number;
+  /** The AI panel is open for this selection — keeps the ✨ button lit. */
+  aiOpen: boolean;
   onArtboard: () => void;
   onTidy: () => void;
+  /** Opens the AI panel over the selection (analyze / captions). */
+  onAi: () => void;
   onCopy: () => void;
   onDuplicate: () => void;
   onExport: () => void;
@@ -72,12 +76,15 @@ function Divider() {
  *  tool (moved off the left toolbar) plus selection actions. Copy/Duplicate/
  *  Export/Group are stubs for now; Delete is real (bulk trash + undo, ADR
  *  0033 — the old Archive stub sat next to it implying a parity that never
- *  existed, so it's gone until asset archiving is a real feature). */
+ *  existed, so it's gone until asset archiving is a real feature), and so is
+ *  the AI button. */
 function WorkspaceActionBar({
   tool,
   selCount,
+  aiOpen,
   onArtboard,
   onTidy,
+  onAi,
   onCopy,
   onDuplicate,
   onExport,
@@ -109,6 +116,16 @@ function WorkspaceActionBar({
       </Btn>
       <Btn title={selCount >= 2 ? "Tidy up selection" : "Tidy up canvas"} onClick={onTidy}>
         <TidyGlyph />
+      </Btn>
+
+      <Divider />
+
+      {/* The selection's AI entry point. Bulk AI used to be reachable only from
+          the left toolbar and the right-click menu — neither of which is where
+          the eye goes after selecting tiles, so the most common bulk action was
+          the hardest one to find. */}
+      <Btn title={selCount >= 2 ? `Analyze ${selCount} with AI` : "Analyze with AI"} active={aiOpen} disabled={noSel} onClick={onAi}>
+        <SparkleIcon width={16} height={16} />
       </Btn>
 
       <Divider />

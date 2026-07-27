@@ -83,7 +83,7 @@ export default function CanvasContextMenu({
           <>
             <Divider />
             <Item label="Smart Search" onClick={run(onToggleChat)} />
-            <Item label="Generate Captions" onClick={run(onToggleBulkPanel)} />
+            <Item label="AI actions" onClick={run(onToggleBulkPanel)} />
             <Item label="Extract EXIF" onClick={run(onExtractExif)} />
             <Divider />
             <Item label="Add" onClick={run(onAdd)} />

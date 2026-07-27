@@ -96,6 +96,15 @@ export default function PhotoDrawer({
   }
   const shownCaption = draft ?? captionText;
   const captionDirty = draft !== null && draft !== captionText;
+  // The caption block used to be gated purely on `processed` (= the analyze
+  // job's ai_processed_at). But the caption worker doesn't need analysis — it
+  // reads the medium preview + EXIF — so a captions-only bulk run produced
+  // captions the drawer then refused to show. Show the block whenever there is
+  // something to show.
+  const hasAnyCaption = Object.values(photo?.captions ?? {}).some(
+    (byStyle) => Object.keys(byStyle ?? {}).length > 0,
+  );
+  const showCaptionBlock = Boolean(photo && (photo.processed || hasAnyCaption));
 
   return (
     <div
@@ -176,7 +185,7 @@ export default function PhotoDrawer({
             </span>
           </div>
 
-          {photo.processed && (
+          {showCaptionBlock && (
             <>
               <div style={{ marginTop: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
@@ -228,7 +237,7 @@ export default function PhotoDrawer({
                 <textarea
                   value={shownCaption}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="No caption yet — Regenerate to generate one"
+                  placeholder={`No ${lang} ${style.toLowerCase()} caption yet — press Generate`}
                   style={{
                     width: "100%",
                     minHeight: 96,
@@ -244,9 +253,12 @@ export default function PhotoDrawer({
                   }}
                 />
                 <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+                  {/* "Regenerate" on an empty box asked the user to redo
+                      something that was never done. It only says that once
+                      there is a caption to replace. */}
                   <button onClick={onRegen} style={smallBtn}>
                     <SparkleIcon />
-                    Regenerate
+                    {captionText ? "Regenerate" : "Generate"}
                   </button>
                   <button onClick={() => onCopy(shownCaption)} style={smallBtn}>
                     <CopyIcon />
@@ -259,7 +271,13 @@ export default function PhotoDrawer({
                   )}
                 </div>
               </div>
+            </>
+          )}
 
+          {/* Tags come from analyze, not caption — a captions-only run would
+              otherwise render this section empty but for the "+ add" chip. */}
+          {photo.processed && (
+            <>
               <div style={{ marginTop: 18 }}>
                 <span style={labelCaps}>Tags</span>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 9 }}>
@@ -293,10 +311,18 @@ export default function PhotoDrawer({
             </>
           )}
 
-          {!photo.processed && (
+          {/* Unprocessed photo: ONE button that does the whole thing. It used
+              to say "Generate caption" and enqueue `analyze`, which writes tags
+              and facts and never a caption — so the photo came back tagged,
+              captionless, and the user was left pressing it again. It now runs
+              analyze and chains the caption job behind it. */}
+          {!showCaptionBlock && (
             <div style={{ marginTop: 16, background: "var(--bg-in)", border: "1px solid var(--bd)", borderRadius: 2, padding: 18, textAlign: "center" }}>
-              <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 12 }}>
-                No caption yet — this photo hasn&apos;t been processed.
+              <div style={{ fontSize: 13, color: "var(--t2)", marginBottom: 4 }}>
+                This photo hasn&apos;t been processed by AI yet.
+              </div>
+              <div style={{ fontSize: 11, color: "var(--t3)", marginBottom: 12, lineHeight: 1.45 }}>
+                Reads tags and facts, makes it searchable, then writes a {lang} {style.toLowerCase()} caption.
               </div>
               <button
                 onClick={onGenSingle}
@@ -318,7 +344,7 @@ export default function PhotoDrawer({
                 }}
               >
                 <SparkleIcon width={14} height={14} />
-                Generate caption
+                Analyze &amp; caption
               </button>
             </div>
           )}
