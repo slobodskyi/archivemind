@@ -365,6 +365,13 @@ create index usage_ws_idx on usage_events (workspace_id, created_at);
 -- view. Like topic_clusters / asset_edits / canvas_groups, those tables live in
 -- their migrations and ADRs rather than in this block, which stays the
 -- migration-0001 design.
+-- Migration 20260727000003 (ADR 0038) adds `topic_clusters.is_renamed` — a human
+-- named this cloud, so the worker must preserve its label and must not delete it
+-- when its centroid stops matching. It is the repo's SECOND column-level ACL
+-- (after the source_connections token columns): the blanket UPDATE grant is
+-- revoked and re-granted on (label, is_renamed) only, because the same row holds
+-- the k-means `centroid` and a forged one corrupts every future clustering of
+-- the workspace rather than a single row.
 
 -- ============ canvas layouts ============
 create table canvas_layouts (
@@ -563,7 +570,9 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `POST /api/imports` | `{provider, items:[…]}` from Picker (Drive, multi-file) or Chooser (Dropbox, direct links) → `assets` + `files` rows → `ingest` job (worker streams Drive bytes; fetches Dropbox bytes once → R2) |
 | `POST /api/projects` · `GET /api/projects` · `PATCH /api/projects/:id` | CRUD incl. `caption_prompt`. **Shipped:** `GET` takes `?scope=active\|archived\|trash`; `PATCH` does rename **and** archive/trash (`{name}` / `{archived}` / `{deleted}` → `archived_at`/`deleted_at`, ADR 0019). `caption_prompt` is not wired yet (Phase 3). |
 | `POST /api/projects/:id/assets` · `DELETE .../assets/:assetId` | M:N add/remove |
-| `POST /api/jobs` | `{type:'ingest'|'analyze'|'caption', assetIds}` → insert `ai_jobs`. **Not** export/edit/purge/cluster: each of those has its own route (or is worker-only), and `createJobRequestSchema` is a discriminated union that rejects them |
+| `POST /api/jobs` | `{type:'ingest'|'analyze'|'caption', assetIds}` → insert `ai_jobs`. **Not** export/edit/purge/cluster: every arm of `createJobRequestSchema` is asset-id-shaped, so each job type that isn't gets its own route |
+| `POST /api/topics/recluster` | **shipped (ADR 0038)** — re-run the workspace's semantic clustering on demand. Workspace-scoped, so it is a route rather than a `createJobRequestSchema` arm. Zero credits (pure CPU over stored embeddings, no Gemini call); `queued\|running` backlog guard; `workspace_id` built from the caller's server-resolved membership, never the body |
+| `PATCH /api/topics/:id` | **shipped (ADR 0038)** — rename one Topic cloud. Writes `label` + `is_renamed` and nothing else: migration `20260727000003` narrowed the UPDATE grant to those two columns, so an extra key raises 42501 rather than silently updating the k-means `centroid` |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |
 | `GET  /api/search?q=&projectId=` | §8.4 |
 | `GET  /api/usage` | **shipped (ADR 0037)** — the Usage & Storage snapshot: storage by bucket, this month's credits, the analyzed/captioned funnel, per-project and per-source attribution, 30 days of activity. One `workspace_usage()` RPC (SECURITY INVOKER — RLS is the boundary). Only for the client-side view switch; `/account/usage` awaits the same reader server-side |

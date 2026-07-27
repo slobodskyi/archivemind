@@ -79,10 +79,15 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   end-to-end since #82: drawer Regenerate/edit/Save per lang × style) and
   cluster (deterministic k-means over image embeddings → `topic_clusters` +
   `assets.cluster_id`; auto-enqueued after analyze, zero Gemini calls so the
-  "AI only by button" rule holds — ADR 0028) and purge (erase an expired
+  "AI only by button" rule holds — ADR 0028; it also RELABELS a matched cluster
+  now unless a human pinned the name via `is_renamed`, and can be triggered by
+  the user's own Re-cluster button — ADR 0038) and purge (erase an expired
   trashed asset's R2 bytes + DB derivatives, keep the row as a dedup
   tombstone; enqueued by the 6-hourly `sweep_deleted_assets()` after the
-  30-day photo-trash window or by "Delete permanently" — ADR 0033).
+  30-day photo-trash window or by "Delete permanently" — ADR 0033), edit (renders the
+  stored crop/rotate recipe into separate previews, ADR 0030) and export. There are
+  **seven handlers, one per member of `jobTypeSchema`** — nothing can sit in the queue
+  without one.
 - `packages/shared` — zod schemas / domain contracts shared by web + worker, plus
   `src/usage.ts`: the **credit unit**. `1 credit = 1 AI action on 1 photo` —
   analyze 1, caption 1 *per language*, and `embedding`/`search_query`/`export`/
@@ -92,11 +97,6 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   web reader (which totals them) import this, so the meter and the future bill
   cannot drift apart. Limits live in the `plans` table and are display-only —
   `plans.enforced` is false everywhere and nothing refuses work (ADR 0037).
-  30-day photo-trash window or by "Delete permanently" — ADR 0033), edit (renders the
-  stored crop/rotate recipe into separate previews, ADR 0030) and export. There are
-  **seven handlers, one per member of `jobTypeSchema`** — nothing can sit in the queue
-  without one.
-- `packages/shared` — zod schemas / domain contracts shared by web + worker.
 
 Target stack: Supabase (Postgres + Auth + pgvector),
 Cloudflare R2 (all binaries), and a **worker on Railway** for heavy jobs

@@ -161,6 +161,30 @@ Phases 1–2). What actually remains:
   ledger + empty `db diff`). End-to-end verified live: a cluster job over an
   11-asset workspace produced two discriminative-labelled clouds covering all 11,
   stable (same ids/labels, no duplicates) across a re-run.
+- **Topic view legibility — ✅ DONE 2026-07-27 (#182), LIVE on prod** — an audit
+  of the Topic tab, and the fixes for what it found
+  ([ADR 0038](decisions/0038-topic-view-legibility.md)). Every defect was
+  reproduced by running the code, not by reading it: **one** stale drag override
+  stretched a cloud's bbox 581 px → 1856 px and slid its label 638 px into empty
+  canvas (0023 predicted this verbatim and named the fix); labels ranked by
+  discriminativeness alone, so a tag on one photo scored the maximum and a
+  screenshot cluster came out `"smartphone · book cover"`; and `planClusters`
+  copied the stored label while the handler never wrote `label`, so **any**
+  labeller improvement would have been invisible on every existing workspace.
+  Now: overrides are anchored to the cluster **id** (a relabel and a rename both
+  leave the arrangement alone) and ignored once it changes; a cloud's
+  label/backdrop anchor on its *core* (members within 2.2 packed radii of the
+  median), so one flung tile no longer drags the name away while a whole-cloud
+  drag still does; **Regroup** on Topic/Timeline; **Re-cluster** on demand
+  (`POST /api/topics/recluster`, zero credits — `ai_jobs_insert` never restricted
+  `type`, the refusal lived in zod); **rename** a cloud (`PATCH /api/topics/:id`
+  + `topic_clusters.is_renamed`, which also protects the cluster from deletion
+  when its centroid stops matching); and stored cluster labels are exempt from
+  the `TOPIC_CLOUD_CAP` "Other" fold, which now bounds only the heuristic.
+  pgTAP `004` raised 9 → 21 assertions. Migration `20260727000003` — **on prod
+  2026-07-27**, verified via ledger only: Docker on the owner's machine returns
+  500, which takes out `db diff`'s shadow database, `db dump`, and makes
+  `db push` print a `pgdelta` warning after succeeding.
 - **Image editing — Tier 0 (crop / rotate 90° / straighten / flip) — ✅ DONE
   2026-07-22 (#126; live-refresh fix #128), LIVE on prod** — **non-destructive**
   ([ADR 0030](decisions/0030-non-destructive-image-editing.md)): a stored,
