@@ -60,17 +60,21 @@ READ PATH (Server Components import these and await them directly):
                             — ensureWorkspace() + getProjectCards()
   app/projects/[id]/page.tsx  canvas — getProjectCards() + lib/api.ts getPhotos()
         |                    ("all" = whole workspace; else the project's M:N assets)
-  app/account/usage/page.tsx  Usage & Storage (ADR 0037) — lib/usage.ts
+  app/account/usage/page.tsx  Usage & Storage (ADR 0037) — NOT its own layout:
+        |                    renders HomeClient with initialView="usage", so the
+        |                    sidebar/shell are the homepage's. lib/usage.ts
         |                    getWorkspaceUsage() → ONE workspace_usage() RPC
         |                    (SECURITY INVOKER, RLS is the boundary) returning
         |                    storage by bucket, credits this month, the
         |                    analyzed/captioned funnel, per-project and
         |                    per-source attribution, 30 days of activity.
-        |                    Both account menus link here; Settings/Billing
-        |                    still toast, so they stay buttons
+        |                    The sidebar's own "Usage & Storage" item switches
+        |                    view in place and fetches GET /api/usage instead.
+        |                    Both account menus link to the route;
+        |                    Settings/Billing still toast, so they stay buttons
         v
   components/home/HomeClient.tsx · components/workspace/ArchiveWorkspace.tsx
-  components/account/UsageView.tsx
+  components/account/UsageView.tsx  (a view BODY — no page chrome of its own)
 
 WRITE PATH (client → HTTP → route handlers; nothing client-side touches the DB):
   app/api/uploads/presign · uploads/complete   drag-drop → R2 → ingest job
@@ -106,6 +110,10 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                so no bearer URL is stored or broadcast. Artifacts are
                                                swept after EXPORT_RETENTION_DAYS, and purge.ts erases
                                                any that contain an erased photo
+  app/api/usage                                GET: the Usage view's snapshot when the
+                                               sidebar switches to it client-side (ADR 0037).
+                                               Same RPC the Server Component awaits — this
+                                               adds only the transport
   app/api/search                               GET §8.4: parse → embed → search_assets()
                                                (hybrid: cosine + FTS on description/facts,
                                                tiered; date/place/EXIF filters — ADR 0029/0031)

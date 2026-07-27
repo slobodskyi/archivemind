@@ -20,6 +20,12 @@ import type { UsageSnapshot } from "@/lib/usage";
  *  how much room is left, how many credits are left, and what is still
  *  unprocessed — then attribution and the audit trail underneath.
  *
+ *  Renders as the BODY of a homepage view, not as its own page: the sidebar,
+ *  the shell and the `<h1>` all come from HomeClient, exactly like Archived and
+ *  Trash. An account page with its own chrome would have been a second layout
+ *  for the same signed-in surface, and the sidebar is where people already look
+ *  for Trash — which is half of what this page is about.
+ *
  *  Every number here comes from `workspace_usage()`. Where the database cannot
  *  yet answer honestly (derivative rows written before byte tracking existed)
  *  the card says so rather than rendering a confident under-count.
@@ -106,44 +112,7 @@ export default function UsageView({ usage }: { usage: UsageSnapshot }) {
   const maxDaily = Math.max(1, ...usage.daily.map((d) => d.credits));
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--t1)", fontSize: 12 }}>
-      {/* ── header ───────────────────────────────────────────────── */}
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--bd)",
-          background: "var(--bg-s)",
-          position: "sticky",
-          top: 0,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, letterSpacing: ".08em", color: "var(--t2)" }}>
-          <Link href="/" style={{ color: "var(--t2)", textDecoration: "none" }}>
-            ← ARCHIVE MIND
-          </Link>
-          <span style={{ color: "var(--t3)" }}>/</span>
-          <span style={{ color: "var(--t1)", fontWeight: 700 }}>USAGE &amp; STORAGE</span>
-        </div>
-        <span
-          style={{
-            border: "1px solid var(--bdh)",
-            borderRadius: 2,
-            padding: "3px 8px",
-            fontSize: 10,
-            letterSpacing: ".08em",
-            color: "var(--t2)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {plan?.enforced ? plan.name.toUpperCase() : "BETA · NO LIMITS ENFORCED"}
-        </span>
-      </header>
-
-      <div style={{ padding: 16, maxWidth: 1180, margin: "0 auto" }}>
+    <div style={{ fontSize: 12 }}>
         {/* ── the two meters ─────────────────────────────────────── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
           <section style={card}>
@@ -469,8 +438,29 @@ export default function UsageView({ usage }: { usage: UsageSnapshot }) {
           </span>
           <span style={{ color: "var(--t3)" }}>Billing arrives with the first paid plan.</span>
         </div>
-      </div>
     </div>
+  );
+}
+
+/** The plan chip. Lives beside the view title in HomeClient's header row —
+ *  the same slot "+ New project" occupies on the project views — because
+ *  "which plan am I on" belongs next to the page name, not buried under the
+ *  meters it explains. */
+export function UsagePlanPill({ plan }: { plan: UsageSnapshot["plan"] }) {
+  return (
+    <span
+      style={{
+        border: "1px solid var(--bdh)",
+        borderRadius: 2,
+        padding: "4px 9px",
+        fontSize: 10,
+        letterSpacing: ".08em",
+        color: "var(--t2)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {plan && plan.enforced ? plan.name.toUpperCase() : "BETA · NO LIMITS ENFORCED"}
+    </span>
   );
 }
 
