@@ -25,6 +25,26 @@ interface PhotoTileProps {
   /** Shown as a small hover button, top-right of the tile — every view that
    *  renders a PhotoTile gets file deletion for free (issue: delete on any view). */
   onDelete?: (e: React.MouseEvent) => void;
+  /** AI state, shown as a badge in the tile's top-left corner. `analyzed`
+   *  mirrors `photo.processed` (the worker's ai_processed_at). Without this the
+   *  only way to tell an analyzed photo from a raw one was to open the drawer
+   *  and read the status chip. */
+  analyzed?: boolean;
+  /** This tile is covered by the AI job currently running. */
+  aiBusy?: boolean;
+  /** Click on the badge — analyzes just this photo. Omitted (badge becomes a
+   *  plain indicator) for mock rows and non-interactive surfaces. */
+  onAnalyze?: (e: React.MouseEvent) => void;
+}
+
+/** Filled = analyzed, hollow = not. Deliberately the same sparkle used by every
+ *  other AI affordance in the app, so the badge reads as "AI" at 14px. */
+function AiBadgeGlyph({ filled }: { filled: boolean }) {
+  return (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z" />
+    </svg>
+  );
 }
 
 const STAGE_LABEL: Record<Exclude<CanvasUploadStage, "ready">, string> = {
@@ -50,6 +70,9 @@ export default function PhotoTile({
   onOpen,
   onContext,
   onDelete,
+  analyzed = false,
+  aiBusy = false,
+  onAnalyze,
 }: PhotoTileProps) {
   const zIndex = hovered ? 30 : selected ? 12 : 2;
   const status = stage === "ready" ? "" : `, ${STAGE_LABEL[stage]}`;
@@ -203,6 +226,41 @@ export default function PhotoTile({
         {filename}
       </span>
     </button>
+    {/* AI badge — always on (not hover-only) for ingested tiles: the point is
+        to scan a canvas and see at a glance what still needs analysis, and a
+        badge that appears only under the cursor can't do that. Absence of a
+        badge would be ambiguous with "analyzed", so both states render. */}
+    {stage === "ready" && (analyzed || onAnalyze || aiBusy) && (
+      <button
+        type="button"
+        disabled={!onAnalyze || aiBusy || analyzed}
+        aria-label={aiBusy ? `${filename}: AI running` : analyzed ? `${filename}: analyzed by AI` : `Analyze ${filename} with AI`}
+        title={aiBusy ? "AI is working on this photo…" : analyzed ? "Analyzed — tags, facts and search are ready" : "Not analyzed yet — click to analyze with AI"}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onAnalyze}
+        className={aiBusy ? "am-ai-badge-busy" : undefined}
+        style={{
+          position: "absolute",
+          top: 4,
+          left: 4,
+          display: "flex",
+          width: 20,
+          height: 20,
+          alignItems: "center",
+          justifyContent: "center",
+          border: `1px solid ${aiBusy || analyzed ? "color-mix(in srgb,var(--ac) 55%,transparent)" : "rgba(255,255,255,.16)"}`,
+          borderRadius: 2,
+          background: aiBusy || analyzed ? "color-mix(in srgb,var(--ac) 20%,rgba(10,10,10,.8))" : "rgba(10,10,10,.65)",
+          color: aiBusy || analyzed ? "var(--ac)" : "rgba(255,255,255,.55)",
+          cursor: onAnalyze && !analyzed && !aiBusy ? "pointer" : "default",
+          opacity: analyzed && !hovered ? 0.75 : 1,
+          transition: "opacity .15s, color .15s, background .15s",
+          zIndex: 5,
+        }}
+      >
+        <AiBadgeGlyph filled={analyzed || aiBusy} />
+      </button>
+    )}
     {interactive && onDelete && hovered && (
       <button
         type="button"

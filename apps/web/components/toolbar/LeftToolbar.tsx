@@ -178,7 +178,9 @@ function LeftToolbar({
       </TbButton>
       {!allFilesMode && (
         <>
-          <TbButton onClick={onToggleBulkPanel} title="Generate Captions" active={bulkPanelOpen}>
+          {/* Was "Generate Captions", which named one of the two operations in
+              the panel it opens — and not the one the panel actually ran. */}
+          <TbButton onClick={onToggleBulkPanel} title="AI actions" active={bulkPanelOpen}>
             <TagIcon />
           </TbButton>
           <TbButton onClick={onExtractExif} title="Extract EXIF">

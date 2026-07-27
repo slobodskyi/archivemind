@@ -232,6 +232,28 @@ textarea {
   }
 }
 
+/* The tile's AI badge while that photo is inside the running job — pulses so a
+   long analyze reads as "working on THIS photo", not just the one global bar at
+   the bottom of the canvas. Static (but still accent-coloured) when the user
+   asked for reduced motion. */
+@keyframes amAiBadgePulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.am-ai-badge-busy {
+  animation: amAiBadgePulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .am-ai-badge-busy {
+    animation: none;
+  }
+}
+
 /* Indeterminate progress sliver along a tile's bottom edge while it uploads /
    processes — a live "working" signal that doesn't cover the preview image the
    way the full shimmer does. Under reduced motion it rests as a static half-bar. */

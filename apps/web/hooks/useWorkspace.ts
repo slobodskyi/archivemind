@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import type { CanvasGroup, EditRecipe, TrashedAsset } from "@archivemind/shared";
-import { CAPTION_LANG_DB, CAPTION_STYLE_DB, getCaptionRow } from "@/lib/format";
+import { getCaptionRow } from "@/lib/format";
+import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
 import type {
@@ -156,10 +157,13 @@ interface ImpState {
   open: boolean;
 }
 
+/** The two AI operations that actually exist as job types (`jobTypeSchema`).
+ *  A third, "Detect & group faces", used to sit beside them in the panel with
+ *  no job type, no worker handler and no effect — a checkbox that promised a
+ *  feature. It's gone rather than shipped as a lie. */
 interface BulkOps {
   captions: boolean;
   tags: boolean;
-  faces: boolean;
 }
 
 interface ProcState {
@@ -216,10 +220,14 @@ interface WorkspaceState {
   drawerStyle: CaptionStyle;
   copyLabel: string;
   bulkOps: BulkOps;
-  bulkLangs: string[];
+  bulkLangs: Language[];
   bulkStyle: CaptionStyle;
   bulkPanelOpen: boolean;
   proc: ProcState;
+  /** Assets covered by the AI job currently running — drives the per-tile
+   *  "working" badge, so a photo shows its own progress instead of only the
+   *  one global bar at the bottom of the canvas. */
+  aiBusyIds: string[];
   toast: { show: boolean; text: string; actionLabel?: string; onAction?: () => void };
   /** True while a canvas pan drag is active (drives the grabbing cursor). */
   panning: boolean;
@@ -624,19 +632,24 @@ export interface Workspace {
   toggleBulkPanel: () => void;
   bulkShow: boolean;
   bulkIdle: boolean;
-  bulkCount: number;
+  /** Exactly the ids `runBulk` will act on — the panel plans its button text
+   *  from these, so label and work share one input. */
+  bulkSelectedIds: string[];
   bulkThumbs: { src: string; ml: number }[];
   bulkOps: BulkOps;
-  bulkLangs: string[];
+  bulkLangs: Language[];
   bulkStyle: CaptionStyle;
   proc: ProcState;
+  /** Assets in the running AI job — per-tile "working" state. */
+  aiBusyIds: Set<string>;
   toggleBulkCaptions: () => void;
   toggleBulkTags: () => void;
-  toggleBulkFaces: () => void;
-  toggleBulkLang: (l: string) => void;
+  toggleBulkLang: (l: Language) => void;
   setBulkStyle: (s: CaptionStyle) => void;
   clearSelection: () => void;
   runBulk: () => void;
+  /** Analyze a single asset (tile badge). */
+  analyzePhoto: (id: string) => void;
 
   flashToast: (text: string, action?: { label: string; onAction: () => void }) => void;
 }
@@ -685,11 +698,12 @@ export function useWorkspace(
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
-    bulkOps: { captions: true, tags: true, faces: false },
+    bulkOps: { captions: false, tags: true },
     bulkLangs: ["EN"],
     bulkStyle: "Agency",
     bulkPanelOpen: false,
     proc: { active: false, label: "", pct: 0 },
+    aiBusyIds: [],
     toast: { show: false, text: "" },
     panning: false,
     spacePan: false,
@@ -726,6 +740,10 @@ export function useWorkspace(
    *  pointer-down handlers so they never recompute a pack/edge pass. */
   const cloudDecorRef = useRef<CloudLayout | null>(null);
   const activeJobId = useRef<string | null>(null);
+  /** Queued second leg of an "analyze, then caption" run. The two are separate
+   *  job types and captions read the facts analyze writes, so they can't be one
+   *  job — this fires the caption leg when the analyze leg reports done. */
+  const followUpCaption = useRef<CaptionJobSpec | null>(null);
   const objectUrlsRef = useRef(new Map<string, string>());
 
   // Patch helper that also advances stateRef so sequential reads see fresh data.
@@ -1425,6 +1443,73 @@ export function useWorkspace(
     [openDrawer],
   );
 
+  // ── AI runner ─────────────────────────────────────────────────────────────
+  // Every AI entry point in the app (tile badge, action bar, bulk panel, drawer,
+  // context menu) funnels through these two. Before this, three call sites each
+  // built their own fetch with their own copy and their own idea of which job
+  // type to send — which is how the drawer's "Generate caption" ended up
+  // enqueueing `analyze` and never writing a caption.
+
+  /** POST one job and adopt it as the tracked job. Returns false on failure. */
+  const enqueueJob = useCallback(
+    async (body: Record<string, unknown>, label: string, assetIds: string[]) => {
+      try {
+        const resp = await fetch("/api/jobs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const { jobId } = (await resp.json()) as { jobId: string };
+        activeJobId.current = jobId;
+        setState({ proc: { active: true, label, pct: 5 }, aiBusyIds: assetIds });
+        return true;
+      } catch {
+        activeJobId.current = null;
+        followUpCaption.current = null;
+        setState({ proc: { active: false, label: "", pct: 0 }, aiBusyIds: [] });
+        return false;
+      }
+    },
+    [setState],
+  );
+
+  /** The one way to start AI work. The plan (which jobs, in what order) comes
+   *  from `planAiRun`, the same function the panel uses to label its button. */
+  const runAi = useCallback(
+    async (assetIds: string[], ops: BulkOps, langs: Language[], style: CaptionStyle) => {
+      if (activeJobId.current) {
+        // Used to be a silent `return` — the button simply did nothing and the
+        // user had no way to tell a busy queue from a broken button.
+        flashToast("An AI job is already running — wait for it to finish");
+        return;
+      }
+      const plan = planAiRun(assetIds, ops, langs, style);
+      if (plan.blocked) {
+        flashToast(plan.cta);
+        return;
+      }
+      const n = assetIds.length;
+      setState({
+        proc: { active: true, label: `Queueing ${n} ${n === 1 ? "photo" : "photos"}…`, pct: 3 },
+        aiBusyIds: assetIds,
+      });
+
+      if (plan.analyze) {
+        // Captions ride along as the follow-up leg so they see the facts this
+        // analyze is about to write.
+        followUpCaption.current = plan.caption;
+        const ok = await enqueueJob({ type: "analyze", ...plan.analyze }, "Analyzing…", assetIds);
+        if (!ok) flashToast("Analyze failed to start — try again");
+        return;
+      }
+
+      const ok = await enqueueJob({ type: "caption", ...plan.caption }, "Writing captions…", assetIds);
+      if (!ok) flashToast("Caption failed to start — try again");
+    },
+    [setState, flashToast, enqueueJob],
+  );
+
   const copyCap = useCallback(
     async (text: string) => {
       // The visible caption (incl. any unsaved edit) is copied from the drawer;
@@ -1451,7 +1536,11 @@ export function useWorkspace(
   const regen = useCallback(async () => {
     const s = stateRef.current;
     const photo = s.photos.find((p) => p.id === s.drawerId);
-    if (!photo || activeJobId.current) return;
+    if (!photo) return;
+    if (activeJobId.current) {
+      flashToast("An AI job is already running — wait for it to finish");
+      return;
+    }
     const row = getCaptionRow(photo, s.drawerLang, s.drawerStyle);
     if (row?.edited) {
       if (!window.confirm("This caption was edited by hand. Regenerate and overwrite it?")) return;
@@ -1465,27 +1554,8 @@ export function useWorkspace(
         return;
       }
     }
-    setState({ proc: { active: true, label: "Queueing caption…", pct: 3 } });
-    try {
-      const resp = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          type: "caption",
-          assetIds: [photo.id],
-          langs: [CAPTION_LANG_DB[s.drawerLang]],
-          style: CAPTION_STYLE_DB[s.drawerStyle],
-        }),
-      });
-      if (!resp.ok) throw new Error(String(resp.status));
-      const { jobId } = (await resp.json()) as { jobId: string };
-      activeJobId.current = jobId;
-      setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
-    } catch {
-      setState({ proc: { active: false, label: "", pct: 0 } });
-      flashToast("Caption failed to start — try again");
-    }
-  }, [setState, flashToast]);
+    await runAi([photo.id], { captions: true, tags: false }, [s.drawerLang], s.drawerStyle);
+  }, [flashToast, runAi]);
 
   /** Persist a drawer caption edit — PATCH stamps is_edited=true (spec §8.3),
    *  so bulk regeneration never silently clobbers it. */
@@ -1629,32 +1699,31 @@ export function useWorkspace(
     [setState],
   );
 
-  /** Drawer's single-photo Analyze — a REAL analyze job. This was the last
-   *  mock stamp left from the mockup (#59 fixed only the bulk path): it
-   *  painted fake tags/facts/processed client-side without ever enqueueing,
-   *  so photos looked analyzed while search had no embedding to find. Real
-   *  tags/facts land via the job's Broadcast → router.refresh. */
+  /** Drawer's single-photo "Analyze & caption" — analyze chained into caption.
+   *  The button used to be labelled "Generate caption" while enqueueing only
+   *  `analyze`, which writes tags/facts/embeddings and never a caption: the
+   *  photo came back tagged and captionless, and the real caption trigger was
+   *  hiding under the word "Regenerate". Now the label and the work match. */
   const genSingle = useCallback(
-    async (id: string) => {
-      if (activeJobId.current) return;
-      setState({ proc: { active: true, label: "Queueing analyze…", pct: 3 } });
-      try {
-        const resp = await fetch("/api/jobs", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ type: "analyze", assetIds: [id] }),
-        });
-        if (!resp.ok) throw new Error(String(resp.status));
-        const { jobId } = (await resp.json()) as { jobId: string };
-        activeJobId.current = jobId;
-        setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
-      } catch {
-        setState({ proc: { active: false, label: "", pct: 0 } });
-        flashToast("Analyze failed to start — try again");
-      }
+    (id: string) => {
+      const s = stateRef.current;
+      void runAi([id], { captions: true, tags: true }, [s.drawerLang], s.drawerStyle);
     },
-    [setState, flashToast],
+    [runAi],
   );
+
+  /** Tile badge / action bar: analyze only, for whatever is selected. Captions
+   *  stay an explicit choice — they cost a call per language. */
+  const analyzeIds = useCallback(
+    (ids: string[]) => {
+      void runAi(ids, { captions: false, tags: true }, [], stateRef.current.bulkStyle);
+    },
+    [runAi],
+  );
+
+  /** One photo, straight from its tile badge. Stable identity so the memoized
+   *  ProjectAssetView doesn't re-render every tile on each parent render. */
+  const analyzePhoto = useCallback((id: string) => analyzeIds([id]), [analyzeIds]);
 
   // ── Image editor (ADR 0030) ──────────────────────────────────────────────
   const openEditor = useCallback((id: string) => setState({ editorId: id }), [setState]);
@@ -1667,7 +1736,13 @@ export function useWorkspace(
     async (recipe: EditRecipe) => {
       const s = stateRef.current;
       const id = s.editorId;
-      if (!id || activeJobId.current) return;
+      if (!id) return;
+      // Edits share the single-job lock with the AI runs, so say so rather than
+      // dropping the click — same reason the AI buttons stopped failing silently.
+      if (activeJobId.current) {
+        flashToast("A job is already running — wait for it to finish");
+        return;
+      }
       setState({ editorId: null, proc: { active: true, label: "Queueing edit…", pct: 3 } });
       try {
         const resp = await fetch(`/api/assets/${id}/edit`, {
@@ -2310,7 +2385,10 @@ export function useWorkspace(
         patchLastChatMsg(
           results.length
             ? `${strong} best match${strong === 1 ? "" : "es"}${filterNote}${weak ? ` — plus ${weak} more distant below` : ""}. Tap a thumb to open it.`
-            : `No matches${filterNote}. Only analyzed photos are searchable — run "Analyze with AI" first, or try different wording.`,
+            // Names a real affordance: the ✨ badge sits on every unanalyzed
+            // tile. The old copy pointed at an "Analyze with AI" button that
+            // did not exist anywhere in the UI.
+            : `No matches${filterNote}. Only analyzed photos are searchable — click the ✨ badge on a photo to analyze it, or try different wording.`,
           results,
         );
       } catch {
@@ -2825,12 +2903,8 @@ export function useWorkspace(
     () => setState({ bulkOps: { ...stateRef.current.bulkOps, tags: !stateRef.current.bulkOps.tags } }),
     [setState],
   );
-  const toggleBulkFaces = useCallback(
-    () => setState({ bulkOps: { ...stateRef.current.bulkOps, faces: !stateRef.current.bulkOps.faces } }),
-    [setState],
-  );
   const toggleBulkLang = useCallback(
-    (l: string) => {
+    (l: Language) => {
       const s = stateRef.current;
       const has = s.bulkLangs.includes(l);
       const next = has ? s.bulkLangs.filter((x) => x !== l) : [...s.bulkLangs, l];
@@ -2849,30 +2923,21 @@ export function useWorkspace(
     setState({ bulkPanelOpen: !s.bulkPanelOpen });
   }, [setState, flashToast]);
 
-  // Real analyze (spec §8.2, issue #12): enqueue via POST /api/jobs; the
-  // worker's progress streams back through the workspace Broadcast channel.
-  const runBulk = useCallback(async () => {
+  /** Run the panel's checked operations over the selection (spec §8.2, #12).
+   *  Used to hardcode `type: "analyze"` and ignore every control in the panel
+   *  it belongs to — the caption checkbox, language chips and style toggle all
+   *  rendered above a button that could not act on them. */
+  const runBulk = useCallback(() => {
     const s = stateRef.current;
     // Canvas selection when present; otherwise the source-browser selection —
     // with real data the sidebar is where multi-select lives (issue #12).
     const ids = (s.selectedIds.length ? s.selectedIds : s.sidebarSelectedIds).slice();
-    if (!ids.length || activeJobId.current) return;
-    setState({ proc: { active: true, label: `Queueing ${ids.length} photo(s)…`, pct: 3 } });
-    try {
-      const resp = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "analyze", assetIds: ids }),
-      });
-      if (!resp.ok) throw new Error(`jobs API ${resp.status}`);
-      const { jobId } = (await resp.json()) as { jobId: string };
-      activeJobId.current = jobId;
-      setState({ proc: { active: true, label: "Waiting for worker…", pct: 5 } });
-    } catch {
-      setState({ proc: { active: false, label: "", pct: 0 } });
-      flashToast("Analyze failed to start — try again");
-    }
-  }, [setState, flashToast]);
+    void runAi(ids, s.bulkOps, s.bulkLangs, s.bulkStyle);
+  }, [runAi]);
+
+  /** Drawer/tile entry points name the op explicitly rather than inheriting the
+   *  panel's checkboxes — a photo-level button must not change meaning because
+   *  of a toggle the user set somewhere else. */
 
   useJobProgress(workspaceId, (job) => {
     if (job.type === "ingest") {
@@ -2961,8 +3026,28 @@ export function useWorkspace(
       return;
     }
     activeJobId.current = null;
+
+    // Second leg of an "analyze, then caption" run: the analyze that just
+    // finished wrote the facts the caption prompt reads, so hand straight over
+    // without dropping the selection or the progress bar.
+    const followUp = followUpCaption.current;
+    followUpCaption.current = null;
+    if (followUp && job.status === "done" && job.type === "analyze") {
+      router.refresh(); // tags/facts land now; captions follow
+      setState({ proc: { active: true, label: "Writing captions…", pct: 5 } });
+      void enqueueJob(
+        { type: "caption", assetIds: followUp.assetIds, langs: followUp.langs, style: followUp.style },
+        "Writing captions…",
+        followUp.assetIds,
+      ).then((ok) => {
+        if (!ok) flashToast("Photos analyzed, but captions failed to start — try Regenerate");
+      });
+      return;
+    }
+
     setState({
       proc: { active: false, label: "", pct: 0 },
+      aiBusyIds: [],
       selectedIds: [],
       sidebarSelectedIds: [],
       bulkPanelOpen: false,
@@ -3232,6 +3317,7 @@ export function useWorkspace(
   }, [state.frames, state.photos, neuralGalleryPos]);
 
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
+  const aiBusyIds = useMemo(() => new Set(state.aiBusyIds), [state.aiBusyIds]);
 
   const marquee = state.marquee
     ? {
@@ -3301,6 +3387,9 @@ export function useWorkspace(
 
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
   // panel is the progress indicator even without a canvas selection.
+  // Canvas selection when present; otherwise the source-browser selection —
+  // must stay in lockstep with runBulk, which reads the same pair.
+  const bulkSelectedIds = state.selectedIds.length ? state.selectedIds : state.sidebarSelectedIds;
   const bulkShow = (state.bulkPanelOpen && selectedIds.size > 0) || state.proc.active;
   const bulkThumbs = useMemo(() => {
     const set = selectedIds;
@@ -3627,19 +3716,20 @@ export function useWorkspace(
     toggleBulkPanel,
     bulkShow,
     bulkIdle: !state.proc.active,
-    bulkCount: selectedIds.size,
+    bulkSelectedIds,
     bulkThumbs,
     bulkOps: state.bulkOps,
     bulkLangs: state.bulkLangs,
     bulkStyle: state.bulkStyle,
     proc: state.proc,
+    aiBusyIds,
     toggleBulkCaptions,
     toggleBulkTags,
-    toggleBulkFaces,
     toggleBulkLang,
     setBulkStyle: setBulkStyleAction,
     clearSelection,
     runBulk,
+    analyzePhoto,
 
     flashToast,
   };
