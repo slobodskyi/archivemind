@@ -2,6 +2,7 @@ import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf
 import fontkit from "@pdf-lib/fontkit";
 import sharp from "sharp";
 import {
+  EXPORT_MAX_ASSETS,
   artboardSettingsSchema,
   exportJobPayloadSchema,
   resolveCaptionText,
@@ -184,16 +185,53 @@ function drawLines(
   return cursor;
 }
 
-/** Decode a medium preview (webp) to a JPEG pdf-lib can embed. Null → no image. */
-async function embedMedium(doc: PDFDocument, key: string | null): Promise<PDFImage | null> {
-  if (!key) return null;
+/** Decode a medium preview (webp) to a JPEG pdf-lib can embed. Null → no image,
+ *  and the page falls back to a labelled placeholder.
+ *
+ *  Both misses are logged: the handler used to swallow them entirely (a bare
+ *  `catch { return null }` and no console call anywhere in the file), so a
+ *  half-grey PDF shipped as a clean success and nothing said why. The dominant
+ *  case is not even an error — a null key means the asset simply has no medium
+ *  preview yet, which is ordinary for the "drop these in, now export" flow since
+ *  an asset is 'active' the moment the upload completes. */
+async function embedMedium(doc: PDFDocument, key: string | null, label: string): Promise<PDFImage | null> {
+  if (!key) {
+    console.log(`[export] ${label}: no medium preview yet — placeholder page`);
+    return null;
+  }
   try {
     const webp = await getObjectBuffer(key);
     const jpg = await sharp(webp).flatten({ background: "#ffffff" }).jpeg({ quality: 86 }).toBuffer();
     return await doc.embedJpg(jpg);
-  } catch {
-    return null; // a single unreadable preview must not fail the whole export
+  } catch (err) {
+    // A single unreadable preview must not fail the whole export.
+    console.log(`[export] ${label}: preview ${key} unreadable — ${String(err)}`);
+    return null;
   }
+}
+
+/** Fill a photo slot that has no image with a grey box naming the file, so a
+ *  reader can tell WHICH photo is missing instead of seeing an anonymous block. */
+function drawPlaceholder(
+  page: PDFPage,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  label: string,
+  font: PDFFont,
+  measure: Measure,
+): void {
+  page.drawRectangle({ x, y, width: w, height: h, color: PLACEHOLDER });
+  if (h < META_SIZE * 3) return;
+  const text = truncateToWidth(label ? `${label} — preview unavailable` : "preview unavailable", measure, META_SIZE, w - 12);
+  page.drawText(text, {
+    x: x + 6,
+    y: y + h / 2 - META_SIZE / 2,
+    size: META_SIZE,
+    font,
+    color: MUTED,
+  });
 }
 
 export async function exportHandler({ pool, job, progress }: HandlerContext): Promise<void> {
@@ -212,8 +250,9 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
          left join asset_previews ap on ap.asset_id = a.id and ap.size = 'medium'
          left join asset_edits ae on ae.asset_id = a.id
         where cga.group_id = $1
-        order by cga.position asc, cga.added_at asc`,
-      [payload.group_id],
+        order by cga.position asc, cga.added_at asc
+        limit $2`,
+      [payload.group_id, EXPORT_MAX_ASSETS],
     );
     rows = r.rows;
   } else {
@@ -234,6 +273,8 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
 
   const assetIds = rows.map((r) => r.asset_id);
   const total = rows.length;
+  /** Photos that ended up as a placeholder — reported, not silently swallowed. */
+  let skipped = 0;
 
   // 2. Caption / facts / exif in batch, keyed by asset.
   const capByAsset = new Map<string, CaptionRowLike[]>();
@@ -320,14 +361,16 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
         col = 0;
       }
       const x = MARGIN + col * (cellW + gap);
-      const img = await embedMedium(doc, rows[i].medium_key);
+      const label = (rows[i].title ?? "").trim();
+      const img = await embedMedium(doc, rows[i].medium_key, label || rows[i].asset_id);
       if (img) {
         const s = fitScale(img.width, img.height, cellW, imgH);
         const w = img.width * s;
         const h = img.height * s;
         page.drawImage(img, { x: x + (cellW - w) / 2, y: yTop - h, width: w, height: h });
       } else {
-        page.drawRectangle({ x, y: yTop - imgH, width: cellW, height: imgH, color: PLACEHOLDER });
+        skipped += 1;
+        drawPlaceholder(page, x, yTop - imgH, cellW, imgH, label, font, measure);
       }
       let y = yTop - imgH - 2;
       if (options.include.title) {
@@ -364,7 +407,8 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
         measure,
       );
 
-      const img = await embedMedium(doc, row.medium_key);
+      const label = (row.title ?? "").trim();
+      const img = await embedMedium(doc, row.medium_key, label || row.asset_id);
       let yBelow: number;
       if (img) {
         const s = fitScale(img.width, img.height, contentW, plan.imgAreaH);
@@ -373,13 +417,8 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
         page.drawImage(img, { x: MARGIN + (contentW - w) / 2, y: pageH - MARGIN - h, width: w, height: h });
         yBelow = pageH - MARGIN - h - IMG_TEXT_GAP;
       } else {
-        page.drawRectangle({
-          x: MARGIN,
-          y: pageH - MARGIN - plan.imgAreaH,
-          width: contentW,
-          height: plan.imgAreaH,
-          color: PLACEHOLDER,
-        });
+        skipped += 1;
+        drawPlaceholder(page, MARGIN, pageH - MARGIN - plan.imgAreaH, contentW, plan.imgAreaH, label, font, measure);
         yBelow = pageH - MARGIN - plan.imgAreaH - IMG_TEXT_GAP;
       }
 
@@ -405,8 +444,24 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   const key = `${job.workspace_id}/exports/${job.id}.pdf`;
   await putObject(key, pdf, "application/pdf");
   await pool.query(`update ai_jobs set payload = payload || $1::jsonb where id = $2`, [
-    JSON.stringify({ result_key: key }),
+    JSON.stringify({ result_key: key, skipped_previews: skipped }),
     job.id,
   ]);
-  await progress(100, "Export ready", total, total);
+
+  // Export was the only job type writing no usage_events row, though the
+  // schema has reserved the event type since init and ADR 0035 claims it is
+  // carried for billing. It is also the most expensive non-AI operation per
+  // invocation (N R2 GETs + N sharp transcodes + a stored artifact), and
+  // recording the page count is what makes the R2 growth attributable to a
+  // workspace after the fact.
+  await pool.query(
+    `insert into usage_events (workspace_id, user_id, job_id, event_type, units)
+     values ($1, $2, $3, 'export', $4)`,
+    [job.workspace_id, job.user_id, job.id, total],
+  );
+
+  if (skipped > 0) {
+    console.log(`[export] ${job.id}: ${skipped}/${total} page(s) had no usable preview`);
+  }
+  await progress(100, skipped > 0 ? `Export ready (${skipped} without a preview)` : "Export ready", total, total);
 }

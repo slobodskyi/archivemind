@@ -47,6 +47,7 @@ const ENQUEUE_ERROR_COPY: Record<string, string> = {
   group_not_found: "That artboard no longer exists.",
   unauthorized: "Your session expired. Reload the page and sign in again.",
   no_workspace: "No workspace found for your account.",
+  export_backlog: "You already have exports rendering. Wait for those to finish and try again.",
 };
 
 const CARD: React.CSSProperties = {

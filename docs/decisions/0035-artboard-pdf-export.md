@@ -110,6 +110,32 @@ letting text consume the page; `fitScale` can no longer return a negative scale.
 `wrap()` also hard-breaks a single token wider than the column, which previously
 drew past the margin.
 
+### 2026-07-27 — metered, bounded, and no longer silent about skipped photos
+
+Export was the only job type writing no `usage_events` row, though the schema has
+reserved the `export` event type since init and the Consequences above claim it is
+carried for billing. It is also the most expensive non-AI operation per
+invocation — N R2 GETs, N sharp transcodes, and a stored artifact — so the page
+count is now recorded, which is what makes the R2 growth attributable to a
+workspace after the fact.
+
+`POST /api/exports` had no rate limit and no in-flight check. The worker claims and
+awaits ONE job at a time across all workspaces with no per-type lanes, so a retry
+loop could queue hundreds of 500-page exports and starve every ingest, analyze and
+purge job in the deployment — for every user. `EXPORT_MAX_IN_FLIGHT` mirrors the
+ingest backlog guard already in `POST /api/imports`. The 500-page cap also now
+applies to the `group_id` branch, whose query had no `LIMIT` at all: the ceiling
+was enforced in exactly one of the two paths.
+
+And a photo with no usable preview no longer disappears quietly. `embedMedium`
+swallowed both misses (a bare `catch { return null }`, and no `console` call
+anywhere in the file, against 13 in `ingest.ts`), then drew an anonymous grey box
+and reported "Export ready". Both paths are logged, the placeholder names the
+file, the count lands in `payload.skipped_previews` and in the final progress
+label. Worth stressing that the common case is not an error at all: an asset is
+`status='active'` the moment the upload completes, so exporting before ingest has
+run is an ordinary thing to do, and the dialog's pre-flight now says so too.
+
 ### 2026-07-27 — the artifact is keyed, presigned per request, and swept
 
 Decision §1 stored a **7-day presigned URL** in `ai_jobs.payload.result_url`.
