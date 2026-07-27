@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { Z } from "@/lib/ui";
 import {
   ChevronDownIcon,
   SettingsIcon,
+  UsageIcon,
   AddIcon,
   TeamIcon,
   ThemeIcon,
@@ -32,6 +34,22 @@ const ITEMS = [
   { label: "Change theme", icon: ThemeIcon, toast: "Theme switching coming soon" },
   { label: "Get desktop app", icon: DesktopIcon, toast: "Desktop app coming soon" },
 ] as const;
+
+const MENU_ITEM_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
+  width: "100%",
+  padding: "9px 10px",
+  border: 0,
+  borderRadius: 2,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  color: "var(--t2)",
+  fontSize: 13,
+  background: "transparent",
+  textDecoration: "none",
+};
 
 export default function AccountMenu({ account, open, onToggle, onClose, onFlashToast }: AccountMenuProps) {
   return (
@@ -101,29 +119,24 @@ export default function AccountMenu({ account, open, onToggle, onClose, onFlashT
               padding: 6,
             }}
           >
+            {/* The one account entry that leads somewhere. It sits at the top
+                because it is the only real page here — the rest still toast,
+                and the header dropdown offers the same link. */}
+            <Link href="/account/usage" className="am-mi" onClick={onClose} style={MENU_ITEM_STYLE}>
+              <UsageIcon />
+              <span>Usage &amp; Storage</span>
+            </Link>
             {ITEMS.map((it) => {
               const Icon = it.icon;
               return (
                 <button
                   key={it.label}
+                  className="am-mi"
                   onClick={() => {
                     onClose();
                     onFlashToast(it.toast);
                   }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 9,
-                    width: "100%",
-                    padding: "9px 10px",
-                    border: 0,
-                    borderRadius: 2,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    color: "var(--t2)",
-                    fontSize: 13,
-                    background: "transparent",
-                  }}
+                  style={MENU_ITEM_STYLE}
                 >
                   <Icon />
                   <span>{it.label}</span>

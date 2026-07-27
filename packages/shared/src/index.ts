@@ -7,6 +7,11 @@ import { z } from "zod";
  * contracts. Consumed as TypeScript source (apps/web has `transpilePackages`).
  */
 
+/** Credits, cost estimates and the usage-event vocabulary. Its own module
+ *  because the worker writes those rows and the web reader totals them, and the
+ *  two must agree on what a credit is. */
+export * from "./usage";
+
 /** Any Postgres-valid uuid text. zod's .uuid() enforces RFC-4122
  *  version/variant bits and rejects ids Postgres happily stores (fixtures,
  *  imported data) — our contract is "what the uuid column holds". */

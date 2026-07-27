@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Z } from "@/lib/ui";
 import { SettingsIcon, BillingIcon, UsageIcon, SignOutIcon } from "@/components/icons/icons";
 
@@ -14,12 +15,35 @@ interface AccountDropdownProps {
   onFlashToast: (text: string) => void;
 }
 
-const ITEMS = [
+/** `href` means the destination exists; the rest still toast. Usage & Storage
+ *  became real with migration 20260727000002 — Settings and Billing have no
+ *  page yet, and a link to a 404 is worse than an honest "coming soon". */
+const ITEMS: {
+  label: string;
+  icon: typeof SettingsIcon;
+  color: string;
+  toast: string;
+  href?: string;
+}[] = [
   { label: "Account Settings", icon: SettingsIcon, color: "var(--t2)", toast: "Settings coming soon" },
-  { label: "Billing & Plan", icon: BillingIcon, color: "var(--t2)", toast: "Billing coming soon" },
-  { label: "Usage & Storage", icon: UsageIcon, color: "var(--t2)", toast: "Usage details coming soon" },
+  { label: "Billing & Plan", icon: BillingIcon, color: "var(--t2)", toast: "Billing arrives with the first paid plan" },
+  { label: "Usage & Storage", icon: UsageIcon, color: "var(--t2)", toast: "", href: "/account/usage" },
   { label: "Sign out", icon: SignOutIcon, color: "var(--red)", toast: "Signed out" },
 ];
+
+const ITEM_STYLE: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
+  width: "100%",
+  padding: "9px 10px",
+  border: 0,
+  borderRadius: 2,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  fontSize: 13,
+  textDecoration: "none",
+};
 
 export default function AccountDropdown({ open, account, onClose, onFlashToast }: AccountDropdownProps) {
   if (!open) return null;
@@ -68,6 +92,20 @@ export default function AccountDropdown({ open, account, onClose, onFlashToast }
         <div style={{ height: 1, background: "var(--bd)", marginBottom: 4 }} />
         {ITEMS.map((it) => {
           const Icon = it.icon;
+          if (it.href) {
+            return (
+              <Link
+                key={it.label}
+                href={it.href}
+                className="am-mi"
+                onClick={onClose}
+                style={{ ...ITEM_STYLE, color: it.color }}
+              >
+                <Icon />
+                <span>{it.label}</span>
+              </Link>
+            );
+          }
           return (
             <button
               key={it.label}
@@ -82,19 +120,7 @@ export default function AccountDropdown({ open, account, onClose, onFlashToast }
                 }
                 onFlashToast(it.toast);
               }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 9,
-                width: "100%",
-                padding: "9px 10px",
-                border: 0,
-                borderRadius: 2,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                color: it.color,
-                fontSize: 13,
-              }}
+              style={{ ...ITEM_STYLE, color: it.color }}
             >
               <Icon />
               <span>{it.label}</span>

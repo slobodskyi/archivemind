@@ -1,6 +1,7 @@
 import { analyzeJobPayloadSchema } from "@archivemind/shared";
 import { analyzeImage, analyzeModel, embedImage, EMBEDDING_MODEL } from "../services/gemini";
 import { getObjectBuffer } from "../services/r2";
+import { recordUsage } from "../services/usage";
 import type { HandlerContext } from "./index";
 
 /** Analyze (spec §8.2), per asset: medium preview → Gemini structured output
@@ -85,11 +86,27 @@ export async function analyzeHandler({ pool, job, progress }: HandlerContext): P
       [row.workspace_id, row.asset_id, out.description, JSON.stringify(embedding)],
     );
 
-    await pool.query(
-      `insert into usage_events (workspace_id, user_id, job_id, event_type, units, model)
-       values ($1, $2, $3, 'image_analyzed', 1, $4), ($1, $2, $3, 'embedding', 1, $5)`,
-      [row.workspace_id, job.user_id, job.id, analyzeModel(), EMBEDDING_MODEL],
-    );
+    // Two rows, one credit: 'embedding' is the second half of this same call,
+    // kept separately for the §12 audit trail and priced at 0 so the meter
+    // doesn't double every analysis (packages/shared CREDIT_COST).
+    await recordUsage(pool, [
+      {
+        workspaceId: row.workspace_id,
+        userId: job.user_id,
+        jobId: job.id,
+        type: "image_analyzed",
+        units: 1,
+        model: analyzeModel(),
+      },
+      {
+        workspaceId: row.workspace_id,
+        userId: job.user_id,
+        jobId: job.id,
+        type: "embedding",
+        units: 1,
+        model: EMBEDDING_MODEL,
+      },
+    ]);
 
     await pool.query(`update assets set ai_processed_at = now() where id = $1`, [row.asset_id]);
     analyzed += 1;

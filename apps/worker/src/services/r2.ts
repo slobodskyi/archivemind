@@ -1,4 +1,10 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 
 /** Worker-side R2 access. Same constraints as the web app's client: the
  *  EU-jurisdiction endpoint (host contains `.eu.`) with path-style addressing
@@ -43,4 +49,16 @@ export async function putObject(key: string, body: Buffer, contentType: string):
 
 export async function deleteObject(key: string): Promise<void> {
   await r2().send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key }));
+}
+
+/** Size of a stored object without downloading it. Null when the key is gone —
+ *  the backfill script treats a missing preview as a fact to record (0 bytes we
+ *  are holding), not an error to retry. */
+export async function headObjectSize(key: string): Promise<number | null> {
+  try {
+    const out = await r2().send(new HeadObjectCommand({ Bucket: r2Bucket(), Key: key }));
+    return out.ContentLength ?? null;
+  } catch {
+    return null;
+  }
 }

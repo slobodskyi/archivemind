@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { searchResponseSchema, uuidSchema, type SearchParse } from "@archivemind/shared";
+import { costUsdFor, searchResponseSchema, uuidSchema, type SearchParse } from "@archivemind/shared";
 import { analyzeModel, embedText, parseSearchQuery } from "@/lib/gemini";
 import { assignTiers } from "@/lib/search-tiers";
 import { createClient } from "@/lib/supabase/server";
@@ -89,6 +89,9 @@ export async function GET(request: Request) {
     event_type: "search_query",
     units: 1,
     model: analyzeModel(),
+    // Costs us two model calls (parse + embed) and the user 0 credits —
+    // search is the core loop (packages/shared CREDIT_COST).
+    cost_usd: costUsdFor("search_query", 1),
   });
 
   // The RPC returns a ranked list with no cutoff; the tier annotation (ADR

@@ -32,22 +32,36 @@ export async function editHandler({ pool, job, progress }: HandlerContext): Prom
 
   let thumbKey: string | null = null;
   let mediumKey: string | null = null;
+  // Edited previews are a third copy of the image in R2 (original + previews +
+  // these), and until migration 20260727000002 nothing recorded their size —
+  // so an archive where every photo was cropped under-reported its own storage
+  // by a whole tier. Measured here, where the buffer is already in hand.
+  let thumbBytes: number | null = null;
+  let mediumBytes: number | null = null;
   for (const p of previews) {
     const key = editPreviewKey(row.workspace_id, asset_id, p.size);
     await putObject(key, p.data, "image/webp");
-    if (p.size === "thumb") thumbKey = key;
-    else if (p.size === "medium") mediumKey = key;
+    if (p.size === "thumb") {
+      thumbKey = key;
+      thumbBytes = p.data.length;
+    } else if (p.size === "medium") {
+      mediumKey = key;
+      mediumBytes = p.data.length;
+    }
   }
 
   await pool.query(
-    `insert into asset_edits (asset_id, recipe, edited_thumb_key, edited_medium_key)
-       values ($1, $2, $3, $4)
+    `insert into asset_edits (asset_id, recipe, edited_thumb_key, edited_medium_key,
+                              thumb_bytes, medium_bytes)
+       values ($1, $2, $3, $4, $5, $6)
      on conflict (asset_id) do update set
        recipe = excluded.recipe,
        edited_thumb_key = excluded.edited_thumb_key,
        edited_medium_key = excluded.edited_medium_key,
+       thumb_bytes = excluded.thumb_bytes,
+       medium_bytes = excluded.medium_bytes,
        updated_at = now()`,
-    [asset_id, JSON.stringify(recipe), thumbKey, mediumKey],
+    [asset_id, JSON.stringify(recipe), thumbKey, mediumKey, thumbBytes, mediumBytes],
   );
   await pool.query(`update assets set updated_at = now() where id = $1`, [asset_id]);
   await progress(100, "Edited", 1, 1);
