@@ -252,9 +252,14 @@ recent as (
 )
 select jsonb_build_object(
   'plan', (select to_jsonb(plan_row) from plan_row),
+  -- Emitted as plain dates, not timestamptz. A timestamptz serializes with the
+  -- server's UTC offset, and the UI formats in UTC to keep the server render
+  -- and the browser render identical — so on a non-UTC database "1 Aug
+  -- 00:00+03" would reach the reset line as "31 Jul". A date has no offset to
+  -- get lost. The comparisons above still use the timestamptz values.
   'period', jsonb_build_object(
-    'start', (select p_start from period),
-    'end',   (select p_end from period)
+    'start', (select p_start::date from period),
+    'end',   (select p_end::date from period)
   ),
   'storage', (
     select jsonb_build_object(
