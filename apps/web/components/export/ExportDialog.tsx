@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { EXPORT_MAX_ASSETS, type ArtboardSettings } from "@archivemind/shared";
+import { EXPORT_MAX_ASSETS, type ArtboardSettings, type WorkspaceInfo } from "@archivemind/shared";
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { useDialog } from "@/hooks/useDialog";
 import { photoSrc } from "@/lib/img";
@@ -10,6 +10,8 @@ interface ExportDialogProps {
   assetIds: string[];
   /** The workspace's loaded photos — the dialog looks up the ones it exports. */
   photos: Photo[];
+  /** Suggested document name — the current project's label. */
+  defaultTitle?: string;
   onClose: () => void;
 }
 
@@ -75,6 +77,17 @@ const CARD: React.CSSProperties = {
   maxWidth: "92vw",
   fontFamily: "inherit",
 };
+const INPUT: React.CSSProperties = {
+  width: "100%",
+  height: 28,
+  padding: "0 8px",
+  background: "var(--bg-sf)",
+  border: "1px solid var(--bd)",
+  borderRadius: 2,
+  color: "var(--t1)",
+  fontSize: 11.5,
+  fontFamily: "inherit",
+};
 const LABEL: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 700,
@@ -95,7 +108,13 @@ const LABEL: React.CSSProperties = {
  *
  *  Mounted only while open, so its state resets naturally each time (the parent
  *  gates it with `&&`). */
-export default function ExportDialog({ assetIds, photos, onClose }: ExportDialogProps) {
+export default function ExportDialog({ assetIds, photos, defaultTitle, onClose }: ExportDialogProps) {
+  const [title, setTitle] = useState(defaultTitle ?? "");
+  const [cover, setCover] = useState(false);
+  /** Workspace credit block — fetched lazily, edited here because the app has no
+   *  settings page and this is the only place a byline matters. */
+  const [credit, setCredit] = useState<WorkspaceInfo | null>(null);
+  const [creditOpen, setCreditOpen] = useState(false);
   const [format, setFormat] = useState<ArtboardSettings["format"]>("pdf");
   const [zipContents, setZipContents] = useState<ArtboardSettings["zipContents"]>("originals");
   const [layout, setLayout] = useState<ArtboardSettings["pageLayout"]>("one_per_page");
@@ -122,6 +141,36 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
 
   // Stop polling if the dialog unmounts mid-job (cleanup only — no state writes).
   useEffect(() => stopPoll, [stopPoll]);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const r = await fetch("/api/workspace");
+        if (!r.ok) return;
+        const info = (await r.json()) as WorkspaceInfo;
+        if (live) setCredit(info);
+      } catch {
+        // The credit block is optional — its absence must not block an export.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const saveCredit = useCallback(async (patch: Partial<WorkspaceInfo>) => {
+    setCredit((prev) => (prev ? { ...prev, ...patch } : prev));
+    try {
+      await fetch("/api/workspace", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    } catch {
+      // Optimistic: the next open re-reads the server's copy.
+    }
+  }, []);
 
   // While rendering, this dialog is the only place the finished link appears, so
   // it must not be dismissed out from under the job. The stall deadline below
@@ -186,8 +235,8 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
   }, [items, count, isCsv, isZip, inc.caption, captionLang, captionStyle, captionState]);
 
   const options: ArtboardSettings = useMemo(
-    () => ({ format, zipContents, pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
-    [format, zipContents, layout, pageSize, orientation, captionLang, captionStyle, inc],
+    () => ({ format, zipContents, cover, pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
+    [format, zipContents, cover, layout, pageSize, orientation, captionLang, captionStyle, inc],
   );
 
   // Describe what the run will actually contain — the old copy promised a
@@ -206,7 +255,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
       const res = await fetch("/api/exports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetIds: ids, options }),
+        body: JSON.stringify({ assetIds: ids, title: title.trim() || undefined, options }),
       });
       const data = (await res.json().catch(() => null)) as
         | { jobId?: string; accepted?: number | null; error?: string }
@@ -281,7 +330,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
       setErr("Couldn't start the export. Please try again.");
       setPhase("error");
     }
-  }, [ids, options, stopPoll]);
+  }, [ids, title, options, stopPoll]);
 
   const seg = (active: boolean, disabled = false): React.CSSProperties => ({
     flex: 1,
@@ -513,6 +562,21 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
             )}
 
             <div>
+              <div style={LABEL}>Document name</div>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                maxLength={120}
+                placeholder="Untitled"
+                aria-label="Document name"
+                style={INPUT}
+              />
+              <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 4 }}>
+                Used for the file name{isDoc ? ", the PDF title and the cover page" : ""}.
+              </div>
+            </div>
+
+            <div>
               <div style={LABEL}>Format</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button style={seg(format === "pdf")} onClick={() => setFormat("pdf")}>
@@ -645,6 +709,81 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                 </div>
               </div>
             )}
+
+            {isDoc && (
+              <div>
+                <div style={LABEL}>Cover page</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button style={seg(!cover)} onClick={() => setCover(false)} aria-pressed={!cover}>
+                    No cover
+                  </button>
+                  <button style={seg(cover)} onClick={() => setCover(true)} aria-pressed={cover}>
+                    Add cover
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <button
+                onClick={() => setCreditOpen((v) => !v)}
+                aria-expanded={creditOpen}
+                style={{
+                  ...LABEL,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: creditOpen ? 8 : 0,
+                  background: "transparent",
+                  border: 0,
+                  padding: 0,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {creditOpen ? "▾" : "▸"} Credit{" "}
+                {credit?.credit || credit?.creator ? (
+                  <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--t2)" }}>
+                    — {credit.credit ?? credit.creator}
+                  </span>
+                ) : (
+                  <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--t3)" }}>
+                    — not set
+                  </span>
+                )}
+              </button>
+              {creditOpen && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(
+                    [
+                      ["creator", "Creator", "Your name"],
+                      ["credit", "Credit line", "Photo: Your Name / Agency"],
+                      ["copyrightNotice", "Copyright", "© 2026 Your Name"],
+                      ["usageTerms", "Usage terms", "Editorial use only"],
+                    ] as const
+                  ).map(([key, label, placeholder]) => (
+                    <label key={key} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontSize: 10, color: "var(--t3)" }}>{label}</span>
+                      <input
+                        defaultValue={credit?.[key] ?? ""}
+                        placeholder={placeholder}
+                        disabled={!credit?.canEdit}
+                        onBlur={(e) => {
+                          const next = e.target.value.trim();
+                          if (next !== (credit?.[key] ?? "")) void saveCredit({ [key]: next } as Partial<WorkspaceInfo>);
+                        }}
+                        style={{ ...INPUT, opacity: credit?.canEdit ? 1 : 0.5 }}
+                      />
+                    </label>
+                  ))}
+                  <div style={{ fontSize: 10.5, color: "var(--t3)" }}>
+                    {credit?.canEdit
+                      ? "Saved for this workspace and printed in the page footer of every export."
+                      : "Only the workspace owner can change these."}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {phase === "error" && (
               <div style={{ fontSize: 11, color: "var(--red)" }} role="alert">

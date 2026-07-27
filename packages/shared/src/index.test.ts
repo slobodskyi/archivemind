@@ -7,6 +7,7 @@ import {
   EXPORT_ARTIFACTS,
   artboardSettingsSchema,
   assetKindFromMime,
+  exportFilename,
   exportFormatSchema,
   canvasGroupKindSchema,
   createCanvasGroupRequestSchema,
@@ -685,5 +686,30 @@ describe("resolveCaptionText fallback chain", () => {
   it("returns '' when no lang/style and no English exist", () => {
     expect(resolveCaptionText([{ lang: "uk", style: "social", text: "x" }], "ru", "agency")).toBe("");
     expect(resolveCaptionText([], "en", "agency")).toBe("");
+  });
+});
+
+describe("exportFilename", () => {
+  const date = "2026-07-27T15:04:05.000Z";
+
+  it("slugs the document title and stamps the date", () => {
+    expect(exportFilename("Odesa 2026", "pdf", date)).toBe("odesa-2026-2026-07-27.pdf");
+  });
+
+  it("keeps Cyrillic (the Content-Disposition carries filename* as UTF-8)", () => {
+    expect(exportFilename("Одеса, літо", "zip", date)).toBe("одеса-літо-2026-07-27.zip");
+  });
+
+  it("never yields a bare uuid or an empty stem", () => {
+    // The old download was named after the job id, which told the recipient nothing.
+    expect(exportFilename(null, "csv", date)).toBe("archivemind-2026-07-27.csv");
+    expect(exportFilename("!!!", "pdf", date)).toBe("archivemind-2026-07-27.pdf");
+    expect(exportFilename("   ", "pdf", date)).toBe("archivemind-2026-07-27.pdf");
+  });
+
+  it("collapses separators and bounds the stem", () => {
+    expect(exportFilename("a  //  b", "pdf", date)).toBe("a-b-2026-07-27.pdf");
+    const long = exportFilename("x".repeat(200), "pdf", date);
+    expect(long.startsWith(`${"x".repeat(60)}-`)).toBe(true);
   });
 });

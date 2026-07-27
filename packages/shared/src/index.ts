@@ -484,6 +484,9 @@ export const artboardSettingsSchema = z.object({
   format: exportFormatSchema.default("pdf"),
   /** Only meaningful for format 'zip'. */
   zipContents: zipContentsSchema.default("originals"),
+  /** PDF only: prepend a cover page (title, count, date range, credit block).
+   *  Default false — an extra page nobody asked for is a surprise. */
+  cover: z.boolean().default(false),
   pageLayout: pageLayoutSchema.default("one_per_page"),
   pageSize: pageSizeSchema.default("A4"),
   orientation: pageOrientationSchema.default("portrait"),
@@ -606,6 +609,20 @@ export type PatchWorkspaceRequest = z.infer<typeof patchWorkspaceRequestSchema>;
  *  every workspace member can read and that broadcasts on update). */
 export const EXPORT_RETENTION_DAYS = 8;
 
+/** Filename for a downloaded artifact: a slug of the document title plus the
+ *  date, e.g. `odesa-2026-2026-07-27.pdf`. Shared so the Content-Disposition the
+ *  web route signs and any future client-side naming cannot drift. Falls back to
+ *  "archivemind" — never to the job uuid, which is what users used to get. */
+export function exportFilename(title: string | null | undefined, ext: string, isoDate: string): string {
+  const slug = (title ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `${slug || "archivemind"}-${isoDate.slice(0, 10)}.${ext}`;
+}
+
 /** Pages per export. One source of truth: the request cap, the payload cap, the
  *  worker's group-query LIMIT and the number the dialog shows all read this. */
 export const EXPORT_MAX_ASSETS = 500;
@@ -622,6 +639,11 @@ export const createExportRequestSchema = z
   .object({
     groupId: uuidSchema.optional(),
     assetIds: z.array(uuidSchema).min(1).max(EXPORT_MAX_ASSETS).optional(),
+    /** Document name: the PDF's Title metadata, the cover page heading, and the
+     *  basis of the download filename. The client supplies it (it knows the
+     *  project/artboard the run came from) because the route resolves a
+     *  project_id only in the groupId branch, which no client reaches. */
+    title: z.string().trim().max(120).optional(),
     options: artboardSettingsSchema,
   })
   .refine((v) => v.groupId !== undefined || (v.assetIds !== undefined && v.assetIds.length > 0), {
@@ -639,6 +661,7 @@ export const exportJobPayloadSchema = z
   .object({
     group_id: uuidSchema.optional(),
     asset_ids: z.array(uuidSchema).min(1).max(EXPORT_MAX_ASSETS).optional(),
+    title: z.string().max(120).optional(),
     options: artboardSettingsSchema,
     /** R2 key of the finished artifact, written back by the worker. Presigned
      *  per request by GET /api/exports; cleared by the retention sweep once the

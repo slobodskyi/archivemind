@@ -56,11 +56,32 @@ const PRESIGN_GET_TTL_SECONDS = 60 * 60; // spec §12: 1 h GET
  *  Remaining validity is always 30–60 min, inside the spec §12 1 h TTL. */
 const SIGNING_BUCKET_MS = 30 * 60 * 1000;
 
-/** Presigned GET for serving previews to the browser (zero-egress R2). */
-export async function presignGet(key: string): Promise<string> {
-  const command = new GetObjectCommand({ Bucket: r2Bucket(), Key: key });
-  const signingDate = new Date(Math.floor(Date.now() / SIGNING_BUCKET_MS) * SIGNING_BUCKET_MS);
+/** Presigned GET for serving previews to the browser (zero-egress R2).
+ *
+ *  `filename` sets ResponseContentDisposition so a download lands with a human
+ *  name. It has to be signed into the URL: the `download` attribute on an <a> is
+ *  ignored cross-origin, and a presigned URL is on the R2 host, so exports used
+ *  to save as a job uuid. Passing it also opts out of the signing-date bucket —
+ *  bucketing exists to keep preview URLs byte-identical for the browser cache,
+ *  which does not apply to a one-off deliverable. */
+export async function presignGet(key: string, filename?: string): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: r2Bucket(),
+    Key: key,
+    ...(filename ? { ResponseContentDisposition: contentDisposition(filename) } : {}),
+  });
+  const signingDate = filename
+    ? undefined
+    : new Date(Math.floor(Date.now() / SIGNING_BUCKET_MS) * SIGNING_BUCKET_MS);
   return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_GET_TTL_SECONDS, signingDate });
+}
+
+/** RFC 6266 / 5987 attachment header. A Cyrillic filename cannot go in the plain
+ *  `filename=` token, so it also ships percent-encoded in `filename*`, and the
+ *  ASCII fallback is stripped rather than mangled. */
+export function contentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, "").replace(/["\\]/g, "") || "download";
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 /** Delete one object (idempotent — S3 delete of a missing key succeeds). The

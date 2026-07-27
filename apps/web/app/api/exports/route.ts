@@ -3,6 +3,7 @@ import {
   EXPORT_MAX_ASSETS,
   EXPORT_MAX_IN_FLIGHT,
   createExportRequestSchema,
+  exportFilename,
   exportResultSchema,
   uuidSchema,
   type ExportResult,
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
     if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 });
     if (!group) return NextResponse.json({ error: "group_not_found" }, { status: 404 });
     projectId = (group.project_id as string | null) ?? null;
-    payload = { group_id: parsed.data.groupId, options: parsed.data.options };
+    payload = { group_id: parsed.data.groupId, options: parsed.data.options, title: parsed.data.title };
   } else {
     // Ad-hoc selection — keep only active, visible assets, preserving order.
     // Duplicates are collapsed: the same id repeated would otherwise render the
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
     const ownedSet = new Set((owned ?? []).map((a) => a.id as string));
     const assetIds = ids.filter((aid) => ownedSet.has(aid));
     if (assetIds.length === 0) return NextResponse.json({ error: "no_matching_assets" }, { status: 404 });
-    payload = { asset_ids: assetIds, options: parsed.data.options };
+    payload = { asset_ids: assetIds, options: parsed.data.options, title: parsed.data.title };
     accepted = assetIds.length;
   }
 
@@ -141,8 +142,21 @@ export async function GET(request: Request) {
   // stored URL died on day 8 while this route kept serving it with status 'done'
   // and no way to mint another. A cleared key means the retention sweep has
   // deleted the object, so there is deliberately nothing to offer.
-  const payload = (job.payload ?? {}) as { result_key?: unknown };
-  const url = typeof payload.result_key === "string" ? await presignGet(payload.result_key) : null;
+  const payload = (job.payload ?? {}) as { result_key?: unknown; title?: unknown };
+  const key = typeof payload.result_key === "string" ? payload.result_key : null;
+  // Sign a human filename into the URL — the download used to save as the job's
+  // uuid, because the presigned URL is cross-origin and the <a download>
+  // attribute is ignored there.
+  const url = key
+    ? await presignGet(
+        key,
+        exportFilename(
+          typeof payload.title === "string" ? payload.title : null,
+          key.split(".").pop() ?? "pdf",
+          new Date().toISOString(),
+        ),
+      )
+    : null;
   const body: ExportResult = {
     jobId: job.id as string,
     status: exportResultSchema.shape.status.parse(job.status),

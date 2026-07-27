@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   MIN_IMG_H,
   clampLines,
+  coverLines,
   fitScale,
+  footerCredit,
   planPhotoPage,
   truncateToWidth,
   wrap,
@@ -135,5 +137,74 @@ describe("truncateToWidth", () => {
 
   it("returns empty rather than a bare ellipsis when nothing fits", () => {
     expect(truncateToWidth("ABC", measure, 8, 2)).toBe("");
+  });
+});
+
+describe("footerCredit", () => {
+  const ws = { creator: null, credit: null, copyright_notice: null, usage_terms: null };
+
+  it("prefers the explicit credit line over the creator's name", () => {
+    expect(footerCredit({ ...ws, creator: "O. Slobodskyi", credit: "Photo: O. S. / Agency" })).toBe(
+      "Photo: O. S. / Agency",
+    );
+  });
+
+  it("falls back to the creator, then to nothing", () => {
+    expect(footerCredit({ ...ws, creator: "O. Slobodskyi" })).toBe("O. Slobodskyi");
+    expect(footerCredit(ws)).toBe("");
+    expect(footerCredit(null)).toBe("");
+  });
+
+  it("ignores whitespace-only values rather than printing a blank footer", () => {
+    expect(footerCredit({ ...ws, credit: "   " })).toBe("");
+  });
+});
+
+describe("coverLines", () => {
+  const none = { creator: null, credit: null, copyright_notice: null, usage_terms: null };
+  const range = { from: "2026-06-01T10:00:00.000Z", to: "2026-06-09T18:00:00.000Z" };
+
+  it("leads with the count, pluralised", () => {
+    expect(coverLines(1, { from: null, to: null }, null)[0]).toBe("1 photograph");
+    expect(coverLines(24, { from: null, to: null }, null)[0]).toBe("24 photographs");
+  });
+
+  it("renders a date range as dates, not timestamps", () => {
+    expect(coverLines(3, range, null)[1]).toBe("2026-06-01 — 2026-06-09");
+  });
+
+  it("collapses a single-day range to one date", () => {
+    expect(coverLines(3, { from: range.from, to: range.from }, null)[1]).toBe("2026-06-01");
+  });
+
+  it("omits the date line entirely when nothing is dated", () => {
+    expect(coverLines(3, { from: null, to: null }, null)).toEqual(["3 photographs"]);
+  });
+
+  it("appends the rights block in order", () => {
+    const lines = coverLines(2, { from: null, to: null }, {
+      creator: "O. Slobodskyi",
+      credit: "Photo: O. S. / Agency",
+      copyright_notice: "© 2026 O. Slobodskyi",
+      usage_terms: "Editorial use only.",
+    });
+    expect(lines).toEqual([
+      "2 photographs",
+      "O. Slobodskyi",
+      "Photo: O. S. / Agency",
+      "© 2026 O. Slobodskyi",
+      "Editorial use only.",
+    ]);
+  });
+
+  it("does not print the same value twice when creator and credit agree", () => {
+    const lines = coverLines(1, { from: null, to: null }, { ...none, creator: "O. S.", credit: "O. S." });
+    expect(lines).toEqual(["1 photograph", "O. S."]);
+  });
+
+  it("skips blank rights fields", () => {
+    expect(coverLines(1, { from: null, to: null }, { ...none, creator: "  ", usage_terms: "" })).toEqual([
+      "1 photograph",
+    ]);
   });
 });
