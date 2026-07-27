@@ -80,6 +80,7 @@ const LABEL: React.CSSProperties = {
  *  Mounted only while open, so its state resets naturally each time (the parent
  *  gates it with `&&`). */
 export default function ExportDialog({ assetIds, photos, onClose }: ExportDialogProps) {
+  const [format, setFormat] = useState<ArtboardSettings["format"]>("pdf");
   const [layout, setLayout] = useState<ArtboardSettings["pageLayout"]>("one_per_page");
   const [pageSize, setPageSize] = useState<ArtboardSettings["pageSize"]>("A4");
   const [orientation, setOrientation] = useState<ArtboardSettings["orientation"]>("portrait");
@@ -121,6 +122,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
 
   const ids = useMemo(() => items.map((i) => i.id), [items]);
   const count = ids.length;
+  const isCsv = format === "captions_csv";
 
   const captionState = useCallback(
     (photo: Photo | undefined): "exact" | "fallback" | "none" => {
@@ -134,6 +136,9 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
   );
 
   const warnings = useMemo(() => {
+    // A CSV embeds no images and omits nothing: a missing preview or caption is
+    // simply an empty cell, which is information rather than a broken page.
+    if (isCsv) return [];
     if (!inc.caption && count > 0) {
       const noPreview = items.filter((i) => i.photo && !i.photo.srcMedium && !i.photo.src).length;
       return noPreview > 0 ? [`${noPreview} of ${count} have no preview yet — those pages print blank.`] : [];
@@ -153,11 +158,11 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
     if (none > 0) out.push(`${none} have no caption at all and will print without one.`);
     if (noPreview > 0) out.push(`${noPreview} have no preview yet — those pages print blank.`);
     return out;
-  }, [items, count, inc.caption, captionLang, captionStyle, captionState]);
+  }, [items, count, isCsv, inc.caption, captionLang, captionStyle, captionState]);
 
   const options: ArtboardSettings = useMemo(
-    () => ({ pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
-    [layout, pageSize, orientation, captionLang, captionStyle, inc],
+    () => ({ format, pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
+    [format, layout, pageSize, orientation, captionLang, captionStyle, inc],
   );
 
   // Describe what the run will actually contain — the old copy promised a
@@ -294,16 +299,18 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
         style={CARD}
       >
         <div id={titleId} style={{ fontSize: 13, fontWeight: 800, color: "var(--t1)", marginBottom: 2 }}>
-          Export to PDF
+          {isCsv ? "Export captions as CSV" : "Export to PDF"}
         </div>
         <div style={{ fontSize: 11.5, color: "var(--t3)", marginBottom: 16 }}>
-          {count} {count === 1 ? "photo" : "photos"} · {under}
-          {layout === "one_per_page" ? ` · ${count} ${count === 1 ? "page" : "pages"}` : " · 2 per row"}
+          {count} {count === 1 ? "photo" : "photos"} ·{" "}
+          {isCsv
+            ? "one row each · captions in EN, UK and RU"
+            : `${under}${layout === "one_per_page" ? ` · ${count} ${count === 1 ? "page" : "pages"}` : " · 2 per row"}`}
         </div>
 
         {phase === "ready" && url ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 12, color: "var(--t2)" }}>Your PDF is ready.</div>
+            <div style={{ fontSize: 12, color: "var(--t2)" }}>Your {isCsv ? "CSV" : "PDF"} is ready.</div>
             <a
               href={url}
               target="_blank"
@@ -322,7 +329,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                 textDecoration: "none",
               }}
             >
-              Download PDF
+              Download {isCsv ? "CSV" : "PDF"}
             </a>
             <button onClick={onClose} style={{ ...seg(false), height: 32 }}>
               Close
@@ -330,7 +337,9 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
           </div>
         ) : phase === "working" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "8px 0 4px" }} aria-live="polite">
-            <div style={{ fontSize: 12, color: "var(--t2)" }}>{progressLabel ?? "Rendering your PDF…"}</div>
+            <div style={{ fontSize: 12, color: "var(--t2)" }}>
+              {progressLabel ?? (isCsv ? "Collecting captions…" : "Rendering your PDF…")}
+            </div>
             <div
               style={{ height: 3, background: "var(--bd)", borderRadius: 2, overflow: "hidden", position: "relative" }}
               role="progressbar"
@@ -361,7 +370,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {count > 0 && (
               <div>
-                <div style={LABEL}>Pages, in order</div>
+                <div style={LABEL}>{isCsv ? "Rows, in order" : "Pages, in order"}</div>
                 <div
                   style={{
                     maxHeight: 148,
@@ -471,57 +480,87 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
             )}
 
             <div>
-              <div style={LABEL}>Layout</div>
+              <div style={LABEL}>Format</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <button style={seg(layout === "one_per_page")} onClick={() => setLayout("one_per_page")}>
-                  One per page
+                <button style={seg(format === "pdf")} onClick={() => setFormat("pdf")}>
+                  PDF document
                 </button>
-                <button style={seg(layout === "grid")} onClick={() => setLayout("grid")}>
-                  Grid
+                <button style={seg(isCsv)} onClick={() => setFormat("captions_csv")}>
+                  Captions CSV
                 </button>
               </div>
+              {isCsv && (
+                <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
+                  One row per photo: filename, full EXIF, place, tags, the AI description, facts split
+                  by review status, and the captions in all three languages of the chosen style.
+                </div>
+              )}
             </div>
 
-            <div>
-              <div style={LABEL}>Page</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                <button style={seg(pageSize === "A4")} onClick={() => setPageSize("A4")}>
-                  A4
-                </button>
-                <button style={seg(pageSize === "Letter")} onClick={() => setPageSize("Letter")}>
-                  Letter
-                </button>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button style={seg(orientation === "portrait")} onClick={() => setOrientation("portrait")}>
-                  Portrait
-                </button>
-                <button style={seg(orientation === "landscape")} onClick={() => setOrientation("landscape")}>
-                  Landscape
-                </button>
-              </div>
-            </div>
+            {!isCsv && (
+              <>
+                <div>
+                  <div style={LABEL}>Layout</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={seg(layout === "one_per_page")} onClick={() => setLayout("one_per_page")}>
+                      One per page
+                    </button>
+                    <button style={seg(layout === "grid")} onClick={() => setLayout("grid")}>
+                      Grid
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={LABEL}>Page</div>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <button style={seg(pageSize === "A4")} onClick={() => setPageSize("A4")}>
+                      A4
+                    </button>
+                    <button style={seg(pageSize === "Letter")} onClick={() => setPageSize("Letter")}>
+                      Letter
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button style={seg(orientation === "portrait")} onClick={() => setOrientation("portrait")}>
+                      Portrait
+                    </button>
+                    <button style={seg(orientation === "landscape")} onClick={() => setOrientation("landscape")}>
+                      Landscape
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div>
-              <div style={LABEL}>Caption language / style</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                {LANGS.map((l) => (
-                  <button
-                    key={l.key}
-                    style={seg(captionLang === l.key, !inc.caption)}
-                    disabled={!inc.caption}
-                    onClick={() => setCaptionLang(l.key)}
-                  >
-                    {l.label}
-                  </button>
-                ))}
-              </div>
+              <div style={LABEL}>{isCsv ? "Caption style" : "Caption language / style"}</div>
+              {/* A CSV carries every language, so the lang picker would be a
+                  control that changes nothing — say that instead of showing it. */}
+              {isCsv ? (
+                <div style={{ fontSize: 10.5, color: "var(--t3)", marginBottom: 6 }}>
+                  All three languages are included as their own columns.
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  {LANGS.map((l) => (
+                    <button
+                      key={l.key}
+                      style={seg(captionLang === l.key, !inc.caption)}
+                      disabled={!inc.caption}
+                      onClick={() => setCaptionLang(l.key)}
+                    >
+                      {l.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 6 }}>
                 {STYLES.map((s) => (
                   <button
                     key={s.key}
-                    style={seg(captionStyle === s.key, !inc.caption)}
-                    disabled={!inc.caption}
+                    style={seg(captionStyle === s.key, !isCsv && !inc.caption)}
+                    disabled={!isCsv && !inc.caption}
                     onClick={() => setCaptionStyle(s.key)}
                   >
                     {s.label}
@@ -530,27 +569,29 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
               </div>
             </div>
 
-            <div>
-              <div style={LABEL}>Under each photo</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {(
-                  [
-                    ["caption", "Caption"],
-                    ["title", "Title"],
-                    ["exif", "EXIF"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    style={{ ...seg(inc[key]), flex: "0 0 auto", padding: "0 12px" }}
-                    aria-pressed={inc[key]}
-                    onClick={() => setInc((p) => ({ ...p, [key]: !p[key] }))}
-                  >
-                    {label}
-                  </button>
-                ))}
+            {!isCsv && (
+              <div>
+                <div style={LABEL}>Under each photo</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(
+                    [
+                      ["caption", "Caption"],
+                      ["title", "Title"],
+                      ["exif", "EXIF"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      style={{ ...seg(inc[key]), flex: "0 0 auto", padding: "0 12px" }}
+                      aria-pressed={inc[key]}
+                      onClick={() => setInc((p) => ({ ...p, [key]: !p[key] }))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {phase === "error" && (
               <div style={{ fontSize: 11, color: "var(--red)" }} role="alert">
@@ -580,7 +621,7 @@ export default function ExportDialog({ assetIds, photos, onClose }: ExportDialog
                   fontFamily: "inherit",
                 }}
               >
-                {phase === "error" ? "Try again" : "Export PDF"}
+                {phase === "error" ? "Try again" : isCsv ? "Export CSV" : "Export PDF"}
               </button>
             </div>
           </div>

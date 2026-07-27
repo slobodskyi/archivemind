@@ -479,7 +479,28 @@ Graceful degradation: no GPS in archive (common for pro cameras) → place match
 Log `search_query` usage_event. Latency budget: 1 analyze-model call + 1 embed + 1 SQL ≈ well under Vercel limits.
 
 ### 8.5 Export (`type='export'`)
-Payload: asset_ids, langs, style. Worker builds ZIP (owned original files where present, else medium previews + note) + `captions.csv` (asset title, lang, style, text, tags, facts, EXIF) → R2 `exports/` → presigned GET (7 days) in `ai_jobs.payload.result_url`.
+**Shipped shape (ADR 0035 + its Amendments) — this paragraph is the current contract.**
+Payload: `{group_id | asset_ids, options}` where `options` is `artboardSettingsSchema`
+(`format`, page layout/size/orientation, caption lang×style, `include`). Two formats today:
+
+- `format: 'pdf'` — a laid-out document, one photo per page or a 2-up contact sheet,
+  rendered from the **medium previews** (edited-medium when present). Facts are
+  deliberately not printed; see the ADR amendment.
+- `format: 'captions_csv'` — the caption spreadsheet this section originally
+  specified: one row per photo with filename, full EXIF (camera/lens/ISO/aperture/
+  shutter), place + lat/lon, tags, the AI description, facts **split into
+  `facts_confirmed` / `facts_unreviewed`**, and `caption_en|uk|ru` for the chosen
+  style (exact lookup — no English fallback, so an empty cell is the "still needs
+  translating" signal). UTF-8 BOM + CRLF so Excel reads Cyrillic.
+
+The worker writes the artifact to R2 `{workspace_id}/exports/{job_id}.{ext}` and puts
+that **key** in `ai_jobs.payload.result_key`. `GET /api/exports` presigns it per
+request; no bearer URL is stored or broadcast (the old `result_url` was readable by
+every workspace member through `ai_jobs` RLS and pushed to all of them on update).
+Artifacts are deleted by `sweepExpiredExports` after `EXPORT_RETENTION_DAYS`.
+
+A ZIP bundle (originals where present, previews + a note for Drive-linked files) is
+the planned third `format` and does not exist yet.
 
 ### Cost notes (recorded per event; re-verify current prices at Phase 2)
 - `gemini-3.1-flash-lite` analyze/caption: ≈ $0.31–0.35 per 1000 images ($0.25/M in, $1.50/M out; ~half at `media_resolution=medium`, ~half again via Batch API).

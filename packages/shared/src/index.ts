@@ -445,7 +445,27 @@ export type PageLayout = z.infer<typeof pageLayoutSchema>;
 export const pageSizeSchema = z.enum(["A4", "Letter"]);
 export const pageOrientationSchema = z.enum(["portrait", "landscape"]);
 
+/** What an export run produces. FLAT field, deliberately not a discriminated
+ *  union on `format`: three live call sites do `artboardSettingsSchema.parse(<a
+ *  maybe-{} settings blob>)` and a union would reject them. Every field defaults,
+ *  so a settings row written before a format existed still parses as 'pdf'.
+ *
+ *  `captions_csv` is the shape TECH_SPEC §8.5 originally specified and ADR 0035
+ *  parked: a PDF is NOT a superset of a spreadsheet — you cannot paste a PDF page
+ *  into an agency's caption field, and until this existed the only way to get
+ *  generated captions out was the drawer's Copy button, one at a time. */
+export const exportFormatSchema = z.enum(["pdf", "captions_csv"]);
+export type ExportFormat = z.infer<typeof exportFormatSchema>;
+
+/** Extension + MIME per format, so the worker has no hardcoded ".pdf". */
+export const EXPORT_ARTIFACTS: Record<ExportFormat, { ext: string; contentType: string }> = {
+  pdf: { ext: "pdf", contentType: "application/pdf" },
+  // charset matters: the CSV carries uk/ru captions and opens in Excel.
+  captions_csv: { ext: "csv", contentType: "text/csv; charset=utf-8" },
+};
+
 export const artboardSettingsSchema = z.object({
+  format: exportFormatSchema.default("pdf"),
   pageLayout: pageLayoutSchema.default("one_per_page"),
   pageSize: pageSizeSchema.default("A4"),
   orientation: pageOrientationSchema.default("portrait"),

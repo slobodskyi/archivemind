@@ -2,6 +2,7 @@ import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf
 import fontkit from "@pdf-lib/fontkit";
 import sharp from "sharp";
 import {
+  EXPORT_ARTIFACTS,
   EXPORT_MAX_ASSETS,
   artboardSettingsSchema,
   exportJobPayloadSchema,
@@ -10,13 +11,18 @@ import {
   type CaptionLang,
   type CaptionRowLike,
   type CaptionStyleKey,
+  type ExportJobPayload,
 } from "@archivemind/shared";
+import type pg from "pg";
 import { getObjectBuffer, putObject } from "../services/r2";
 import { loadPdfFont } from "../services/pdf-font";
+import { renderCaptionsCsv } from "./export-csv";
 import type { HandlerContext } from "./index";
 
-/** Artboard → PDF export (ADR 0035). Reads a group's ordered members (or an
- *  ad-hoc selection), renders each photo with its caption underneath into a PDF,
+/** Artboard → PDF / captions.csv export (ADR 0035 + its Amendments). Reads a
+ *  group's ordered members (or an ad-hoc selection), renders the artifact the
+ *  requested `format` asks for — a laid-out PDF, or the caption spreadsheet
+ *  TECH_SPEC §8.5 originally specified (see ./export-csv) —
  *  stores it in R2 under {workspace_id}/exports/{job_id}.pdf, and writes
  *  its R2 key into ai_jobs.payload.result_key — the web route presigns that per
  *  request, so no bearer URL is ever stored or broadcast (the client polls
@@ -26,7 +32,7 @@ import type { HandlerContext } from "./index";
  *  R2 already holds them for every source, and 1024px is ample for a page. The
  *  embedded font (services/pdf-font) covers Cyrillic so uk/ru captions render. */
 
-interface ExportRow {
+export interface ExportRow {
   asset_id: string;
   title: string | null;
   medium_key: string | null;
@@ -234,12 +240,13 @@ function drawPlaceholder(
   });
 }
 
-export async function exportHandler({ pool, job, progress }: HandlerContext): Promise<void> {
-  const payload = exportJobPayloadSchema.parse(job.payload);
-  const options = artboardSettingsSchema.parse(payload.options);
-  await progress(4, "Preparing export", 0, 1);
-
-  // 1. Ordered asset list (group members by position, or the selection's order).
+/** The run's assets, in page order. Format-agnostic: the group branch trusts
+ *  canvas_group_assets.position, the selection branch re-imposes the order the
+ *  client sent (which openExportFor puts into canvas reading order). */
+export async function collectExportRows(
+  pool: pg.Pool,
+  payload: ExportJobPayload,
+): Promise<ExportRow[]> {
   let rows: ExportRow[];
   if (payload.group_id) {
     const r = await pool.query<ExportRow>(
@@ -270,13 +277,34 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     rows = ids.map((id) => byId.get(id)).filter((x): x is ExportRow => Boolean(x));
   }
   if (rows.length === 0) throw new Error("export_empty");
+  return rows;
+}
+
+export async function exportHandler({ pool, job, progress }: HandlerContext): Promise<void> {
+  const payload = exportJobPayloadSchema.parse(job.payload);
+  const options = artboardSettingsSchema.parse(payload.options);
+  await progress(4, "Preparing export", 0, 1);
+
+  const rows = await collectExportRows(pool, payload);
+  const total = rows.length;
+
+  const artifact = EXPORT_ARTIFACTS[options.format];
+  const key = `${job.workspace_id}/exports/${job.id}.${artifact.ext}`;
+
+  // captions_csv needs no images, no font and no page geometry — it shares only
+  // the row collection above and the storage tail below.
+  if (options.format === "captions_csv") {
+    await progress(20, `Writing ${total} caption row(s)`, 0, total);
+    const csv = await renderCaptionsCsv(pool, rows, options);
+    await finishExport({ pool, job, progress }, key, csv, artifact.contentType, total, 0);
+    return;
+  }
 
   const assetIds = rows.map((r) => r.asset_id);
-  const total = rows.length;
   /** Photos that ended up as a placeholder — reported, not silently swallowed. */
   let skipped = 0;
 
-  // 2. Caption / facts / exif in batch, keyed by asset.
+  // Caption / exif in batch, keyed by asset.
   const capByAsset = new Map<string, CaptionRowLike[]>();
   if (options.include.caption) {
     const capRes = await pool.query<{ asset_id: string; lang: string; style: string; text: string }>(
@@ -430,19 +458,28 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
     }
   }
 
-  // 4. Store the artifact and hand back its KEY, not a URL.
-  //
-  // This used to write a 7-day presigned URL into ai_jobs.payload. Two problems:
-  // `ai_jobs` RLS is is_member(workspace_id) with no column restriction AND the
-  // payload UPDATE fires the Realtime broadcast trigger, so that bearer URL —
-  // which bypasses RLS for anyone holding it — was readable by every member of
-  // the workspace and pushed to all of them on completion. And it rotted: from
-  // day 8 the GET route handed back a dead signature with status 'done' and
-  // there was no way to mint another. The key is durable; the web route presigns
-  // it per request for the caller who is entitled to it.
-  const pdf = Buffer.from(await doc.save());
-  const key = `${job.workspace_id}/exports/${job.id}.pdf`;
-  await putObject(key, pdf, "application/pdf");
+  await finishExport({ pool, job, progress }, key, Buffer.from(await doc.save()), artifact.contentType, total, skipped);
+}
+
+/** Store the artifact and hand back its KEY, not a URL — shared by every format.
+ *
+ *  This used to write a 7-day presigned URL into ai_jobs.payload. Two problems:
+ *  `ai_jobs` RLS is is_member(workspace_id) with no column restriction AND the
+ *  payload UPDATE fires the Realtime broadcast trigger, so that bearer URL —
+ *  which bypasses RLS for anyone holding it — was readable by every member of the
+ *  workspace and pushed to all of them on completion. And it rotted: from day 8
+ *  the GET route handed back a dead signature with status 'done' and there was no
+ *  way to mint another. The key is durable; the web route presigns it per request
+ *  for the caller who is entitled to it. */
+async function finishExport(
+  { pool, job, progress }: HandlerContext,
+  key: string,
+  body: Buffer,
+  contentType: string,
+  total: number,
+  skipped: number,
+): Promise<void> {
+  await putObject(key, body, contentType);
   await pool.query(`update ai_jobs set payload = payload || $1::jsonb where id = $2`, [
     JSON.stringify({ result_key: key, skipped_previews: skipped }),
     job.id,
@@ -453,7 +490,7 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   // carried for billing. It is also the most expensive non-AI operation per
   // invocation (N R2 GETs + N sharp transcodes + a stored artifact), and
   // recording the page count is what makes the R2 growth attributable to a
-  // workspace after the fact.
+  // workspace after the fact — and which format users actually pick.
   await pool.query(
     `insert into usage_events (workspace_id, user_id, job_id, event_type, units)
      values ($1, $2, $3, 'export', $4)`,
