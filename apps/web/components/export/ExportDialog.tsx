@@ -47,7 +47,7 @@ export default function ExportDialog({ assetIds, onClose }: ExportDialogProps) {
   const [pageSize, setPageSize] = useState<ArtboardSettings["pageSize"]>("A4");
   const [captionLang, setCaptionLang] = useState<ArtboardSettings["captionLang"]>("en");
   const [captionStyle, setCaptionStyle] = useState<ArtboardSettings["captionStyle"]>("agency");
-  const [inc, setInc] = useState({ caption: true, title: true, facts: false, exif: false });
+  const [inc, setInc] = useState({ caption: true, title: true, exif: false });
   const [phase, setPhase] = useState<Phase>("config");
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string>("");
@@ -222,7 +222,6 @@ export default function ExportDialog({ assetIds, onClose }: ExportDialogProps) {
                   [
                     ["caption", "Caption"],
                     ["title", "Title"],
-                    ["facts", "Facts"],
                     ["exif", "EXIF"],
                   ] as const
                 ).map(([key, label]) => (

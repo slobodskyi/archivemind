@@ -56,6 +56,8 @@ What goes under each photo is configurable (`caption`, `title`, `facts`, `exif`)
 — caption + title on by default. Caption text is resolved by the shared
 `resolveCaptionText` (exact lang×style → English-of-style → any → "") so web and
 worker never disagree on which caption a photo shows.
+*(Amended 2026-07-27 — `facts` is gone and `grid` never honoured `title`/`exif`;
+see Amendments.)*
 
 ## Consequences
 
@@ -71,3 +73,39 @@ worker never disagree on which caption a photo shows.
 - The delivered URL lives in `ai_jobs.payload.result_url` (no dedicated column),
   matching the spec's convention; the GET route reads it back after Realtime
   signals done.
+
+## Amendments
+
+### 2026-07-27 — facts leave the PDF; the page geometry is bounded
+
+An audit of the shipped v1 found two things this ADR got wrong.
+
+**Facts are no longer rendered, and the `include.facts` flag is removed.** §4
+listed facts as one of four configurable blocks. But `analyze` only ever writes
+`status='likely'` (EXIF-derived) or `'needs_check'` (AI-visual), and nothing
+writes `'confirmed'` automatically — so on any asset the user has not hand-reviewed,
+*every* fact is an unreviewed model guess. The handler selected them with no status
+predicate and drew all three states as byte-identical grey bullets. That made the
+export a larger laundering surface than the caption prompt, which
+`handlers/caption.ts` deliberately restricts to `status = 'confirmed'` for exactly
+this reason (see ARCHITECTURE.md's Facts entry: confirming is an AI action, not
+bookkeeping). A document that leaves the building must not assert the model's
+guesses in the same visual register as facts a human verified. Facts belong in the
+captions CSV instead, where they can carry their status as a column and a machine
+consumer can filter. `artboardSettingsSchema` is not `.strict()`, so settings rows
+persisted with a `facts` key still parse — the key is stripped.
+
+**The page geometry is now a bounded pure function.** `imgAreaH` was
+`pageH - MARGIN*2 - textH - 16` with no floor. `textH` summed unbounded wrapped
+line counts, so a long enough text block drove it negative; `Math.min` then picked
+the negative ratio and `page.drawImage` received negative width *and* height.
+pdf-lib does not validate the sign, so the photo rendered point-reflected as a
+sliver hanging off the top of the page, overlapping the text — and the handler
+still reported "Export ready". Dropping facts removes the most reachable path to
+it (facts were selected with no `LIMIT`, where the caption prompt uses `limit 6`),
+but one long caption reaches it too. So `planPhotoPage()` and `fitScale()` are now
+exported pure functions, unit-tested in `export-logic.test.ts`, that reserve
+`MIN_IMG_H` for the photo and truncate the caption with an ellipsis rather than
+letting text consume the page; `fitScale` can no longer return a negative scale.
+`wrap()` also hard-breaks a single token wider than the column, which previously
+drew past the margin.

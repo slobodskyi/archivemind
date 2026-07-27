@@ -453,14 +453,20 @@ export const artboardSettingsSchema = z.object({
   captionStyle: captionStyleSchema.default("agency"),
   // Explicit literal default: a bare .default({}) would be used as-is (zod does
   // not re-parse the default), leaving the inner booleans undefined.
+  //
+  // There is deliberately no `facts` flag. `analyze` only ever writes 'likely'
+  // or 'needs_check' facts, so a PDF that prints them asserts unreviewed model
+  // output to a client in the same register as facts the user confirmed. Facts
+  // travel in the captions CSV instead, carrying their status. Settings rows
+  // written before this (canvas_groups.settings, ai_jobs.payload) still parse —
+  // the object is not .strict(), so a stale `facts` key is stripped.
   include: z
     .object({
       caption: z.boolean().default(true),
       title: z.boolean().default(true),
-      facts: z.boolean().default(false),
       exif: z.boolean().default(false),
     })
-    .default({ caption: true, title: true, facts: false, exif: false }),
+    .default({ caption: true, title: true, exif: false }),
 });
 export type ArtboardSettings = z.infer<typeof artboardSettingsSchema>;
 
