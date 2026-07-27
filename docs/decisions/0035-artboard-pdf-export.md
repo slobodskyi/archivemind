@@ -136,6 +136,33 @@ label. Worth stressing that the common case is not an error at all: an asset is
 `status='active'` the moment the upload completes, so exporting before ingest has
 run is an ordinary thing to do, and the dialog's pre-flight now says so too.
 
+### 2026-07-27 — purge erases the deliverables too, not just the asset
+
+The sweep above bounded a purged photo's survival inside past exports to
+`EXPORT_RETENTION_DAYS`. For a "Delete permanently" click — and for the GDPR
+right-to-erasure work in #134 — eventual is not the promise. `purge.ts` now
+deletes every export artifact containing the asset, in the same R2 phase as its
+own bytes.
+
+The hard part was the mapping, and it is solved in the export job rather than
+guessed at in the purge. `finishExport` writes **`payload.exported_asset_ids`** —
+the set actually rendered into that artifact. The request payload alone cannot
+answer the question: a `group_id` export carries no asset list at all, and group
+membership can change after the render, so a join through
+`canvas_group_assets` would be reconstructing a past state from a present one.
+`payload.asset_ids` is still matched so artifacts written before this field
+existed are covered; that is the *requested* set, a superset of the rendered one,
+which errs in the right direction here — the user just permanently deleted the
+photo, so removing a deliverable that may contain it is the intent.
+
+**The cleanup is contained, not fatal.** A throw would be worse than the risk it
+guards: by that point the asset's own bytes are already deleted, so one
+persistently failing artifact (a malformed key) would block the derivative-row
+cleanup forever, leaving the tombstone holding its dedup claim and its captions,
+facts and EXIF for good. It logs and moves on; `sweepExpiredExports` remains the
+backstop. ADR 0033's ordered correctness argument gains this as step 3 rather
+than having it smuggled in.
+
 ### 2026-07-27 — it reads as a document now: cover, footer, metadata, filename
 
 `drawText` appeared exactly **once** in the whole worker before this — inside
@@ -280,12 +307,9 @@ per row after the delete succeeds, so a mid-sweep failure retries rather than
 orphaning objects whose keys it had already dropped.
 
 One consequence worth naming: an exported PDF embeds a JPEG copy of each photo,
-so a purged asset's pixels survive inside any export made from it. That window
-is now bounded by `EXPORT_RETENTION_DAYS` rather than unbounded. Making it
-immediate means teaching `purge.ts` to find the exports containing an asset —
-straightforward for the `asset_ids` payload shape, approximate for `group_id`
-(membership can change after the export) — and belongs with the GDPR erasure
-work, not here.
+so a purged asset's pixels survive inside any export made from it. This sweep
+bounds that window to `EXPORT_RETENTION_DAYS`; **the same-day amendment below
+makes it immediate.**
 
 Finally, a finished export can no longer strand: the Realtime handler has an
 `export` branch that raises a toast with a Download action when the job completes
