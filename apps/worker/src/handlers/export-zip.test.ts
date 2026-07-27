@@ -106,9 +106,45 @@ describe("planZip — names and sizes", () => {
   });
 });
 
+const RIGHTS = {
+  creator: "O. Slobodskyi",
+  credit: "Photo: O. Slobodskyi / Reuters",
+  copyright_notice: "(c) 2026 O. Slobodskyi",
+  usage_terms: "Editorial use only.",
+};
+
 describe("buildReadme", () => {
-  it("is absent when the archive delivered exactly what was asked for", () => {
+  it("is absent when nothing is off AND the workspace has no rights set", () => {
     expect(buildReadme(planZip([row()], "originals"), "originals")).toBeNull();
+    expect(buildReadme(planZip([row()], "originals"), "originals", null)).toBeNull();
+  });
+
+  it("is written for a perfect bundle when rights exist — the client needs them", () => {
+    // A PDF carries the credit in its footer and the copyright on its cover; a
+    // ZIP had nowhere to put either, so a client received photographs with no
+    // statement of who owns them.
+    const note = buildReadme(planZip([row()], "originals"), "originals", RIGHTS);
+    expect(note).toContain("Creator: O. Slobodskyi");
+    expect(note).toContain("Credit: Photo: O. Slobodskyi / Reuters");
+    expect(note).toContain("Copyright: (c) 2026 O. Slobodskyi");
+    expect(note).toContain("Usage terms: Editorial use only.");
+  });
+
+  it("omits the fields the workspace left empty rather than printing blank labels", () => {
+    const note = buildReadme(planZip([row()], "originals"), "originals", {
+      ...RIGHTS,
+      credit: null,
+      usage_terms: "   ",
+    });
+    expect(note).toContain("Creator:");
+    expect(note).not.toContain("Credit:");
+    expect(note).not.toContain("Usage terms:");
+  });
+
+  it("puts the rights above the delivery notes", () => {
+    const plan = planZip([row({ original_key: null })], "originals");
+    const note = buildReadme(plan, "originals", RIGHTS) ?? "";
+    expect(note.indexOf("Creator:")).toBeLessThan(note.indexOf("Google Drive"));
   });
 
   it("names every substituted file and says why", () => {
