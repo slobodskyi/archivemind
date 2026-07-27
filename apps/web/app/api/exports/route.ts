@@ -128,7 +128,7 @@ export async function GET(request: Request) {
 
   const { data: job, error } = await supabase
     .from("ai_jobs")
-    .select("id, status, payload, progress, progress_label, done_items, total_items")
+    .select("id, status, payload, progress, progress_label, done_items, total_items, error")
     .eq("id", jobId)
     .eq("type", "export")
     .maybeSingle();
@@ -151,6 +151,7 @@ export async function GET(request: Request) {
     progressLabel: typeof job.progress_label === "string" ? job.progress_label : null,
     doneItems: typeof job.done_items === "number" ? job.done_items : null,
     totalItems: typeof job.total_items === "number" ? job.total_items : null,
+    error: typeof job.error === "string" ? job.error : null,
   };
   return NextResponse.json(body);
 }
