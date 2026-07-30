@@ -16,21 +16,21 @@ import styles from "./landing.module.css";
  *  Everything on this page is a claim we can back with shipped behaviour; there
  *  are no borrowed assets, no invented benchmarks and no third-party logos. */
 
-const HEADLINE = ["Your", "archive", "finally", "knows", "what’s", "in", "it."];
-const ACCENT_WORD = 3;
+const HEADLINE = ["Your", "archive", "is", "finally", "smart."];
+const ACCENT_WORD = 4;
 
 const FEATURES = [
   {
     title: "An infinite canvas, not a folder tree",
-    body: "Pan, zoom, drag. Folders and artboards live on the canvas itself, and any artboard exports straight to a PDF.",
+    body: "Pan, zoom, drag. Folders and artboards live on the canvas itself, and any artboard exports straight to a PDF — or as the original files, separately or bundled in a ZIP.",
   },
   {
     title: "Search the way you'd describe it",
     body: "Ask for a place, a camera, a season. Image embeddings, full-text search and EXIF filters run as one query, strongest matches first.",
   },
   {
-    title: "Four ways to look at the same archive",
-    body: "A canvas, a timeline laid out day by day, a real map of where you were standing, and clouds of what the photos are about.",
+    title: "A workspace, and three ways to sort it",
+    body: "Canvas is where you work. Timeline, Map and Topic are sorting views — by day, by where you were standing, by what a file is about — for selecting and dividing your files.",
   },
   {
     title: "Bring your files from anywhere",
@@ -39,10 +39,78 @@ const FEATURES = [
 ];
 
 const FACTS = [
-  { n: "768", l: "dimensions in every image embedding" },
+  { n: "1", l: "search box for a place, a camera, a subject" },
+  { n: "∞", l: "projects and new files from one archive" },
+  { n: "4", l: "views — one to work in, three to sort by" },
   { n: "3", l: "import routes — drag & drop, Drive, Dropbox" },
-  { n: "30 days", l: "in trash before anything is erased for good" },
-  { n: "0", l: "AI calls you didn’t ask for" },
+];
+
+/** Plans. The feature lines are all shipped behaviour; the prices and the
+ *  storage/analysis ceilings are placeholders until billing is decided — there
+ *  is no checkout behind these buttons yet, every CTA lands on /signup. */
+const PLANS = [
+  {
+    name: "Free",
+    price: "$0",
+    per: "forever",
+    note: "Enough to see whether it thinks the way you do.",
+    cta: "Start free",
+    featured: false,
+    items: [
+      "1 workspace, unlimited projects",
+      "10 GB of originals",
+      "500 files analyzed per month",
+      "Drag & drop, Google Drive, Dropbox",
+      "All four views + hybrid search",
+    ],
+  },
+  {
+    name: "Creator",
+    price: "$18",
+    per: "per month",
+    note: "For the archive you actually work with.",
+    cta: "Start free trial",
+    featured: true,
+    items: [
+      "Everything in Free",
+      "1 TB of originals",
+      "25,000 files analyzed per month",
+      "Multilingual styled captions",
+      "Export to PDF, originals or ZIP",
+      "Semantic clustering across the workspace",
+    ],
+  },
+  {
+    name: "Team",
+    price: "$49",
+    per: "per month",
+    note: "One archive, your whole crew in it.",
+    cta: "Start free trial",
+    featured: false,
+    items: [
+      "Everything in Creator",
+      "Up to 5 members",
+      "Shared workspaces & projects",
+      "Roles & permissions",
+      "Collaborate on the same canvas",
+    ],
+  },
+  {
+    name: "Studio",
+    price: "Let’s talk",
+    per: "annual",
+    note: "Bigger teams, longer retention, priority help.",
+    cta: "Contact us",
+    featured: false,
+    items: [
+      "Everything in Team",
+      "Unlimited members",
+      "Storage priced to your volume",
+      "Unlimited analysis",
+      "Custom retention windows",
+      "Priority support",
+    ],
+  },
 ];
 
 const MARQUEE = [
@@ -79,15 +147,20 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
           ArchiveMind
         </Link>
 
+        {/* Nav order tracks the order the sections actually appear in below —
+            Features sits before Pipeline on the page, so it does here too. */}
         <nav className={styles.navLinks} aria-label="Sections">
           <a className={styles.navLink} href="#how">
             How it works
           </a>
+          <a className={styles.navLink} href="#features">
+            Features
+          </a>
           <a className={styles.navLink} href="#pipeline">
             Pipeline
           </a>
-          <a className={styles.navLink} href="#features">
-            Features
+          <a className={styles.navLink} href="#pricing">
+            Pricing
           </a>
         </nav>
 
@@ -107,7 +180,7 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
 
           <div className={styles.heroInner}>
             <div className={styles.heroCopy}>
-              <span className={styles.eyebrow}>AI-powered creator archive</span>
+              <span className={styles.eyebrow}>Archive workspace for visual creators</span>
 
               <h1 className={`${styles.display} ${styles.h1}`}>
                 {HEADLINE.map((w, i) => (
@@ -123,9 +196,8 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
               </h1>
 
               <p className={styles.lede}>
-                Drop in a decade of shoots. ArchiveMind reads every frame — what&rsquo;s in it, where it was
-                taken, what it&rsquo;s about — and hands the whole archive back to you as one canvas and one
-                search box.
+                ArchiveMind organizes, analyzes and understands every file you have — then lets you build
+                projects, create new files from your originals, and work through it all together with your team.
               </p>
 
               <div className={styles.heroActions}>
@@ -138,12 +210,6 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
                 <a href="#how" className={`${styles.btn} ${styles.btnGhost}`}>
                   See how it works
                 </a>
-              </div>
-
-              <div className={styles.heroMeta}>
-                <span>No credit card</span>
-                <span>Originals stay yours</span>
-                <span>Import from Drive &amp; Dropbox</span>
               </div>
             </div>
 
@@ -176,7 +242,7 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
             <div className={styles.sectionHead}>
               <span className={styles.eyebrow}>What you get</span>
               <h2 className={`${styles.display} ${styles.h2}`}>
-                Built for the archive you already have, not the one you wish you&rsquo;d labelled.
+                A different approach to keeping creative work organized.
               </h2>
             </div>
           </Reveal>
@@ -207,15 +273,68 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
           ))}
         </div>
 
+        {/* -------------------------------------------------------- pricing */}
+        <section className={styles.section} id="pricing">
+          <Reveal>
+            <div className={styles.sectionHead}>
+              <span className={styles.eyebrow}>Pricing</span>
+              <h2 className={`${styles.display} ${styles.h2}`}>
+                Pay for the archive you keep, not the seats you don&rsquo;t fill.
+              </h2>
+              <p className={styles.lede}>
+                Every plan gets every view, every import route and the whole search stack. What changes is how much
+                you can store and how much of it you analyze.
+              </p>
+            </div>
+          </Reveal>
+
+          <div className={styles.planTable}>
+            {PLANS.map((p, i) => (
+              <Reveal
+                key={p.name}
+                delay={i * 90}
+                className={`${styles.plan}${p.featured ? ` ${styles.planFeatured}` : ""}`}
+              >
+                {p.featured ? <span className={styles.planFlag}>Most popular</span> : null}
+                <span className={styles.planName}>{p.name}</span>
+                <span className={styles.planPriceRow}>
+                  <span className={`${styles.display} ${styles.planPrice}`}>{p.price}</span>
+                  <span className={styles.planPer}>{p.per}</span>
+                </span>
+                <p className={styles.planNote}>{p.note}</p>
+
+                <ul className={styles.planList}>
+                  {p.items.map((it) => (
+                    <li key={it} className={styles.planItem}>
+                      {it}
+                    </li>
+                  ))}
+                </ul>
+
+                <Link
+                  href="/signup"
+                  className={`${styles.btn} ${styles.planCta}${p.featured ? "" : ` ${styles.btnGhost}`}`}
+                >
+                  {p.cta}
+                </Link>
+              </Reveal>
+            ))}
+          </div>
+
+          <p className={styles.planFoot}>
+            Prices in USD. Your originals stay yours — cancel and you can export or download everything.
+          </p>
+        </section>
+
         {/* --------------------------------------------------------- closer */}
         <section className={styles.closer}>
           <div className={styles.closerGlow} aria-hidden="true" />
           <Reveal className={styles.closerInner}>
             <span className={styles.eyebrow}>Start today</span>
             <h2 className={`${styles.display} ${styles.closerTitle}`}>
-              Bring the archive.
+              You do the creative work.
               <br />
-              We&rsquo;ll do the remembering.
+              We&rsquo;ll manage the archive.
             </h2>
             <Link href="/signup" className={styles.btn}>
               Create your archive
@@ -235,6 +354,9 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
           </a>
           <a className={styles.footerLink} href="#features">
             Features
+          </a>
+          <a className={styles.footerLink} href="#pricing">
+            Pricing
           </a>
           <Link className={styles.footerLink} href="/login">
             Sign in

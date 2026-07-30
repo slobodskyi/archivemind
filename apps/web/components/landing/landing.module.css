@@ -26,6 +26,11 @@
   --l-line: rgba(255, 255, 255, 0.07);
   --l-line-h: rgba(255, 255, 255, 0.14);
   --l-pad: clamp(20px, 5vw, 72px);
+  /* One radius token for the whole surface, and it is zero. Every corner on the
+     landing is square — buttons, chips, tiles, dots, the lot — so the page reads
+     as one bold, solid system rather than a mix of pills and rounded cards.
+     Never override this per-component: change it here or nowhere. */
+  --l-r: 0px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -123,14 +128,15 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 13px 26px;
-  border-radius: 999px;
+  padding: 14px 28px;
+  border-radius: var(--l-r);
   border: 1px solid transparent;
   background: var(--btn-bg);
   color: var(--btn-fg);
   font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
   font-size: 12px;
-  letter-spacing: 0.06em;
+  font-weight: 500;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   text-decoration: none;
   cursor: pointer;
@@ -151,10 +157,12 @@
   transform: translateY(0);
 }
 
+/* Square corners leave a ghost button with nothing but a hairline to hold it
+   together, so the outline carries more weight than the pill version did. */
 .btnGhost {
   --btn-bg: transparent;
   --btn-fg: var(--t1);
-  border-color: var(--l-line-h);
+  border-color: var(--t3);
 }
 
 .btnGhost:hover {
@@ -222,7 +230,7 @@
 .brandMark {
   width: 12px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: var(--l-r);
   background: var(--ac);
   box-shadow: 0 0 14px rgba(57, 255, 106, 0.55);
 }
@@ -370,7 +378,7 @@
 
 .preview {
   border: 1px solid var(--l-line-h);
-  border-radius: 4px;
+  border-radius: var(--l-r);
   background: var(--bg-s);
   overflow: hidden;
   box-shadow: 0 40px 110px rgba(0, 0, 0, 0.66);
@@ -386,150 +394,343 @@
   }
 }
 
-.previewBar {
+/* ---- Dummy workspace header (PreviewHeader), shared by both previews ---- */
+
+.phBar {
+  container-type: inline-size;
+  container-name: ph;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
   height: 34px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--l-line);
-  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--t3);
+  padding: 0 8px;
+  background: var(--bg-nb);
+  border-bottom: 1px solid var(--bd);
+  font-family: var(--font-display), system-ui, sans-serif;
+  z-index: 4;
 }
 
-.previewBarLabel {
+.phGroup {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.phIconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 2px;
   color: var(--t2);
+  flex: 0 0 auto;
 }
 
-.previewBarRight {
-  margin-left: auto;
-  color: var(--ac);
+.phIconBtn svg {
+  width: 12px;
+  height: 12px;
 }
 
-/* Stands in for the photo: a low sun over a hard horizon, warm above, cool
-   below. Abstract on purpose — it should read as "a frame", never as a
-   photograph we're passing off as a customer's work. */
-.previewShot {
-  position: relative;
-  aspect-ratio: 3 / 2;
-  background:
-    radial-gradient(46% 34% at 74% 30%, rgba(255, 206, 138, 0.62), transparent 64%),
-    radial-gradient(90% 60% at 50% 100%, rgba(0, 0, 0, 0.55), transparent 60%),
-    linear-gradient(
-      180deg,
-      #2b2129 0%,
-      #4a3630 26%,
-      #6b4a33 45%,
-      #2e2a2c 52.5%,
-      #191b20 53%,
-      #0e1013 100%
-    );
+.phProject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 7px;
+  background: var(--bg-sf);
+  border: 1px solid var(--bd);
+  border-radius: 2px;
+  color: var(--t1);
+  font-size: 10.5px;
+  min-width: 0;
+}
+
+.phProjectName {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Horizon glint — the one hard edge in an otherwise soft frame. */
-.previewShot::after {
-  content: "";
+.phDots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5px;
+  flex: 0 0 auto;
+}
+
+.phDots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.phWorkspace {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--bd);
+  border-radius: 2px;
+  color: var(--t2);
+  font-size: 10.5px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.phWorkspace svg {
+  width: 10px;
+  height: 10px;
+}
+
+.phWorkspaceOn {
+  background: var(--ac);
+  border-color: var(--ac);
+  color: #050505;
+}
+
+/* Centered absolutely, exactly like ViewTabs. */
+.phTabs {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 52.5%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 214, 160, 0.5) 62%, transparent);
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 1px;
+  border: 1px solid var(--bd);
+  border-radius: 2px;
+  padding: 1.5px;
+  background: var(--bg-nb);
 }
 
-/* One pass of the analyzer over the frame — it runs once and stays gone. */
-.previewScan {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 34%;
-  background: linear-gradient(180deg, transparent, rgba(57, 255, 106, 0.16), transparent);
-  border-bottom: 1px solid rgba(57, 255, 106, 0.4);
-  animation: scanPass 1.6s cubic-bezier(0.4, 0, 0.2, 1) 0.5s 1 forwards;
-  top: -34%;
+.phTab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 8px;
+  border-radius: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t2b);
 }
 
-@keyframes scanPass {
-  to {
-    top: 100%;
-    opacity: 0;
+.phTab svg {
+  width: 10px;
+  height: 10px;
+}
+
+.phTabOn {
+  background: var(--bg-el);
+  color: var(--t1);
+}
+
+.phZoom {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 7px;
+  background: var(--bg-sf);
+  border: 1px solid var(--bd);
+  border-radius: 2px;
+  color: var(--t2);
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
+.phShare {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid var(--bdh);
+  border-radius: 2px;
+  color: var(--t1);
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
+.phShare svg {
+  width: 10px;
+  height: 10px;
+}
+
+.phAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 2px;
+  background: var(--bg-el);
+  border: 1px solid var(--bdh);
+  color: var(--t1);
+  font-size: 8px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+/* Shed the lower-priority controls as the preview narrows (container query on
+   .phBar itself — so the wide stage keeps everything and the narrow hero card
+   trims to essentials, never letting the centered tabs collide with a group). */
+@container ph (max-width: 780px) {
+  .phZoom,
+  .phWsLabel {
+    display: none;
   }
 }
 
-.previewChips {
+@container ph (max-width: 620px) {
+  .phWorkspace,
+  .phShareLabel {
+    display: none;
+  }
+}
+
+@container ph (max-width: 460px) {
+  .phTabLabel {
+    display: none;
+  }
+  .phShare {
+    display: none;
+  }
+}
+
+@container ph (max-width: 340px) {
+  .phTabs {
+    display: none;
+  }
+}
+
+/* The Topic view, in miniature — the same construction the real CloudDecor /
+   CloudLabels / PhotoTile draw, so the hero shows the product itself. */
+.topicScene {
+  position: relative;
+  aspect-ratio: 460 / 360;
+  overflow: hidden;
+  background: var(--bg-s);
+}
+
+/* The infinite-canvas grid, exactly as InfiniteGrid paints it. */
+.topicGrid {
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: 12px 8px;
 }
 
-.chip {
-  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--t1);
-  background: rgba(8, 8, 8, 0.72);
-  backdrop-filter: blur(6px);
-  border: 1px solid var(--l-line-h);
-  border-radius: 999px;
-  padding: 5px 11px;
+/* Colored cloud backdrop — CloudDecor's blurred radial blob. */
+.topicBlob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(24px);
+  pointer-events: none;
   opacity: 0;
-  transform: translateY(6px) scale(0.96);
-  animation: chipIn 0.5s cubic-bezier(0.22, 0.8, 0.28, 1) forwards;
-  animation-delay: calc(var(--i) * 120ms + 1.15s);
+  animation: topicFade 0.8s ease 0.25s forwards;
 }
 
-@keyframes chipIn {
+.topicEdges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Each line draws itself in once the tiles have "settled" — the landing's
+   stand-in for CloudDecor's edgesReady fade. */
+.topicEdge {
+  /* pathLength="1" on the element normalises every path, so one dash pair
+     draws them all in regardless of real length. */
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: topicDraw 0.7s cubic-bezier(0.22, 0.8, 0.28, 1) forwards;
+  animation-delay: calc(var(--i) * 45ms + 1s);
+}
+
+@keyframes topicDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Photo tile — PhotoTile's chrome (hairline border, resting square corner per
+   the landing's design system) over a colored square standing in for a photo. */
+.topicTile {
+  position: absolute;
+  border-radius: var(--l-r);
+  overflow: hidden;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: scale(0.9);
+  animation: topicPop 0.5s cubic-bezier(0.22, 0.8, 0.28, 1) forwards;
+  animation-delay: calc(var(--i) * 45ms + 0.5s);
+}
+
+.topicTileGloss {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.04), transparent 46%);
+}
+
+@keyframes topicPop {
   to {
     opacity: 1;
     transform: none;
   }
 }
 
-.previewMeta {
-  padding: 16px 16px 18px;
-  border-top: 1px solid var(--l-line);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.previewCaption {
-  margin: 0;
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--t2);
-}
-
-.previewExif {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
+/* Glowing uppercase topic label — CloudLabels, to the letter. */
+.topicLabel {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
   font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
-  font-size: 9.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--t3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  opacity: 0;
+  animation: topicFade 0.6s ease 0.9s forwards;
+}
+
+@keyframes topicFade {
+  to {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .preview,
-  .chip {
+  .preview {
     animation: none;
     opacity: 1;
     transform: none;
   }
-  .previewScan {
+  .topicBlob,
+  .topicTile,
+  .topicLabel,
+  .topicEdge {
     animation: none;
-    display: none;
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+  .topicTile {
+    transform: none;
   }
 }
 
@@ -562,7 +763,7 @@
   content: "";
   width: 4px;
   height: 4px;
-  border-radius: 50%;
+  border-radius: var(--l-r);
   background: var(--ac);
   opacity: 0.65;
 }
@@ -789,7 +990,7 @@
   height: 2px;
   background: var(--l-line);
   overflow: hidden;
-  border-radius: 1px;
+  border-radius: var(--l-r);
 }
 
 .scrubStepFill {
@@ -802,13 +1003,15 @@
 /* The product window the tiles animate inside. */
 .stage {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 1320px;
   margin: 0 auto;
   flex: 1;
   min-height: 0;
   border: 1px solid var(--l-line-h);
-  border-radius: 4px;
+  border-radius: var(--l-r);
   background:
     radial-gradient(120% 90% at 50% 0%, rgba(57, 255, 106, 0.05), transparent 60%),
     var(--bg-s);
@@ -839,7 +1042,7 @@
 .stageDot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--l-r);
   background: var(--l-line-h);
 }
 
@@ -853,8 +1056,10 @@
 }
 
 .stageField {
-  position: absolute;
-  inset: 34px 0 0 0;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .stageGrid {
@@ -863,7 +1068,7 @@
   background-image:
     linear-gradient(var(--l-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--l-line) 1px, transparent 1px);
-  background-size: 54px 54px;
+  background-size: 27px 27px;
   opacity: 0.5;
   transition: opacity 0.5s;
 }
@@ -884,46 +1089,132 @@
   opacity: 1;
 }
 
+/* The dotted vector world map — the Map view's landmasses. Its opacity is
+   written per-frame from ScrubDemo (fades with the map state). */
+.worldMap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .tile {
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: 2px;
+  border-radius: var(--l-r);
   overflow: hidden;
   will-change: transform;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  /* No outline — a soft ambient shadow does the lifting instead, so the tile
+     reads as a clean card sitting on the surface, not a bordered swatch. */
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
 }
 
 .tileInner {
   position: absolute;
   inset: 0;
-  opacity: 0.92;
 }
 
+/* A whisper of top sheen for depth — gentle, not a hard diagonal highlight. */
 .tileGloss {
   position: absolute;
   inset: 0;
-  background: linear-gradient(150deg, rgba(255, 255, 255, 0.16), transparent 55%);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.04), transparent 46%);
 }
 
-.cloudLabel {
+/* Film grain over the gradient — the reference cards' texture. Shared by the
+   ScrubDemo tiles and the hero Topic tiles. The data URI lives in tileStyle.ts
+   (TILE_GRAIN); it's duplicated here because CSS Modules can't read a TS const,
+   and it's the one place the grain is drawn — keep the two in sync. */
+.tileGrain {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 130px 130px;
+  opacity: 0.2;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+/* ---- Timeline decor (CloudDecor's timeline branch + CloudLabels) ---- */
+
+/* The whole layer fades in/out with the timeline state; its opacity is written
+   per-frame from ScrubDemo. */
+.tlDecor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The horizontal date axis — the real one is a 1px var(--bd) rule. */
+.tlAxis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid var(--l-line-h);
+}
+
+/* A day's colored band, pinned to its evenly-spaced column (CloudDecor draws
+   this stronger than Map/Topic's blob — 0.42 alpha). */
+.tlBand {
+  position: absolute;
+  transform: translateX(-50%);
+  filter: blur(20px);
+}
+
+/* The colored tick under each date, on the axis. */
+/* The glowing date label, centred on the axis — no chip, just the glowing text
+   over the line. Equal space above and below to the nearest photos. */
+.tlLabel {
   position: absolute;
   transform: translate(-50%, -50%);
-  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--t1);
-  background: rgba(6, 6, 6, 0.9);
-  border: 1px solid rgba(57, 255, 106, 0.35);
-  border-radius: 2px;
-  padding: 4px 10px;
   white-space: nowrap;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* ---- Topic decor (CloudDecor blobs/edges + CloudLabels) ---- */
+
+/* Blobs + connecting lines — behind the tiles. Labels are a separate layer
+   (.topicLabels) rendered after the tiles, so they sit on top. Both fade with
+   the topic state. */
+.topicDecor {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
-  /* Above the tiles it labels — DOM order alone loses to their box-shadow. */
+}
+
+.topicLabels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   z-index: 2;
-  transition: opacity 0.4s;
+}
+
+/* CloudDecor's blurred radial blob (0.22 alpha, circle). */
+.cloudBlob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(28px);
+}
+
+.cloudEdges {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+/* CloudLabels: glowing, uppercase, in the cloud's own color (set inline). */
+.cloudLabel {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 .stageCaption {
@@ -971,7 +1262,7 @@
   gap: 1px;
   background: var(--l-line);
   border: 1px solid var(--l-line);
-  border-radius: 3px;
+  border-radius: var(--l-r);
   overflow: hidden;
   margin-top: 58px;
 }
@@ -1010,6 +1301,139 @@
   line-height: 1.6;
   color: var(--t2);
   margin: 0;
+}
+
+/* ----------------------------------------------------------------- pricing  */
+
+/* Same hairline-grid construction as .tileTable — the gap IS the rule, drawn by
+   the container's background showing through a 1px gap. Square by definition,
+   which is the point. */
+.planTable {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: 1px;
+  background: var(--l-line);
+  border: 1px solid var(--l-line);
+  margin-top: 58px;
+}
+
+.plan {
+  background: var(--bg);
+  padding: 38px 30px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: relative;
+  transition: background 0.3s;
+}
+
+.plan:hover {
+  background: var(--bg-sf);
+}
+
+/* The middle plan carries the weight: a green top rule and a lift out of the
+   near-black, rather than a scale transform that would break the 1px grid. */
+.planFeatured {
+  background: var(--bg-s);
+  box-shadow: inset 0 2px 0 var(--ac);
+}
+
+.planFlag {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 5px 11px;
+  background: var(--ac);
+  color: #061006;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.planName {
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ac);
+}
+
+.planPriceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.planPrice {
+  font-size: clamp(34px, 3.6vw, 48px);
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.planPer {
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+
+.planNote {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--t2);
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--l-line);
+}
+
+.planList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  /* Pushes the CTA to the bottom edge so all three buttons line up across the
+     row however uneven the feature lists are. */
+  flex: 1;
+}
+
+.planItem {
+  display: flex;
+  gap: 11px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--t2);
+}
+
+.planItem::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-top: 7px;
+  background: var(--ac);
+  opacity: 0.8;
+}
+
+.planCta {
+  margin-top: 20px;
+  justify-content: center;
+  width: 100%;
+}
+
+.planFoot {
+  margin: 22px 0 0;
+  font-family: var(--font-space-mono), var(--font-mono-cy), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--t3);
+  line-height: 1.7;
 }
 
 /* ---------------------------------------------------------------- prompter  */
@@ -1061,7 +1485,7 @@
   top: 42px;
   width: 5px;
   height: 5px;
-  border-radius: 50%;
+  border-radius: var(--l-r);
   background: var(--l-line-h);
   transition: background 0.4s, box-shadow 0.4s;
 }
@@ -1103,7 +1527,7 @@
   text-transform: uppercase;
   color: var(--t3);
   border: 1px solid var(--l-line);
-  border-radius: 999px;
+  border-radius: var(--l-r);
   padding: 5px 12px;
 }
 
@@ -1188,7 +1612,7 @@
   content: "";
   width: 3px;
   height: 3px;
-  border-radius: 50%;
+  border-radius: var(--l-r);
   background: var(--ac);
   opacity: 0.5;
 }

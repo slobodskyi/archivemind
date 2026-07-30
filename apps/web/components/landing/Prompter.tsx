@@ -13,24 +13,29 @@ import styles from "./landing.module.css";
 
 const STEPS = [
   {
-    tag: "Ingest",
-    title: "You upload. Nothing else happens.",
-    body: "Files land in your own storage, deduplicated by checksum. EXIF and previews are extracted — HEIC and RAW included — and that is the whole of it. No model has seen your archive yet.",
+    tag: "Add",
+    title: "Add your files.",
+    body: "Connect a cloud source — Google Drive or Dropbox — or drag them straight in from your computer. Duplicates collapse by checksum before they cost you storage.",
   },
   {
     tag: "Analyze",
-    title: "AI runs when you press the button.",
-    body: "Not on upload, not on a schedule, not quietly in the background. When you ask for it, each photo gets tags, facts, and an embedding — and you can watch the queue drain in real time.",
+    title: "Analyze all your content with AI.",
+    body: "When you ask for it, the AI system reads every file — tags, facts, captions and embeddings — and you watch the queue drain in real time. Never automatic, never in the background.",
   },
   {
-    tag: "Cluster",
-    title: "Your photos sort themselves out.",
-    body: "Embeddings get clustered, so “yoga”, “stretching” and “йога” end up in one group instead of three. The clusters hold still between sessions and read the same in every project.",
+    tag: "Sort",
+    title: "Sort and select everything you need.",
+    body: "Re-sort the same files by day, by where you were standing, or by what they’re about — then pick out exactly the ones the job calls for.",
   },
   {
-    tag: "Caption",
-    title: "Captions in your language, in your voice.",
-    body: "Generate them per language and per style, edit any line by hand, and your edit is never silently overwritten — regeneration asks first.",
+    tag: "Compile",
+    title: "Compile a project, create new materials.",
+    body: "Build a project from your selection and make new files from your originals — lay them onto an artboard, arrange them, and produce something new from your own work.",
+  },
+  {
+    tag: "Export",
+    title: "Export your project in any format.",
+    body: "Send it out as a PDF, as the original files, or bundled in a ZIP — whatever the next step needs.",
   },
 ];
 
@@ -58,9 +63,10 @@ export default function Prompter() {
       <div className={styles.prompterInner}>
         <div className={styles.prompterSticky}>
           <span className={styles.eyebrow}>The pipeline</span>
-          <h2 className={`${styles.display} ${styles.h2}`}>Nothing happens to your archive until you say so.</h2>
+          <h2 className={`${styles.display} ${styles.h2}`}>From the files you add to the project you export.</h2>
           <p className={styles.lede}>
-            Four jobs, in order, each one visible while it runs. The expensive ones only ever start on a click.
+            Five steps, in order — add, analyze, sort, compile, export. The AI only ever runs when you ask it to,
+            and every step is visible while it works.
           </p>
         </div>
 
