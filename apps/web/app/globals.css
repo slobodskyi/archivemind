@@ -38,6 +38,34 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
+/* Folder Finder popup item — Finder-style selection highlight on hover. */
+.am-finder-item {
+  transition: background 0.12s;
+}
+.am-finder-item:hover {
+  background: var(--bg-el) !important;
+}
+
+/* Folder Finder popup — drops down from just above its resting spot. */
+@keyframes folderPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Sticky notes are freeform canvas widgets, not form fields — a text input
+   always matches :focus-visible on plain mouse click, so the app-wide accent
+   ring above lit up a green box around a note the moment you clicked into it.
+   Opt the note body out; its own paper colour + shadow already mark focus. */
+textarea.am-sticky-note:focus-visible {
+  outline: none !important;
+}
+
 /* Menu/dropdown item hover. Items set their inline background only when
    active, so this class supplies the rest state + hover highlight. */
 .am-mi {

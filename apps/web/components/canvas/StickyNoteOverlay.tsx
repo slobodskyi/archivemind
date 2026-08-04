@@ -61,6 +61,7 @@ export default function StickyNoteOverlay({ notes, onDragStart, onTextChange, on
             </button>
           </div>
           <textarea
+            className="am-sticky-note"
             value={note.text}
             placeholder="Type a note…"
             onChange={(e) => onTextChange(note.id, e.target.value)}

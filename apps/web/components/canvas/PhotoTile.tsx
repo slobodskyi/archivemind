@@ -14,6 +14,9 @@ interface PhotoTileProps {
   /** When true, the tile glides to a new position instead of snapping — used
    *  while a sort/view change reflows every tile at once (not during drag). */
   animating?: boolean;
+  /** Persistent stacking delta ("Bring to front / Send to back"), added to the
+   *  tile's resting z-index so its layer order survives across renders. */
+  z?: number;
   /** Faded back when another cloud is focused (a label was clicked). */
   dimmed?: boolean;
   onDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
@@ -63,6 +66,7 @@ export default function PhotoTile({
   hovered,
   interactive,
   animating,
+  z = 0,
   dimmed,
   onDown,
   onEnter,
@@ -74,7 +78,9 @@ export default function PhotoTile({
   aiBusy = false,
   onAnalyze,
 }: PhotoTileProps) {
-  const zIndex = hovered ? 30 : selected ? 12 : 2;
+  // The layer-order delta (`z`) shifts the whole resting band, so a tile brought
+  // to front stays above its neighbours even when one of them is hovered.
+  const zIndex = (hovered ? 30 : selected ? 12 : 2) + z;
   const status = stage === "ready" ? "" : `, ${STAGE_LABEL[stage]}`;
   const posTransition = animating ? "left .45s cubic-bezier(.4,0,.2,1), top .45s cubic-bezier(.4,0,.2,1)" : "";
   // A tile with no image yet, while still being uploaded/processed, shows a

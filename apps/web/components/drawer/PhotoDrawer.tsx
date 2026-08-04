@@ -114,6 +114,22 @@ export default function PhotoDrawer({
   );
   const showCaptionBlock = Boolean(photo && (photo.processed || hasAnyCaption));
 
+  // Manual Metadata/EXIF editing — local/UI only for now (no backend yet), so
+  // the draft is reset whenever the photo changes and is not persisted. Same
+  // render-time reset pattern as the caption draft above.
+  const [exifEditing, setExifEditing] = useState(false);
+  const [exifDraft, setExifDraft] = useState<Record<string, string>>({});
+  const [exifScope, setExifScope] = useState("");
+  if (exifScope !== (photo?.id ?? "none")) {
+    setExifScope(photo?.id ?? "none");
+    setExifDraft({});
+    setExifEditing(false);
+  }
+  const exifVal = (key: string, fallback: string | number) =>
+    exifDraft[key] ?? String(fallback);
+  const setExifField = (key: string, v: string) =>
+    setExifDraft((d) => ({ ...d, [key]: v }));
+
   return (
     <div
       style={{
@@ -358,24 +374,40 @@ export default function PhotoDrawer({
           )}
 
           <div style={{ marginTop: 18 }}>
-            <span style={labelCaps}>Metadata / EXIF</span>
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "7px 14px", marginTop: 10, fontSize: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={labelCaps}>Metadata / EXIF</span>
+              {/* Pen toggle: flip the fields between read-only and editable. Edits
+                  are local-only for now (not saved) — the tooltip says so. */}
+              <button
+                onClick={() => setExifEditing((v) => !v)}
+                title={exifEditing ? "Done editing (not saved yet)" : "Edit metadata manually"}
+                aria-label={exifEditing ? "Finish editing metadata" : "Edit metadata manually"}
+                aria-pressed={exifEditing}
+                style={exifEditBtn(exifEditing)}
+              >
+                {exifEditing ? <CheckIcon width={12} height={12} /> : <PenGlyph />}
+                {exifEditing ? "Done" : "Edit"}
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "7px 14px", marginTop: 10, fontSize: 12, alignItems: "center" }}>
               {/* Labels use --t2b (4.72:1), not --t3 (2.96:1, WCAG fail) — this
                   is the readable label column, not decoration. */}
               <span style={exifLabel}>Camera</span>
-              <span style={{ color: "var(--t2)" }}>{photo.exif.camera}</span>
+              <ExifField editing={exifEditing} value={exifVal("camera", photo.exif.camera)} onChange={(v) => setExifField("camera", v)} />
               <span style={exifLabel}>Lens</span>
-              <span style={{ color: "var(--t2)" }}>{photo.exif.lens}</span>
+              <ExifField editing={exifEditing} value={exifVal("lens", photo.exif.lens)} onChange={(v) => setExifField("lens", v)} />
               <span style={exifLabel}>Date</span>
-              <span style={{ color: "var(--t2)" }}>{photo.exif.dateTaken}</span>
+              <ExifField editing={exifEditing} value={exifVal("dateTaken", photo.exif.dateTaken)} onChange={(v) => setExifField("dateTaken", v)} />
+              {/* GPS is a structured lat/lon pair the Map reads — not a free-text
+                  field, so it stays read-only in this local-only editor. */}
               <span style={exifLabel}>GPS</span>
               <span style={{ color: "var(--t2)" }}>{formatGps(photo.exif)}</span>
               <span style={exifLabel}>ISO</span>
-              <span style={{ color: "var(--t2)" }}>{photo.exif.iso}</span>
+              <ExifField editing={exifEditing} value={exifVal("iso", photo.exif.iso)} onChange={(v) => setExifField("iso", v)} />
               <span style={exifLabel}>Aperture</span>
-              <span style={{ color: "var(--t2)" }}>{photo.exif.aperture}</span>
+              <ExifField editing={exifEditing} value={exifVal("aperture", photo.exif.aperture)} onChange={(v) => setExifField("aperture", v)} />
               <span style={exifLabel}>Shutter</span>
-              <span style={{ color: "var(--t2)" }}>{photo.exif.shutter}</span>
+              <ExifField editing={exifEditing} value={exifVal("shutter", photo.exif.shutter)} onChange={(v) => setExifField("shutter", v)} />
             </div>
           </div>
 
@@ -424,13 +456,61 @@ export default function PhotoDrawer({
               ADR 0035's export path is real — this now opens it for this photo. */}
           <div style={{ display: "flex", gap: 7, marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--bd)" }}>
             <button onClick={onExport} style={footerBtn(true)}>
-              Export PDF
+              Export
             </button>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+/* Pen glyph for the Metadata/EXIF edit toggle. */
+const PenGlyph = () => (
+  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+  </svg>
+);
+
+/** One Metadata/EXIF value cell: a read-only span, or an input while editing. */
+function ExifField({ editing, value, onChange }: { editing: boolean; value: string; onChange: (v: string) => void }) {
+  if (!editing) return <span style={{ color: "var(--t2)" }}>{value}</span>;
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        width: "100%",
+        height: 24,
+        background: "var(--bg-in)",
+        border: "1px solid var(--bd)",
+        borderRadius: 2,
+        padding: "0 7px",
+        color: "var(--t1)",
+        fontSize: 12,
+        fontFamily: "inherit",
+        outline: 0,
+      }}
+    />
+  );
+}
+
+function exifEditBtn(active: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    height: 22,
+    padding: "0 8px",
+    borderRadius: 2,
+    border: `1px solid ${active ? "color-mix(in srgb,var(--ac) 40%,transparent)" : "var(--bd)"}`,
+    background: active ? "color-mix(in srgb,var(--ac) 14%,transparent)" : "transparent",
+    color: active ? "var(--ac)" : "var(--t2b)",
+    fontSize: 10.5,
+    fontFamily: "inherit",
+    cursor: "pointer",
+  };
 }
 
 const labelCaps: React.CSSProperties = {

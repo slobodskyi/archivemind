@@ -1,8 +1,12 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { hexA, type CloudLayout } from "@/lib/layout";
 
-/** Extra margin the blurred backdrop blob extends past each cloud's tile bbox. */
-const BLOB_PAD = 60;
+/** Extra margin the blurred backdrop blob extends past each cloud's tile bbox.
+ *  Topic's soft blobs get a wide margin so the cloud reads as a large, easily
+ *  told-apart color field; Timeline's bands stay tighter so adjacent day columns
+ *  don't bleed together. */
+const BLOB_PAD_TOPIC = 96;
+const BLOB_PAD_TIMELINE = 58;
 /** Opacity applied to clouds/tiles that aren't the focused one (click a label). */
 const DIM = 0.22;
 
@@ -27,10 +31,41 @@ interface CloudDecorProps {
 function CloudDecor({ layout, edgesReady, focusedCloudKey }: CloudDecorProps) {
   const dimOf = (key: string) => (focusedCloudKey && key !== focusedCloudKey ? DIM : 1);
   // Timeline's day clouds are pinned bands, so paint them more strongly than
-  // Map/Topic's soft blobs — they read as the column, not a faint haze.
+  // Map/Topic's soft blobs — they read as the column, not a faint haze. Topic's
+  // blobs are now more saturated too, so a cloud is legible by color alone.
   const isTimeline = !!layout.axis;
-  const blobAlpha = isTimeline ? 0.42 : 0.22;
-  const blobBlur = isTimeline ? 22 : 28;
+  const blobPad = isTimeline ? BLOB_PAD_TIMELINE : BLOB_PAD_TOPIC;
+  const blobAlpha = isTimeline ? 0.52 : 0.36;
+  const blobBlur = isTimeline ? 22 : 30;
+
+  // A tile the user has dragged clear of its cloud's core (ADR 0038 keeps the
+  // main blob + label anchored to the core, so it does NOT stretch to a far
+  // outlier). Without this the stray tile sat on bare canvas with no way to tell
+  // which cloud it came from — so each outlier gets its own color halo in the
+  // cloud's color, and stays visibly part of the group wherever it's moved.
+  //
+  // The trigger is a small margin past the CORE bbox — NOT the blob's own wide
+  // pad — so the halo appears the moment a tile leaves the group. Reusing the
+  // blob pad left a dead zone: a tile dragged out of the visible color but not
+  // yet `blobPad` px past the core sat with nothing under it. And because a lone
+  // tile lacks the color-stacking of a dense cloud, its halo is drawn punchier
+  // than the main blob: a solid plateau (not a single fading point), higher
+  // alpha, tighter blur — so a dragged-out file clearly rests on its color.
+  const HALO_MARGIN = 24;
+  const haloAlpha = Math.min(blobAlpha + 0.16, 0.62);
+  const haloBlur = Math.max(blobBlur - 10, 13);
+  const cloudByKey = new Map(layout.clouds.map((c) => [c.key, c]));
+  const outliers = Object.entries(layout.tiles).flatMap(([id, t]) => {
+    const c = cloudByKey.get(layout.tileCloud[id]);
+    if (!c) return [];
+    const inCore =
+      t.cx >= c.bx - HALO_MARGIN &&
+      t.cx <= c.bx + c.bw + HALO_MARGIN &&
+      t.cy >= c.by - HALO_MARGIN &&
+      t.cy <= c.by + c.bh + HALO_MARGIN;
+    return inCore ? [] : [{ id, cx: t.cx, cy: t.cy, r: Math.hypot(t.w, t.h) / 2 + 56, color: c.color, key: c.key }];
+  });
+
   return (
     <>
       {/* Colored backdrop per cloud. On Map/Topic it hugs the live tile bbox; on
@@ -40,14 +75,34 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey }: CloudDecorProps) {
           key={`blob-${c.key}`}
           style={{
             position: "absolute",
-            left: c.bx - BLOB_PAD,
-            top: c.by - BLOB_PAD,
-            width: c.bw + BLOB_PAD * 2,
-            height: c.bh + BLOB_PAD * 2,
+            left: c.bx - blobPad,
+            top: c.by - blobPad,
+            width: c.bw + blobPad * 2,
+            height: c.bh + blobPad * 2,
             borderRadius: isTimeline ? 40 : "50%",
             background: `radial-gradient(closest-side, ${hexA(c.color, blobAlpha)}, ${hexA(c.color, 0)})`,
             filter: `blur(${blobBlur}px)`,
             opacity: dimOf(c.key),
+            transition: "opacity .2s ease",
+            pointerEvents: "none",
+          }}
+        />
+      ))}
+
+      {/* Color halo behind each dragged-away (outlier) tile — see above. */}
+      {outliers.map((o) => (
+        <div
+          key={`halo-${o.id}`}
+          style={{
+            position: "absolute",
+            left: o.cx - o.r,
+            top: o.cy - o.r,
+            width: o.r * 2,
+            height: o.r * 2,
+            borderRadius: "50%",
+            background: `radial-gradient(closest-side, ${hexA(o.color, haloAlpha)} 0%, ${hexA(o.color, haloAlpha)} 36%, ${hexA(o.color, 0)} 100%)`,
+            filter: `blur(${haloBlur}px)`,
+            opacity: dimOf(o.key),
             transition: "opacity .2s ease",
             pointerEvents: "none",
           }}

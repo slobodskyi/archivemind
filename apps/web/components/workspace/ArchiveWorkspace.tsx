@@ -107,7 +107,14 @@ export default function ArchiveWorkspace({
             <FolderOverlay
               folders={ws.folders}
               scale={ws.scale}
-              onToggle={ws.toggleFolder}
+              openFolderId={ws.openFolderId}
+              onOpen={ws.openFolder}
+              onClose={ws.closeFolder}
+              onOpenPhoto={(id) => {
+                ws.closeFolder();
+                ws.openDrawer(id);
+              }}
+              onDropMemberOut={ws.dropMemberOnCanvas}
               onMove={ws.moveGroup}
               onRename={ws.renameGroup}
               onDelete={ws.deleteGroup}
@@ -132,6 +139,7 @@ export default function ArchiveWorkspace({
           selectedIds={ws.selectedIds}
           hoveredId={ws.hoveredId}
           animating={ws.tilesAnimating}
+          zOrder={ws.tileZ}
           focusedCloudKey={ws.focusedCloudKey}
           tileCloud={ws.tileCloud}
           aiBusyIds={ws.aiBusyIds}
@@ -306,9 +314,9 @@ export default function ArchiveWorkspace({
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
           onCopy={ws.copyFiles}
-          onDuplicate={ws.duplicateFiles}
           onExport={ws.exportFiles}
           onGroup={ws.groupFiles}
+          onFolder={ws.folderFiles}
           onDelete={ws.deleteSelected}
         />
       )}
@@ -436,6 +444,13 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
+        onGroup={ws.groupFiles}
+        onUngroup={ws.ungroupSelection}
+        hasGroup={ws.selectionHasGroup}
+        onBringToFront={ws.bringToFront}
+        onBringForward={ws.bringForward}
+        onSendBackward={ws.sendBackward}
+        onSendToBack={ws.sendToBack}
         onDelete={ws.deleteFromContext}
         onFit={ws.onFit}
       />
