@@ -5,7 +5,7 @@
 -- (a group is a curated subset, not a container of bytes).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(11);
+select plan(14);
 
 -- ── fixtures (as superuser) ─────────────────────────────────────────────
 insert into auth.users (id, email) values
@@ -70,6 +70,28 @@ select is(
 select is(
   (select count(*)::int from public.assets where id = '00000000-0000-0000-0000-0000000000f1'),
   1, 'the group''s assets survive the delete');
+
+-- ── the third kind: bound groups (migration 20260805000002) ──────────────
+-- A bound "Group" is membership with no geometry at all, so it lives here
+-- rather than in localStorage where PR #184 first shipped it. These assert the
+-- enum value is live and that it inherits the same row gates as the other two —
+-- the single-membership-per-kind rule itself is route-level (the DB cannot hold
+-- it: a unique index on asset_id would break artboard sharing).
+select ok(
+  'group' = any(enum_range(null::canvas_group_kind)::text[]),
+  'canvas_group_kind accepts the group value');
+
+select lives_ok(
+  $$insert into public.canvas_groups (id, workspace_id, project_id, kind, name)
+    values ('00000000-0000-0000-0000-0000000000c9',
+            '00000000-0000-0000-0000-00000000aaaa', null, 'group', 'Group 1')$$,
+  'an editor creates a bound group (canvas_groups_insert, same gate as folders)');
+
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000b2","role":"authenticated"}';
+select is_empty(
+  $$select id from public.canvas_groups where kind = 'group'$$,
+  'a bound group is invisible outside its workspace, like every other kind');
+
 
 select * from finish();
 rollback;

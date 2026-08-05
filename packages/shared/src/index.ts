@@ -516,8 +516,20 @@ export type AddProjectAssetsRequest = z.infer<typeof addProjectAssetsRequestSche
 //   • folder   — organize; a file lives in at most one folder per scope.
 //   • artboard — compose a PDF deliverable; ordered members = the pages.
 
-export const canvasGroupKindSchema = z.enum(["folder", "artboard"]);
+/** The three on-canvas grouping primitives (ADR 0034). All three are membership
+ *  only — geometry stays a per-user localStorage override (ADR 0022):
+ *    folder   — collapses N tiles into one labelled tile with a dropdown;
+ *    artboard — its ordered members become the pages of a PDF export;
+ *    group    — a bound set that selects, moves and edits as one, drawing no
+ *               container at all (migration 20260805000002).
+ *  'folder' and 'group' are each single-membership per scope; artboards
+ *  deliberately share assets. */
+export const canvasGroupKindSchema = z.enum(["folder", "artboard", "group"]);
 export type CanvasGroupKind = z.infer<typeof canvasGroupKindSchema>;
+
+/** Kinds a tile may belong to only ONE of per scope, enforced route-side (the
+ *  DB cannot: a blanket unique index would break artboard sharing). */
+export const EXCLUSIVE_GROUP_KINDS = ["folder", "group"] as const;
 
 /** PDF export config, stored in canvas_groups.settings for artboards ({} for
  *  folders) and echoed in the export job payload. All fields default so an

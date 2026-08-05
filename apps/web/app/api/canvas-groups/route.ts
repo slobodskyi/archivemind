@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { artboardSettingsSchema, createCanvasGroupRequestSchema, type CanvasGroup } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
-import { detachFromSiblingFolders, getCanvasGroups, nextGroupSortIndex } from "@/lib/canvas-groups";
+import { detachFromSiblingGroups, getCanvasGroups, nextGroupSortIndex } from "@/lib/canvas-groups";
 
 /** Canvas groups — folders + artboards (ADR 0034). RLS scopes every query to
  *  the caller's workspace.
@@ -78,8 +78,8 @@ export async function POST(request: Request) {
     const ownedSet = new Set((owned ?? []).map((a) => a.id as string));
     const assetIds = parsed.data.assetIds.filter((aid) => ownedSet.has(aid));
     if (assetIds.length > 0) {
-      if (kind === "folder") {
-        await detachFromSiblingFolders(supabase, { projectId, exceptGroupId: group.id as string, assetIds });
+      if (kind === "folder" || kind === "group") {
+        await detachFromSiblingGroups(supabase, { kind, projectId, exceptGroupId: group.id as string, assetIds });
       }
       const rows = assetIds.map((assetId, i) => ({
         group_id: group.id as string,

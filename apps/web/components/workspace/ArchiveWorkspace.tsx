@@ -444,6 +444,8 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
+        onPaste={ws.pasteFiles}
+        clipboardCount={ws.clipboardCount}
         onGroup={ws.groupFiles}
         onUngroup={ws.ungroupSelection}
         hasGroup={ws.selectionHasGroup}

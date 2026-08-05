@@ -66,6 +66,10 @@ const EMPTY_TILE_CLOUD: Record<string, string> = {};
  *  Positions are UI-only, so the browser is the right home — no backend/schema. */
 const CANVAS_STORE_PREFIX = "archivemind:canvas:";
 const canvasStoreKey = (projectId: string) => `${CANVAS_STORE_PREFIX}${projectId}`;
+/** Copy/Paste clipboard — asset ids waiting to be linked into another project.
+ *  Not per-project (the whole point is to cross between them) and not in React
+ *  state, because navigating to the target project remounts the workspace. */
+const CLIPBOARD_KEY = "am:clipboard:assets";
 /** Saved arrangements from a different version are discarded on load — their
  *  coordinates were laid out against clouds that no longer exist. v2: everything
  *  saved by the design-branch DEMO_CLOUDS builds (fake Poland/Italy/topic clouds). */
@@ -121,7 +125,15 @@ export interface FolderModel {
   geom: GroupGeom;
 }
 
-/** The bound "Group" set (ADR 0022 client grouping) that contains `id`, or null. */
+/** The bound "Group" sets in the current scope, as plain member-id arrays — the
+ *  shape the selection logic below wants. Derived from the server groups rather
+ *  than stored: a bound set is membership, and membership is the server's
+ *  (migration 20260805000002). Only the geometry stays client-side. */
+function boundGroupsOf(groups: CanvasGroup[]): string[][] {
+  return groups.filter((g) => g.kind === "group").map((g) => g.members);
+}
+
+/** The bound "Group" set that contains `id`, or null. */
 function tileGroupOf(id: string, groups: string[][]): string[] | null {
   return groups.find((g) => g.includes(id)) ?? null;
 }
@@ -140,8 +152,6 @@ interface PersistedCanvas {
   galleryOverrides?: Partial<GalleryOverrides>;
   frames?: Frame[];
   groupGeom?: Record<string, GroupGeom>;
-  /** Bound "Group" sets — client-only, additive to older saves that lack it. */
-  tileGroups?: string[][];
   /** Per-tile stacking-order deltas — client-only, additive to older saves. */
   tileZ?: Record<string, number>;
   stickyNotes?: StickyNote[];
@@ -266,12 +276,10 @@ interface WorkspaceState {
   /** Per-group on-canvas geometry + collapse state, keyed by server group id.
    *  Client-only (persisted with the rest of the canvas arrangement). */
   groupGeom: Record<string, GroupGeom>;
-  /** Bound tile groups (the "Group" action): each entry is a set of asset ids
-   *  that select, move and edit as one unit — no folder, no container box.
-   *  Purely a client-side selection/drag convenience (ADR 0022 territory), so
-   *  it lives in the localStorage arrangement, never the server. Distinct from
-   *  `groups` (folders/artboards) above. */
-  tileGroups: string[][];
+  /** How many files sit on the Copy clipboard, so Paste can say so and hide
+   *  itself when there is nothing to paste. Hydrated from localStorage on mount
+   *  — the clipboard outlives this component by design. */
+  clipboardCount: number;
   /** Per-tile stacking order (ADR 0022 client geometry) — the delta added to a
    *  tile's resting z-index by "Bring to front / Send to back". Default 0. */
   tileZ: Record<string, number>;
@@ -547,6 +555,10 @@ export interface Workspace {
   // Selection actions (bottom action bar + right-click menu)
   deleteSelected: () => void;
   copyFiles: () => void;
+  /** Link the copied files into the project being viewed. */
+  pasteFiles: () => void;
+  /** Files waiting on the clipboard — drives the Paste entry. */
+  clipboardCount: number;
   exportFiles: () => void;
   /** Open the Export-to-PDF dialog for an explicit asset set (ADR 0035). */
   openExportFor: (ids: string[]) => void;
@@ -793,8 +805,8 @@ export function useWorkspace(
     frames: [],
     groups: initialGroups,
     groupGeom: {},
-    tileGroups: [],
     tileZ: {},
+    clipboardCount: 0,
     openFolderId: null,
     stickyNotes: [],
     frameDraftRect: null,
@@ -1108,7 +1120,7 @@ export function useWorkspace(
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
       // A bound "Group" (ADR 0022) acts as one tile: grabbing any member selects
       // (and later drags) the whole set. `members` is the group or just the tile.
-      const members = tileGroupOf(id, s.tileGroups) ?? [id];
+      const members = tileGroupOf(id, boundGroupsOf(s.groups)) ?? [id];
       let selectedIds: string[];
       if (additive) {
         // Toggle the whole group in/out, not the single tile it was grabbed by.
@@ -1124,7 +1136,7 @@ export function useWorkspace(
       }
       // Any partially-selected group (e.g. one member caught by a marquee) is
       // completed here so actions and the group-drag below cover the whole set.
-      selectedIds = expandBoundGroups(selectedIds, s.tileGroups);
+      selectedIds = expandBoundGroups(selectedIds, boundGroupsOf(s.groups));
       setState({ selectedIds, drawerId: null });
       // Group move: grabbing any member of a multi-selection drags the whole set
       // by one delta (Figma/Miro semantics). Capture every selected tile's center
@@ -1346,7 +1358,7 @@ export function useWorkspace(
         setState({
           marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 },
           // A group half-inside the marquee is grabbed whole — it's one unit.
-          selectedIds: expandBoundGroups(selection, s.tileGroups),
+          selectedIds: expandBoundGroups(selection, boundGroupsOf(s.groups)),
         });
       } else if (d.mode === "frameDraw") {
         const r = rect();
@@ -2166,7 +2178,63 @@ export function useWorkspace(
     if (ids.length > 0) requestDeletePhotos(ids);
   }, [contextMenu, requestDeletePhotos]);
 
-  const copyFiles = useCallback(() => { setContextMenu(null); flashToast("Copy — coming soon"); }, [flashToast]);
+  /** Copy: park the selection on a clipboard that Paste reads in another
+   *  project. Deliberately NOT a duplicate — `assets` is deduped by a UNIQUE
+   *  index on content_hash, so a second row over the same bytes cannot exist,
+   *  and it would be the wrong idea anyway: an asset is one shot, and putting it
+   *  in two projects is what `project_assets` (M:N) is for. So Copy + Paste is a
+   *  *link*, which is also why Duplicate could be removed in favour of it.
+   *
+   *  localStorage, not React state: the point is to paste somewhere ELSE, and
+   *  navigating to another project remounts the workspace. */
+  const copyFiles = useCallback(() => {
+    const s = stateRef.current;
+    setContextMenu(null);
+    const ids = expandBoundGroups(s.selectedIds.slice(), boundGroupsOf(s.groups));
+    if (ids.length === 0) return flashToast("Select files to copy");
+    try {
+      localStorage.setItem(CLIPBOARD_KEY, JSON.stringify(ids));
+    } catch {
+      return flashToast("Couldn't copy — storage is unavailable");
+    }
+    setState({ clipboardCount: ids.length });
+    flashToast(`Copied ${ids.length} ${ids.length === 1 ? "file" : "files"} — open another archive and paste`);
+  }, [flashToast, setState]);
+
+  /** Paste: link the clipboard's assets into the project being viewed. The
+   *  route is idempotent (on-conflict ignore), so pasting twice is harmless and
+   *  pasting a file that is already here is a no-op rather than an error. */
+  const pasteFiles = useCallback(() => {
+    const s = stateRef.current;
+    setContextMenu(null);
+    // 'all' is every asset in the workspace, not a project — there is no
+    // membership row to add, so there is nothing "here" to paste into.
+    if (s.projCurrent === "all") return flashToast("Open an archive to paste into");
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(localStorage.getItem(CLIPBOARD_KEY) ?? "[]") as string[];
+    } catch {
+      ids = [];
+    }
+    if (!Array.isArray(ids) || ids.length === 0) return flashToast("Nothing copied yet");
+    void fetch(`/api/projects/${s.projCurrent}/assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assetIds: ids }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<{ added: number }>) : Promise.reject(new Error("paste failed"))))
+      .then(({ added }) => {
+        // `added` counts the links actually created, so a re-paste honestly
+        // reports 0 rather than claiming to have added what was already here.
+        flashToast(
+          added === 0
+            ? "Those files are already in this archive"
+            : `Pasted ${added} ${added === 1 ? "file" : "files"}`,
+        );
+        if (added > 0) router.refresh();
+      })
+      .catch(() => flashToast("Couldn't paste — try again"));
+  }, [flashToast, router]);
 
   // ── Bound tile groups (the "Group" action) — no folder, no server ──────────
 
@@ -2179,24 +2247,46 @@ export function useWorkspace(
   const groupFiles = useCallback(() => {
     const s = stateRef.current;
     setContextMenu(null);
-    const ids = expandBoundGroups(s.selectedIds.slice(), s.tileGroups);
+    const ids = expandBoundGroups(s.selectedIds.slice(), boundGroupsOf(s.groups));
     if (ids.length < 2) return flashToast("Select at least two files to group");
+    const projectId = s.projCurrent === "all" ? null : s.projCurrent;
     const idSet = new Set(ids);
-    // Drop any existing group that overlaps the new one (its members are being
-    // absorbed), then add the merged set.
-    const kept = s.tileGroups.filter((g) => !g.some((m) => idSet.has(m)));
-    setState({ tileGroups: [...kept, ids], selectedIds: ids });
-    flashToast(`Grouped ${ids.length} files — they now move and edit together`);
+    // Groups the new one absorbs. The route enforces single-membership per kind,
+    // so their rows would be emptied anyway — deleting them keeps the server from
+    // accumulating groups that still exist but hold nothing.
+    const absorbed = s.groups.filter((g) => g.kind === "group" && g.members.some((m) => idSet.has(m)));
+    const n = s.groups.filter((g) => g.kind === "group").length + 1;
+    void fetch("/api/canvas-groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "group", name: "Group " + n, projectId, assetIds: ids }),
+    })
+      .then((r) => (r.ok ? (r.json() as Promise<CanvasGroup>) : Promise.reject(new Error("create failed"))))
+      .then((group) => {
+        setState((prev) => ({
+          groups: [...prev.groups.filter((g) => !absorbed.some((a) => a.id === g.id)), group],
+          selectedIds: ids,
+        }));
+        for (const g of absorbed) {
+          void fetch(`/api/canvas-groups/${g.id}`, { method: "DELETE" }).catch(() => {});
+        }
+        flashToast(`Grouped ${ids.length} files — they now move and edit together`);
+      })
+      .catch(() => flashToast("Couldn't group those files"));
   }, [flashToast, setState]);
 
-  /** "Ungroup": dissolve every bound group that the current selection touches. */
+  /** "Ungroup": dissolve every bound group that the current selection touches.
+   *  Optimistic — the tiles come apart at once and the DELETEs follow. */
   const ungroupSelection = useCallback(() => {
     const s = stateRef.current;
     setContextMenu(null);
     const sel = new Set(s.selectedIds);
-    const next = s.tileGroups.filter((g) => !g.some((m) => sel.has(m)));
-    if (next.length === s.tileGroups.length) return flashToast("Nothing grouped in the selection");
-    setState({ tileGroups: next });
+    const hit = s.groups.filter((g) => g.kind === "group" && g.members.some((m) => sel.has(m)));
+    if (hit.length === 0) return flashToast("Nothing grouped in the selection");
+    setState({ groups: s.groups.filter((g) => !hit.some((h) => h.id === g.id)) });
+    for (const g of hit) {
+      void fetch(`/api/canvas-groups/${g.id}`, { method: "DELETE" }).catch(() => {});
+    }
     flashToast("Ungrouped");
   }, [flashToast, setState]);
 
@@ -2204,8 +2294,8 @@ export function useWorkspace(
    *  label (Group ↔ Ungroup) so one entry point covers both. */
   const selectionHasGroup = useMemo(() => {
     const sel = new Set(Array.from(state.selectedIds));
-    return state.tileGroups.some((g) => g.some((m) => sel.has(m)));
-  }, [state.selectedIds, state.tileGroups]);
+    return state.groups.some((g) => g.kind === "group" && g.members.some((m) => sel.has(m)));
+  }, [state.selectedIds, state.groups]);
 
   // ── Tile stacking order (context-menu "Bring to front / Send to back") ──────
 
@@ -3557,6 +3647,15 @@ export function useWorkspace(
   // and sticky notes are exactly where they were left. localStorage only — this
   // is UI state, never a backend concern.
   useEffect(() => {
+    // The clipboard is workspace-wide and outlives this mount, so it is read
+    // back before the 'all'-scope guard below — Copy on the workspace canvas has
+    // to survive the navigation into the project you mean to paste it into.
+    try {
+      const clip = JSON.parse(localStorage.getItem(CLIPBOARD_KEY) ?? "[]") as string[];
+      if (Array.isArray(clip) && clip.length > 0) setState({ clipboardCount: clip.length });
+    } catch {
+      // corrupt clipboard — Paste will report it as empty
+    }
     if (currentProjectId === "all") return;
     try {
       const raw = localStorage.getItem(canvasStoreKey(currentProjectId));
@@ -3579,7 +3678,6 @@ export function useWorkspace(
         galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
         frames: saved.frames ?? [],
         groupGeom,
-        tileGroups: saved.tileGroups ?? [],
         tileZ: saved.tileZ ?? {},
         stickyNotes: saved.stickyNotes ?? [],
       });
@@ -3603,7 +3701,6 @@ export function useWorkspace(
             galleryOverrides: state.galleryOverrides,
             frames: state.frames,
             groupGeom: state.groupGeom,
-            tileGroups: state.tileGroups,
             tileZ: state.tileZ,
             stickyNotes: state.stickyNotes,
           } satisfies PersistedCanvas),
@@ -3615,7 +3712,7 @@ export function useWorkspace(
     return () => {
       if (persistTimer.current) clearTimeout(persistTimer.current);
     };
-  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.tileGroups, state.tileZ, state.stickyNotes]);
+  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.tileZ, state.stickyNotes]);
 
   // Flush the latest arrangement on unmount too, so navigating away right after
   // a drag (before the debounce fires) still saves it.
@@ -3631,7 +3728,6 @@ export function useWorkspace(
             galleryOverrides: s.galleryOverrides,
             frames: s.frames,
             groupGeom: s.groupGeom,
-            tileGroups: s.tileGroups,
             tileZ: s.tileZ,
             stickyNotes: s.stickyNotes,
           } satisfies PersistedCanvas),
@@ -3645,6 +3741,26 @@ export function useWorkspace(
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+C / +V. A canvas that offers Copy only from a menu is a canvas
+      // people will assume is broken, so both live on the keyboard too — but
+      // never while typing, where they must stay the browser's own text
+      // copy/paste, and never with a dialog open over the canvas.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "c" || e.key === "v")) {
+        const t = e.target as HTMLElement | null;
+        const isTyping = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+        const s = stateRef.current;
+        if (isTyping || s.exportOpen) return;
+        if (e.key === "c") {
+          if (s.selectedIds.length === 0) return;
+          e.preventDefault();
+          copyFiles();
+        } else {
+          if (s.clipboardCount === 0) return;
+          e.preventDefault();
+          pasteFiles();
+        }
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
         const target = e.target as HTMLElement | null;
         const isTyping = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
@@ -3673,7 +3789,7 @@ export function useWorkspace(
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos]);
+  }, [closeDrawer, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos, copyFiles, pasteFiles]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
   // hand-tool path, so the selected tool is never mutated and simply resumes on
@@ -4075,6 +4191,8 @@ export function useWorkspace(
 
     deleteSelected,
     copyFiles,
+    pasteFiles,
+    clipboardCount: state.clipboardCount,
     exportFiles,
     openExportFor,
     exportOpen: state.exportOpen,

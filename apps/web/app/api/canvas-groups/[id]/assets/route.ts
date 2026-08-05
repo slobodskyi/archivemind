@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { groupAssetsRequestSchema, uuidSchema } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
-import { detachFromSiblingFolders } from "@/lib/canvas-groups";
+import { detachFromSiblingGroups } from "@/lib/canvas-groups";
 
 /** POST /api/canvas-groups/[id]/assets — add members (append after the current
  *  max position; folder-exclusivity applied). DELETE — remove members. RLS
@@ -44,8 +44,9 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   const assetIds = parsed.data.assetIds.filter((aid) => ownedSet.has(aid));
   if (assetIds.length === 0) return NextResponse.json({ error: "no matching assets" }, { status: 404 });
 
-  if (group.kind === "folder") {
-    await detachFromSiblingFolders(supabase, {
+  if (group.kind === "folder" || group.kind === "group") {
+    await detachFromSiblingGroups(supabase, {
+      kind: group.kind,
       projectId: (group.project_id as string | null) ?? null,
       exceptGroupId: id,
       assetIds,
