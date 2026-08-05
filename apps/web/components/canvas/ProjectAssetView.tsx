@@ -16,6 +16,8 @@ interface ProjectAssetViewProps {
   hoveredId: string | null;
   /** True while a view/sort switch reflows every tile — enables the glide. */
   animating: boolean;
+  /** Per-tile stacking delta from "Bring to front / Send to back" (default 0). */
+  zOrder: Record<string, number>;
   /** When a cloud is focused (its label clicked), tiles in other clouds fade. */
   focusedCloudKey: string | null;
   /** Tile id → cloud key, for the fade above. Empty on the unsorted Canvas. */
@@ -39,6 +41,7 @@ function ProjectAssetView({
   selectedIds,
   hoveredId,
   animating,
+  zOrder,
   focusedCloudKey,
   tileCloud,
   aiBusyIds,
@@ -78,6 +81,7 @@ function ProjectAssetView({
             hovered={hoveredId === photo.id}
             interactive
             animating={animating}
+            z={zOrder[photo.id] ?? 0}
             dimmed={!!focusedCloudKey && tileCloud[photo.id] !== focusedCloudKey}
             onDown={(event) => onTileDown(event, photo.id, { x: pos.cx, y: pos.cy })}
             onEnter={() => setHover(photo.id)}

@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Tool } from "@/types";
-import { FrameToolIcon, CopyIcon, TrashIcon, SparkleIcon } from "@/components/icons/icons";
+import { FrameToolIcon, CopyIcon, TrashIcon, FolderIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
   tool: Tool;
@@ -12,17 +12,24 @@ interface WorkspaceActionBarProps {
   /** Opens the AI panel over the selection (analyze / captions). */
   onAi: () => void;
   onCopy: () => void;
-  onDuplicate: () => void;
   onExport: () => void;
+  /** Bind the selection into a move-/edit-together group (no folder — ADR 0034 folders live on the Folder button). */
   onGroup: () => void;
+  /** Wrap the selection in a real folder (collapsible tile + Finder popup). */
+  onFolder: () => void;
   onDelete: () => void;
 }
 
 /* Inline glyphs for the actions without an existing icon (mono/line style). */
 const gp = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-const DuplicateGlyph = () => (<svg {...gp}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M4 16V6a2 2 0 0 1 2-2h10" /></svg>);
 const ExportGlyph = () => (<svg {...gp}><path d="M12 3v12" /><path d="m8 7 4-4 4 4" /><path d="M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" /></svg>);
-const GroupGlyph = () => (<svg {...gp}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>);
+/* Group: two overlapping tiles bound by a corner-bracket frame — a set that
+   moves and edits as one, not a container. */
+const GroupGlyph = () => (<svg {...gp}><path d="M3 8V4a1 1 0 0 1 1-1h4" /><path d="M21 8V4a1 1 0 0 0-1-1h-4" /><path d="M3 16v4a1 1 0 0 0 1 1h4" /><path d="M21 16v4a1 1 0 0 1-1 1h-4" /><rect x="8.5" y="8.5" width="7" height="7" rx="1" /></svg>);
+/* Analyze with AI: a magic wand throwing sparkles — the universal "let the AI
+   work on these" glyph, and unlike a bare sparkle it won't read as decoration
+   or collide with Search's magnifier. */
+const AnalyzeGlyph = () => (<svg {...gp}><path d="M15 6 6 15l-2.5 5.5L9 18l9-9z" /><path d="m14 7 3 3" /><path d="M18 3v3M16.5 4.5h3" /><path d="M20 11v2M19 12h2" /></svg>);
 /* Tidy up: four photo-tile-shaped cells snapping into an even grid. */
 const TidyGlyph = () => (<svg {...gp}><rect x="3" y="4" width="8" height="6" rx="1" /><rect x="13" y="4" width="8" height="6" rx="1" /><rect x="3" y="14" width="8" height="6" rx="1" /><rect x="13" y="14" width="8" height="6" rx="1" /></svg>);
 
@@ -73,11 +80,13 @@ function Divider() {
 }
 
 /** Bottom action bar for the Workspace (neural view) only. Hosts the artboard
- *  tool (moved off the left toolbar) plus selection actions. Copy/Duplicate/
- *  Export/Group are stubs for now; Delete is real (bulk trash + undo, ADR
- *  0033 — the old Archive stub sat next to it implying a parity that never
- *  existed, so it's gone until asset archiving is a real feature), and so is
- *  the AI button. */
+ *  tool (moved off the left toolbar) plus selection actions. Copy/Export are
+ *  stubs for now; Group binds the selection into a move-/edit-together set (no
+ *  container) and Folder wraps it in a real folder (ADR 0034) — the two used to
+ *  be one button. Delete is real (bulk trash + undo, ADR 0033 — the old Archive
+ *  stub sat next to it implying a parity that never existed, so it's gone until
+ *  asset archiving is a real feature), and so is the AI button. (Duplicate was
+ *  removed — Copy already covers it.) */
 function WorkspaceActionBar({
   tool,
   selCount,
@@ -86,9 +95,9 @@ function WorkspaceActionBar({
   onTidy,
   onAi,
   onCopy,
-  onDuplicate,
   onExport,
   onGroup,
+  onFolder,
   onDelete,
 }: WorkspaceActionBarProps) {
   const noSel = selCount === 0;
@@ -125,7 +134,7 @@ function WorkspaceActionBar({
           the eye goes after selecting tiles, so the most common bulk action was
           the hardest one to find. */}
       <Btn title={selCount >= 2 ? `Analyze ${selCount} with AI` : "Analyze with AI"} active={aiOpen} disabled={noSel} onClick={onAi}>
-        <SparkleIcon width={16} height={16} />
+        <AnalyzeGlyph />
       </Btn>
 
       <Divider />
@@ -133,14 +142,14 @@ function WorkspaceActionBar({
       <Btn title="Copy" disabled={noSel} onClick={onCopy}>
         <CopyIcon width={16} height={16} />
       </Btn>
-      <Btn title="Duplicate" disabled={noSel} onClick={onDuplicate}>
-        <DuplicateGlyph />
-      </Btn>
       <Btn title="Export" disabled={noSel} onClick={onExport}>
         <ExportGlyph />
       </Btn>
-      <Btn title="Group" disabled={noSel} onClick={onGroup}>
+      <Btn title={selCount >= 2 ? `Group ${selCount} (move & edit together)` : "Group"} disabled={noSel} onClick={onGroup}>
         <GroupGlyph />
+      </Btn>
+      <Btn title="Put in folder" disabled={noSel} onClick={onFolder}>
+        <FolderIcon width={16} height={16} />
       </Btn>
 
       <Divider />

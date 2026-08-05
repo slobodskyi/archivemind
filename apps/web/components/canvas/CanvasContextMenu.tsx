@@ -17,6 +17,17 @@ interface CanvasContextMenuProps {
   onExtractExif: () => void;
   onAdd: () => void;
   onAddStickyNote: () => void;
+  /** Bind the selection into a move-/edit-together group (needs ≥ 2 selected). */
+  onGroup: () => void;
+  /** Dissolve the bound group(s) the selection touches. */
+  onUngroup: () => void;
+  /** The selection overlaps a bound group — show Ungroup instead of Group. */
+  hasGroup: boolean;
+  /** Layer order for the selection / right-clicked tile. */
+  onBringToFront: () => void;
+  onBringForward: () => void;
+  onSendBackward: () => void;
+  onSendToBack: () => void;
   onDelete: () => void;
   onFit: () => void;
 }
@@ -36,11 +47,21 @@ export default function CanvasContextMenu({
   onExtractExif,
   onAdd,
   onAddStickyNote,
+  onGroup,
+  onUngroup,
+  hasGroup,
+  onBringToFront,
+  onBringForward,
+  onSendBackward,
+  onSendToBack,
   onDelete,
   onFit,
 }: CanvasContextMenuProps) {
   if (!menu) return null;
   const deletable = !allFilesMode && (selCount > 0 || menu.targetId != null);
+  const canGroup = !allFilesMode && (hasGroup || selCount >= 2);
+  // Layer order applies to the selection, or the single right-clicked tile.
+  const canLayer = !allFilesMode && (selCount > 0 || menu.targetId != null);
 
   const W = 190;
   const left = typeof window !== "undefined" ? Math.min(menu.x, window.innerWidth - W - 8) : menu.x;
@@ -94,6 +115,25 @@ export default function CanvasContextMenu({
           <>
             <Divider />
             <Item label="Smart Search" onClick={run(onToggleChat)} />
+          </>
+        )}
+        {canLayer && (
+          <>
+            <Divider />
+            <Item label="Bring to front" onClick={run(onBringToFront)} />
+            <Item label="Bring forward" onClick={run(onBringForward)} />
+            <Item label="Send backward" onClick={run(onSendBackward)} />
+            <Item label="Send to back" onClick={run(onSendToBack)} />
+          </>
+        )}
+        {canGroup && (
+          <>
+            <Divider />
+            {hasGroup ? (
+              <Item label="Ungroup" onClick={run(onUngroup)} />
+            ) : (
+              <Item label={`Group ${selCount}`} onClick={run(onGroup)} />
+            )}
           </>
         )}
         {deletable && (

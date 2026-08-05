@@ -114,9 +114,25 @@ export interface FolderModel {
   id: string;
   name: string;
   count: number;
-  /** Up to 3 presigned member thumbs for the collapsed stack. */
+  /** Up to 3 presigned member thumbs peeking out of the collapsed folder tile. */
   previews: string[];
+  /** Every member (thumb + filename) — the Finder-style popup lists these. */
+  items: { id: string; filename: string; src?: string }[];
   geom: GroupGeom;
+}
+
+/** The bound "Group" set (ADR 0022 client grouping) that contains `id`, or null. */
+function tileGroupOf(id: string, groups: string[][]): string[] | null {
+  return groups.find((g) => g.includes(id)) ?? null;
+}
+
+/** Expand a selection so any bound group with at least one selected member is
+ *  pulled in whole — this is what makes a group select / move / act as a unit. */
+function expandBoundGroups(ids: string[], groups: string[][]): string[] {
+  if (groups.length === 0) return ids;
+  const out = new Set(ids);
+  for (const g of groups) if (g.some((m) => out.has(m))) for (const m of g) out.add(m);
+  return Array.from(out);
 }
 
 interface PersistedCanvas {
@@ -124,6 +140,10 @@ interface PersistedCanvas {
   galleryOverrides?: Partial<GalleryOverrides>;
   frames?: Frame[];
   groupGeom?: Record<string, GroupGeom>;
+  /** Bound "Group" sets — client-only, additive to older saves that lack it. */
+  tileGroups?: string[][];
+  /** Per-tile stacking-order deltas — client-only, additive to older saves. */
+  tileZ?: Record<string, number>;
   stickyNotes?: StickyNote[];
 }
 
@@ -246,6 +266,17 @@ interface WorkspaceState {
   /** Per-group on-canvas geometry + collapse state, keyed by server group id.
    *  Client-only (persisted with the rest of the canvas arrangement). */
   groupGeom: Record<string, GroupGeom>;
+  /** Bound tile groups (the "Group" action): each entry is a set of asset ids
+   *  that select, move and edit as one unit — no folder, no container box.
+   *  Purely a client-side selection/drag convenience (ADR 0022 territory), so
+   *  it lives in the localStorage arrangement, never the server. Distinct from
+   *  `groups` (folders/artboards) above. */
+  tileGroups: string[][];
+  /** Per-tile stacking order (ADR 0022 client geometry) — the delta added to a
+   *  tile's resting z-index by "Bring to front / Send to back". Default 0. */
+  tileZ: Record<string, number>;
+  /** Folder whose Finder-style popup is open (double-click a folder), or null. */
+  openFolderId: string | null;
   stickyNotes: StickyNote[];
   /** Content-space preview rect while the frame tool is actively drawing. */
   frameDraftRect: { x: number; y: number; w: number; h: number } | null;
@@ -497,7 +528,14 @@ export interface Workspace {
 
   // Folders (ADR 0034) — server-backed grouping, client-side geometry
   folders: FolderModel[];
-  toggleFolder: (id: string) => void;
+  /** Open a folder's Finder-style popup (double-click). */
+  openFolder: (id: string) => void;
+  /** Close the folder popup. */
+  closeFolder: () => void;
+  /** The folder whose popup is open, or null. */
+  openFolderId: string | null;
+  /** Drag a member out of a folder dropdown onto the Canvas at (clientX, clientY). */
+  dropMemberOnCanvas: (folderId: string, assetId: string, clientX: number, clientY: number) => void;
   renameGroup: (id: string, name: string) => void;
   deleteGroup: (id: string) => void;
   moveGroup: (id: string, dx: number, dy: number) => void;
@@ -505,14 +543,26 @@ export interface Workspace {
   // Selection actions (bottom action bar + right-click menu)
   deleteSelected: () => void;
   copyFiles: () => void;
-  duplicateFiles: () => void;
   exportFiles: () => void;
   /** Open the Export-to-PDF dialog for an explicit asset set (ADR 0035). */
   openExportFor: (ids: string[]) => void;
   exportOpen: boolean;
   exportIds: string[];
   closeExport: () => void;
+  /** Bind the selection into a move-/edit-together set (client-only, no folder). */
   groupFiles: () => void;
+  /** Dissolve every bound group the selection touches. */
+  ungroupSelection: () => void;
+  /** True when the selection overlaps a bound group (drives Group ↔ Ungroup). */
+  selectionHasGroup: boolean;
+  /** Tile stacking order — context-menu layer actions + the map tiles read. */
+  bringToFront: () => void;
+  bringForward: () => void;
+  sendBackward: () => void;
+  sendToBack: () => void;
+  tileZ: Record<string, number>;
+  /** Wrap the selection in a real folder (ADR 0034) — collapsible tile + popup. */
+  folderFiles: () => void;
   /** Re-arrange the Canvas into a clean grid (selection-aware). */
   tidyUp: () => void;
   /** Drop the sorting view's drag overrides so tiles glide back into their
@@ -739,6 +789,9 @@ export function useWorkspace(
     frames: [],
     groups: initialGroups,
     groupGeom: {},
+    tileGroups: [],
+    tileZ: {},
+    openFolderId: null,
     stickyNotes: [],
     frameDraftRect: null,
     history: [],
@@ -1049,15 +1102,25 @@ export function useWorkspace(
         return;
       }
       const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+      // A bound "Group" (ADR 0022) acts as one tile: grabbing any member selects
+      // (and later drags) the whole set. `members` is the group or just the tile.
+      const members = tileGroupOf(id, s.tileGroups) ?? [id];
       let selectedIds: string[];
       if (additive) {
+        // Toggle the whole group in/out, not the single tile it was grabbed by.
         const selection = new Set(s.selectedIds);
-        if (selection.has(id)) selection.delete(id);
-        else selection.add(id);
+        const allIn = members.every((m) => selection.has(m));
+        if (allIn) members.forEach((m) => selection.delete(m));
+        else members.forEach((m) => selection.add(m));
         selectedIds = Array.from(selection);
       } else {
-        selectedIds = s.selectedIds.includes(id) ? s.selectedIds : [id];
+        // Keep an existing multi-selection if this tile is already part of it
+        // (so you can drag it), otherwise select just this tile / its group.
+        selectedIds = s.selectedIds.includes(id) ? s.selectedIds : members;
       }
+      // Any partially-selected group (e.g. one member caught by a marquee) is
+      // completed here so actions and the group-drag below cover the whole set.
+      selectedIds = expandBoundGroups(selectedIds, s.tileGroups);
       setState({ selectedIds, drawerId: null });
       // Group move: grabbing any member of a multi-selection drags the whole set
       // by one delta (Figma/Miro semantics). Capture every selected tile's center
@@ -1278,7 +1341,8 @@ export function useWorkspace(
           : hits;
         setState({
           marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 },
-          selectedIds: selection,
+          // A group half-inside the marquee is grabbed whole — it's one unit.
+          selectedIds: expandBoundGroups(selection, s.tileGroups),
         });
       } else if (d.mode === "frameDraw") {
         const r = rect();
@@ -2062,7 +2126,80 @@ export function useWorkspace(
   }, [contextMenu, requestDeletePhotos]);
 
   const copyFiles = useCallback(() => { setContextMenu(null); flashToast("Copy — coming soon"); }, [flashToast]);
-  const duplicateFiles = useCallback(() => { setContextMenu(null); flashToast("Duplicate — coming soon"); }, [flashToast]);
+
+  // ── Bound tile groups (the "Group" action) — no folder, no server ──────────
+
+  /** "Group" action: bind the current selection into a move-/edit-together set.
+   *  Unlike a folder (below) this creates no container and no server row — it is
+   *  a client-only grouping so that clicking any member selects the whole set and
+   *  dragging one drags all (see onGalleryAssetDown / the marquee). Re-grouping a
+   *  selection that already spans other groups folds them in and drops the stale
+   *  ones, so a tile only ever belongs to one group. */
+  const groupFiles = useCallback(() => {
+    const s = stateRef.current;
+    setContextMenu(null);
+    const ids = expandBoundGroups(s.selectedIds.slice(), s.tileGroups);
+    if (ids.length < 2) return flashToast("Select at least two files to group");
+    const idSet = new Set(ids);
+    // Drop any existing group that overlaps the new one (its members are being
+    // absorbed), then add the merged set.
+    const kept = s.tileGroups.filter((g) => !g.some((m) => idSet.has(m)));
+    setState({ tileGroups: [...kept, ids], selectedIds: ids });
+    flashToast(`Grouped ${ids.length} files — they now move and edit together`);
+  }, [flashToast, setState]);
+
+  /** "Ungroup": dissolve every bound group that the current selection touches. */
+  const ungroupSelection = useCallback(() => {
+    const s = stateRef.current;
+    setContextMenu(null);
+    const sel = new Set(s.selectedIds);
+    const next = s.tileGroups.filter((g) => !g.some((m) => sel.has(m)));
+    if (next.length === s.tileGroups.length) return flashToast("Nothing grouped in the selection");
+    setState({ tileGroups: next });
+    flashToast("Ungrouped");
+  }, [flashToast, setState]);
+
+  /** True when the selection touches a bound group — drives the context-menu
+   *  label (Group ↔ Ungroup) so one entry point covers both. */
+  const selectionHasGroup = useMemo(() => {
+    const sel = new Set(Array.from(state.selectedIds));
+    return state.tileGroups.some((g) => g.some((m) => sel.has(m)));
+  }, [state.selectedIds, state.tileGroups]);
+
+  // ── Tile stacking order (context-menu "Bring to front / Send to back") ──────
+
+  /** Restack the selection (or the right-clicked tile). Front/back jump the tiles
+   *  past the current max/min z-delta; forward/backward nudge by one. Persisted
+   *  with the rest of the client geometry; PhotoTile adds the delta to its
+   *  resting z-index. */
+  const applyTileZ = useCallback(
+    (mode: "front" | "back" | "forward" | "backward") => {
+      const s = stateRef.current;
+      setContextMenu(null);
+      const ids =
+        s.selectedIds.length > 0
+          ? s.selectedIds.slice()
+          : contextMenu?.targetId
+            ? [contextMenu.targetId]
+            : [];
+      if (ids.length === 0) return;
+      const cur = s.tileZ;
+      const vals = Object.values(cur);
+      const max = vals.length ? Math.max(0, ...vals) : 0;
+      const min = vals.length ? Math.min(0, ...vals) : 0;
+      const next = { ...cur };
+      if (mode === "front") ids.forEach((id, i) => { next[id] = max + 1 + i; });
+      else if (mode === "back") ids.forEach((id, i) => { next[id] = min - 1 - i; });
+      else if (mode === "forward") ids.forEach((id) => { next[id] = (cur[id] ?? 0) + 1; });
+      else ids.forEach((id) => { next[id] = (cur[id] ?? 0) - 1; });
+      setState({ tileZ: next });
+    },
+    [contextMenu, setState],
+  );
+  const bringToFront = useCallback(() => applyTileZ("front"), [applyTileZ]);
+  const sendToBack = useCallback(() => applyTileZ("back"), [applyTileZ]);
+  const bringForward = useCallback(() => applyTileZ("forward"), [applyTileZ]);
+  const sendBackward = useCallback(() => applyTileZ("backward"), [applyTileZ]);
   /** Open the Export-to-PDF dialog for an explicit set of assets (ADR 0035) — a
    *  frame's content, a folder, or the current selection. The dialog itself does
    *  the POST /api/exports + poll + download.
@@ -2091,14 +2228,14 @@ export function useWorkspace(
   const closeExport = useCallback(() => setState({ exportOpen: false }), [setState]);
   // ── Folders (ADR 0034) — server-backed grouping, client-side geometry ──────
 
-  /** "Group" action: wrap the current selection in a new folder. The server
+  /** "Folder" action: wrap the current selection in a new folder. The server
    *  owns membership (single-folder-membership is enforced route-side); the
    *  browser owns the collapsed tile's spot, placed at the selection's center. */
-  const groupFiles = useCallback(() => {
+  const folderFiles = useCallback(() => {
     const s = stateRef.current;
     const ids = s.selectedIds.slice();
     setContextMenu(null);
-    if (ids.length === 0) return flashToast("Select files to group into a folder");
+    if (ids.length === 0) return flashToast("Select files to put in a folder");
     const projectId = s.projCurrent === "all" ? null : s.projCurrent;
     const pos = activeTilePositions({ ...s, view: "neural" });
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -2135,46 +2272,11 @@ export function useWorkspace(
       .catch(() => flashToast("Couldn't create the folder"));
   }, [activeTilePositions, flashToast, setState]);
 
-  /** Collapse ↔ expand. Expanding packs the members into a grid inside a rect
-   *  anchored at the tile's spot (Milanote-style in-place open); collapsing just
-   *  hides them again (they keep their override positions). */
-  const toggleFolder = useCallback(
-    (id: string) => {
-      const s = stateRef.current;
-      const folder = s.groups.find((g) => g.id === id && g.kind === "folder");
-      if (!folder) return;
-      const geom = s.groupGeom[id] ?? defaultFolderGeom(id);
-      if (!geom.collapsed) {
-        setState({ groupGeom: { ...s.groupGeom, [id]: { ...geom, collapsed: true, w: FOLDER_TILE_W, h: FOLDER_TILE_H } } });
-        return;
-      }
-      // Pack members into a grid inside a rect anchored at the tile's spot;
-      // each tile is centered in its cell (the layout keeps its real aspect).
-      const cell = 128, gap = 14, pad = 16, header = 32;
-      const count = Math.max(1, folder.members.length);
-      const cols = Math.min(count, Math.max(2, Math.ceil(Math.sqrt(count))));
-      const rows = Math.ceil(count / cols);
-      const rectW = pad * 2 + cols * (cell + gap) - gap;
-      const rectH = header + pad * 2 + rows * (cell + gap) - gap;
-      const asset = { ...s.galleryOverrides.asset };
-      folder.members.forEach((mid, i) => {
-        const col = i % cols, row = Math.floor(i / cols);
-        asset[mid] = {
-          x: geom.x + pad + col * (cell + gap) + cell / 2,
-          y: geom.y + header + pad + row * (cell + gap) + cell / 2,
-        };
-      });
-      pushHistory();
-      setState({
-        galleryOverrides: { ...s.galleryOverrides, asset },
-        groupGeom: { ...s.groupGeom, [id]: { ...geom, collapsed: false, w: rectW, h: rectH } },
-        tilesAnimating: true,
-      });
-      if (animTimer.current) clearTimeout(animTimer.current);
-      animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
-    },
-    [pushHistory, setState],
-  );
+  /** Double-clicking a folder opens its Finder-style popup (the folder's members
+   *  are hidden from the canvas while it stands in for them, ADR 0034); the popup
+   *  is where you browse them. Replaces the old in-place grid expansion. */
+  const openFolder = useCallback((id: string) => setState({ openFolderId: id }), [setState]);
+  const closeFolder = useCallback(() => setState({ openFolderId: null }), [setState]);
 
   const renameGroup = useCallback(
     (id: string, name: string) => {
@@ -2195,10 +2297,39 @@ export function useWorkspace(
       const s = stateRef.current;
       const geom = { ...s.groupGeom };
       delete geom[id];
-      setState({ groups: s.groups.filter((g) => g.id !== id), groupGeom: geom });
+      setState({
+        groups: s.groups.filter((g) => g.id !== id),
+        groupGeom: geom,
+        openFolderId: s.openFolderId === id ? null : s.openFolderId,
+      });
       void fetch(`/api/canvas-groups/${id}`, { method: "DELETE" }).catch(() => {});
     },
     [setState],
+  );
+
+  /** Drag a member out of a folder's dropdown and drop it onto the Canvas: it
+   *  leaves the folder (mirror of syncFolderMembership's grid→folder path) and
+   *  lands where it was dropped. `clientX/Y` are screen coords from the drop. */
+  const dropMemberOnCanvas = useCallback(
+    (folderId: string, assetId: string, clientX: number, clientY: number) => {
+      const center = toContent(clientX, clientY);
+      pushHistory();
+      setState((prev) => ({
+        groups: prev.groups.map((g) =>
+          g.id === folderId ? { ...g, members: g.members.filter((m) => m !== assetId) } : g,
+        ),
+        galleryOverrides: {
+          ...prev.galleryOverrides,
+          asset: { ...prev.galleryOverrides.asset, [assetId]: center },
+        },
+      }));
+      void fetch(`/api/canvas-groups/${folderId}/assets`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetIds: [assetId] }),
+      }).catch(() => {});
+    },
+    [toContent, pushHistory, setState],
   );
 
   /** Drag a folder box: shift its geometry; an expanded folder carries its
@@ -3391,10 +3522,24 @@ export function useWorkspace(
       if (!raw) return;
       const saved = JSON.parse(raw) as PersistedCanvas;
       if (saved.v !== CANVAS_STORE_VERSION) return; // stale layout generation — start clean
+      // `collapsed: false` is no longer reachable — the in-place expansion this
+      // flag drove was replaced by the folder's dropdown, so nothing can clear it
+      // again. A save from before that change can still carry it, and three
+      // readers below still branch on it: folderHitRect would keep the old
+      // expanded rect as a now-INVISIBLE drop target (tiles dropped anywhere in
+      // it silently join the folder), foldedNeuralPos would leave the members on
+      // the canvas beside the folder tile that stands in for them, and moveGroup
+      // would drag them along. Normalise on load rather than bumping the store
+      // version, which would throw away every project's arrangement.
+      const groupGeom = Object.fromEntries(
+        Object.entries(saved.groupGeom ?? {}).map(([id, g]) => [id, { ...g, collapsed: true }]),
+      );
       setState({
         galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
         frames: saved.frames ?? [],
-        groupGeom: saved.groupGeom ?? {},
+        groupGeom,
+        tileGroups: saved.tileGroups ?? [],
+        tileZ: saved.tileZ ?? {},
         stickyNotes: saved.stickyNotes ?? [],
       });
     } catch {
@@ -3417,6 +3562,8 @@ export function useWorkspace(
             galleryOverrides: state.galleryOverrides,
             frames: state.frames,
             groupGeom: state.groupGeom,
+            tileGroups: state.tileGroups,
+            tileZ: state.tileZ,
             stickyNotes: state.stickyNotes,
           } satisfies PersistedCanvas),
         );
@@ -3427,7 +3574,7 @@ export function useWorkspace(
     return () => {
       if (persistTimer.current) clearTimeout(persistTimer.current);
     };
-  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.stickyNotes]);
+  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.tileGroups, state.tileZ, state.stickyNotes]);
 
   // Flush the latest arrangement on unmount too, so navigating away right after
   // a drag (before the debounce fires) still saves it.
@@ -3443,6 +3590,8 @@ export function useWorkspace(
             galleryOverrides: s.galleryOverrides,
             frames: s.frames,
             groupGeom: s.groupGeom,
+            tileGroups: s.tileGroups,
+            tileZ: s.tileZ,
             stickyNotes: s.stickyNotes,
           } satisfies PersistedCanvas),
         );
@@ -3563,16 +3712,20 @@ export function useWorkspace(
     const byId = new Map(state.photos.map((p) => [p.id, p]));
     return state.groups
       .filter((g) => g.kind === "folder")
-      .map((g) => ({
-        id: g.id,
-        name: g.name,
-        count: g.members.length,
-        previews: g.members
-          .map((m) => byId.get(m)?.src)
-          .filter((s): s is string => Boolean(s))
-          .slice(0, 3),
-        geom: state.groupGeom[g.id] ?? defaultFolderGeom(g.id),
-      }));
+      .map((g) => {
+        const items = g.members
+          .map((m) => byId.get(m))
+          .filter((p): p is Photo => Boolean(p))
+          .map((p) => ({ id: p.id, filename: p.filename, src: p.src }));
+        return {
+          id: g.id,
+          name: g.name,
+          count: g.members.length,
+          previews: items.map((i) => i.src).filter((s): s is string => Boolean(s)).slice(0, 3),
+          items,
+          geom: state.groupGeom[g.id] ?? defaultFolderGeom(g.id),
+        };
+      });
   }, [state.groups, state.groupGeom, state.photos]);
 
   // How many tiles currently sit inside each frame (positional) — the header
@@ -3869,20 +4022,30 @@ export function useWorkspace(
     endFrameGesture,
 
     folders: folderModels,
-    toggleFolder,
+    openFolder,
+    closeFolder,
+    openFolderId: state.openFolderId,
+    dropMemberOnCanvas,
     renameGroup,
     deleteGroup,
     moveGroup,
 
     deleteSelected,
     copyFiles,
-    duplicateFiles,
     exportFiles,
     openExportFor,
     exportOpen: state.exportOpen,
     exportIds: state.exportIds,
     closeExport,
     groupFiles,
+    ungroupSelection,
+    selectionHasGroup,
+    bringToFront,
+    bringForward,
+    sendBackward,
+    sendToBack,
+    tileZ: state.tileZ,
+    folderFiles,
     tidyUp,
     regroupClouds,
     canRegroup:
