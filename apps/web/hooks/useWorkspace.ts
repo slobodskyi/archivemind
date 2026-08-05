@@ -3522,10 +3522,22 @@ export function useWorkspace(
       if (!raw) return;
       const saved = JSON.parse(raw) as PersistedCanvas;
       if (saved.v !== CANVAS_STORE_VERSION) return; // stale layout generation — start clean
+      // `collapsed: false` is no longer reachable — the in-place expansion this
+      // flag drove was replaced by the folder's dropdown, so nothing can clear it
+      // again. A save from before that change can still carry it, and three
+      // readers below still branch on it: folderHitRect would keep the old
+      // expanded rect as a now-INVISIBLE drop target (tiles dropped anywhere in
+      // it silently join the folder), foldedNeuralPos would leave the members on
+      // the canvas beside the folder tile that stands in for them, and moveGroup
+      // would drag them along. Normalise on load rather than bumping the store
+      // version, which would throw away every project's arrangement.
+      const groupGeom = Object.fromEntries(
+        Object.entries(saved.groupGeom ?? {}).map(([id, g]) => [id, { ...g, collapsed: true }]),
+      );
       setState({
         galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
         frames: saved.frames ?? [],
-        groupGeom: saved.groupGeom ?? {},
+        groupGeom,
         tileGroups: saved.tileGroups ?? [],
         tileZ: saved.tileZ ?? {},
         stickyNotes: saved.stickyNotes ?? [],
