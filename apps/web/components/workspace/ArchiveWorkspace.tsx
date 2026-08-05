@@ -444,6 +444,8 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
+        onPaste={ws.pasteFiles}
+        clipboardCount={ws.clipboardCount}
         onGroup={ws.groupFiles}
         onUngroup={ws.ungroupSelection}
         hasGroup={ws.selectionHasGroup}
@@ -470,6 +472,8 @@ export default function ArchiveWorkspace({
         onCopy={ws.copyCap}
         onGenSingle={() => ws.drawerPhoto && ws.genSingle(ws.drawerPhoto.id)}
         onSaveCaption={ws.saveCaption}
+        onSaveExif={ws.saveExif}
+        onRevertExif={ws.revertExif}
         onEditImage={() => ws.drawerPhoto && ws.openEditor(ws.drawerPhoto.id)}
         onDelete={() => ws.drawerPhoto && ws.deletePhoto(ws.drawerPhoto.id)}
         onSetFactStatus={ws.setFactStatus}

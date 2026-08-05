@@ -117,6 +117,10 @@ export const EXIF_BLOCK: ExifData = {
   iso: 6400,
   aperture: "f/2.8",
   shutter: "1/125s",
+  // Mock rows have no asset_exif row to correct, so the drawer's editor stays
+  // inert on them — nothing has been hand-edited and there is nothing to revert.
+  editedFields: [],
+  takenAtIso: null,
 };
 
 // ── Photo generation (verbatim algorithm from source, typed) ────────────────

@@ -58,6 +58,8 @@ function photo(id: string, overrides: Partial<Photo> = {}): Photo {
       iso: 0,
       aperture: "—",
       shutter: "—",
+      editedFields: [],
+      takenAtIso: null,
     },
     ...overrides,
   };

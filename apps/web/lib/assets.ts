@@ -35,6 +35,8 @@ interface ExifRow {
   iso: number | null;
   aperture: string | null;
   shutter: string | null;
+  /** Columns a human corrected by hand (migration 20260805000001). */
+  edited_fields: string[] | null;
 }
 
 interface TagRow {
@@ -122,6 +124,13 @@ function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
     iso: e?.iso ?? 0,
     aperture: e?.aperture ?? "—",
     shutter: e?.shutter ?? "—",
+    editedFields: e?.edited_fields ?? [],
+    // The absolute instant behind the display string above. `dateTaken` is
+    // formatted in the server's local time and cannot be parsed back without
+    // guessing a zone, so the editor needs the raw value. Null when taken_at was
+    // missing and `taken` fell back to created_at — the editor then starts empty
+    // rather than offering the ingest date as if the camera had recorded it.
+    takenAtIso: parsed && !Number.isNaN(parsed.getTime()) ? parsed.toISOString() : null,
   };
 }
 
@@ -212,7 +221,7 @@ const ASSET_SELECT = `id, title, status, ai_processed_at, created_at, cluster_id
        files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),
        asset_edits ( recipe, edited_thumb_key, edited_medium_key ),
-       asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter ),
+       asset_exif ( taken_at, camera_make, camera_model, lens, gps_lat, gps_lon, gps_label, iso, aperture, shutter, edited_fields ),
        asset_tags ( tags ( name, category ) ),
        facts ( id, text, status ),
        captions ( id, lang, style, text, is_edited )`;

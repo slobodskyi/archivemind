@@ -95,7 +95,12 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
   app/api/uploads/presign · uploads/complete   drag-drop → R2 → ingest job
   app/api/jobs                                 user-triggered analyze / caption
   app/api/projects · projects/[id]             create · rename/archive/trash
-  app/api/projects/[id]/assets                 M:N add
+  app/api/projects/[id]/assets                 M:N add. Also the Copy/Paste target: Copy parks the
+                                               selection's ids in localStorage and Paste links them
+                                               into the project being viewed. NOT a duplicate — assets
+                                               are deduped by a UNIQUE content_hash index, so a second
+                                               row over the same bytes cannot exist, and M:N membership
+                                               is what "the same shot in two archives" already means
   app/api/assets/[id]                          soft delete (status='deleted'; DB trigger stamps deleted_at)
   app/api/assets/delete · restore · purge      bulk trash ops (ADR 0033): move a selection to
                                                Trash · undo/Restore it (purged excluded) ·
@@ -107,6 +112,13 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                GET current recipe · DELETE reset. Non-destructive —
                                                asset_previews untouched; worker renders edited
                                                previews from the original medium into asset_edits
+  app/api/assets/[id]/exif                     manual metadata correction (ADR 0039): PATCH writes
+                                               asset_exif's OWN columns — so a corrected date moves
+                                               the tile on the Timeline and a corrected camera answers
+                                               that search filter, with no reader changed. DELETE
+                                               reverts from the original_values snapshot. edited_fields
+                                               records provenance AND stops the ingest upsert from
+                                               overwriting a correction on a re-ingest
   app/api/topics/[id]                          PATCH: rename one Topic cloud (ADR 0038).
                                                Sets label + is_renamed and NOTHING else —
                                                migration 20260727000003 revoked the blanket
@@ -130,7 +142,13 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                `facts where status='confirmed'`, so this is
                                                the only user-supplied ground truth that
                                                reaches caption generation
-  app/api/canvas-groups · /[id] · /[id]/assets canvas folders + artboards (ADR 0034): create/list ·
+  app/api/canvas-groups · /[id] · /[id]/assets canvas folders + artboards + bound GROUPS (ADR 0034;
+                                               'group' added by migration 20260805000002 — a bound set
+                                               that selects/moves/edits as one, no container drawn.
+                                               It shipped in localStorage and moved here because the
+                                               ADR-0034 line is "membership is data, geometry is a
+                                               per-user override", and a bound set is pure membership):
+                                               create/list ·
                                                rename/reorder/delete · add/remove members. Server owns
                                                membership + order; geometry stays in localStorage (ADR 0022).
                                                Read seam: lib/canvas-groups.ts (getCanvasGroups)

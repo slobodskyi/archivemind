@@ -17,6 +17,10 @@ interface CanvasContextMenuProps {
   onExtractExif: () => void;
   onAdd: () => void;
   onAddStickyNote: () => void;
+  /** Link the copied files into the archive being viewed. */
+  onPaste: () => void;
+  /** Files sitting on the Copy clipboard — 0 hides the Paste entry. */
+  clipboardCount: number;
   /** Bind the selection into a move-/edit-together group (needs ≥ 2 selected). */
   onGroup: () => void;
   /** Dissolve the bound group(s) the selection touches. */
@@ -47,6 +51,8 @@ export default function CanvasContextMenu({
   onExtractExif,
   onAdd,
   onAddStickyNote,
+  onPaste,
+  clipboardCount,
   onGroup,
   onUngroup,
   hasGroup,
@@ -62,6 +68,9 @@ export default function CanvasContextMenu({
   const canGroup = !allFilesMode && (hasGroup || selCount >= 2);
   // Layer order applies to the selection, or the single right-clicked tile.
   const canLayer = !allFilesMode && (selCount > 0 || menu.targetId != null);
+  // Paste links copied files into THIS archive, so it is meaningless on the
+  // workspace-wide 'all' canvas, which has no membership to add to.
+  const canPaste = !allFilesMode && clipboardCount > 0;
 
   const W = 190;
   const left = typeof window !== "undefined" ? Math.min(menu.x, window.innerWidth - W - 8) : menu.x;
@@ -124,6 +133,12 @@ export default function CanvasContextMenu({
             <Item label="Bring forward" onClick={run(onBringForward)} />
             <Item label="Send backward" onClick={run(onSendBackward)} />
             <Item label="Send to back" onClick={run(onSendToBack)} />
+          </>
+        )}
+        {canPaste && (
+          <>
+            <Divider />
+            <Item label={`Paste ${clipboardCount} here`} onClick={run(onPaste)} />
           </>
         )}
         {canGroup && (

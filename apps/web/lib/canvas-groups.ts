@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { artboardSettingsSchema, type CanvasGroup } from "@archivemind/shared";
+import { artboardSettingsSchema, type CanvasGroup, type CanvasGroupKind } from "@archivemind/shared";
 
-/** Canvas groups — folders + artboards (ADR 0034). The server owns MEMBERSHIP +
+/** Canvas groups — folders, artboards and bound groups (ADR 0034). The server owns MEMBERSHIP +
  *  name + order + export settings (these tables); the on-canvas geometry stays a
  *  per-user client override in localStorage (ADR 0022 holds). RLS scopes every
  *  read to the caller's workspace.
@@ -68,16 +68,18 @@ export async function getCanvasGroups(
   });
 }
 
-/** Single-folder-membership (ADR 0034): before adding assets to a folder,
- *  detach them from any OTHER folder in the same scope. Artboards are exempt —
- *  they deliberately share assets — so callers only invoke this for kind
- *  'folder'. RLS scopes the delete to the caller's own groups. */
-export async function detachFromSiblingFolders(
+/** Single-membership within a kind (ADR 0034): before adding assets to a folder
+ *  or a bound group, detach them from any OTHER group of THAT SAME kind in the
+ *  scope. Artboards are exempt — they deliberately share assets — and the two
+ *  exclusive kinds are independent of each other: a tile can sit in a folder and
+ *  in a bound group at once, which is why this filters on `kind` rather than on
+ *  "not artboard". RLS scopes the delete to the caller's own groups. */
+export async function detachFromSiblingGroups(
   supabase: SupabaseClient,
-  opts: { projectId: string | null; exceptGroupId: string; assetIds: string[] },
+  opts: { kind: "folder" | "group"; projectId: string | null; exceptGroupId: string; assetIds: string[] },
 ): Promise<void> {
   if (opts.assetIds.length === 0) return;
-  let q = supabase.from("canvas_groups").select("id").eq("kind", "folder").neq("id", opts.exceptGroupId);
+  let q = supabase.from("canvas_groups").select("id").eq("kind", opts.kind).neq("id", opts.exceptGroupId);
   q = opts.projectId === null ? q.is("project_id", null) : q.eq("project_id", opts.projectId);
   const { data: siblings, error } = await q;
   if (error) throw error;
@@ -95,7 +97,7 @@ export async function detachFromSiblingFolders(
  *  their order is the PDF page order; folders share the sequence harmlessly. */
 export async function nextGroupSortIndex(
   supabase: SupabaseClient,
-  scope: { projectId: string | null; kind: "folder" | "artboard" },
+  scope: { projectId: string | null; kind: CanvasGroupKind },
 ): Promise<number> {
   let q = supabase
     .from("canvas_groups")

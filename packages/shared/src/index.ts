@@ -320,6 +320,65 @@ export type FactStatusKey = z.infer<typeof factStatusSchema>;
 export const patchFactRequestSchema = z.object({ status: factStatusSchema });
 export type PatchFactRequest = z.infer<typeof patchFactRequestSchema>;
 
+/** PATCH /api/assets/[id]/exif — a human correcting the metadata the ingest
+ *  worker extracted. Shaped in the drawer's terms, not the table's: `camera` is
+ *  one field on screen but two columns underneath, and the route owns that
+ *  mapping so the UI never has to know a make/model split exists.
+ *
+ *  Every field is nullable — clearing one is a real edit ("this file's EXIF
+ *  claims a lens it was not shot with"), and null is distinct from *omitted*,
+ *  which means "leave this field alone". That is why nothing here has a
+ *  default: a default would turn every unmentioned field into a silent wipe.
+ *
+ *  The values that reach further than the drawer are worth knowing about when
+ *  changing this: `takenAt` moves the photo on the Timeline and answers the
+ *  search RPC's date filters, `gpsLat`/`gpsLon` move its marker on the Map, and
+ *  camera/iso/aperture are search filters of their own (ADR 0031). */
+export const patchAssetExifRequestSchema = z
+  .object({
+    camera: z.string().trim().max(120).nullable().optional(),
+    lens: z.string().trim().max(120).nullable().optional(),
+    /** ISO-8601 with an offset — the client sends an absolute instant, so a
+     *  photo does not shift a day when it is read in another timezone. */
+    takenAt: z.string().datetime({ offset: true }).nullable().optional(),
+    iso: z.number().int().min(0).max(10_000_000).nullable().optional(),
+    aperture: z.string().trim().max(40).nullable().optional(),
+    shutter: z.string().trim().max(40).nullable().optional(),
+    gpsLat: z.number().min(-90).max(90).nullable().optional(),
+    gpsLon: z.number().min(-180).max(180).nullable().optional(),
+    gpsLabel: z.string().trim().max(200).nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "at least one field is required",
+  })
+  // A latitude without a longitude is not a location, and half a coordinate
+  // pair would put a marker on the null island or drop it from the Map with no
+  // way for the user to tell which. Clearing is symmetric: both go, or neither.
+  .refine(
+    (v) => (v.gpsLat === undefined) === (v.gpsLon === undefined) && (v.gpsLat === null) === (v.gpsLon === null),
+    { message: "gpsLat and gpsLon must be set, cleared and omitted together" },
+  );
+export type PatchAssetExifRequest = z.infer<typeof patchAssetExifRequestSchema>;
+
+/** The `asset_exif` columns a human may correct, in DB terms — the vocabulary of
+ *  `asset_exif.edited_fields`. `camera` maps onto two of them, and writing GPS
+ *  also claims `location_source` (it stops being 'gps' the moment a person types
+ *  the coordinates), so this list is longer than the request's. */
+export const EXIF_EDITABLE_COLUMNS = [
+  "taken_at",
+  "camera_make",
+  "camera_model",
+  "lens",
+  "iso",
+  "aperture",
+  "shutter",
+  "gps_lat",
+  "gps_lon",
+  "gps_label",
+  "location_source",
+] as const;
+export type ExifEditableColumn = (typeof EXIF_EDITABLE_COLUMNS)[number];
+
 /** POST /api/jobs — the user-triggered AI entry point (analyze #12, caption
  *  #14, ingest re-runs #23; export joins with its phase). The ingest variant
  *  exists to heal Drive-linked assets whose download failed or whose
@@ -457,8 +516,20 @@ export type AddProjectAssetsRequest = z.infer<typeof addProjectAssetsRequestSche
 //   • folder   — organize; a file lives in at most one folder per scope.
 //   • artboard — compose a PDF deliverable; ordered members = the pages.
 
-export const canvasGroupKindSchema = z.enum(["folder", "artboard"]);
+/** The three on-canvas grouping primitives (ADR 0034). All three are membership
+ *  only — geometry stays a per-user localStorage override (ADR 0022):
+ *    folder   — collapses N tiles into one labelled tile with a dropdown;
+ *    artboard — its ordered members become the pages of a PDF export;
+ *    group    — a bound set that selects, moves and edits as one, drawing no
+ *               container at all (migration 20260805000002).
+ *  'folder' and 'group' are each single-membership per scope; artboards
+ *  deliberately share assets. */
+export const canvasGroupKindSchema = z.enum(["folder", "artboard", "group"]);
 export type CanvasGroupKind = z.infer<typeof canvasGroupKindSchema>;
+
+/** Kinds a tile may belong to only ONE of per scope, enforced route-side (the
+ *  DB cannot: a blanket unique index would break artboard sharing). */
+export const EXCLUSIVE_GROUP_KINDS = ["folder", "group"] as const;
 
 /** PDF export config, stored in canvas_groups.settings for artboards ({} for
  *  folders) and echoed in the export job payload. All fields default so an
