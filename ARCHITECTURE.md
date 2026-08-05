@@ -107,6 +107,13 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                GET current recipe · DELETE reset. Non-destructive —
                                                asset_previews untouched; worker renders edited
                                                previews from the original medium into asset_edits
+  app/api/assets/[id]/exif                     manual metadata correction (ADR 0039): PATCH writes
+                                               asset_exif's OWN columns — so a corrected date moves
+                                               the tile on the Timeline and a corrected camera answers
+                                               that search filter, with no reader changed. DELETE
+                                               reverts from the original_values snapshot. edited_fields
+                                               records provenance AND stops the ingest upsert from
+                                               overwriting a correction on a re-ingest
   app/api/topics/[id]                          PATCH: rename one Topic cloud (ADR 0038).
                                                Sets label + is_renamed and NOTHING else —
                                                migration 20260727000003 revoked the blanket

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import type { CanvasGroup, EditRecipe, TrashedAsset } from "@archivemind/shared";
+import type { CanvasGroup, EditRecipe, PatchAssetExifRequest, TrashedAsset } from "@archivemind/shared";
 import { getCaptionRow } from "@/lib/format";
 import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
 import { cloudErrorCopy } from "@/lib/drive-errors";
@@ -501,6 +501,10 @@ export interface Workspace {
   copyCap: (text: string) => void;
   regen: () => void;
   saveCaption: (text: string) => void;
+  /** Persist a manual Metadata/EXIF correction for the drawer's photo. */
+  saveExif: (patch: PatchAssetExifRequest) => void;
+  /** Restore what ingest extracted, dropping every manual correction. */
+  revertExif: () => void;
   /** Confirm / un-confirm one extracted fact (feeds the caption prompt). */
   setFactStatus: (factId: string, status: "confirmed" | "likely") => void;
   genSingle: (id: string) => void;
@@ -1803,6 +1807,43 @@ export function useWorkspace(
     },
     [flashToast, router],
   );
+
+  /** Save a manual Metadata/EXIF correction for the open photo (migration
+   *  20260805000001). The route writes asset_exif's own columns, so a corrected
+   *  date really does move the tile on the Timeline and a corrected camera
+   *  really does answer that search filter — which is why this refreshes rather
+   *  than patching one drawer field in place. */
+  const saveExif = useCallback(
+    async (patch: PatchAssetExifRequest) => {
+      const id = stateRef.current.drawerId;
+      if (!id) return;
+      const resp = await fetch(`/api/assets/${id}/exif`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (resp.ok) {
+        flashToast("Metadata saved");
+        router.refresh();
+      } else {
+        flashToast("Couldn't save the metadata — try again");
+      }
+    },
+    [flashToast, router],
+  );
+
+  /** Drop every manual correction and restore what ingest extracted. */
+  const revertExif = useCallback(async () => {
+    const id = stateRef.current.drawerId;
+    if (!id) return;
+    const resp = await fetch(`/api/assets/${id}/exif`, { method: "DELETE" });
+    if (resp.ok) {
+      flashToast("Metadata reverted to the file's own values");
+      router.refresh();
+    } else {
+      flashToast("Couldn't revert the metadata — try again");
+    }
+  }, [flashToast, router]);
 
   /** Real soft-delete (spec §12 / ADR 0033: status='deleted', the DB stamps
    *  deleted_at, the worker purges after 30 days). Bulk-first: one POST moves
@@ -3999,6 +4040,8 @@ export function useWorkspace(
     copyCap,
     regen,
     saveCaption,
+    saveExif,
+    revertExif,
     setFactStatus,
     genSingle,
     toolSelect,

@@ -386,18 +386,42 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
       // "somewhere plausible". "" records that we looked and found nothing,
       // which is what keeps the backfill from re-scanning it forever.
       const place = reverseGeocode(exif.gps_lat, exif.gps_lon);
+      // Every human-corrected column is held back on conflict (migration
+      // 20260805000001). This upsert runs on more than the first ingest — a
+      // dedup revival, a retry, and the #113 HEIC re-extract all reach it — so
+      // without the guard a re-run would overwrite a hand-typed camera or date
+      // with whatever the file's own EXIF says, which is precisely the value the
+      // user was correcting. `focal_length` and `raw` are not user-editable and
+      // always take the freshly extracted value; `raw` in particular must stay
+      // the original dump, because Revert restores from it.
       await pool.query(
         `insert into asset_exif (asset_id, taken_at, camera_make, camera_model, lens,
                                  gps_lat, gps_lon, gps_label, location_source, iso, aperture,
                                  shutter, focal_length, raw)
          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          on conflict (asset_id) do update set
-           taken_at=excluded.taken_at, camera_make=excluded.camera_make,
-           camera_model=excluded.camera_model, lens=excluded.lens,
-           gps_lat=excluded.gps_lat, gps_lon=excluded.gps_lon,
-           gps_label=excluded.gps_label,
-           location_source=excluded.location_source, iso=excluded.iso,
-           aperture=excluded.aperture, shutter=excluded.shutter,
+           taken_at=case when 'taken_at'=any(asset_exif.edited_fields)
+                         then asset_exif.taken_at else excluded.taken_at end,
+           camera_make=case when 'camera_make'=any(asset_exif.edited_fields)
+                            then asset_exif.camera_make else excluded.camera_make end,
+           camera_model=case when 'camera_model'=any(asset_exif.edited_fields)
+                             then asset_exif.camera_model else excluded.camera_model end,
+           lens=case when 'lens'=any(asset_exif.edited_fields)
+                     then asset_exif.lens else excluded.lens end,
+           gps_lat=case when 'gps_lat'=any(asset_exif.edited_fields)
+                        then asset_exif.gps_lat else excluded.gps_lat end,
+           gps_lon=case when 'gps_lon'=any(asset_exif.edited_fields)
+                        then asset_exif.gps_lon else excluded.gps_lon end,
+           gps_label=case when 'gps_label'=any(asset_exif.edited_fields)
+                          then asset_exif.gps_label else excluded.gps_label end,
+           location_source=case when 'location_source'=any(asset_exif.edited_fields)
+                                then asset_exif.location_source else excluded.location_source end,
+           iso=case when 'iso'=any(asset_exif.edited_fields)
+                    then asset_exif.iso else excluded.iso end,
+           aperture=case when 'aperture'=any(asset_exif.edited_fields)
+                         then asset_exif.aperture else excluded.aperture end,
+           shutter=case when 'shutter'=any(asset_exif.edited_fields)
+                        then asset_exif.shutter else excluded.shutter end,
            focal_length=excluded.focal_length, raw=excluded.raw`,
         [
           row.asset_id,

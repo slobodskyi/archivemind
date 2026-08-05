@@ -470,6 +470,8 @@ export default function ArchiveWorkspace({
         onCopy={ws.copyCap}
         onGenSingle={() => ws.drawerPhoto && ws.genSingle(ws.drawerPhoto.id)}
         onSaveCaption={ws.saveCaption}
+        onSaveExif={ws.saveExif}
+        onRevertExif={ws.revertExif}
         onEditImage={() => ws.drawerPhoto && ws.openEditor(ws.drawerPhoto.id)}
         onDelete={() => ws.drawerPhoto && ws.deletePhoto(ws.drawerPhoto.id)}
         onSetFactStatus={ws.setFactStatus}

@@ -57,6 +57,16 @@ export interface ExifData {
   iso: number;
   aperture: string;
   shutter: string;
+  /** `asset_exif` columns a human has corrected by hand (migration
+   *  20260805000001) — DB column names, e.g. "camera_model", "taken_at". Drives
+   *  the drawer's per-field "edited" marks and whether Revert is offered. Empty
+   *  for mock rows and for anything nobody has touched. */
+  editedFields: string[];
+  /** The ISO-8601 instant behind `dateTaken`, for the editor's datetime input.
+   *  `dateTaken` itself is a display string in local time and cannot be parsed
+   *  back without guessing a timezone. null when the asset has no taken_at and
+   *  the display value fell back to created_at. */
+  takenAtIso: string | null;
 }
 
 export interface Photo {

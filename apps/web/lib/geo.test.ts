@@ -36,6 +36,8 @@ const photo = (id: string, gpsLat: number | null, gpsLon: number | null): Photo 
       iso: 0,
       aperture: "—",
       shutter: "—",
+      editedFields: [],
+      takenAtIso: null,
     },
   }) as Photo;
 

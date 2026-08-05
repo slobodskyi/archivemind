@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { PatchAssetExifRequest } from "@archivemind/shared";
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { FACT_STATUS_COLOR, formatGps, getCaptionText, statusMeta } from "@/lib/format";
 import { photoSrcMedium, isRealSource } from "@/lib/img";
@@ -40,6 +41,10 @@ interface PhotoDrawerProps {
   onSetFactStatus: (factId: string, status: "confirmed" | "likely") => void;
   /** Export this one photo to PDF (ADR 0035). */
   onExport: () => void;
+  /** Persist a manual Metadata/EXIF correction (migration 20260805000001). */
+  onSaveExif: (patch: PatchAssetExifRequest) => void;
+  /** Drop every manual correction, restoring what ingest extracted. */
+  onRevertExif: () => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -64,6 +69,8 @@ export default function PhotoDrawer({
   onDelete,
   onSetFactStatus,
   onExport,
+  onSaveExif,
+  onRevertExif,
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
@@ -114,14 +121,20 @@ export default function PhotoDrawer({
   );
   const showCaptionBlock = Boolean(photo && (photo.processed || hasAnyCaption));
 
-  // Manual Metadata/EXIF editing — local/UI only for now (no backend yet), so
-  // the draft is reset whenever the photo changes and is not persisted. Same
-  // render-time reset pattern as the caption draft above.
+  // Manual Metadata/EXIF editing (migration 20260805000001). A local draft over
+  // the server values, saved explicitly — the same reset-during-render pattern
+  // as the caption draft above, keyed on the photo AND on the values themselves
+  // so a successful save (which refreshes the row) drops the draft instead of
+  // leaving it shadowing the value that just came back.
+  const ex = photo?.exif;
   const [exifEditing, setExifEditing] = useState(false);
   const [exifDraft, setExifDraft] = useState<Record<string, string>>({});
   const [exifScope, setExifScope] = useState("");
-  if (exifScope !== (photo?.id ?? "none")) {
-    setExifScope(photo?.id ?? "none");
+  const exifKey = photo
+    ? `${photo.id}:${ex?.camera}:${ex?.lens}:${ex?.takenAtIso}:${ex?.iso}:${ex?.aperture}:${ex?.shutter}:${ex?.gpsLat}:${ex?.gpsLon}:${ex?.gpsLabel}`
+    : "none";
+  if (exifScope !== exifKey) {
+    setExifScope(exifKey);
     setExifDraft({});
     setExifEditing(false);
   }
@@ -129,6 +142,90 @@ export default function PhotoDrawer({
     exifDraft[key] ?? String(fallback);
   const setExifField = (key: string, v: string) =>
     setExifDraft((d) => ({ ...d, [key]: v }));
+  const exifEdited = new Set(ex?.editedFields ?? []);
+  // The em dash is the drawer's "no value" glyph, not a value — an untouched
+  // field must not be sent as the literal "—" when some *other* field is saved.
+  const asEdit = (key: string, current: string | number) => {
+    const raw = exifDraft[key];
+    if (raw === undefined) return undefined;
+    const trimmed = raw.trim();
+    if (trimmed === String(current).trim()) return undefined;
+    return trimmed === "" || trimmed === "—" ? null : trimmed;
+  };
+  const exifDirty = Object.keys(exifDraft).length > 0;
+
+  /** Collect the changed fields into the route's shape. Untouched fields are
+   *  omitted entirely — the contract treats omitted as "leave alone" and null as
+   *  "clear", so sending everything would wipe fields the user never opened. */
+  const buildExifPatch = () => {
+    if (!ex) return null;
+    const patch: Record<string, unknown> = {};
+    const camera = asEdit("camera", ex.camera);
+    if (camera !== undefined) patch.camera = camera;
+    const lens = asEdit("lens", ex.lens);
+    if (lens !== undefined) patch.lens = lens;
+    const aperture = asEdit("aperture", ex.aperture);
+    if (aperture !== undefined) patch.aperture = aperture;
+    const shutter = asEdit("shutter", ex.shutter);
+    if (shutter !== undefined) patch.shutter = shutter;
+    const gpsLabel = asEdit("gpsLabel", ex.gpsLabel);
+    if (gpsLabel !== undefined) patch.gpsLabel = gpsLabel;
+
+    const isoRaw = exifDraft.iso;
+    if (isoRaw !== undefined && isoRaw.trim() !== String(ex.iso)) {
+      const n = Number(isoRaw.trim());
+      // A non-numeric ISO is dropped rather than sent — the contract would
+      // reject the whole patch and take the other fields down with it.
+      if (isoRaw.trim() === "" || isoRaw.trim() === "—") patch.iso = null;
+      else if (Number.isInteger(n) && n >= 0) patch.iso = n;
+    }
+
+    const dateRaw = exifDraft.dateTaken;
+    if (dateRaw !== undefined) {
+      const trimmed = dateRaw.trim();
+      if (trimmed === "") patch.takenAt = null;
+      else {
+        // <input type="datetime-local"> yields wall-clock with no zone; the
+        // Date constructor reads that as local time, which is what the user
+        // meant, and toISOString sends the absolute instant.
+        const d = new Date(trimmed);
+        if (!Number.isNaN(d.getTime()) && d.toISOString() !== ex.takenAtIso) {
+          patch.takenAt = d.toISOString();
+        }
+      }
+    }
+
+    // Latitude and longitude travel together or not at all (the contract
+    // refuses half a pair), so both are sent whenever either was touched.
+    const latRaw = exifDraft.gpsLat;
+    const lonRaw = exifDraft.gpsLon;
+    if (latRaw !== undefined || lonRaw !== undefined) {
+      const lat = (latRaw ?? String(ex.gpsLat ?? "")).trim();
+      const lon = (lonRaw ?? String(ex.gpsLon ?? "")).trim();
+      if (lat === "" && lon === "") {
+        patch.gpsLat = null;
+        patch.gpsLon = null;
+      } else {
+        const la = Number(lat);
+        const lo = Number(lon);
+        if (Number.isFinite(la) && Number.isFinite(lo) && (la !== ex.gpsLat || lo !== ex.gpsLon)) {
+          patch.gpsLat = la;
+          patch.gpsLon = lo;
+        }
+      }
+    }
+    return Object.keys(patch).length > 0 ? patch : null;
+  };
+
+  /** Local-time value for <input type="datetime-local">, which refuses an ISO
+   *  string with a zone. Empty when the asset has no real taken_at. */
+  const dateTimeLocal = (iso: string | null) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
 
   return (
     <div
@@ -376,39 +473,114 @@ export default function PhotoDrawer({
           <div style={{ marginTop: 18 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={labelCaps}>Metadata / EXIF</span>
-              {/* Pen toggle: flip the fields between read-only and editable. Edits
-                  are local-only for now (not saved) — the tooltip says so. */}
-              <button
-                onClick={() => setExifEditing((v) => !v)}
-                title={exifEditing ? "Done editing (not saved yet)" : "Edit metadata manually"}
-                aria-label={exifEditing ? "Finish editing metadata" : "Edit metadata manually"}
-                aria-pressed={exifEditing}
-                style={exifEditBtn(exifEditing)}
-              >
-                {exifEditing ? <CheckIcon width={12} height={12} /> : <PenGlyph />}
-                {exifEditing ? "Done" : "Edit"}
-              </button>
+              {/* Editing is only offered on real assets: a mock row has no
+                  asset_exif row behind it, so the route would have nothing to
+                  correct and every save would 404. */}
+              {isRealSource(photo.source) && (
+                <button
+                  onClick={() => setExifEditing((v) => !v)}
+                  title={exifEditing ? "Stop editing" : "Correct the metadata by hand"}
+                  aria-label={exifEditing ? "Stop editing metadata" : "Correct the metadata by hand"}
+                  aria-pressed={exifEditing}
+                  style={exifEditBtn(exifEditing)}
+                >
+                  {exifEditing ? <CloseIcon width={10} height={10} strokeWidth={2.2} /> : <PenGlyph />}
+                  {exifEditing ? "Cancel" : "Edit"}
+                </button>
+              )}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "7px 14px", marginTop: 10, fontSize: 12, alignItems: "center" }}>
               {/* Labels use --t2b (4.72:1), not --t3 (2.96:1, WCAG fail) — this
                   is the readable label column, not decoration. */}
-              <span style={exifLabel}>Camera</span>
+              <ExifLabel text="Camera" edited={exifEdited.has("camera_model") || exifEdited.has("camera_make")} />
               <ExifField editing={exifEditing} value={exifVal("camera", photo.exif.camera)} onChange={(v) => setExifField("camera", v)} />
-              <span style={exifLabel}>Lens</span>
+              <ExifLabel text="Lens" edited={exifEdited.has("lens")} />
               <ExifField editing={exifEditing} value={exifVal("lens", photo.exif.lens)} onChange={(v) => setExifField("lens", v)} />
-              <span style={exifLabel}>Date</span>
-              <ExifField editing={exifEditing} value={exifVal("dateTaken", photo.exif.dateTaken)} onChange={(v) => setExifField("dateTaken", v)} />
-              {/* GPS is a structured lat/lon pair the Map reads — not a free-text
-                  field, so it stays read-only in this local-only editor. */}
-              <span style={exifLabel}>GPS</span>
-              <span style={{ color: "var(--t2)" }}>{formatGps(photo.exif)}</span>
-              <span style={exifLabel}>ISO</span>
+              <ExifLabel text="Date" edited={exifEdited.has("taken_at")} />
+              {/* A date is an instant, not prose: a text box would accept
+                  "yesterday" and silently drop the edit. The native picker also
+                  keeps the value parseable back to a real timestamp, which
+                  matters because taken_at drives the Timeline and the search
+                  date filters. */}
+              {exifEditing ? (
+                <input
+                  type="datetime-local"
+                  value={exifDraft.dateTaken ?? dateTimeLocal(photo.exif.takenAtIso)}
+                  onChange={(e) => setExifField("dateTaken", e.target.value)}
+                  style={exifInput}
+                />
+              ) : (
+                <span style={{ color: "var(--t2)" }}>{photo.exif.dateTaken}</span>
+              )}
+              <ExifLabel text="GPS" edited={exifEdited.has("gps_lat") || exifEdited.has("gps_lon")} />
+              {exifEditing ? (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    value={exifDraft.gpsLat ?? String(photo.exif.gpsLat ?? "")}
+                    onChange={(e) => setExifField("gpsLat", e.target.value)}
+                    placeholder="lat"
+                    inputMode="decimal"
+                    aria-label="Latitude"
+                    style={{ ...exifInput, flex: 1, minWidth: 0 }}
+                  />
+                  <input
+                    value={exifDraft.gpsLon ?? String(photo.exif.gpsLon ?? "")}
+                    onChange={(e) => setExifField("gpsLon", e.target.value)}
+                    placeholder="lon"
+                    inputMode="decimal"
+                    aria-label="Longitude"
+                    style={{ ...exifInput, flex: 1, minWidth: 0 }}
+                  />
+                </div>
+              ) : (
+                <span style={{ color: "var(--t2)" }}>{formatGps(photo.exif)}</span>
+              )}
+              {exifEditing && (
+                <>
+                  <ExifLabel text="Place" edited={exifEdited.has("gps_label")} />
+                  <ExifField editing value={exifVal("gpsLabel", photo.exif.gpsLabel)} onChange={(v) => setExifField("gpsLabel", v)} />
+                </>
+              )}
+              <ExifLabel text="ISO" edited={exifEdited.has("iso")} />
               <ExifField editing={exifEditing} value={exifVal("iso", photo.exif.iso)} onChange={(v) => setExifField("iso", v)} />
-              <span style={exifLabel}>Aperture</span>
+              <ExifLabel text="Aperture" edited={exifEdited.has("aperture")} />
               <ExifField editing={exifEditing} value={exifVal("aperture", photo.exif.aperture)} onChange={(v) => setExifField("aperture", v)} />
-              <span style={exifLabel}>Shutter</span>
+              <ExifLabel text="Shutter" edited={exifEdited.has("shutter")} />
               <ExifField editing={exifEditing} value={exifVal("shutter", photo.exif.shutter)} onChange={(v) => setExifField("shutter", v)} />
             </div>
+
+            {exifEditing && (
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 11 }}>
+                <button
+                  onClick={() => {
+                    const patch = buildExifPatch();
+                    if (patch) onSaveExif(patch as PatchAssetExifRequest);
+                    setExifEditing(false);
+                  }}
+                  disabled={!exifDirty}
+                  style={footerBtn(exifDirty)}
+                >
+                  Save metadata
+                </button>
+                {exifEdited.size > 0 && (
+                  <button
+                    onClick={() => {
+                      onRevertExif();
+                      setExifEditing(false);
+                    }}
+                    title="Restore the values read from the file itself"
+                    style={footerBtn(false)}
+                  >
+                    Revert
+                  </button>
+                )}
+              </div>
+            )}
+            {!exifEditing && exifEdited.size > 0 && (
+              <span style={{ display: "block", marginTop: 8, fontSize: 10.5, color: "var(--t2b)" }}>
+                Edited by hand — the dot marks each corrected field.
+              </span>
+            )}
           </div>
 
           {/* Facts are confirmed one at a time, and the label says why: the
@@ -473,26 +645,43 @@ const PenGlyph = () => (
   </svg>
 );
 
+/** Shared look for every editable Metadata/EXIF cell — plain text, the date
+ *  picker and the two GPS boxes, so they line up as one column. */
+const exifInput: React.CSSProperties = {
+  width: "100%",
+  height: 24,
+  background: "var(--bg-in)",
+  border: "1px solid var(--bd)",
+  borderRadius: 2,
+  padding: "0 7px",
+  color: "var(--t1)",
+  fontSize: 12,
+  fontFamily: "inherit",
+  outline: 0,
+};
+
 /** One Metadata/EXIF value cell: a read-only span, or an input while editing. */
 function ExifField({ editing, value, onChange }: { editing: boolean; value: string; onChange: (v: string) => void }) {
   if (!editing) return <span style={{ color: "var(--t2)" }}>{value}</span>;
+  return <input value={value} onChange={(e) => onChange(e.target.value)} style={exifInput} />;
+}
+
+/** A Metadata/EXIF row label, dotted when a human has corrected that field.
+ *  The dot matters because a corrected value is indistinguishable from an
+ *  extracted one once it is stored in the same column — and the difference is
+ *  exactly what a second person reading the archive needs to know. */
+function ExifLabel({ text, edited }: { text: string; edited: boolean }) {
   return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      style={{
-        width: "100%",
-        height: 24,
-        background: "var(--bg-in)",
-        border: "1px solid var(--bd)",
-        borderRadius: 2,
-        padding: "0 7px",
-        color: "var(--t1)",
-        fontSize: 12,
-        fontFamily: "inherit",
-        outline: 0,
-      }}
-    />
+    <span style={{ ...exifLabel, display: "flex", alignItems: "center", gap: 5 }}>
+      {text}
+      {edited && (
+        <span
+          title="Corrected by hand"
+          aria-label="Corrected by hand"
+          style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--ac)", flex: "0 0 auto" }}
+        />
+      )}
+    </span>
   );
 }
 
