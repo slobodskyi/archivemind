@@ -1571,6 +1571,15 @@ export function useWorkspace(
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));
         const saved = (await res.json()) as InkAnnotation;
+        // Erased (or undone) while the insert was in flight: the row exists now
+        // and nothing on screen points at it, so undo the create rather than
+        // leaving an orphan that reappears on the next load. Same guard the
+        // note create makes — commitErase deliberately skips DELETE for a tmp
+        // id, on the understanding that this is where it gets cleaned up.
+        if (!stateRef.current.inkStrokes.some((k) => k.id === tmpId)) {
+          void fetch(`/api/annotations/${saved.id}`, { method: "DELETE" });
+          return;
+        }
         setState({
           inkStrokes: stateRef.current.inkStrokes.map((k) => (k.id === tmpId ? saved : k)),
         });
