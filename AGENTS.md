@@ -85,7 +85,11 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   lets an annotation have **no anchor** at all, since there is exactly one
   arrangement it is positioned against. Colour is the ADR 0040 seven (reused,
   not re-picked, so the two swatch rows can't fork); `style` is jsonb parsed by
-  zod, so the next knob is a field and not a migration. Zero credits.
+  zod, so the next knob is a field and not a migration. A note is configurable —
+  colour + font size through `NoteOptionsPopover`, a corner handle to resize —
+  and **checklists are syntax, not structure**: a leading `[ ]`/`[x]` renders as
+  a checkbox (`lib/notes.ts`) while the body stays one plain string, which is
+  what keeps undo and the autosave debounce out of a block model. Zero credits.
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI

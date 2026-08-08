@@ -11,12 +11,14 @@ import type {
   CanvasGroup,
   EditRecipe,
   LabelNames,
+  NoteFontSize,
   PatchAnnotationRequest,
   PatchAssetExifRequest,
   TrashedAsset,
 } from "@archivemind/shared";
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, labelCounts as countLabels, type LabelFilter } from "@/lib/labels";
+import { toggleChecklistLine } from "@/lib/notes";
 import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -416,6 +418,17 @@ type DragSession =
       moved: boolean;
     }
   | {
+      // Corner handle. Its own mode rather than a flag on "sticky": the two
+      // write different columns (x/y vs w/h) and so PATCH different fields on
+      // release, and a resize must never move the note's origin.
+      mode: "stickyResize";
+      id: string;
+      sx: number;
+      sy: number;
+      orig: { w: number; h: number };
+      moved: boolean;
+    }
+  | {
       mode: "frameDraw";
       startContent: { x: number; y: number };
       endContent: { x: number; y: number };
@@ -695,7 +708,12 @@ export interface Workspace {
   stickyNotes: StickyNote[];
   addStickyNote: () => void;
   onStickyDown: (e: React.PointerEvent, id: string, orig: { x: number; y: number }) => void;
+  onStickyResizeDown: (e: React.PointerEvent, id: string, orig: { w: number; h: number }) => void;
   updateStickyText: (id: string, text: string) => void;
+  setStickyColor: (id: string, color: AssetLabel) => void;
+  setStickyFontSize: (id: string, fontSize: NoteFontSize) => void;
+  /** Tick/untick one `[ ]` line from the rendered body, no editor involved. */
+  toggleStickyCheck: (id: string, lineIndex: number) => void;
   deleteStickyNote: (id: string) => void;
 
   // Undo / redo
@@ -881,6 +899,13 @@ const isTmpNote = (id: string) => id.startsWith(TMP_NOTE_PREFIX);
  *  character on a note somebody is actually writing in. Long enough to batch a
  *  sentence, short enough that a browser closed mid-thought keeps it. */
 const NOTE_TEXT_SAVE_MS = 700;
+
+/** Resize bounds. The floor is a usability one — below it the header strip and
+ *  its controls stop fitting — and sits well inside the schema's own 40..4000,
+ *  so the server never has to reject a drag the UI allowed. */
+const NOTE_MIN_SIZE = 120;
+const NOTE_MAX_SIZE = 4000;
+const clampNoteSize = (v: number) => Math.min(NOTE_MAX_SIZE, Math.max(NOTE_MIN_SIZE, Math.round(v)));
 
 export function useWorkspace(
   initialPhotos: Photo[],
@@ -1604,6 +1629,16 @@ export function useWorkspace(
     [pushHistory, startPan, gestureClaimed],
   );
 
+  const onStickyResizeDown = useCallback(
+    (e: React.PointerEvent, id: string, orig: { w: number; h: number }) => {
+      e.stopPropagation();
+      if (gestureClaimed()) return;
+      pushHistory();
+      dragRef.current = { mode: "stickyResize", id, sx: e.clientX, sy: e.clientY, orig, moved: false };
+    },
+    [pushHistory, gestureClaimed],
+  );
+
   // ── Sticky notes: server-backed (ADR 0041) ─────────────────────────────────
   // Every mutation is optimistic — the canvas updates immediately and the row
   // follows — because a note is typed into and dragged around, and a round trip
@@ -1712,6 +1747,50 @@ export function useWorkspace(
       );
     },
     [setState, patchNote],
+  );
+
+  /** Colour and font size are single discrete choices, so they save immediately
+   *  — there is no equivalent of "still typing" to debounce, and a picked swatch
+   *  that stayed unsaved for 700 ms would be the one change a user reloads to
+   *  check. History is pushed so Cmd+Z reaches them like every other note edit;
+   *  `reconcileNotes` is what makes that undo hit the server too. */
+  const setStickyColor = useCallback(
+    (id: string, color: AssetLabel) => {
+      const note = stateRef.current.stickyNotes.find((n) => n.id === id);
+      if (!note || note.color === color) return;
+      pushHistory();
+      setState({ stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === id ? { ...n, color } : n)) });
+      patchNote(id, { color });
+    },
+    [pushHistory, setState, patchNote],
+  );
+
+  const setStickyFontSize = useCallback(
+    (id: string, fontSize: NoteFontSize) => {
+      const note = stateRef.current.stickyNotes.find((n) => n.id === id);
+      if (!note || note.fontSize === fontSize) return;
+      pushHistory();
+      setState({
+        stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === id ? { ...n, fontSize } : n)),
+      });
+      patchNote(id, { style: { fontSize } });
+    },
+    [pushHistory, setState, patchNote],
+  );
+
+  /** Tick a `[ ]` line straight from the rendered body, without opening the
+   *  editor. Goes through the same debounce as typing: ticking three boxes in a
+   *  row is one PATCH, and it cannot race the text save for the same note. */
+  const toggleStickyCheck = useCallback(
+    (id: string, lineIndex: number) => {
+      const note = stateRef.current.stickyNotes.find((n) => n.id === id);
+      if (!note) return;
+      const text = toggleChecklistLine(note.text, lineIndex);
+      if (text === note.text) return; // stale index — the text moved under the click
+      pushHistory();
+      updateStickyText(id, text);
+    },
+    [pushHistory, updateStickyText],
   );
 
   const deleteStickyNote = useCallback(
@@ -1859,6 +1938,21 @@ export function useWorkspace(
             n.id === d.id ? { ...n, x: d.orig.x + dx, y: d.orig.y + dy } : n,
           ),
         });
+      } else if (d.mode === "stickyResize") {
+        if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        const dx = (e.clientX - d.sx) / s.scale,
+          dy = (e.clientY - d.sy) / s.scale;
+        setState({
+          stickyNotes: s.stickyNotes.map((n) =>
+            n.id === d.id
+              ? {
+                  ...n,
+                  w: clampNoteSize(d.orig.w + dx),
+                  h: clampNoteSize(d.orig.h + dy),
+                }
+              : n,
+          ),
+        });
       } else if (d.mode === "marquee") {
         const r = rect();
         d.x1 = e.clientX - r.left;
@@ -1998,6 +2092,11 @@ export function useWorkspace(
       if (d.moved) {
         const note = stateRef.current.stickyNotes.find((n) => n.id === d.id);
         if (note) patchNote(note.id, { x: note.x, y: note.y });
+      }
+    } else if (d.mode === "stickyResize") {
+      if (d.moved) {
+        const note = stateRef.current.stickyNotes.find((n) => n.id === d.id);
+        if (note) patchNote(note.id, { w: note.w, h: note.h });
       }
     } else if (d.mode === "cloudDrag") {
       // A click (no drag) on a label toggles focus on that cloud.
@@ -4350,10 +4449,19 @@ export function useWorkspace(
         // cloud's rename input — keep the platform's own hold gesture: on touch
         // that is how you place a caret and select a word, and stealing it for
         // the canvas menu would make those fields unusable.
+        //
+        // `[data-note-surface]` covers the note's RENDERED body, which is a plain
+        // div (it only becomes a textarea once you tap into it) and would
+        // otherwise fail all three checks below — so a hold anywhere on a note
+        // would open the canvas menu on top of it. Matched with closest(),
+        // because the press usually lands on a line or a checkbox inside it.
         const target = e.target as HTMLElement | null;
         const editable =
           !!target &&
-          (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            target.closest("[data-note-surface]") !== null);
         if (e.pointerType !== "mouse" && !editable) {
           // Hold = right-click. iOS Safari does not deliver a usable
           // `contextmenu` from a long press, so without this the menu — and
@@ -5160,6 +5268,10 @@ export function useWorkspace(
     stickyNotes: state.stickyNotes,
     addStickyNote,
     onStickyDown,
+    onStickyResizeDown,
+    setStickyColor,
+    setStickyFontSize,
+    toggleStickyCheck,
     updateStickyText,
     deleteStickyNote,
 

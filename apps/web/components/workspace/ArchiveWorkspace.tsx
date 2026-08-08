@@ -159,8 +159,13 @@ export default function ArchiveWorkspace({
             />
             <StickyNoteOverlay
               notes={ws.stickyNotes}
+              labelNames={ws.labelNames}
               onDragStart={ws.onStickyDown}
+              onResizeStart={ws.onStickyResizeDown}
               onTextChange={ws.updateStickyText}
+              onColorChange={ws.setStickyColor}
+              onFontSizeChange={ws.setStickyFontSize}
+              onToggleCheck={ws.toggleStickyCheck}
               onDelete={ws.deleteStickyNote}
             />
           </>
