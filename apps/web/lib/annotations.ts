@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   canvasAnnotationKindSchema,
+  inkBodySchema,
   noteBodySchema,
   noteStyleSchema,
   assetLabelSchema,
@@ -53,22 +54,42 @@ export async function getCanvasAnnotations(
   if (error?.code === "42P01" || error?.code === "42703") return [];
   if (error) throw error as unknown as Error;
 
-  return ((data ?? []) as unknown as AnnotationRow[]).map(rowToAnnotation);
+  return ((data ?? []) as unknown as AnnotationRow[])
+    .map(rowToAnnotation)
+    .filter((a): a is CanvasAnnotation => a !== null);
 }
 
 /** One row → the client shape. `body`/`style` are jsonb parsed by zod, never by
  *  SQL: defaults fill anything a row written before a knob existed is missing,
- *  which is the property that lets the note gain settings with no migration. */
-export function rowToAnnotation(row: AnnotationRow): CanvasAnnotation {
-  return {
+ *  which is the property that lets a note gain settings with no migration.
+ *
+ *  Branching on `kind` is not a formality — the two bodies are different shapes
+ *  and `noteBodySchema.text` has a default, so parsing a stroke as a note would
+ *  succeed and hand back a blank sticky where the ink was. */
+export function rowToAnnotation(row: AnnotationRow): CanvasAnnotation | null {
+  const base = {
     id: row.id,
-    kind: canvasAnnotationKindSchema.catch("note").parse(row.kind),
     projectId: row.project_id,
     x: row.x,
     y: row.y,
     w: row.w,
     h: row.h,
     color: assetLabelSchema.catch("yellow").parse(row.color),
+  };
+  const kind = canvasAnnotationKindSchema.catch("note").parse(row.kind);
+
+  if (kind === "ink") {
+    // A stroke with unreadable points cannot be drawn or erased, so it is
+    // dropped from the read rather than rendered as an empty artefact the user
+    // can see but not remove. Notes get no such escape: their body always
+    // parses, and losing text silently would be far worse than showing it.
+    const body = inkBodySchema.safeParse(row.body ?? {});
+    if (!body.success) return null;
+    return { ...base, kind, body: body.data, style: {} };
+  }
+  return {
+    ...base,
+    kind: "note",
     body: noteBodySchema.parse(row.body ?? {}),
     style: noteStyleSchema.parse(row.style ?? {}),
   };

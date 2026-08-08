@@ -739,22 +739,80 @@ export const noteStyleSchema = z.object({
 });
 export type NoteStyle = z.infer<typeof noteStyleSchema>;
 
+/** kind='ink' body — one freehand stroke per row (ADR 0041).
+ *
+ *  ONE STROKE PER ROW, not one accumulating "ink layer": the row's x/y/w/h is
+ *  then the stroke's own bounding box, which is exactly what the geometry
+ *  columns mean everywhere else here; erasing is a DELETE rather than a
+ *  read-modify-write of a growing blob; and two people drawing at once touch
+ *  different rows instead of clobbering one.
+ *
+ *  Points are `[x, y, pressure]`, stored RELATIVE to the row's x/y. Relative
+ *  keeps the numbers small and — more to the point — lets a stroke be moved
+ *  later by patching two columns instead of rewriting every sample.
+ *
+ *  Pressure is kept per point even though today's renderer bands it: the samples
+ *  are what the Pencil actually reported, and a better renderer should not need
+ *  a migration or a re-capture to use them. 0 means "device didn't say"
+ *  (a mouse) — the renderer substitutes its own default rather than drawing a
+ *  zero-width line. */
+export const inkPointSchema = z.tuple([z.number(), z.number(), z.number().min(0).max(1)]);
+export type InkPoint = z.infer<typeof inkPointSchema>;
+
+/** A stroke is capped so one runaway drag can't post a megabyte of samples.
+ *  ~4000 points is a very long continuous stroke at 120 Hz (30+ seconds without
+ *  lifting the pen); the capture simplifies well below this before sending. */
+export const INK_MAX_POINTS = 4000;
+
+export const inkBodySchema = z.object({
+  points: z.array(inkPointSchema).min(2).max(INK_MAX_POINTS),
+  /** Nib width in canvas units at pressure 1, before the per-point banding. */
+  size: z.number().min(0.5).max(64).default(3),
+});
+export type InkBody = z.infer<typeof inkBodySchema>;
+
 /** GET /api/annotations?project= — the read shape the canvas hydrates from.
  *  `color` is the ADR 0040 seven, reused rather than re-picked so the note
  *  swatch and the label swatch cannot fork into two palettes (and a renamed
- *  colour carries its name onto notes for free). */
-export const canvasAnnotationSchema = z.object({
+ *  colour carries its name onto notes for free).
+ *
+ *  Discriminated on `kind`, NOT a plain union: `noteBodySchema.text` has a
+ *  default, so `{points, size}` parses cleanly as an empty note and a union
+ *  would quietly turn every stroke into a blank sticky. The discriminant makes
+ *  that unrepresentable, and gives callers real narrowing off `a.kind`. */
+const annotationBaseShape = {
   id: uuidSchema,
-  kind: canvasAnnotationKindSchema,
   projectId: uuidSchema.nullable(),
   x: z.number(),
   y: z.number(),
   w: z.number(),
   h: z.number(),
   color: assetLabelSchema,
+};
+
+export const noteAnnotationSchema = z.object({
+  ...annotationBaseShape,
+  kind: z.literal("note"),
   body: noteBodySchema,
   style: noteStyleSchema,
 });
+export type NoteAnnotation = z.infer<typeof noteAnnotationSchema>;
+
+export const inkAnnotationSchema = z.object({
+  ...annotationBaseShape,
+  kind: z.literal("ink"),
+  body: inkBodySchema,
+  // Ink has no presentation knobs yet — colour is the column and the nib width
+  // travels with the points that were captured against it. The key exists so
+  // the row shape stays uniform and the first knob is additive.
+  style: z.object({}).default({}),
+});
+export type InkAnnotation = z.infer<typeof inkAnnotationSchema>;
+
+export const canvasAnnotationSchema = z.discriminatedUnion("kind", [
+  noteAnnotationSchema,
+  inkAnnotationSchema,
+]);
 export type CanvasAnnotation = z.infer<typeof canvasAnnotationSchema>;
 
 export const canvasAnnotationsResponseSchema = z.object({
@@ -766,23 +824,49 @@ export type CanvasAnnotationsResponse = z.infer<typeof canvasAnnotationsResponse
  *  at 1e12 where Fit would then try to frame it. Generous enough that no real
  *  canvas hits them — the workspace grid is a few thousand units across. */
 const CANVAS_COORD_MAX = 1_000_000;
-const annotationGeometrySchema = {
+const annotationOrigin = {
   x: z.number().finite().min(-CANVAS_COORD_MAX).max(CANVAS_COORD_MAX),
   y: z.number().finite().min(-CANVAS_COORD_MAX).max(CANVAS_COORD_MAX),
+};
+/** A note is a card you have to be able to read and grab. */
+const noteGeometrySchema = {
+  ...annotationOrigin,
   w: z.number().finite().min(40).max(4000),
   h: z.number().finite().min(40).max(4000),
 };
+/** A stroke's w/h is its bounding box, and a legitimate stroke can be a dot or a
+ *  perfectly straight horizontal line — so the floor is 0, not the note's 40. */
+const inkGeometrySchema = {
+  ...annotationOrigin,
+  w: z.number().finite().min(0).max(4000),
+  h: z.number().finite().min(0).max(4000),
+};
 
-/** POST /api/annotations. The client sends where it put the note, because the
- *  viewport centre it was dropped at is only known there. */
-export const createAnnotationRequestSchema = z.object({
-  kind: canvasAnnotationKindSchema.default("note"),
-  projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
-  ...annotationGeometrySchema,
-  color: assetLabelSchema.default("yellow"),
-  body: noteBodySchema.default({ text: "" }),
-  style: noteStyleSchema.default({ fontSize: "m" }),
-});
+/** POST /api/annotations. The client sends the geometry, because both the
+ *  viewport centre a note was dropped at and the bounding box a stroke swept
+ *  out are only known there.
+ *
+ *  Discriminated for the same reason the read shape is: a plain union would let
+ *  an ink body fall through to `noteBodySchema` and be stored as a blank note.
+ *  `kind` therefore has no default — every caller states it. */
+export const createAnnotationRequestSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("note"),
+    projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
+    ...noteGeometrySchema,
+    color: assetLabelSchema.default("yellow"),
+    body: noteBodySchema.default({ text: "" }),
+    style: noteStyleSchema.default({ fontSize: "m" }),
+  }),
+  z.object({
+    kind: z.literal("ink"),
+    projectId: uuidSchema.nullish(),
+    ...inkGeometrySchema,
+    color: assetLabelSchema.default("gray"),
+    body: inkBodySchema,
+    style: z.object({}).default({}),
+  }),
+]);
 export type CreateAnnotationRequest = z.infer<typeof createAnnotationRequestSchema>;
 
 /** PATCH /api/annotations/[id] — move, resize, retype, recolour, restyle.
@@ -792,12 +876,18 @@ export type CreateAnnotationRequest = z.infer<typeof createAnnotationRequestSche
  *  tab reverts a recolour in another. */
 export const patchAnnotationRequestSchema = z
   .object({
-    x: annotationGeometrySchema.x.optional(),
-    y: annotationGeometrySchema.y.optional(),
-    w: annotationGeometrySchema.w.optional(),
-    h: annotationGeometrySchema.h.optional(),
+    x: noteGeometrySchema.x.optional(),
+    y: noteGeometrySchema.y.optional(),
+    // The looser ink floor, because a patch carries no `kind` to branch on and
+    // refusing to move a one-pixel-tall stroke would be the wrong failure.
+    w: inkGeometrySchema.w.optional(),
+    h: inkGeometrySchema.h.optional(),
     color: assetLabelSchema.optional(),
-    body: noteBodySchema.optional(),
+    // Ink FIRST. `noteBodySchema.text` has a default, so a note body matches
+    // anything — put it first and every ink patch would be read as a blank
+    // note. Ink requires `points`, so it only matches a real stroke and a note
+    // body falls through to the second member.
+    body: z.union([inkBodySchema, noteBodySchema]).optional(),
     style: noteStyleSchema.optional(),
   })
   .refine((v) => Object.values(v).some((field) => field !== undefined), {

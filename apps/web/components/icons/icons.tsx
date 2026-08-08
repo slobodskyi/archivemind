@@ -138,6 +138,26 @@ export function FrameToolIcon({ width = 16, height = 16, ...props }: IconProps) 
   );
 }
 
+/** Marker (ADR 0041) — a nib, angled like a held pen. */
+export function InkToolIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+      <path d="M14.5 5.5l3 3" />
+    </svg>
+  );
+}
+
+/** Eraser — a block on a baseline, so it reads against the marker beside it. */
+export function EraserToolIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M14 4.5 20 10.5a1.6 1.6 0 0 1 0 2.3l-5.4 5.4H9.2l-4.7-4.7a1.6 1.6 0 0 1 0-2.3l7.2-7.2a1.6 1.6 0 0 1 2.3 0Z" />
+      <path d="M4 20.5h16" />
+    </svg>
+  );
+}
+
 export function UndoIcon({ width = 15, height = 15, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>

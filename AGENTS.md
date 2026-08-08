@@ -89,7 +89,11 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   colour + font size through `NoteOptionsPopover`, a corner handle to resize —
   and **checklists are syntax, not structure**: a leading `[ ]`/`[x]` renders as
   a checkbox (`lib/notes.ts`) while the body stays one plain string, which is
-  what keeps undo and the autosave debounce out of a block model. Zero credits.
+  what keeps undo and the autosave debounce out of a block model. **Freehand ink
+  is the same table's second `kind`** — one row per stroke (so erasing is a
+  DELETE), `lib/ink.ts` for the pure geometry, marker + eraser in the left
+  toolbar, and the rule that matters: **a pen draws whatever tool is selected, a
+  finger never does.** Zero credits.
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI

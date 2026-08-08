@@ -2,13 +2,15 @@
 
 import type { AssetLabel, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
-import { NO_LABEL_CLOUD_KEY } from "@/lib/labels";
+import { useMemo } from "react";
+import { LABEL_COLORS, NO_LABEL_CLOUD_KEY } from "@/lib/labels";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
 import FolderOverlay from "@/components/canvas/FolderOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
+import InkOverlay, { LiveStroke } from "@/components/canvas/InkOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
 import GeoMapPane from "@/components/map/GeoMapPane";
@@ -92,6 +94,11 @@ export default function ArchiveWorkspace({
   const currentLabel: AssetLabel | "mixed" | null =
     targetLabels.size === 1 ? ([...targetLabels][0] ?? null) : targetLabels.size > 1 ? "mixed" : null;
 
+  // A Set so InkOverlay's per-stroke memo compares by identity: an erase drag
+  // fires on every pointermove, and rebuilding this inline would make each one
+  // a new object and defeat the memo it exists to feed.
+  const pendingEraseSet = useMemo(() => new Set(ws.pendingErase), [ws.pendingErase]);
+
   return (
     <div
       style={{
@@ -157,6 +164,18 @@ export default function ArchiveWorkspace({
               onRename={ws.renameGroup}
               onDelete={ws.deleteGroup}
             />
+            {/* Ink sits UNDER the notes and folders (zIndex 14 vs 15) — a
+                stroke annotates the photos, and a note or a folder box is a
+                thing you put on top of the board, not something to draw over
+                and then lose. */}
+            <InkOverlay strokes={ws.inkStrokes} pendingErase={pendingEraseSet} />
+            {ws.inkDrawing && (
+              <LiveStroke
+                attachPath={ws.setInkPathEl}
+                color={LABEL_COLORS[ws.inkColor]}
+                width={ws.inkLiveWidth}
+              />
+            )}
             <StickyNoteOverlay
               notes={ws.stickyNotes}
               labelNames={ws.labelNames}
@@ -400,6 +419,8 @@ export default function ArchiveWorkspace({
         onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
         onAddStickyNote={ws.addStickyNote}
+        onInkTool={ws.toolInk}
+        onEraserTool={ws.toolEraser}
         onToggleTrash={ws.toggleTrash}
         trashOpen={ws.trashOpen}
         onToggleLabels={ws.toggleLabelFilterPanel}
