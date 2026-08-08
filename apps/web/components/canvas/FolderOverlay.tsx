@@ -420,6 +420,11 @@ function FinderDropdown({
           gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
           gap: 12,
           alignContent: "start",
+          // The canvas root sets `touch-action: none` to own pinch/pan/long-press,
+          // and that also suppresses touch scrolling for everything inside it —
+          // including this list. Hand the gesture back where a finger is meant
+          // to scroll rather than move the canvas.
+          touchAction: "pan-y",
         }}
       >
         {folder.items.length === 0 ? (

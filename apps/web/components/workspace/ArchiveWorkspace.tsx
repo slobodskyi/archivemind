@@ -66,7 +66,10 @@ export default function ArchiveWorkspace({
       style={{
         position: "relative",
         width: "100vw",
-        height: "100vh",
+        // dvh, not vh: on iOS `100vh` is the LARGE viewport, so the bottom
+        // action bars (bottom: 20) sat underneath Safari's own toolbar and were
+        // unreachable until the chrome happened to collapse.
+        height: "100dvh",
         overflow: "hidden",
         background: "var(--bg)",
       }}

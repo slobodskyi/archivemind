@@ -8,7 +8,7 @@ function Sk({ w, h, style }: { w: number | string; h: number; style?: React.CSSP
 
 export default function HomeLoading() {
   return (
-    <div style={{ display: "flex", width: "100vw", height: "100vh", overflow: "hidden", background: "var(--bg)" }}>
+    <div style={{ display: "flex", width: "100vw", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
       <aside
         style={{
           width: 248,

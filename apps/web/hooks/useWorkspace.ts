@@ -400,6 +400,19 @@ const DEFAULT_RECT = { left: 0, top: 0, width: 1000, height: 700 };
 const BULK_DELETE_CONFIRM_AT = 8;
 /** Undo toasts outlive plain ones — reading + deciding + clicking takes time. */
 const UNDO_TOAST_MS = 6500;
+
+/** Touch gestures on the canvas. A finger is imprecise and has no right button,
+ *  so these mirror what every tablet canvas app already trained people to do:
+ *  hold to get the menu the mouse gets from right-click, tap twice to open. */
+const LONG_PRESS_MS = 480;
+/** Movement past this (in CSS px) turns a hold into a drag and cancels the menu.
+ *  Generous on purpose: a finger resting on glass drifts a few px on its own. */
+const LONG_PRESS_SLOP = 10;
+/** Double-tap window for opening a tile — the touch counterpart of dblclick,
+ *  which cannot be used here because the pointerdown handlers preventDefault
+ *  (and so suppress the compatibility mouse events dblclick is built from). */
+const DOUBLE_TAP_MS = 320;
+const DOUBLE_TAP_SLOP = 24;
 export interface ProjectListItem {
   key: ProjectKey;
   label: string;
@@ -829,6 +842,31 @@ export function useWorkspace(
   // Mirror of committed state, kept current for window-level event handlers.
   const stateRef = useRef(state);
   const dragRef = useRef<DragSession>(null);
+  /** Touch bookkeeping for the canvas (tablets/phones). The desktop paths above
+   *  assume exactly one pointer: `move`/`up` read a single `dragRef` session, so
+   *  a second finger used to restart the drag from its own origin and the first
+   *  finger lifting used to end it. Everything a finger can do that a mouse
+   *  cannot — pinch, two-finger pan, long-press, double-tap — is arbitrated
+   *  here, in ONE place, rather than by teaching each drag handler about it.
+   *  `suppress` swallows the rest of a gesture once it has been claimed by a
+   *  pinch or a long-press, and clears only when every finger is off the glass. */
+  const touchRef = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    primary: number | null;
+    pinch: { dist: number; cx: number; cy: number; scale: number; tx: number; ty: number } | null;
+    longPress: ReturnType<typeof setTimeout> | null;
+    longPressAt: { x: number; y: number } | null;
+    suppress: boolean;
+    lastTap: { id: string; at: number; x: number; y: number } | null;
+  }>({
+    pointers: new Map(),
+    primary: null,
+    pinch: null,
+    longPress: null,
+    longPressAt: null,
+    suppress: false,
+    lastTap: null,
+  });
   const canvasElRef = useRef<HTMLDivElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -969,7 +1007,33 @@ export function useWorkspace(
     [],
   );
 
+  const openDrawer = useCallback(
+    (id: string) => {
+      const s = stateRef.current;
+      setState({
+        drawerId: id,
+        drawerLang: "EN",
+        drawerStyle: (s.photos.find((p) => p.id === id)?.captionStyle as CaptionStyle) || "Agency",
+        copyLabel: "Copy",
+        // The photo drawer and the source browser sidebar are both right-side
+        // panels — never show both at once.
+        sidebarTabs: [],
+        sidebarActiveTab: null,
+        sidebarAddOpen: false,
+      });
+    },
+    [setState],
+  );
+
   // ── Pan / zoom ────────────────────────────────────────────────────────────
+
+  /** True while a pinch or long-press owns the gesture, or while a second finger
+   *  is down. Every pointer-down entry point on the canvas checks this so a
+   *  two-finger gesture can't also start a marquee/tile drag underneath itself. */
+  const gestureClaimed = useCallback(
+    () => touchRef.current.suppress || touchRef.current.pointers.size > 1,
+    [],
+  );
 
   const wheel = useCallback(
     (e: WheelEvent) => {
@@ -1001,6 +1065,7 @@ export function useWorkspace(
   const onCanvasDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
+      if (gestureClaimed()) return;
       const s = stateRef.current;
       const patch: Partial<WorkspaceState> = {};
       if (s.imp.open) patch.imp = { open: false };
@@ -1064,7 +1129,7 @@ export function useWorkspace(
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
-    [rect, toContent, setState, activeTilePositions, startPan],
+    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed],
   );
 
   const onGalleryNodeDown = useCallback(
@@ -1108,8 +1173,35 @@ export function useWorkspace(
   const onGalleryAssetDown = useCallback(
     (kind: "asset" | "map" | "topic" | "timeline", e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
       if (e.button !== 0) return;
+      if (gestureClaimed()) return;
       e.preventDefault();
       e.stopPropagation();
+      // Touch: a second tap on the same tile opens it, the way a double-click
+      // does with a mouse. This cannot be a `dblclick` handler — the
+      // preventDefault above suppresses the compatibility mouse events that
+      // dblclick is synthesised from, so on a tablet it never fires at all.
+      // The first tap has already run this handler and selected the tile, so
+      // returning early here leaves that selection standing.
+      if (e.pointerType !== "mouse") {
+        const prev = touchRef.current.lastTap;
+        const isSecond =
+          prev?.id === id &&
+          e.timeStamp - prev.at < DOUBLE_TAP_MS &&
+          Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_SLOP;
+        touchRef.current.lastTap = { id, at: e.timeStamp, x: e.clientX, y: e.clientY };
+        if (isSecond) {
+          touchRef.current.lastTap = null;
+          // The capture listener armed a hold on this same press; opening the
+          // drawer means the press is spent, so the menu must not still fire.
+          if (touchRef.current.longPress) {
+            clearTimeout(touchRef.current.longPress);
+            touchRef.current.longPress = null;
+          }
+          dragRef.current = null;
+          openDrawer(id);
+          return;
+        }
+      }
       const s = stateRef.current;
       // Space-hold pans even when the press starts on a tile (tiles stopPropagation,
       // so the canvas root never sees it) — hand off to a pan drag and bail.
@@ -1164,7 +1256,7 @@ export function useWorkspace(
         anchors: kind === "topic" ? topicAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id]) : null,
       };
     },
-    [setState, activeTilePositions, startPan, topicAnchorsFor],
+    [setState, activeTilePositions, startPan, topicAnchorsFor, gestureClaimed, openDrawer],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
    *  that matches the active sort, so a tile stays where you drop it within the
@@ -1186,6 +1278,7 @@ export function useWorkspace(
   const onCloudLabelDown = useCallback(
     (e: React.PointerEvent, cloudKey: string) => {
       if (e.button !== 0) return;
+      if (gestureClaimed()) return;
       e.preventDefault();
       e.stopPropagation();
       const s = stateRef.current;
@@ -1212,12 +1305,13 @@ export function useWorkspace(
         anchors: bucket === "topic" ? topicAnchorsFor(s, Object.keys(origCenters)) : null,
       };
     },
-    [startPan, topicAnchorsFor],
+    [startPan, topicAnchorsFor, gestureClaimed],
   );
 
   const onStickyDown = useCallback(
     (e: React.PointerEvent, id: string, orig: { x: number; y: number }) => {
       e.stopPropagation();
+      if (gestureClaimed()) return;
       if (stateRef.current.spacePan) {
         startPan(e);
         return;
@@ -1225,7 +1319,7 @@ export function useWorkspace(
       pushHistory();
       dragRef.current = { mode: "sticky", id, sx: e.clientX, sy: e.clientY, orig, moved: false };
     },
-    [pushHistory, startPan],
+    [pushHistory, startPan, gestureClaimed],
   );
 
   const addStickyNote = useCallback(() => {
@@ -1263,8 +1357,54 @@ export function useWorkspace(
     [pushHistory, setState],
   );
 
+  /** Two-finger pinch: zoom AND pan in one pass. The content point that sat
+   *  under the midpoint when the pinch began is pinned to wherever the midpoint
+   *  is now — which makes moving both fingers together a pan and spreading them
+   *  a zoom, with no separate branch for either. Same anchor-a-point-and-solve
+   *  math as `wheel`, just with the midpoint standing in for the cursor. */
+  const applyPinch = useCallback(() => {
+    const t = touchRef.current;
+    const p = t.pinch;
+    if (!p) return;
+    const [a, b] = Array.from(t.pointers.values());
+    if (!a || !b) return;
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+    if (dist < 1 || p.dist < 1) return;
+    const r = rect();
+    const ns = Math.min(4, Math.max(0.05, (p.scale * dist) / p.dist));
+    // The pinned content point, from the state captured at pinch start.
+    const px = (p.cx - r.left - p.tx) / p.scale;
+    const py = (p.cy - r.top - p.ty) / p.scale;
+    const cx = (a.x + b.x) / 2 - r.left;
+    const cy = (a.y + b.y) / 2 - r.top;
+    setState({ scale: ns, tx: cx - px * ns, ty: cy - py * ns });
+  }, [rect, setState]);
+
   const move = useCallback(
     (e: PointerEvent) => {
+      const t = touchRef.current;
+      const tracked = t.pointers.get(e.pointerId);
+      if (tracked) {
+        tracked.x = e.clientX;
+        tracked.y = e.clientY;
+        // A hold that turns into a drag is a drag, not a menu.
+        if (
+          t.longPress &&
+          t.longPressAt &&
+          Math.hypot(e.clientX - t.longPressAt.x, e.clientY - t.longPressAt.y) > LONG_PRESS_SLOP
+        ) {
+          clearTimeout(t.longPress);
+          t.longPress = null;
+        }
+        if (t.pinch) {
+          applyPinch();
+          return;
+        }
+        // A gesture already claimed by pinch/long-press, or a second finger that
+        // arrived while one drag was running: both must stay out of `dragRef`,
+        // which holds exactly one session started by exactly one pointer.
+        if (t.suppress || (t.primary !== null && e.pointerId !== t.primary)) return;
+      }
       const d = dragRef.current;
       if (!d) return;
       const s = stateRef.current;
@@ -1385,25 +1525,7 @@ export function useWorkspace(
         setState({ tx: rr.width / 2 - targetX * s.scale, ty: rr.height / 2 - targetY * s.scale });
       }
     },
-    [rect, toContent, setState, pushHistory],
-  );
-
-  const openDrawer = useCallback(
-    (id: string) => {
-      const s = stateRef.current;
-      setState({
-        drawerId: id,
-        drawerLang: "EN",
-        drawerStyle: (s.photos.find((p) => p.id === id)?.captionStyle as CaptionStyle) || "Agency",
-        copyLabel: "Copy",
-        // The photo drawer and the source browser sidebar are both right-side
-        // panels — never show both at once.
-        sidebarTabs: [],
-        sidebarActiveTab: null,
-        sidebarAddOpen: false,
-      });
-    },
-    [setState],
+    [rect, toContent, setState, pushHistory, applyPinch],
   );
 
   /** After a Canvas tile drag, reconcile folder membership (ADR 0034): a tile
@@ -1459,7 +1581,32 @@ export function useWorkspace(
     [activeTilePositions, setState],
   );
 
-  const up = useCallback(() => {
+  const up = useCallback((e: PointerEvent) => {
+    const t = touchRef.current;
+    if (t.pointers.delete(e.pointerId)) {
+      if (t.longPress) {
+        clearTimeout(t.longPress);
+        t.longPress = null;
+      }
+      const wasPrimary = e.pointerId === t.primary;
+      // A gesture that pinch or long-press already claimed has no drag session
+      // left to finish (both null `dragRef` when they take over), and lifting
+      // one finger out of a pinch must not hand the canvas back to the finger
+      // still on the glass — that would resume a stale session and jump the
+      // view. Such a gesture ends only when the last finger leaves.
+      const claimed = t.pinch !== null || t.suppress;
+      t.pinch = null;
+      if (t.pointers.size === 0) {
+        t.primary = null;
+        t.suppress = false;
+        t.longPressAt = null;
+      } else if (claimed) {
+        t.suppress = true;
+      }
+      if (claimed) return;
+      // A secondary finger lifting is not the end of the primary's drag.
+      if (!wasPrimary) return;
+    }
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
@@ -3612,6 +3759,83 @@ export function useWorkspace(
     window.addEventListener("pointercancel", up);
     const el = canvasElRef.current;
     if (el) el.addEventListener("wheel", wheel, { passive: false });
+
+    // Touch arbitration for the canvas, bound natively in the CAPTURE phase so
+    // it sees a press before React's own handlers do — including presses on
+    // tiles and cloud labels, which stopPropagation and so never reach the
+    // canvas root's onPointerDown. That ordering is what lets a second finger
+    // cancel an already-armed drag, and lets a double-tap or a hold take the
+    // press away from the drag handlers entirely.
+    const touch = touchRef.current;
+    const onCaptureDown = (e: PointerEvent) => {
+      const t = touch;
+      // A primary pointer is by definition the start of a fresh gesture, so it
+      // is also the moment to drop anything stale. Without this, a pointerup
+      // the window never saw (mouse released outside the browser, a touch the
+      // OS took for a system gesture) would leave a phantom finger in the map
+      // and turn the NEXT single press into a two-pointer pinch.
+      if (e.isPrimary) {
+        if (t.longPress) clearTimeout(t.longPress);
+        t.pointers.clear();
+        t.pinch = null;
+        t.longPress = null;
+        t.longPressAt = null;
+        t.suppress = false;
+        t.primary = null;
+      }
+      t.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (t.pointers.size === 1) {
+        t.primary = e.pointerId;
+        // Editable targets inside the canvas — the sticky-note body, the Topic
+        // cloud's rename input — keep the platform's own hold gesture: on touch
+        // that is how you place a caret and select a word, and stealing it for
+        // the canvas menu would make those fields unusable.
+        const target = e.target as HTMLElement | null;
+        const editable =
+          !!target &&
+          (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+        if (e.pointerType !== "mouse" && !editable) {
+          // Hold = right-click. iOS Safari does not deliver a usable
+          // `contextmenu` from a long press, so without this the menu — and
+          // with it Paste, Ungroup and the whole layer order, which live
+          // nowhere else — is unreachable on a tablet.
+          t.longPressAt = { x: e.clientX, y: e.clientY };
+          t.longPress = setTimeout(() => {
+            const c = touchRef.current;
+            c.longPress = null;
+            if (c.pointers.size !== 1 || !c.longPressAt) return;
+            c.suppress = true;
+            dragRef.current = null;
+            setState({ marquee: null, frameDraftRect: null, panning: false });
+            // targetId null: the menu acts on the selection, and the press that
+            // started this hold has already selected whatever it landed on.
+            openContextMenu(c.longPressAt.x, c.longPressAt.y, null);
+          }, LONG_PRESS_MS);
+        }
+      } else if (t.pointers.size === 2) {
+        if (t.longPress) {
+          clearTimeout(t.longPress);
+          t.longPress = null;
+        }
+        // Take the gesture away from whatever the first finger armed. Anything
+        // it already moved stays where it is — undo covers a stray nudge, and
+        // reverting here would fight the user's own correction.
+        dragRef.current = null;
+        const s = stateRef.current;
+        const [a, b] = Array.from(t.pointers.values());
+        t.suppress = true;
+        t.pinch = {
+          dist: Math.hypot(a.x - b.x, a.y - b.y),
+          cx: (a.x + b.x) / 2,
+          cy: (a.y + b.y) / 2,
+          scale: s.scale,
+          tx: s.tx,
+          ty: s.ty,
+        };
+        setState({ marquee: null, frameDraftRect: null, panning: false });
+      }
+    };
+    if (el) el.addEventListener("pointerdown", onCaptureDown, true);
     let ro: ResizeObserver | undefined;
     const syncSize = () => {
       if (!el) return;
@@ -3634,7 +3858,11 @@ export function useWorkspace(
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
-      if (el) el.removeEventListener("wheel", wheel);
+      if (el) {
+        el.removeEventListener("wheel", wheel);
+        el.removeEventListener("pointerdown", onCaptureDown, true);
+      }
+      if (touch.longPress) clearTimeout(touch.longPress);
       cancelAnimationFrame(raf);
       if (ro) ro.disconnect();
     };

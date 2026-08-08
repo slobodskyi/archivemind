@@ -329,7 +329,7 @@ export default function HomeClient({
   }
 
   return (
-    <div style={{ position: "relative", display: "flex", width: "100vw", height: "100vh", overflow: "hidden", background: "var(--bg)" }}>
+    <div style={{ position: "relative", display: "flex", width: "100vw", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
       {/* ── drawer sidebar ─────────────────────────────────────────── */}
       <aside
         style={{
