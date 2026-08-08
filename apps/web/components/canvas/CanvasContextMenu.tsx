@@ -1,3 +1,5 @@
+import type { AssetLabel, LabelNames } from "@archivemind/shared";
+import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import { Z } from "@/lib/ui";
 
 interface CanvasContextMenuProps {
@@ -34,6 +36,14 @@ interface CanvasContextMenuProps {
   onSendToBack: () => void;
   onDelete: () => void;
   onFit: () => void;
+  /** Colour labels: the swatch row sits at the TOP of the menu, exactly where
+   *  Finder puts it — this is the highest-frequency action on a photo archive
+   *  and it should never be a submenu. */
+  labelNames: LabelNames;
+  /** The colour the target already carries (`"mixed"` for a disagreeing
+   *  selection), so the row can ring it. */
+  currentLabel: AssetLabel | "mixed" | null;
+  onPickLabel: (label: AssetLabel | null) => void;
 }
 
 /** Right-click menu on the grid — mirrors the functions of the left tools
@@ -62,9 +72,15 @@ export default function CanvasContextMenu({
   onSendToBack,
   onDelete,
   onFit,
+  labelNames,
+  currentLabel,
+  onPickLabel,
 }: CanvasContextMenuProps) {
   if (!menu) return null;
   const deletable = !allFilesMode && (selCount > 0 || menu.targetId != null);
+  // Labels are curation, not project editing — they work on the read-only
+  // all-files grid too, which is where an untriaged pile usually is.
+  const labelable = selCount > 0 || menu.targetId != null;
   const canGroup = !allFilesMode && (hasGroup || selCount >= 2);
   // Layer order applies to the selection, or the single right-clicked tile.
   const canLayer = !allFilesMode && (selCount > 0 || menu.targetId != null);
@@ -107,6 +123,19 @@ export default function CanvasContextMenu({
           padding: 6,
         }}
       >
+        {labelable && (
+          <>
+            <LabelSwatchRow
+              names={labelNames}
+              current={currentLabel}
+              onPick={(label) => {
+                onClose();
+                onPickLabel(label);
+              }}
+            />
+            <Divider />
+          </>
+        )}
         <Item label="Select" onClick={run(onSelectTool)} />
         <Item label="Pan" onClick={run(onHandTool)} />
         {!allFilesMode && (

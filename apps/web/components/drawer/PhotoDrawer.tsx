@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PatchAssetExifRequest } from "@archivemind/shared";
+import type { AssetLabel, LabelNames, PatchAssetExifRequest } from "@archivemind/shared";
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { FACT_STATUS_COLOR, formatGps, getCaptionText, statusMeta } from "@/lib/format";
 import { photoSrcMedium, isRealSource } from "@/lib/img";
+import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -45,6 +46,10 @@ interface PhotoDrawerProps {
   onSaveExif: (patch: PatchAssetExifRequest) => void;
   /** Drop every manual correction, restoring what ingest extracted. */
   onRevertExif: () => void;
+  /** Colour label for THIS photo (migration 20260808000001) — the single-photo
+   *  entry point, next to the canvas's selection-wide ones. */
+  labelNames: LabelNames;
+  onPickLabel: (label: AssetLabel | null) => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -71,6 +76,8 @@ export default function PhotoDrawer({
   onExport,
   onSaveExif,
   onRevertExif,
+  labelNames,
+  onPickLabel,
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
@@ -306,6 +313,21 @@ export default function PhotoDrawer({
               <span style={{ width: 5, height: 5, borderRadius: 999, background: st.color }} />
               {st.label}
             </span>
+          </div>
+
+          {/* Colour label. Directly under the filename because that is what it
+              qualifies — this photo, by name — and above everything the AI
+              produced, which is the other half of the drawer. */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+            <span style={labelCaps}>
+              {photo.label ? labelNames[photo.label] : "Label"}
+            </span>
+            <LabelSwatchRow
+              names={labelNames}
+              current={photo.label ?? null}
+              onPick={onPickLabel}
+              size={15}
+            />
           </div>
 
           {showCaptionBlock && (

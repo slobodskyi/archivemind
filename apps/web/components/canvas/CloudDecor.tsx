@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { hexA, type CloudLayout } from "@/lib/layout";
+import { hexA, type CloudLayout, type CloudNode } from "@/lib/layout";
 
 /** Extra margin the blurred backdrop blob extends past each cloud's tile bbox.
  *  Topic's soft blobs get a wide margin so the cloud reads as a large, easily
@@ -182,10 +182,14 @@ interface CloudLabelsProps {
   /** Pointer-down on a label: drag it to move the whole cloud, or click (no
    *  drag) to focus it and fade the rest (ADR 0024). */
   onCloudLabelDown: (e: React.PointerEvent, cloudKey: string) => void;
-  /** Double-click to rename (ADR 0038). Supplied only on Topic, and only ever
-   *  called for a cloud that maps to exactly one stored cluster — Timeline's
-   *  labels are dates and a heuristic topic has no row to rename. */
-  onRenameCloud?: (clusterId: string, label: string) => void;
+  /** Double-click to rename (ADR 0038). Never supplied on Timeline, whose
+   *  labels are dates. The caller decides what a rename MEANS — on Topic it
+   *  PATCHes the stored cluster, on LABELS it renames the colour workspace-wide
+   *  — and `canRenameCloud` decides which clouds offer it at all (a Topic cloud
+   *  needs exactly one backing cluster; the "No label" cloud is not a colour and
+   *  has no name to set). */
+  onRenameCloud?: (cloud: CloudNode, name: string) => void;
+  canRenameCloud?: (cloud: CloudNode) => boolean;
 }
 
 /** How long after a label press a second press still counts as a double-click. */
@@ -197,8 +201,14 @@ const RENAME_DOUBLE_CLICK_SLOP = 6;
  *  Draggable — grab a label to move its whole cloud — clickable to focus that
  *  cloud (fades the others), and on Topic double-clickable to rename it.
  *  Shown immediately with the backdrop. */
-function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown, onRenameCloud }: CloudLabelsProps) {
-  const [editing, setEditing] = useState<{ key: string; clusterId: string } | null>(null);
+function CloudLabelsBase({
+  layout,
+  focusedCloudKey,
+  onCloudLabelDown,
+  onRenameCloud,
+  canRenameCloud,
+}: CloudLabelsProps) {
+  const [editing, setEditing] = useState<{ key: string } | null>(null);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
   const lastPress = useRef<{ key: string; at: number; x: number; y: number } | null>(null);
@@ -214,12 +224,13 @@ function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown, onRenameCl
     // opened on no longer exists. Writing anyway would PATCH a stale cluster —
     // pinning a name the user never confirmed, or 404-ing with a toast attached
     // to whatever they happened to click next.
-    if (!layout.clouds.some((c) => c.key === editing.key)) return;
+    const cloud = layout.clouds.find((c) => c.key === editing.key);
+    if (!cloud) return;
     const trimmed = draft.trim();
-    // No "unchanged, skip the write" shortcut: the PATCH also sets is_renamed,
-    // and pinning is the point. Confirming a machine name you like is exactly
-    // how you stop the next re-cluster from relabelling it.
-    if (trimmed) onRenameCloud?.(editing.clusterId, trimmed);
+    // No "unchanged, skip the write" shortcut: on Topic the PATCH also sets
+    // is_renamed, and pinning is the point. Confirming a machine name you like
+    // is exactly how you stop the next re-cluster from relabelling it.
+    if (trimmed) onRenameCloud?.(cloud, trimmed);
   }, [draft, editing, layout.clouds, onRenameCloud]);
   const commitRef = useRef(commit);
   useEffect(() => {
@@ -254,7 +265,7 @@ function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown, onRenameCl
       {layout.clouds.map((c) => {
         const isEditing = editing?.key === c.key;
         const dim = focusedCloudKey && c.key !== focusedCloudKey && !isEditing ? DIM : 1;
-        const renameable = !!onRenameCloud && !!c.clusterId;
+        const renameable = !!onRenameCloud && (canRenameCloud?.(c) ?? false);
         return (
           <div
             key={`label-${c.key}`}
@@ -287,11 +298,11 @@ function CloudLabelsBase({ layout, focusedCloudKey, onCloudLabelDown, onRenameCl
                       // focusing the cloud.
                       Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < RENAME_DOUBLE_CLICK_SLOP;
                     lastPress.current = { key: c.key, at: e.timeStamp, x: e.clientX, y: e.clientY };
-                    if (second && c.clusterId) {
+                    if (second) {
                       e.preventDefault();
                       e.stopPropagation();
                       lastPress.current = null;
-                      setEditing({ key: c.key, clusterId: c.clusterId });
+                      setEditing({ key: c.key });
                       setDraft(c.label);
                       return;
                     }

@@ -1,5 +1,5 @@
 import type { ViewMode } from "@/types";
-import { ViewTimelineIcon, ViewMapIcon, ViewSenseIcon } from "@/components/icons/icons";
+import { ViewTimelineIcon, ViewMapIcon, ViewSenseIcon, LabelsIcon } from "@/components/icons/icons";
 
 interface ViewTabsProps {
   show: boolean;
@@ -9,10 +9,15 @@ interface ViewTabsProps {
 
 // The sorting views only — Workspace (neural) is promoted to its own distinct
 // subheader control (WorkspaceToggle), so it no longer reads as a peer tab.
+// Each tab is one way to re-sort the same tiles: by capture date, by place, by
+// what the AI thinks the photo is — and, last, by what the USER said about it.
+// LABELS goes at the end because it is the only one that groups by a human
+// decision rather than by something derived from the file.
 const TABS: { key: ViewMode; label: string; Icon: typeof ViewTimelineIcon }[] = [
   { key: "timeline", label: "TIMELINE", Icon: ViewTimelineIcon },
   { key: "map", label: "MAP", Icon: ViewMapIcon },
   { key: "sense", label: "TOPIC", Icon: ViewSenseIcon },
+  { key: "labels", label: "LABELS", Icon: LabelsIcon },
 ];
 
 export default function ViewTabs({ show, view, onSelect }: ViewTabsProps) {

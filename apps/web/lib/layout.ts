@@ -1,4 +1,6 @@
+import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
+import { LABEL_COLORS, NO_LABEL_CLOUD_KEY, NO_LABEL_COLOR } from "./labels";
 import { GROUPS, SOURCES } from "./mock-data";
 
 /**
@@ -97,9 +99,22 @@ export interface GalleryOverrides {
   map: Record<string, CanvasOverride>;
   topic: Record<string, CanvasOverride>;
   timeline: Record<string, CanvasOverride>;
+  /** LABELS view (migration 20260808000001). Its own bucket for the same reason
+   *  every other view has one: an arrangement made under one grouping means
+   *  nothing under another. Additive to the persisted blob — a save from before
+   *  this view merges over EMPTY_GALLERY_OVERRIDES and simply starts empty, so
+   *  no store-version bump and nobody loses an existing arrangement. */
+  label: Record<string, CanvasOverride>;
 }
 
-export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = { source: {}, asset: {}, map: {}, topic: {}, timeline: {} };
+export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = {
+  source: {},
+  asset: {},
+  map: {},
+  topic: {},
+  timeline: {},
+  label: {},
+};
 
 export interface GalleryTile {
   key: string;
@@ -226,7 +241,7 @@ function assetTileSize(photo: Pick<Photo, "w" | "h">): { w: number; h: number } 
   return { w: Math.max(88, Math.round(ASSET_TILE_LONG_EDGE * aspect)), h: ASSET_TILE_LONG_EDGE };
 }
 
-function positionsBounds(pos: Record<string, TilePos>): Bounds {
+export function positionsBounds(pos: Record<string, TilePos>): Bounds {
   const values = Object.values(pos);
   if (values.length === 0) return { xl: 0, yt: 0, xr: 1000, yb: 700 };
   return {
@@ -706,6 +721,12 @@ function buildCloudLayout(
    *  instead of stranding itself (and its cloud's label) across the canvas.
    *  Null means "this view does not re-cluster", and every override applies. */
   anchorOf: ((p: Photo) => string) | null,
+  /** Draw the shared-AI-tag web between tiles (ADR 0022). True for Topic, where
+   *  the lines ARE the structure the view is about. False for LABELS: there the
+   *  colour is the whole statement, and a tag web over it would assert an AI
+   *  relation the user never made — on top of costing an inverted index over
+   *  every tag on every render. */
+  withEdges: boolean,
 ): CloudLayout {
   const byPrimary: Record<string, Photo[]> = {};
   photos.forEach((p) => {
@@ -804,6 +825,10 @@ function buildCloudLayout(
   });
 
   const edges: CloudEdge[] = [];
+
+  if (!withEdges) {
+    return { clouds, tiles, edges, tileCloud: tileCluster, bounds: positionsBounds(tiles) };
+  }
 
   // A file dropped onto an artboard (frame) is detached from the web — its
   // connecting lines are removed so it reads as pulled out of the cluster.
@@ -960,6 +985,38 @@ export function topicCloudLayout(
     topicOverrides,
     frames,
     topicAnchorOf,
+    true,
+  );
+}
+
+/** The identity a LABELS override is anchored to — the colour itself (ADR 0038's
+ *  mechanic, reused). Re-colour a photo and the position it was dropped at in
+ *  the old cloud goes stale, so it re-packs into the new one instead of sitting
+ *  in the middle of a cloud it no longer belongs to. */
+export function labelAnchorOf(photo: Pick<Photo, "label">): string {
+  return photo.label ?? NO_LABEL_CLOUD_KEY;
+}
+
+/** LABELS: one cloud per colour label the user has assigned, plus a "No label"
+ *  cloud for the rest. The seventh view of the same tiles — Canvas sorts by
+ *  nothing, Timeline by capture date, Map by place, Topic by what the AI thinks
+ *  it is, and this one by what the *user* said about it. No connecting lines:
+ *  membership here is a human statement, not an inferred relation. */
+export function labelCloudLayout(
+  photos: readonly Photo[],
+  labelOverrides: Record<string, CanvasOverride>,
+  names: LabelNames,
+  frames: readonly Frame[] = [],
+): CloudLayout {
+  return buildCloudLayout(
+    photos,
+    labelAnchorOf,
+    (key) => LABEL_COLORS[key as AssetLabel] ?? NO_LABEL_COLOR,
+    (key) => names[key as AssetLabel] ?? key,
+    labelOverrides,
+    frames,
+    labelAnchorOf,
+    false,
   );
 }
 

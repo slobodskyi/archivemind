@@ -59,7 +59,21 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   it** (`PATCH /api/topics/[id]` + `topic_clusters.is_renamed` — a pinned name
   survives every re-cluster, and its cluster is never deleted for failing to
   match). Cluster labels are also exempt from the `TOPIC_CLOUD_CAP` "Other"
-  fold, which now bounds only the heuristic. The chat panel IS
+  fold, which now bounds only the heuristic.
+  **Colour labels are the human axis beside that AI one (ADR 0040, migration
+  `20260808000001`):** `assets.label` — one of seven macOS colours, single-valued,
+  written only by a person. Deliberately NOT a `tags` row: that table feeds the
+  Topic heuristic, the connecting-line web and search's explicit tier, so a tag
+  named `red` would grow a "red" cloud and answer a text search for the colour.
+  One swatch row assigns it from four places (right-click menu, action bar,
+  drawer, keys `1`–`7`, `0` clears) through `POST /api/assets/label`; the seven
+  names are renameable per workspace (`workspace_labels`, `PATCH /api/labels`);
+  the left toolbar's filter **hides tiles without ever moving them** — every
+  layout still runs over the full set and the filter is applied at one seam
+  (`visibleTilePositions`), so artboards, folders and exports keep seeing the
+  real geometry; and **LABELS** is the fifth view, one cloud per colour plus
+  `No label`, via the same `buildCloudLayout` with the tag web off. Zero credits.
+  The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
   description/facts) outrank cosine-only rows and read as "strong", the rest
@@ -124,7 +138,9 @@ design from this file:**
   offline reverse geocoding that labels it) and **0038** (Topic legibility —
   cluster-anchored overrides, core-anchored labels, Regroup / Re-cluster /
   rename; it amends the label ranking and the label-stability rule in 0028 and
-  the "Other" fold in 0023) for what ships today.
+  the "Other" fold in 0023) for what ships today. **0040** adds the fifth view
+  (LABELS) beside them — colour labels as a human curation axis, and the rule
+  that a label filter hides tiles without moving them.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

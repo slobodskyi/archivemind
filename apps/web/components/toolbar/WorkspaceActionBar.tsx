@@ -1,6 +1,8 @@
 import { memo } from "react";
+import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import type { Tool } from "@/types";
-import { FrameToolIcon, CopyIcon, TrashIcon, FolderIcon } from "@/components/icons/icons";
+import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
+import { FrameToolIcon, CopyIcon, TrashIcon, FolderIcon, LabelsIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
   tool: Tool;
@@ -18,6 +20,12 @@ interface WorkspaceActionBarProps {
   /** Wrap the selection in a real folder (collapsible tile + Finder popup). */
   onFolder: () => void;
   onDelete: () => void;
+  /** Colour label for the selection — the swatch row opens above the bar. */
+  labelNames: LabelNames;
+  labelMenuOpen: boolean;
+  selectionLabel: AssetLabel | "mixed" | null;
+  onToggleLabelMenu: () => void;
+  onPickLabel: (label: AssetLabel | null) => void;
 }
 
 /* Inline glyphs for the actions without an existing icon (mono/line style). */
@@ -99,6 +107,11 @@ function WorkspaceActionBar({
   onGroup,
   onFolder,
   onDelete,
+  labelNames,
+  labelMenuOpen,
+  selectionLabel,
+  onToggleLabelMenu,
+  onPickLabel,
 }: WorkspaceActionBarProps) {
   const noSel = selCount === 0;
   return (
@@ -138,6 +151,37 @@ function WorkspaceActionBar({
       </Btn>
 
       <Divider />
+
+      {/* The swatch row pops ABOVE the bar rather than replacing its buttons —
+          labelling is usually a run of many, and a picker that closed the bar
+          would cost a re-open per photo. */}
+      {labelMenuOpen && !noSel && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            bottom: "100%",
+            marginBottom: 8,
+            transform: "translateX(-50%)",
+            padding: "4px 6px",
+            background: "rgba(20,20,20,.96)",
+            border: "1px solid var(--bd)",
+            borderRadius: 2,
+            backdropFilter: "blur(16px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,.45)",
+          }}
+        >
+          <LabelSwatchRow names={labelNames} current={selectionLabel} onPick={onPickLabel} size={18} />
+        </div>
+      )}
+      <Btn
+        title={selCount >= 2 ? `Label ${selCount} (keys 1–7)` : "Label (keys 1–7)"}
+        active={labelMenuOpen}
+        disabled={noSel}
+        onClick={onToggleLabelMenu}
+      >
+        <LabelsIcon width={16} height={16} />
+      </Btn>
 
       <Btn title="Copy" disabled={noSel} onClick={onCopy}>
         <CopyIcon width={16} height={16} />

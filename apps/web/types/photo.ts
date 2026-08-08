@@ -1,3 +1,5 @@
+import type { AssetLabel } from "@archivemind/shared";
+
 export type PhotoSource = "gdrive" | "icloud" | "dropbox" | "upload";
 
 /** Topic-cloud key. The old fixed union (rescue/aid/urban/…) survives only as
@@ -107,6 +109,10 @@ export interface Photo {
    *  rows. */
   clusterId?: string | null;
   country: string;
+  /** User-assigned colour label (`assets.label`, migration 20260808000001) —
+   *  null/absent = unlabelled. Human curation, never AI: it is what the LABELS
+   *  view groups by and what the label filter narrows to. Absent on mock rows. */
+  label?: AssetLabel | null;
   source: PhotoSource;
   /** True when a non-destructive edit (ADR 0030) is applied — `src`/`srcMedium`
    *  then point at the edited previews, and the drawer offers Reset. */
