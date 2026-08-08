@@ -1,4 +1,4 @@
-import type { AssetLabel, LabelNames } from "@archivemind/shared";
+import type { AssetLabel, LabelNames, NoteFontSize } from "@archivemind/shared";
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { LABEL_COLORS, NO_LABEL_CLOUD_KEY, NO_LABEL_COLOR } from "./labels";
 import { GROUPS, SOURCES } from "./mock-data";
@@ -19,6 +19,9 @@ export interface Frame {
   label: string;
 }
 
+/** A sticky note as the canvas holds it. Server-backed since ADR 0041 — the id
+ *  is a `canvas_annotations` row's uuid (or a `tmp-` placeholder for the moment
+ *  between the click and the insert coming back). */
 export interface StickyNote {
   id: string;
   x: number;
@@ -26,10 +29,18 @@ export interface StickyNote {
   w: number;
   h: number;
   text: string;
-  color: string;
+  /** One of the seven ADR 0040 colours, NOT a hex: the note swatch and the
+   *  label swatch share one vocabulary, so a workspace that renamed "yellow" to
+   *  "Client picks" gets that word on both. `noteSurface` resolves it to the
+   *  paper tone the card is actually filled with. */
+  color: AssetLabel;
+  fontSize: NoteFontSize;
 }
 
-export const STICKY_NOTE_COLORS = ["#ffe066", "#ff9eb8", "#8ecdf7", "#a8e6a1"];
+/** Default colours for successive new notes — a rotation, not a palette: the
+ *  full seven are pickable (ADR 0041), this only decides what an unconfigured
+ *  note starts as. Yellow first, because that is what a sticky note is. */
+export const STICKY_NOTE_COLORS: readonly AssetLabel[] = ["yellow", "blue", "green", "purple"];
 
 export interface TilePos {
   x: number;

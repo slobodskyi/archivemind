@@ -18,9 +18,15 @@ interface LeftToolbarProps {
   /** The legacy workspace recovery grid only selects/adds existing assets.
    * Editing, AI actions, and imports live inside an open project. */
   allFilesMode?: boolean;
-  /** Map is a separate MapLibre surface — sticky notes drop behind the basemap
-   * and Fit/zoom move the hidden canvas, so those tools are hidden on Map. */
+  /** Map is a separate MapLibre surface — Fit/zoom would move the hidden canvas
+   * underneath it, so those tools are hidden on Map. */
   isMapView?: boolean;
+  /** The Workspace (neural) view is showing. A sticky note's position is in
+   * Workspace coordinates, so it is only offered — and only drawn — there;
+   * every sorting view arranges the same tiles differently and a note pinned
+   * over one arrangement means nothing over another. Same rule the artboard
+   * and folder overlays already follow in ArchiveWorkspace. */
+  isCanvasView?: boolean;
   showAddToProject?: boolean;
   selCount?: number;
   zoomPct?: string;
@@ -91,6 +97,7 @@ function LeftToolbar({
   tool = "select",
   allFilesMode = false,
   isMapView = false,
+  isCanvasView = true,
   showAddToProject = false,
   selCount = 0,
   zoomPct = "100%",
@@ -233,7 +240,7 @@ function LeftToolbar({
           <span className="tip">Add</span>
         </button>
       )}
-      {!allFilesMode && !isMapView && (
+      {!allFilesMode && isCanvasView && (
         <button
           onClick={onAddStickyNote}
           title="Sticky Note"

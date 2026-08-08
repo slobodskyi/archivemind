@@ -1,5 +1,10 @@
 import type { StickyNote } from "@/lib/layout";
+import { noteSurface } from "@/lib/labels";
 import { CloseIcon } from "@/components/icons/icons";
+
+/** The three steps of `NoteStyle.fontSize`. Sizes, not a scale factor, so the
+ *  middle one stays exactly the 12.5px this note has always been. */
+const FONT_SIZES = { s: 11, m: 12.5, l: 15 } as const;
 
 interface StickyNoteOverlayProps {
   notes: StickyNote[];
@@ -20,7 +25,7 @@ export default function StickyNoteOverlay({ notes, onDragStart, onTextChange, on
             top: note.y,
             width: note.w,
             height: note.h,
-            background: note.color,
+            background: noteSurface(note.color),
             borderRadius: 2,
             boxShadow: "0 10px 28px rgba(0,0,0,.35)",
             display: "flex",
@@ -74,7 +79,7 @@ export default function StickyNoteOverlay({ notes, onDragStart, onTextChange, on
               background: "transparent",
               color: "rgba(0,0,0,.78)",
               fontFamily: "inherit",
-              fontSize: 12.5,
+              fontSize: FONT_SIZES[note.fontSize],
               lineHeight: 1.4,
               padding: "0 10px 10px",
               // Re-enable text selection: the canvas surface sets user-select:none,
