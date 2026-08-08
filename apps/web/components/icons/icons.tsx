@@ -312,6 +312,20 @@ export function ViewSenseIcon({ width = 14, height = 14, ...props }: IconProps) 
   );
 }
 
+/* LABELS view + the label filter: three dots of the same size, which is what a
+   colour label actually is — one mark, several colours. Deliberately NOT the
+   tag/price-tag glyph: TagIcon already means AI tags in this toolbar, and the
+   whole point of colour labels is that they are not those. */
+export function LabelsIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx={7} cy={8} r={3.1} />
+      <circle cx={16.5} cy={7} r={3.1} />
+      <circle cx={11.5} cy={16.5} r={3.1} />
+    </svg>
+  );
+}
+
 export function DataSourcesIcon({ width = 15, height = 15, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>

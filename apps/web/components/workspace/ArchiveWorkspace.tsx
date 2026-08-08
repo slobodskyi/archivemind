@@ -1,7 +1,8 @@
 "use client";
 
-import type { CanvasGroup } from "@archivemind/shared";
+import type { AssetLabel, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
+import { NO_LABEL_CLOUD_KEY } from "@/lib/labels";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
@@ -25,6 +26,7 @@ import Minimap from "@/components/toolbar/Minimap";
 import TrashPanel from "@/components/trash/TrashPanel";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
 import CanvasContextMenu from "@/components/canvas/CanvasContextMenu";
+import LabelFilterPanel from "@/components/labels/LabelFilterPanel";
 import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
@@ -48,6 +50,8 @@ interface ArchiveWorkspaceProps {
   projects: ProjectOption[];
   currentProjectId: string;
   initialGroups: CanvasGroup[];
+  /** The workspace's colour-label names (defaults with renames applied). */
+  initialLabelNames: LabelNames;
   account: Account;
 }
 
@@ -57,9 +61,31 @@ export default function ArchiveWorkspace({
   projects,
   currentProjectId,
   initialGroups,
+  initialLabelNames,
   account,
 }: ArchiveWorkspaceProps) {
-  const ws = useWorkspace(initialPhotos, workspaceId, projects, currentProjectId, initialGroups);
+  const ws = useWorkspace(
+    initialPhotos,
+    workspaceId,
+    projects,
+    currentProjectId,
+    initialGroups,
+    initialLabelNames,
+  );
+
+  // The colour the label pickers should ring: what the whole target carries, or
+  // "mixed" when it disagrees. Target = the selection, else the right-clicked
+  // tile — the same selection-first rule the pickers themselves apply.
+  const labelTargetIds = ws.selectedIds.size > 0
+    ? [...ws.selectedIds]
+    : ws.contextMenu?.targetId
+      ? [ws.contextMenu.targetId]
+      : [];
+  const targetLabels = new Set(
+    labelTargetIds.map((id) => ws.photos.find((p) => p.id === id)?.label ?? null),
+  );
+  const currentLabel: AssetLabel | "mixed" | null =
+    targetLabels.size === 1 ? ([...targetLabels][0] ?? null) : targetLabels.size > 1 ? "mixed" : null;
 
   return (
     <div
@@ -135,8 +161,11 @@ export default function ArchiveWorkspace({
             view, so switching a sort just reflows (animates) their positions. */}
         {ws.cloudDecor && <CloudDecor layout={ws.cloudDecor} edgesReady={!ws.tilesAnimating} focusedCloudKey={ws.focusedCloudKey} />}
         <ProjectAssetView
-          photos={ws.projectPhotos}
-          previews={ws.uploadPreviews}
+          // visiblePhotos, not projectPhotos: the label filter narrows what is
+          // DRAWN while every layout above still runs over the full set, so a
+          // filter can never move a tile that survives it.
+          photos={ws.visiblePhotos}
+          previews={ws.visiblePreviews}
           positions={ws.activePositions}
           previewPositions={ws.projectAssetPositions}
           selectedIds={ws.selectedIds}
@@ -152,15 +181,36 @@ export default function ArchiveWorkspace({
           deletePhoto={ws.deletePhoto}
           openContextMenu={ws.openContextMenu}
           analyzePhoto={ws.analyzePhoto}
+          labelNames={ws.labelNames}
         />
         {ws.cloudDecor && (
           <CloudLabels
             layout={ws.cloudDecor}
             focusedCloudKey={ws.focusedCloudKey}
             onCloudLabelDown={ws.onCloudLabelDown}
-            // Topic only (ADR 0038): Timeline's labels are dates, and only a
-            // cloud backed by exactly one stored cluster has a row to rename.
-            onRenameCloud={ws.isSenseView ? ws.renameCloud : undefined}
+            // Two views can rename a cloud, and a rename means a different thing
+            // in each: on Topic it pins a cluster's name (ADR 0038), on LABELS it
+            // renames the colour for the whole workspace. Timeline's labels are
+            // dates and rename nothing.
+            onRenameCloud={
+              ws.isSenseView
+                ? (cloud, name) => cloud.clusterId && ws.renameCloud(cloud.clusterId, name)
+                : ws.isLabelsView
+                  ? (cloud, name) => ws.renameLabel(cloud.key as AssetLabel, name)
+                  : undefined
+            }
+            canRenameCloud={
+              ws.isSenseView
+                ? // Only a cloud backed by exactly ONE stored cluster: two
+                  // clusters sharing a label draw as one cloud, and renaming
+                  // "it" would silently rename half of it.
+                  (cloud) => !!cloud.clusterId
+                : ws.isLabelsView
+                  ? // Every cloud but "No label", which is the absence of a
+                    // colour and so has no name to set.
+                    (cloud) => cloud.key !== NO_LABEL_CLOUD_KEY
+                  : undefined
+            }
           />
         )}
       </PanZoomCanvas>
@@ -170,11 +220,55 @@ export default function ArchiveWorkspace({
           canvas rather than reflowing it. */}
       {ws.isMapView && (
         <GeoMapPane
-          photos={ws.projectPhotos}
+          photos={ws.visiblePhotos}
           selectedIds={ws.selectedIds}
           onOpenAsset={ws.openDrawer}
           onSelectAssets={ws.selectSearchResults}
         />
+      )}
+
+      {/* Filtered down to nothing. Distinct from the empty state below on
+          purpose: a canvas hiding every file must say WHY and offer the way
+          back, or it is indistinguishable from an archive that lost its
+          contents. */}
+      {ws.labelFilter && ws.visiblePhotos.length === 0 && ws.projectPhotos.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            inset: "52px 0 0 0",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            zIndex: 20,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t2)" }}>
+            {ws.labelFilter === "none"
+              ? "Everything here is labelled"
+              : `Nothing marked ${ws.labelNames[ws.labelFilter]}`}
+          </div>
+          <button
+            onClick={ws.clearLabelFilter}
+            style={{
+              pointerEvents: "auto",
+              marginTop: 2,
+              height: 30,
+              padding: "0 14px",
+              background: "transparent",
+              color: "var(--t1)",
+              border: "1px solid var(--bdh)",
+              borderRadius: 2,
+              fontSize: 12,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            Clear filter
+          </button>
+        </div>
       )}
 
       {/* Empty state — a project emptied after creation used to render a bare
@@ -293,9 +387,23 @@ export default function ArchiveWorkspace({
         onAddStickyNote={ws.addStickyNote}
         onToggleTrash={ws.toggleTrash}
         trashOpen={ws.trashOpen}
+        onToggleLabels={ws.toggleLabelFilterPanel}
+        labelsOpen={ws.labelFilterOpen}
+        labelFilterActive={ws.labelFilter !== null}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
+      />
+
+      <LabelFilterPanel
+        open={ws.labelFilterOpen}
+        names={ws.labelNames}
+        counts={ws.labelCounts}
+        active={ws.labelFilter}
+        total={ws.projectPhotos.length}
+        onSelect={ws.setLabelFilter}
+        onRename={ws.renameLabel}
+        onClose={ws.closeLabelFilterPanel}
       />
 
       <TrashPanel
@@ -321,6 +429,11 @@ export default function ArchiveWorkspace({
           onGroup={ws.groupFiles}
           onFolder={ws.folderFiles}
           onDelete={ws.deleteSelected}
+          labelNames={ws.labelNames}
+          labelMenuOpen={ws.labelMenuOpen}
+          selectionLabel={currentLabel}
+          onToggleLabelMenu={ws.toggleLabelMenu}
+          onPickLabel={(label) => ws.labelSelection(label)}
         />
       )}
 
@@ -330,7 +443,7 @@ export default function ArchiveWorkspace({
           rearranging Canvas from inside Topic. Gated on isSenseView/
           isTimelineView, not on `view` — both also require a real project, and
           `view` can still read "sense" in all-files mode where no cloud exists. */}
-      {(ws.isSenseView || ws.isTimelineView) && (
+      {(ws.isSenseView || ws.isTimelineView || ws.isLabelsView) && (
         <SortingActionBar
           showRecluster={ws.isSenseView}
           canRegroup={ws.canRegroup}
@@ -458,6 +571,9 @@ export default function ArchiveWorkspace({
         onSendToBack={ws.sendToBack}
         onDelete={ws.deleteFromContext}
         onFit={ws.onFit}
+        labelNames={ws.labelNames}
+        currentLabel={currentLabel}
+        onPickLabel={(label) => ws.labelSelection(label, ws.contextMenu?.targetId ?? null)}
       />
 
       <PhotoDrawer
@@ -481,6 +597,11 @@ export default function ArchiveWorkspace({
         onDelete={() => ws.drawerPhoto && ws.deletePhoto(ws.drawerPhoto.id)}
         onSetFactStatus={ws.setFactStatus}
         onExport={() => ws.drawerPhoto && ws.openExportFor([ws.drawerPhoto.id])}
+        labelNames={ws.labelNames}
+        // The drawer is about ONE photo, so it labels that photo even when a
+        // selection is live — passing its id as the fallback would let a
+        // stale canvas selection swallow the click.
+        onPickLabel={(label) => ws.drawerPhoto && ws.labelOne(ws.drawerPhoto.id, label)}
       />
 
       <ImageEditor

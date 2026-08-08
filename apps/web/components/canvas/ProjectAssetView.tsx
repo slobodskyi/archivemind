@@ -1,4 +1,5 @@
 import { memo, useMemo } from "react";
+import type { LabelNames } from "@archivemind/shared";
 import { photoSrc, isRealSource } from "@/lib/img";
 import type { TilePos } from "@/lib/layout";
 import type { CanvasPoint, CanvasUploadPreview, Photo } from "@/types";
@@ -31,6 +32,9 @@ interface ProjectAssetViewProps {
   openContextMenu: (x: number, y: number, targetId: string | null) => void;
   /** Analyze one photo straight from its tile badge. */
   analyzePhoto: (id: string) => void;
+  /** The workspace's colour names, so a tile's dot can carry the user's own
+   *  word for it ("Rejected") rather than the raw colour. */
+  labelNames: LabelNames;
 }
 
 function ProjectAssetView({
@@ -51,6 +55,7 @@ function ProjectAssetView({
   deletePhoto,
   openContextMenu,
   analyzePhoto,
+  labelNames,
 }: ProjectAssetViewProps) {
   const previewByAsset = useMemo(
     () => new Map(previews.flatMap((preview) => preview.assetId ? [[preview.assetId, preview]] : [])),
@@ -98,6 +103,8 @@ function ProjectAssetView({
             }}
             analyzed={photo.processed}
             aiBusy={aiBusyIds.has(photo.id)}
+            label={photo.label ?? null}
+            labelName={photo.label ? labelNames[photo.label] : undefined}
             // Mock rows have no asset to enqueue against — they get the plain
             // indicator, not a button that would 404 in the jobs API.
             onAnalyze={

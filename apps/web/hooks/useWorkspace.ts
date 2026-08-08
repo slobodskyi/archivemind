@@ -4,8 +4,17 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import type { CanvasGroup, EditRecipe, PatchAssetExifRequest, TrashedAsset } from "@archivemind/shared";
+import { ASSET_LABELS } from "@archivemind/shared";
+import type {
+  AssetLabel,
+  CanvasGroup,
+  EditRecipe,
+  LabelNames,
+  PatchAssetExifRequest,
+  TrashedAsset,
+} from "@archivemind/shared";
 import { getCaptionRow } from "@/lib/format";
+import { filterByLabel, labelCounts as countLabels, type LabelFilter } from "@/lib/labels";
 import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -35,8 +44,11 @@ import {
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
+  labelAnchorOf,
+  labelCloudLayout as computeLabelLayout,
   nudgeOffOverlap,
   packGrid,
+  positionsBounds,
   readingOrder,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
@@ -307,6 +319,18 @@ interface WorkspaceState {
    *  (a frame's content, or the current selection). */
   exportOpen: boolean;
   exportIds: string[];
+  /** Colour labels (migration 20260808000001). The filter HIDES tiles, it never
+   *  moves them: every layout still runs over the full photo set, so filtering
+   *  cannot reflow an arrangement, change what an artboard contains, or alter
+   *  what an export picks up. Only what is drawn (and what a marquee can grab)
+   *  narrows. */
+  labelFilter: LabelFilter;
+  /** The workspace's seven colour names, defaults with renames applied. */
+  labelNames: LabelNames;
+  /** Left-toolbar filter popover. */
+  labelFilterOpen: boolean;
+  /** Action-bar "apply a colour to the selection" popover. */
+  labelMenuOpen: boolean;
 }
 
 // Transient per-pointer-move drag session (source's mutable `this.drag`).
@@ -326,7 +350,7 @@ type DragSession =
     }
   | {
       mode: "gallery";
-      kind: "source" | "asset" | "map" | "topic" | "timeline";
+      kind: "source" | "asset" | "map" | "topic" | "timeline" | "label";
       key: string;
       sx: number;
       sy: number;
@@ -348,7 +372,7 @@ type DragSession =
       // click (no move) focuses the cloud instead (ADR 0024).
       mode: "cloudDrag";
       cloudKey: string;
-      bucket: "map" | "topic" | "timeline";
+      bucket: "map" | "topic" | "timeline" | "label";
       sx: number;
       sy: number;
       origCenters: Record<string, { x: number; y: number }>;
@@ -421,6 +445,29 @@ export interface ProjectListItem {
   active: boolean;
 }
 
+/** The active label filter applied to a computed position map: hidden tiles
+ *  lose their entry, everything else keeps the exact coordinate it already had.
+ *  Positions are never recomputed for a filter — that is the whole contract
+ *  (see WorkspaceState.labelFilter), and it is why filtering cannot disturb an
+ *  arrangement, an artboard's contents or an export. */
+function visibleTilePositions(
+  positions: Record<string, TilePos>,
+  photos: readonly Photo[],
+  filter: LabelFilter,
+): Record<string, TilePos> {
+  if (!filter) return positions;
+  const visible = new Set(filterByLabel(photos, filter).map((p) => p.id));
+  // A pending upload holds a position before it has a Photo row. It cannot
+  // answer a colour filter, but it is unlabelled by definition, so "none" keeps
+  // it — a file dropped while triaging the untriaged must not vanish.
+  const known = new Set(photos.map((p) => p.id));
+  const next: Record<string, TilePos> = {};
+  for (const [id, tile] of Object.entries(positions)) {
+    if (visible.has(id) || (filter === "none" && !known.has(id))) next[id] = tile;
+  }
+  return next;
+}
+
 function projectCanvasItems(
   photos: readonly Photo[],
   previews: readonly CanvasUploadPreview[],
@@ -452,7 +499,11 @@ export interface Workspace {
   projCurrent: ProjectKey | "all";
   photos: Photo[];
   projectPhotos: Photo[];
+  /** `projectPhotos` narrowed by the colour-label filter — the render list. */
+  visiblePhotos: Photo[];
   uploadPreviews: CanvasUploadPreview[];
+  /** `uploadPreviews` minus the ones the filter is hiding. */
+  visiblePreviews: CanvasUploadPreview[];
   projectAssetPositions: Record<string, TilePos>;
   selectedIds: Set<string>;
   hoveredId: string | null;
@@ -475,6 +526,7 @@ export interface Workspace {
   isTimelineView: boolean;
   isMapView: boolean;
   isSenseView: boolean;
+  isLabelsView: boolean;
   showViewTabs: boolean;
   showAddToProject: boolean;
   /** Legacy workspace recovery grid; it is not part of primary navigation. */
@@ -595,7 +647,7 @@ export interface Workspace {
   /** Re-arrange the Canvas into a clean grid (selection-aware). */
   tidyUp: () => void;
   /** Drop the sorting view's drag overrides so tiles glide back into their
-   *  packed clouds / date columns (selection-aware). Topic + Timeline only. */
+   *  packed clouds / date columns (selection-aware). Topic, Timeline + LABELS. */
   regroupClouds: () => void;
   /** True when the active sorting view has drags to undo — the Regroup button
    *  is dead otherwise. */
@@ -730,6 +782,26 @@ export interface Workspace {
   tileCloud: Record<string, string>;
   onCloudLabelDown: (e: React.PointerEvent, cloudKey: string) => void;
 
+  // Colour labels (migration 20260808000001) — assign from the context menu /
+  // action bar / drawer, filter from the left toolbar, group in the LABELS view.
+  labelNames: LabelNames;
+  labelFilter: LabelFilter;
+  labelCounts: Record<AssetLabel | "none", number>;
+  labelFilterOpen: boolean;
+  labelMenuOpen: boolean;
+  setLabelFilter: (filter: LabelFilter) => void;
+  clearLabelFilter: () => void;
+  toggleLabelFilterPanel: () => void;
+  closeLabelFilterPanel: () => void;
+  toggleLabelMenu: () => void;
+  closeLabelMenu: () => void;
+  /** Apply/clear a colour on the selection, or on `fallbackId` when nothing is
+   *  selected (the right-clicked tile). */
+  labelSelection: (label: AssetLabel | null, fallbackId?: string | null) => void;
+  /** One photo, ignoring the selection — the drawer's picker. */
+  labelOne: (id: string, label: AssetLabel | null) => void;
+  renameLabel: (label: AssetLabel, name: string) => void;
+
   // Bulk AI
   bulkPanelOpen: boolean;
   toggleBulkPanel: () => void;
@@ -763,6 +835,7 @@ export function useWorkspace(
   initialProjects: ProjectOption[],
   currentProjectId: string,
   initialGroups: CanvasGroup[],
+  initialLabelNames: LabelNames,
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
@@ -833,6 +906,10 @@ export function useWorkspace(
     trashAssets: null,
     exportOpen: false,
     exportIds: [],
+    labelFilter: null,
+    labelNames: initialLabelNames,
+    labelFilterOpen: false,
+    labelMenuOpen: false,
   });
 
   // Right-click menu on the grid — a lightweight overlay, kept out of the main
@@ -1000,9 +1077,23 @@ export function useWorkspace(
    *  tile layout stay identical across Canvas / Timeline / Map / Topic. */
   const activeTilePositions = useCallback(
     (s: WorkspaceState): Record<string, TilePos> => {
-      if (s.view === "timeline") return computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles;
-      if (s.view === "sense") return computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles;
-      return assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
+      const all =
+        s.view === "timeline"
+          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles
+          : s.view === "sense"
+            ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles
+            : s.view === "labels"
+              ? computeLabelLayout(s.photos, s.galleryOverrides.label, s.labelNames, s.frames).tiles
+              : assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
+      // Deliberately NOT filtered. This is the geometry seam — artboard
+      // membership, folder drops, frame move/resize, Tidy up, the delete-time
+      // position freeze and the export's reading order all read it, and every
+      // one of them is about where tiles ARE, not about what is currently drawn.
+      // A label filter that reached in here would quietly drop hidden tiles out
+      // of an artboard's export and let a delete reflow the tiles nobody could
+      // see. The filter is applied only where it belongs: what is rendered
+      // (`activePositions`), what a marquee can grab, and what Fit frames.
+      return all;
     },
     [],
   );
@@ -1109,7 +1200,9 @@ export function useWorkspace(
         // ids) so they render — but those must never enter selectedIds: every
         // selection consumer (bulk jobs, add-to-project, Delete) sends the ids
         // to APIs that validate them as asset UUIDs and reject the whole batch.
-        const canonicalIds = new Set(s.photos.map((p) => p.id));
+        // …and only what a label filter is currently showing: a marquee must
+        // never sweep up a tile the canvas is hiding.
+        const canonicalIds = new Set(filterByLabel(s.photos, s.labelFilter).map((p) => p.id));
         const assetPositions: Record<string, TilePos> = {};
         for (const [id, tile] of Object.entries(activeTilePositions(s))) {
           if (canonicalIds.has(id)) assetPositions[id] = tile;
@@ -1167,11 +1260,29 @@ export function useWorkspace(
     return out;
   }, []);
 
+  /** The same stale-anchor stamp for LABELS, where the cloud is the colour: a
+   *  tile re-coloured after being dragged re-packs into its new cloud instead of
+   *  hanging in the middle of the one it left. */
+  const labelAnchorsFor = useCallback((s: WorkspaceState, ids: readonly string[]): Record<string, string> => {
+    const byId = new Map(s.photos.map((p) => [p.id, p]));
+    const out: Record<string, string> = {};
+    for (const id of ids) {
+      const photo = byId.get(id);
+      if (photo) out[id] = labelAnchorOf(photo);
+    }
+    return out;
+  }, []);
+
   /** Shared by Canvas asset tiles and Map/Topic cloud tiles — select-on-down
    *  (with the same additive/shift-click semantics), then a free-position
    *  drag session keyed to whichever override bucket `kind` names. */
   const onGalleryAssetDown = useCallback(
-    (kind: "asset" | "map" | "topic" | "timeline", e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
+    (
+      kind: "asset" | "map" | "topic" | "timeline" | "label",
+      e: React.PointerEvent,
+      id: string,
+      origCenter: CanvasPoint,
+    ) => {
       if (e.button !== 0) return;
       if (gestureClaimed()) return;
       e.preventDefault();
@@ -1253,10 +1364,15 @@ export function useWorkspace(
         moved: false,
         historyPushed: false,
         groupCenters,
-        anchors: kind === "topic" ? topicAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id]) : null,
+        anchors:
+          kind === "topic"
+            ? topicAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id])
+            : kind === "label"
+              ? labelAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id])
+              : null,
       };
     },
-    [setState, activeTilePositions, startPan, topicAnchorsFor, gestureClaimed, openDrawer],
+    [setState, activeTilePositions, startPan, topicAnchorsFor, labelAnchorsFor, gestureClaimed, openDrawer],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
    *  that matches the active sort, so a tile stays where you drop it within the
@@ -1264,7 +1380,16 @@ export function useWorkspace(
   const onTileDown = useCallback(
     (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
       const v = stateRef.current.view;
-      const kind = v === "timeline" ? "timeline" : v === "map" ? "map" : v === "sense" ? "topic" : "asset";
+      const kind =
+        v === "timeline"
+          ? "timeline"
+          : v === "map"
+            ? "map"
+            : v === "sense"
+              ? "topic"
+              : v === "labels"
+                ? "label"
+                : "asset";
       onGalleryAssetDown(kind, e, id, origCenter);
     },
     [onGalleryAssetDown],
@@ -1286,7 +1411,8 @@ export function useWorkspace(
         startPan(e);
         return;
       }
-      const bucket = s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
+      const bucket =
+        s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "labels" ? "label" : null;
       const layout = cloudDecorRef.current;
       if (!bucket || !layout) return;
       const origCenters: Record<string, { x: number; y: number }> = {};
@@ -1302,10 +1428,15 @@ export function useWorkspace(
         origCenters,
         moved: false,
         historyPushed: false,
-        anchors: bucket === "topic" ? topicAnchorsFor(s, Object.keys(origCenters)) : null,
+        anchors:
+          bucket === "topic"
+            ? topicAnchorsFor(s, Object.keys(origCenters))
+            : bucket === "label"
+              ? labelAnchorsFor(s, Object.keys(origCenters))
+              : null,
       };
     },
-    [startPan, topicAnchorsFor, gestureClaimed],
+    [startPan, topicAnchorsFor, labelAnchorsFor, gestureClaimed],
   );
 
   const onStickyDown = useCallback(
@@ -1813,6 +1944,158 @@ export function useWorkspace(
     [flashToast, router, setState],
   );
 
+  // ── Colour labels ─────────────────────────────────────────────────────────
+
+  /** Apply (or clear) a colour on a set of assets. Optimistic and undoable, like
+   *  the bulk delete: the dots change instantly, the request follows, and the
+   *  toast's Undo restores each photo's PREVIOUS colour — not "no colour",
+   *  which would silently erase whatever the selection already carried.
+   *
+   *  Undo is one request per distinct previous colour (at most eight), because
+   *  the route sets one colour per call. That is still bounded and beats
+   *  round-tripping per photo. */
+  const applyLabel = useCallback(
+    (ids: readonly string[], label: AssetLabel | null) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      const before = stateRef.current.photos.filter((p) => idSet.has(p.id));
+      if (before.length === 0) return;
+      // Nothing to do — every target already carries this colour. Says so rather
+      // than firing a write whose result is indistinguishable from a no-op.
+      if (before.every((p) => (p.label ?? null) === label)) return;
+      const previous = new Map(before.map((p) => [p.id, p.label ?? null]));
+
+      const write = (targets: string[], value: AssetLabel | null) =>
+        fetch("/api/assets/label", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids: targets, label: value }),
+        }).then((resp) => {
+          if (!resp.ok) throw new Error(String(resp.status));
+        });
+
+      const paint = (value: (id: string) => AssetLabel | null) =>
+        setState((prev) => ({
+          photos: prev.photos.map((p) => (idSet.has(p.id) ? { ...p, label: value(p.id) } : p)),
+        }));
+
+      paint(() => label);
+
+      const undo = () => {
+        paint((id) => previous.get(id) ?? null);
+        setState({ toast: { show: false, text: "" } });
+        const byPrevious = new Map<AssetLabel | "none", string[]>();
+        for (const [id, prev] of previous) {
+          const key = prev ?? "none";
+          byPrevious.set(key, [...(byPrevious.get(key) ?? []), id]);
+        }
+        Promise.all([...byPrevious].map(([key, group]) => write(group, key === "none" ? null : key)))
+          .then(() => router.refresh())
+          .catch(() => flashToast("Couldn't undo that — refresh to see the real state"));
+      };
+
+      write([...ids], label)
+        .then(() => {
+          const name = label ? stateRef.current.labelNames[label] : null;
+          const what = ids.length > 1 ? `${ids.length} files` : "File";
+          flashToast(name ? `${what} marked ${name}` : `${what} unmarked`, { label: "Undo", onAction: undo });
+          router.refresh();
+        })
+        .catch(() => {
+          // Put the old colours back — an optimistic dot that never persisted is
+          // worse than no dot at all, because the next reload silently loses it.
+          paint((id) => previous.get(id) ?? null);
+          flashToast("Couldn't save that label — try again");
+        });
+    },
+    [flashToast, router, setState],
+  );
+
+  /** The label pickers all funnel through here: the selection when there is one,
+   *  otherwise the single tile the context menu was opened on — the same
+   *  selection-first rule Move to Trash follows. */
+  const labelSelection = useCallback(
+    (label: AssetLabel | null, fallbackId?: string | null) => {
+      const s = stateRef.current;
+      const ids = s.selectedIds.length > 0 ? s.selectedIds : fallbackId ? [fallbackId] : [];
+      setState({ labelMenuOpen: false });
+      setContextMenu(null);
+      applyLabel(ids, label);
+    },
+    [applyLabel, setState],
+  );
+
+  /** The drawer's picker: this photo and only this photo. It deliberately does
+   *  NOT honour the canvas selection — the drawer shows one photo, and a live
+   *  selection behind it must not swallow a click made on that photo's own row. */
+  const labelOne = useCallback(
+    (id: string, label: AssetLabel | null) => applyLabel([id], label),
+    [applyLabel],
+  );
+
+  /** Filtering only hides tiles (see WorkspaceState.labelFilter), so a selection
+   *  made before the filter would keep acting on photos nobody can see — and
+   *  "Move 40 to Trash" on an empty-looking canvas is exactly the kind of
+   *  surprise this app should not have. Narrow the selection to what survives. */
+  const setLabelFilter = useCallback(
+    (filter: LabelFilter) => {
+      const s = stateRef.current;
+      const next = s.labelFilter === filter ? null : filter;
+      const visible = new Set(filterByLabel(s.photos, next).map((p) => p.id));
+      setState({
+        labelFilter: next,
+        selectedIds: s.selectedIds.filter((id) => visible.has(id)),
+        focusedCloudKey: null,
+        tilesAnimating: true,
+      });
+      if (animTimer.current) clearTimeout(animTimer.current);
+      animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+    },
+    [setState],
+  );
+
+  const clearLabelFilter = useCallback(() => setLabelFilter(null), [setLabelFilter]);
+  const toggleLabelFilterPanel = useCallback(
+    () => setState((prev) => ({ labelFilterOpen: !prev.labelFilterOpen })),
+    [setState],
+  );
+  const closeLabelFilterPanel = useCallback(() => setState({ labelFilterOpen: false }), [setState]);
+  const toggleLabelMenu = useCallback(() => {
+    // The action bar's buttons are only visually disabled (the bar has always
+    // worked that way), so say what is missing rather than opening a picker
+    // with nothing to apply it to — same as "Select files to put in a folder".
+    if (stateRef.current.selectedIds.length === 0) {
+      flashToast("Select files to label");
+      return;
+    }
+    setState((prev) => ({ labelMenuOpen: !prev.labelMenuOpen }));
+  }, [flashToast, setState]);
+  const closeLabelMenu = useCallback(() => setState({ labelMenuOpen: false }), [setState]);
+
+  /** Rename a colour for the whole workspace — "Red" is a colour, "Rejected" is
+   *  a workflow. Optimistic like the topic rename it mirrors; an empty name
+   *  resets to the default. */
+  const renameLabel = useCallback(
+    async (label: AssetLabel, name: string) => {
+      const trimmed = name.trim().slice(0, 40);
+      const before = stateRef.current.labelNames;
+      try {
+        const resp = await fetch("/api/labels", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ label, name: trimmed }),
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+        const { names } = (await resp.json()) as { names: LabelNames };
+        setState({ labelNames: names });
+      } catch {
+        setState({ labelNames: before });
+        flashToast("Couldn't rename that label — try again");
+      }
+    },
+    [flashToast, setState],
+  );
+
   /** The one way to start AI work. The plan (which jobs, in what order) comes
    *  from `planAiRun`, the same function the panel uses to label its button. */
   const runAi = useCallback(
@@ -2214,6 +2497,16 @@ export function useWorkspace(
    *  Content larger than the viewport at 75% simply overflows and pans. */
   const fitDefaultZoom = useCallback((bounds: Bounds, r: Rect) => centerAtScale(bounds, r, DEFAULT_ZOOM), []);
 
+  /** A layout's bounds, narrowed to what is actually on screen while a label
+   *  filter is on. Unfiltered it returns the layout's own bounds untouched —
+   *  which matters for Timeline, whose bounds deliberately stretch past the
+   *  tiles to keep the axis line and its date labels in frame (ADR 0024). */
+  const visibleBounds = useCallback(
+    (layout: { tiles: Record<string, TilePos>; bounds: Bounds }, photos: readonly Photo[], filter: LabelFilter) =>
+      filter ? positionsBounds(visibleTilePositions(layout.tiles, photos, filter)) : layout.bounds,
+    [],
+  );
+
   const computeFit = useCallback(
     (
       view: ViewMode,
@@ -2222,15 +2515,19 @@ export function useWorkspace(
       previews: CanvasUploadPreview[],
     ) => {
       const r = rect();
-      const frames = stateRef.current.frames;
+      const s = stateRef.current;
+      const frames = s.frames;
+      const fit = (layout: { tiles: Record<string, TilePos>; bounds: Bounds }) =>
+        fitDefaultZoom(visibleBounds(layout, allPhotos, s.labelFilter), r);
       if (view === "neural") {
-        const bounds = neuralGalleryFor(allPhotos, overrides, previews).bounds;
-        return fitDefaultZoom(bounds, r);
+        const gallery = neuralGalleryFor(allPhotos, overrides, previews);
+        return fit({ tiles: gallery.pos, bounds: gallery.bounds });
       }
-      if (view === "sense") return fitDefaultZoom(computeTopicLayout(allPhotos, overrides.topic, frames).bounds, r);
-      return fitDefaultZoom(computeTimelineLayout(allPhotos, overrides.timeline).bounds, r);
+      if (view === "sense") return fit(computeTopicLayout(allPhotos, overrides.topic, frames));
+      if (view === "labels") return fit(computeLabelLayout(allPhotos, overrides.label, s.labelNames, frames));
+      return fit(computeTimelineLayout(allPhotos, overrides.timeline));
     },
-    [rect, neuralGalleryFor, fitDefaultZoom],
+    [rect, neuralGalleryFor, fitDefaultZoom, visibleBounds],
   );
 
   const doFit = useCallback(() => {
@@ -2246,16 +2543,22 @@ export function useWorkspace(
     const s = stateRef.current;
     if (s.view === "map") return;
     const r = rect();
-    const bounds =
+    const neural = () => {
+      const gallery = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews);
+      return { tiles: gallery.pos, bounds: gallery.bounds };
+    };
+    const layout =
       s.view === "sense"
-        ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).bounds
-        : s.view === "timeline"
-          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline).bounds
-          : neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
-    setState({ ...fitBounds(bounds, r), tilesAnimating: true });
+        ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames)
+        : s.view === "labels"
+          ? computeLabelLayout(s.photos, s.galleryOverrides.label, s.labelNames, s.frames)
+          : s.view === "timeline"
+            ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline)
+            : neural();
+    setState({ ...fitBounds(visibleBounds(layout, s.photos, s.labelFilter), r), tilesAnimating: true });
     if (animTimer.current) clearTimeout(animTimer.current);
     animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
-  }, [rect, setState, neuralGalleryFor]);
+  }, [rect, setState, neuralGalleryFor, visibleBounds]);
 
   const setZoomPct = useCallback(
     (pct: number) => {
@@ -2881,7 +3184,8 @@ export function useWorkspace(
    *  same rule Tidy up follows); otherwise the whole bucket resets. */
   const regroupClouds = useCallback(() => {
     const s = stateRef.current;
-    const bucketKey = s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
+    const bucketKey =
+      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "labels" ? "label" : null;
     if (!bucketKey) return;
     const current = s.galleryOverrides[bucketKey];
     let next: Record<string, CanvasOverride>;
@@ -3989,6 +4293,21 @@ export function useWorkspace(
         }
         return;
       }
+      // Colour labels on the number row: 1–7 apply, 0 clears. Bare digits, not
+      // Cmd/Ctrl+digit — that combination switches browser tabs, so the macOS
+      // shortcut cannot be copied here. Lightroom uses bare digits for exactly
+      // this too. Selection-only: with nothing selected there is no target, and
+      // a stray keypress must never silently paint the whole canvas.
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= "0" && e.key <= "7" && e.key.length === 1) {
+        const t = e.target as HTMLElement | null;
+        const isTyping = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+        const s = stateRef.current;
+        if (isTyping || s.exportOpen || s.editorId || s.selectedIds.length === 0) return;
+        e.preventDefault();
+        const index = Number(e.key);
+        applyLabel(s.selectedIds, index === 0 ? null : ASSET_LABELS[index - 1]);
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
         const target = e.target as HTMLElement | null;
         const isTyping = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
@@ -4009,7 +4328,11 @@ export function useWorkspace(
       const s = stateRef.current;
       if (s.imp.open) return; // ImportModal owns Esc while open (upload-aware)
       if (s.exportOpen) return; // ExportDialog owns Esc while open (useDialog)
-      if (s.drawerId) closeDrawer();
+      // The label pickers are the shallowest thing on screen — Esc closes them
+      // before it reaches the drawer or a panel underneath.
+      if (s.labelMenuOpen) closeLabelMenu();
+      else if (s.labelFilterOpen) closeLabelFilterPanel();
+      else if (s.drawerId) closeDrawer();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
       else if (s.trashOpen) closeTrash();
@@ -4017,7 +4340,19 @@ export function useWorkspace(
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeDrawer, closeHelp, closeChat, closeTrash, closeSidebar, requestDeletePhotos, copyFiles, pasteFiles]);
+  }, [
+    closeDrawer,
+    closeHelp,
+    closeChat,
+    closeTrash,
+    closeSidebar,
+    requestDeletePhotos,
+    copyFiles,
+    pasteFiles,
+    applyLabel,
+    closeLabelMenu,
+    closeLabelFilterPanel,
+  ]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
   // hand-tool path, so the selected tool is never mutated and simply resumes on
@@ -4154,6 +4489,7 @@ export function useWorkspace(
   const isTimelineView = state.view === "timeline" && state.projCurrent !== "all";
   const isMapView = state.view === "map" && state.projCurrent !== "all";
   const isSenseView = state.view === "sense" && state.projCurrent !== "all";
+  const isLabelsView = state.view === "labels" && state.projCurrent !== "all";
   const showViewTabs = state.projCurrent !== "all";
   const allFilesMode = state.projCurrent === "all";
   const projectMode = !allFilesMode;
@@ -4165,6 +4501,32 @@ export function useWorkspace(
     () => filteredPhotos(state.photos),
     [state.photos, filteredPhotos],
   );
+
+  /** What the canvas actually draws. Every layout above runs over
+   *  `projectPhotos` (the full set) so a filter can never move a tile; this is
+   *  the render list, and a tile it omits simply has no position to draw at. */
+  const visiblePhotos = useMemo(
+    () => filterByLabel(projectPhotos, state.labelFilter),
+    [projectPhotos, state.labelFilter],
+  );
+
+  /** Upload previews minus the ones whose asset the filter is hiding. Without
+   *  this, a file that finished ingesting while a filter was on would reappear
+   *  as a "pending" tile: ProjectAssetView treats a preview as pending when its
+   *  assetId is missing from the photo list it was given, and a filtered-out
+   *  photo is exactly that. A preview with no assetId yet is still uploading and
+   *  always shows. */
+  const visiblePreviews = useMemo(() => {
+    if (!state.labelFilter) return state.uploadPreviews;
+    const visible = new Set(visiblePhotos.map((p) => p.id));
+    const known = new Set(projectPhotos.map((p) => p.id));
+    return state.uploadPreviews.filter(
+      (preview) => !preview.assetId || visible.has(preview.assetId) || !known.has(preview.assetId),
+    );
+  }, [state.uploadPreviews, state.labelFilter, visiblePhotos, projectPhotos]);
+
+  /** Per-colour tallies for the filter strip, over the photos on this canvas. */
+  const labelCounts = useMemo(() => countLabels(projectPhotos), [projectPhotos]);
 
   const projectList: ProjectListItem[] = useMemo(
     () =>
@@ -4198,6 +4560,14 @@ export function useWorkspace(
     [isSenseView, projectPhotos, state.galleryOverrides.topic, state.frames],
   );
 
+  const labelLayoutResult = useMemo(
+    () =>
+      isLabelsView
+        ? computeLabelLayout(projectPhotos, state.galleryOverrides.label, state.labelNames, state.frames)
+        : null,
+    [isLabelsView, projectPhotos, state.galleryOverrides.label, state.labelNames, state.frames],
+  );
+
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
   // panel is the progress indicator even without a canvas selection.
   // Canvas selection when present; otherwise the source-browser selection —
@@ -4221,20 +4591,45 @@ export function useWorkspace(
     ? timelineLayoutResult
     : isSenseView
       ? topicLayoutResult
-      : null;
-  const activePositions = cloudDecor ? cloudDecor.tiles : foldedNeuralPos;
+      : isLabelsView
+        ? labelLayoutResult
+        : null;
+  // Filter applied here and nowhere else on the render path: the layouts above
+  // keep every tile's real coordinate, and what is hidden simply loses its
+  // entry, so clearing the filter puts everything back exactly where it was.
+  const activePositions = useMemo(
+    () => visibleTilePositions(cloudDecor ? cloudDecor.tiles : foldedNeuralPos, projectPhotos, state.labelFilter),
+    [cloudDecor, foldedNeuralPos, projectPhotos, state.labelFilter],
+  );
+
+  /** The decor the canvas draws. Under a label filter, a cloud with nothing
+   *  visible left in it must not keep painting its name and backdrop over empty
+   *  canvas, and the tag web goes too: half of every relation is hidden, so the
+   *  lines that remained would assert connections to tiles that aren't there.
+   *  `tiles` stays whole — dragging a cloud by its label still moves the cloud,
+   *  including the members the filter is hiding. */
+  const decor: CloudLayout | null = useMemo(() => {
+    if (!cloudDecor || !state.labelFilter) return cloudDecor;
+    const live = new Set<string>();
+    for (const id of Object.keys(activePositions)) {
+      const key = cloudDecor.tileCloud[id];
+      if (key) live.add(key);
+    }
+    return { ...cloudDecor, clouds: cloudDecor.clouds.filter((c) => live.has(c.key)), edges: [] };
+  }, [cloudDecor, state.labelFilter, activePositions]);
 
   // Committed after every render so pointer-down handlers (onCloudLabelDown)
   // read the exact layout the canvas is showing instead of recomputing it.
   useEffect(() => {
-    cloudDecorRef.current = cloudDecor;
-  }, [cloudDecor]);
+    cloudDecorRef.current = decor;
+  }, [decor]);
 
   // A focused cloud can disappear under the user (photo deleted, topics
-  // re-derived on refresh, timeline day emptied). A key that matches no
-  // current cloud must not dim the entire canvas — it reads as no focus.
+  // re-derived on refresh, timeline day emptied, a filter hiding it). A key
+  // that matches no current cloud must not dim the entire canvas — it reads as
+  // no focus.
   const focusedCloudKey =
-    state.focusedCloudKey && cloudDecor?.clouds.some((c) => c.key === state.focusedCloudKey)
+    state.focusedCloudKey && decor?.clouds.some((c) => c.key === state.focusedCloudKey)
       ? state.focusedCloudKey
       : null;
 
@@ -4439,7 +4834,8 @@ export function useWorkspace(
     regroupClouds,
     canRegroup:
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
-      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
+      (isLabelsView && Object.keys(state.galleryOverrides.label).length > 0),
     recluster,
     renameCloud,
     addToNewArtboard,
@@ -4541,11 +4937,29 @@ export function useWorkspace(
     purgeFromTrash,
 
     activePositions,
-    cloudDecor,
+    cloudDecor: decor,
     tilesAnimating: state.tilesAnimating,
     focusedCloudKey,
-    tileCloud: cloudDecor?.tileCloud ?? EMPTY_TILE_CLOUD,
+    tileCloud: decor?.tileCloud ?? EMPTY_TILE_CLOUD,
     onCloudLabelDown,
+
+    labelNames: state.labelNames,
+    labelFilter: state.labelFilter,
+    labelCounts,
+    labelFilterOpen: state.labelFilterOpen,
+    labelMenuOpen: state.labelMenuOpen,
+    setLabelFilter,
+    clearLabelFilter,
+    toggleLabelFilterPanel,
+    closeLabelFilterPanel,
+    toggleLabelMenu,
+    closeLabelMenu,
+    labelSelection,
+    labelOne,
+    renameLabel,
+    isLabelsView,
+    visiblePhotos,
+    visiblePreviews,
 
     bulkPanelOpen: state.bulkPanelOpen,
     toggleBulkPanel,

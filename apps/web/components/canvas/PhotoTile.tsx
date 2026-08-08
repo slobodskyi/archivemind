@@ -1,5 +1,7 @@
+import type { AssetLabel } from "@archivemind/shared";
 import type { CanvasUploadStage } from "@/types";
 import type { TilePos } from "@/lib/layout";
+import { LABEL_COLORS } from "@/lib/labels";
 import { CloseIcon } from "@/components/icons/icons";
 
 interface PhotoTileProps {
@@ -38,6 +40,11 @@ interface PhotoTileProps {
   /** Click on the badge — analyzes just this photo. Omitted (badge becomes a
    *  plain indicator) for mock rows and non-interactive surfaces. */
   onAnalyze?: (e: React.MouseEvent) => void;
+  /** Colour label, drawn as a dot before the filename — where Finder puts it,
+   *  and the one spot on this tile that is neither corner: top-left is the AI
+   *  badge and top-right is Delete. */
+  label?: AssetLabel | null;
+  labelName?: string;
 }
 
 /** Filled = analyzed, hollow = not. Deliberately the same sparkle used by every
@@ -77,6 +84,8 @@ export default function PhotoTile({
   analyzed = false,
   aiBusy = false,
   onAnalyze,
+  label = null,
+  labelName,
 }: PhotoTileProps) {
   // The layer-order delta (`z`) shifts the whole resting band, so a tile brought
   // to front stays above its neighbours even when one of them is hovered.
@@ -219,17 +228,33 @@ export default function PhotoTile({
       </span>
       <span
         style={{
-          display: "block",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
           marginTop: 6,
           overflow: "hidden",
           color: stage === "error" ? "var(--red)" : "var(--t2)",
           fontSize: 10.5,
           lineHeight: 1.3,
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
         }}
       >
-        {filename}
+        {label && (
+          <span
+            // Not aria-hidden: the colour is the only carrier of this meaning,
+            // so the name has to reach a screen reader some other way.
+            role="img"
+            aria-label={labelName ?? label}
+            title={labelName ?? label}
+            style={{
+              width: 6,
+              height: 6,
+              flex: "0 0 auto",
+              borderRadius: "50%",
+              background: LABEL_COLORS[label],
+            }}
+          />
+        )}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{filename}</span>
       </span>
     </button>
     {/* AI badge — always on (not hover-only) for ingested tiles: the point is

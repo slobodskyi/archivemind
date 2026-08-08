@@ -256,6 +256,54 @@ export type TrashedAssetsResponse = z.infer<typeof trashedAssetsResponseSchema>;
  *  of truth; this constant only feeds UI copy + the countdown). */
 export const TRASH_RETENTION_DAYS = 30;
 
+// ── Colour labels — the human curation axis (migration 20260808000001) ───────
+
+/** The seven macOS Finder colours, in macOS order. Mirrors the `asset_label`
+ *  Postgres enum exactly; the order is the order they render in every swatch
+ *  row and the order the LABELS view stacks its clouds in, so it is part of the
+ *  contract, not an incidental array literal. */
+export const ASSET_LABELS = ["red", "orange", "yellow", "green", "blue", "purple", "gray"] as const;
+
+export const assetLabelSchema = z.enum(ASSET_LABELS);
+export type AssetLabel = z.infer<typeof assetLabelSchema>;
+
+/** Shown until a workspace renames the colour (workspace_labels). The colour's
+ *  own name is the honest default: it claims no workflow the user hasn't
+ *  chosen, and "red" is what they'll call it out loud anyway. */
+export const DEFAULT_LABEL_NAMES: Record<AssetLabel, string> = {
+  red: "Red",
+  orange: "Orange",
+  yellow: "Yellow",
+  green: "Green",
+  blue: "Blue",
+  purple: "Purple",
+  gray: "Gray",
+};
+
+/** POST /api/assets/label — set or clear one colour on a selection. `label:
+ *  null` clears, which is also what re-picking the colour a photo already has
+ *  sends (the swatch is a toggle, like Finder's). Bulk-first and capped at 500
+ *  like every other selection route. */
+export const setAssetLabelRequestSchema = z.object({
+  ids: z.array(uuidSchema).min(1).max(500),
+  label: assetLabelSchema.nullable(),
+});
+export type SetAssetLabelRequest = z.infer<typeof setAssetLabelRequestSchema>;
+
+/** PATCH /api/labels — rename one colour, workspace-wide. An empty name is a
+ *  delete of the override row (back to DEFAULT_LABEL_NAMES), not a blank label:
+ *  a nameless dot is unusable, and "reset to default" needs no second verb. */
+export const renameLabelRequestSchema = z.object({
+  label: assetLabelSchema,
+  name: z.string().trim().max(40),
+});
+export type RenameLabelRequest = z.infer<typeof renameLabelRequestSchema>;
+
+/** Every colour's display name for one workspace — defaults with the
+ *  workspace's overrides applied on top. Complete by construction, so the UI
+ *  never has to fall back mid-render. */
+export type LabelNames = Record<AssetLabel, string>;
+
 // ── Captions (spec §8.3) — worker handler #13; API wiring joins with #14 ─────
 
 export const captionLangSchema = z.enum(["en", "uk", "ru"]);

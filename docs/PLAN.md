@@ -185,6 +185,33 @@ Phases 1–2). What actually remains:
   2026-07-27**, verified via ledger only: Docker on the owner's machine returns
   500, which takes out `db diff`'s shadow database, `db dump`, and makes
   `db push` print a `pgdelta` warning after succeeding.
+- **Colour labels + the LABELS view — ✅ DONE 2026-08-08, migration NOT yet on
+  prod** — the archive had four ways to group photos and all four were derived
+  from the file (date, GPS, the model's reading, none). This adds the first one
+  that records a *decision*
+  ([ADR 0040](decisions/0040-colour-labels-as-a-human-curation-axis.md)):
+  `assets.label`, one of seven macOS colours, **single-valued** (a tile packs
+  into exactly one cloud) and written only by a person. It is deliberately not a
+  `tags` row — that table feeds the Topic heuristic (0023), the connecting-line
+  web (0022) and search's explicit tier (0029/0031), so a tag named `red` would
+  have grown a "red" cloud and answered a text search for the colour. One swatch
+  row assigns it from four places (top of the right-click menu, action bar,
+  drawer, and keys `1`–`7` / `0` — bare digits, because `⌘1`–`⌘7` switches
+  browser tabs), all through `POST /api/assets/label` with an Undo toast that
+  restores each photo's *previous* colour. The seven names are renameable per
+  workspace (`workspace_labels`, `PATCH /api/labels`; only renamed colours have
+  a row, so every existing workspace is already correct with zero rows) by the
+  same double-click gesture ADR 0038 gave Topic clouds. The left toolbar's
+  filter **hides tiles without moving them** — layouts still run over the full
+  set, the filter is applied at one seam (`visibleTilePositions`), so artboards,
+  folder contents, frame counts and exports keep seeing the real geometry — and
+  **LABELS** is the fifth view, one cloud per colour plus `No label`, reusing
+  `buildCloudLayout` with the colour as both cloud key and staleness anchor (so
+  re-colouring a dragged tile re-packs it) and the tag web switched off. Zero
+  credits (ADR 0037 — no model runs). Migration `20260808000001`
+  (`asset_label` enum + `assets.label` + `workspace_labels` + RLS; pgTAP `012`,
+  18 assertions) — **owner push still pending**; the canvas read already
+  degrades to the pre-label select on `42703` so the deploy can land first.
 - **Image editing — Tier 0 (crop / rotate 90° / straighten / flip) — ✅ DONE
   2026-07-22 (#126; live-refresh fix #128), LIVE on prod** — **non-destructive**
   ([ADR 0030](decisions/0030-non-destructive-image-editing.md)): a stored,

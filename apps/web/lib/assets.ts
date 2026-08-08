@@ -3,6 +3,7 @@ import {
   editRecipeSchema,
   resolveCropRect,
   workingDimensions,
+  type AssetLabel,
   type TrashedAsset,
 } from "@archivemind/shared";
 import type { ExifData, Photo, PhotoCaptions } from "@/types";
@@ -76,6 +77,7 @@ interface AssetRow {
   status: string;
   ai_processed_at: string | null;
   created_at: string;
+  label: AssetLabel | null;
   cluster_id: string | null;
   topic_clusters: { label: string } | null;
   files: FileOriginRow[];
@@ -207,6 +209,10 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
     // not change when the cloud is renamed — ADR 0038.
     clusterId: a.cluster_id,
     country: "Ukraine",
+    // `label ?? null` rather than `a.label`: the pre-migration fallback select
+    // omits the column entirely, and an undefined there would read as "not
+    // loaded" further up where null means "not labelled".
+    label: a.label ?? null,
     source: gdrive ? "gdrive" : dropbox ? "dropbox" : "upload",
     edited,
     folder: gdrive ? (a.files[0]?.source_path ?? "Google Drive") : dropbox ? "Dropbox" : "Uploads",
@@ -216,7 +222,9 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   return photo;
 }
 
-const ASSET_SELECT = `id, title, status, ai_processed_at, created_at, cluster_id,
+/** Everything the canvas needs EXCEPT `assets.label` — the fallback select for
+ *  a database that has not had migration 20260808000001 pushed yet. */
+const ASSET_SELECT_PRE_LABEL = `id, title, status, ai_processed_at, created_at, cluster_id,
        topic_clusters ( label ),
        files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),
@@ -225,6 +233,8 @@ const ASSET_SELECT = `id, title, status, ai_processed_at, created_at, cluster_id
        asset_tags ( tags ( name, category ) ),
        facts ( id, text, status ),
        captions ( id, lang, style, text, is_edited )`;
+
+const ASSET_SELECT = `label, ${ASSET_SELECT_PRE_LABEL}`;
 
 /** The caller's trashed photos (ADR 0033) — the photo half of the Trash view,
  *  read by GET /api/assets?scope=trash. Un-purged trash only: a purged
@@ -269,25 +279,33 @@ export async function getTrashedAssets(supabase: SupabaseClient): Promise<Trashe
   );
 }
 
+/** One canvas read, parameterised by the select list so the caller can retry
+ *  with a narrower one. Inner-joins through the M:N table when scoped, so only
+ *  members of a project return. */
+function selectAssets(supabase: SupabaseClient, projectId: string | undefined, select: string) {
+  const scoped = projectId && projectId !== "all";
+  const query = scoped
+    ? supabase
+        .from("assets")
+        .select(`${select}, project_assets!inner ( project_id )`)
+        .eq("project_assets.project_id", projectId)
+    : supabase.from("assets").select(select);
+  return query.eq("status", "active").order("created_at", { ascending: false }).limit(500);
+}
+
 /** The caller's assets (RLS-scoped). `projectId` filters to one project's M:N
  *  membership; omit (or pass "all") for the whole workspace. */
 export async function getRealPhotos(supabase: SupabaseClient, projectId?: string): Promise<Photo[]> {
-  const scoped = projectId && projectId !== "all";
-  // Inner-join through the M:N table so only members of a project return.
-  const { data, error } = scoped
-    ? await supabase
-        .from("assets")
-        .select(`${ASSET_SELECT}, project_assets!inner ( project_id )`)
-        .eq("status", "active")
-        .eq("project_assets.project_id", projectId)
-        .order("created_at", { ascending: false })
-        .limit(500)
-    : await supabase
-        .from("assets")
-        .select(ASSET_SELECT)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(500);
+  let { data, error } = await selectAssets(supabase, projectId, ASSET_SELECT);
+  // `label` (migration 20260808000001) is the newest column here, and web
+  // deploys are not transactional with migration pushes — main merging ships
+  // this code to Vercel before the owner runs `db push` (CONTRIBUTING.md).
+  // Everywhere else that gap degrades a panel; here it would 42703 the ONE
+  // query the canvas is made of and leave the archive blank, so retry without
+  // it rather than take the whole view down over a colour dot.
+  if (error?.code === "42703") {
+    ({ data, error } = await selectAssets(supabase, projectId, ASSET_SELECT_PRE_LABEL));
+  }
   if (error) throw error;
   const rows = (data ?? []) as unknown as AssetRow[];
   // Topic = the stored semantic cluster label when present (ADR 0028: stable
