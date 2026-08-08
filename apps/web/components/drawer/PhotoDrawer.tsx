@@ -234,7 +234,9 @@ export default function PhotoDrawer({
         top: 52,
         right,
         bottom: 0,
-        width: 410,
+        // Fixed 410 overflowed any viewport narrower than itself; the slide-out
+        // transform below stays 410-based, which is still ≥ the rendered width.
+        width: "min(410px, 100vw)",
         background: "var(--bg-sf)",
         borderLeft: "1px solid var(--bd)",
         boxShadow: "-16px 0 48px rgba(0,0,0,.5)",

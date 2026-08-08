@@ -169,10 +169,15 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
         // thumbnails harder to read.
         dragRotate: false,
         pitchWithRotate: false,
-        touchZoomRotate: false,
+        touchPitch: false,
         renderWorldCopies: false,
       });
       mapRef.current = map;
+      // `touchZoomRotate: false` used to sit in the options above, for the same
+      // no-rotation reason — but that handler owns pinch-to-ZOOM as well, so it
+      // left a geographic map on a tablet with no gesture to zoom it at all.
+      // Keep the handler and disable only its rotation half.
+      map.touchZoomRotate.disableRotation();
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
       map.once("load", () => {

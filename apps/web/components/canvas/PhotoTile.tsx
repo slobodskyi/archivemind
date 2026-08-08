@@ -267,7 +267,10 @@ export default function PhotoTile({
         <AiBadgeGlyph filled={analyzed || aiBusy} />
       </button>
     )}
-    {interactive && onDelete && hovered && (
+    {/* Shown on hover OR selection. Hover-only made this touch-only-unreachable:
+        a finger produces no hover, so on a tablet the tile's own delete simply
+        did not exist. Selection is the touch equivalent — one tap arms it. */}
+    {interactive && onDelete && (hovered || selected) && (
       <button
         type="button"
         aria-label={`Delete ${filename}`}

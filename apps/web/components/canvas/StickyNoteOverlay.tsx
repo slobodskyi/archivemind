@@ -81,6 +81,10 @@ export default function StickyNoteOverlay({ notes, onDragStart, onTextChange, on
               // and a note body must stay selectable/editable underneath it.
               userSelect: "text",
               WebkitUserSelect: "text",
+              // Same for touch — the canvas sets touch-action:none for its own
+              // gestures, which would otherwise take scrolling and caret
+              // placement away from a note long enough to overflow.
+              touchAction: "auto",
             }}
           />
         </div>

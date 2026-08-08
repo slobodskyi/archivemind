@@ -9,7 +9,7 @@ function Sk({ w, h, style }: { w: number | string; h: number; style?: React.CSSP
 
 export default function ProjectLoading() {
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "var(--bg)", position: "relative" }}>
+    <div style={{ width: "100vw", height: "100dvh", overflow: "hidden", background: "var(--bg)", position: "relative" }}>
       {/* header shell (real AppHeader is 52px, bottom-bordered) */}
       <div
         style={{

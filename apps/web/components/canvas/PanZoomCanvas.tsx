@@ -43,6 +43,12 @@ export default function PanZoomCanvas({
         // textarea, chat/drawer) re-enable selection on their own elements.
         userSelect: "none",
         WebkitUserSelect: "none",
+        // Same argument for touch: the browser must not claim any gesture here.
+        // `useWorkspace` implements pinch-zoom, two-finger pan and long-press
+        // itself, and every one of those is a gesture Safari would otherwise
+        // swallow (page zoom, scroll, the long-press callout).
+        touchAction: "none",
+        WebkitTouchCallout: "none",
       }}
     >
       <div

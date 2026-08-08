@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Space_Mono, JetBrains_Mono } from "next/font/google";
 import TopProgressBar from "@/components/nav/TopProgressBar";
 import "./globals.css";
@@ -24,6 +24,20 @@ const monoCyrillic = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "ArchiveMind",
   description: "AI-powered creator archive workspace",
+};
+
+// Next already emits `width=device-width, initial-scale=1` by default; this adds
+// the two things a full-viewport canvas app needs on a tablet/phone.
+// `interactiveWidget: "resizes-content"` makes the on-screen keyboard shrink the
+// viewport instead of sliding the page up — without it the bottom action bars
+// (which sit at `bottom: 20` of a 100dvh shell) end up under the keyboard.
+// Deliberately NOT setting `userScalable: false`: page zoom stays available for
+// accessibility, and the canvas keeps pinch for itself via `touch-action: none`.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-content",
+  themeColor: "#080808",
 };
 
 export default function RootLayout({

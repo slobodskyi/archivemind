@@ -25,6 +25,37 @@
   box-sizing: border-box;
 }
 
+/* The app is a fixed, full-viewport shell — there is nothing to scroll at the
+   document level, so iOS/Android rubber-band only ever drags the whole UI away
+   from under the user's finger mid-gesture. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* Touch input: the 34px chrome buttons are a mouse-era size (Apple HIG asks for
+   44). `min-width`/`min-height` beat the components' inline `width`/`height`
+   without needing !important, so this stays a stylesheet-only fix.
+   `.am-tb` covers the left toolbar and both bottom action bars. */
+@media (pointer: coarse) {
+  .am-tb {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* iOS zooms the whole page when a field smaller than 16px takes focus, and
+     then leaves it zoomed — on the sign-in form that happens before the user
+     has seen anything else. The app's fields are 11–13px by design, so rather
+     than resize them everywhere (and change the desktop look), lift them only
+     where a touch keyboard can appear. !important because the ported
+     components set font-size inline, which no stylesheet can otherwise beat. */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 /* Visible keyboard focus, app-wide. Ported components strip `outline` via
    inline styles (which beat stylesheets), so this needs !important — it only
    fires on :focus-visible, so mouse interaction stays outline-free. */
