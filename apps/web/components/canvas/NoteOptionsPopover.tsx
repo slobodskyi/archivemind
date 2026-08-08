@@ -32,6 +32,12 @@ export default function NoteOptionsPopover({
 }: NoteOptionsPopoverProps) {
   return (
     <div
+      // The overlay's dismiss listener runs in the CAPTURE phase on window, so
+      // it cannot be stopped from in here — it looks for this attribute instead
+      // to tell "operating the popover" from "clicking away". The
+      // stopPropagation below is still needed, but only to keep the canvas from
+      // starting a drag underneath.
+      data-note-options=""
       onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: "absolute",

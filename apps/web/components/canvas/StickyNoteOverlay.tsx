@@ -46,6 +46,14 @@ export default function StickyNoteOverlay({
     if (!menuId) return;
     const close = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== "Escape") return;
+      // A press INSIDE the popover is the user operating it, not dismissing it.
+      // This has to be checked here, on the event itself: the popover's own
+      // React onPointerDown is a bubble-phase delegated handler and cannot stop
+      // a capture-phase listener on window, so without this the popover
+      // unmounted on pointerdown and the swatch's click never landed — which is
+      // exactly why picking a colour or a font size did nothing at all.
+      const target = e.target as HTMLElement | null;
+      if (e.type === "pointerdown" && target?.closest("[data-note-options]")) return;
       setMenuId(null);
     };
     // Capture, and on pointerdown rather than click: the canvas starts drags on
