@@ -21,6 +21,19 @@ export const LABEL_COLORS: Record<AssetLabel, string> = {
   gray: "#9aa0a6",
 };
 
+/** A sticky note's fill (ADR 0041). The same seven colours, mixed most of the
+ *  way to white: an 8px dot needs the full-strength swatch to register, while a
+ *  180px card filled with `#ff5f57` reads as an alarm rather than a note — and
+ *  the note's text is near-black, which needs a light ground. Paper, in other
+ *  words. The hue is still unmistakably the label's, so the two swatch rows
+ *  match without being the same weight. */
+export function noteSurface(label: AssetLabel): string {
+  const hex = LABEL_COLORS[label];
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (channel: number) => Math.round(channel + (255 - channel) * 0.62);
+  return `rgb(${mix((n >> 16) & 255)},${mix((n >> 8) & 255)},${mix(n & 255)})`;
+}
+
 /** The LABELS view's cloud for everything unmarked. A string, not null, because
  *  buildCloudLayout groups by a string key — and it is capitalised like every
  *  other cloud key (Unsorted / Other) so the three read as siblings. */

@@ -7,9 +7,11 @@ import { useJobProgress } from "@/hooks/useJobProgress";
 import { ASSET_LABELS } from "@archivemind/shared";
 import type {
   AssetLabel,
+  CanvasAnnotation,
   CanvasGroup,
   EditRecipe,
   LabelNames,
+  PatchAnnotationRequest,
   PatchAssetExifRequest,
   TrashedAsset,
 } from "@archivemind/shared";
@@ -166,8 +168,33 @@ interface PersistedCanvas {
   groupGeom?: Record<string, GroupGeom>;
   /** Per-tile stacking-order deltas — client-only, additive to older saves. */
   tileZ?: Record<string, number>;
-  stickyNotes?: StickyNote[];
+  /** Written by builds before ADR 0041 only. Notes live in canvas_annotations
+   *  now; this key is read once, uploaded, and deleted. Never written again. */
+  stickyNotes?: LegacyStickyNote[];
 }
+
+/** The shape a sticky note had while it lived in localStorage: a raw hex colour
+ *  and no font size. Kept solely so the one-time adoption can read an old save
+ *  — do not widen it, and do not use it for anything new. */
+interface LegacyStickyNote {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  color: string;
+}
+
+/** The four hexes `STICKY_NOTE_COLORS` used to hold, mapped onto the seven
+ *  ADR 0040 colours they became. Anything else (hand-edited storage, a build
+ *  that shipped a fifth) falls back to yellow rather than dropping the note. */
+const LEGACY_NOTE_COLORS: Record<string, AssetLabel> = {
+  "#ffe066": "yellow",
+  "#ff9eb8": "red",
+  "#8ecdf7": "blue",
+  "#a8e6a1": "green",
+};
 
 export type SidebarViewMode = "pile" | "list" | "gallery";
 
@@ -829,6 +856,32 @@ export interface Workspace {
   flashToast: (text: string, action?: { label: string; onAction: () => void }) => void;
 }
 
+/** A `canvas_annotations` row (ADR 0041) → the canvas's own note shape. */
+function annotationToNote(a: CanvasAnnotation): StickyNote {
+  return {
+    id: a.id,
+    x: a.x,
+    y: a.y,
+    w: a.w,
+    h: a.h,
+    text: a.body.text,
+    color: a.color,
+    fontSize: a.style.fontSize,
+  };
+}
+
+/** A note that exists on the canvas but not yet in the database — the window
+ *  between the click and the INSERT coming back. Prefixed rather than flagged so
+ *  every network path can recognise one from the id alone: PATCHing or DELETEing
+ *  a `tmp-` id would be a 400 against a row that has no uuid yet. */
+const TMP_NOTE_PREFIX = "tmp-";
+const isTmpNote = (id: string) => id.startsWith(TMP_NOTE_PREFIX);
+
+/** Text is saved on a debounce — a PATCH per keystroke would be one request per
+ *  character on a note somebody is actually writing in. Long enough to batch a
+ *  sentence, short enough that a browser closed mid-thought keeps it. */
+const NOTE_TEXT_SAVE_MS = 700;
+
 export function useWorkspace(
   initialPhotos: Photo[],
   workspaceId: string,
@@ -836,6 +889,7 @@ export function useWorkspace(
   currentProjectId: string,
   initialGroups: CanvasGroup[],
   initialLabelNames: LabelNames,
+  initialAnnotations: CanvasAnnotation[],
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
@@ -894,7 +948,9 @@ export function useWorkspace(
     tileZ: {},
     clipboardCount: 0,
     openFolderId: null,
-    stickyNotes: [],
+    // Server-backed since ADR 0041 — the Server Component read them, so the
+    // first paint already has them and there is no post-mount fetch flicker.
+    stickyNotes: initialAnnotations.filter((a) => a.kind === "note").map(annotationToNote),
     frameDraftRect: null,
     history: [],
     future: [],
@@ -949,6 +1005,10 @@ export function useWorkspace(
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** One debounced text save per note (ADR 0041) — keyed by id, because two
+   *  notes can be edited in the same window and a single shared timer would let
+   *  the second one's keystrokes cancel the first one's save. */
+  const noteTextTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   /** The layout the canvas currently renders (committed post-render) — read by
    *  pointer-down handlers so they never recompute a pack/edge pass. */
   const cloudDecorRef = useRef<CloudLayout | null>(null);
@@ -1037,6 +1097,95 @@ export function useWorkspace(
   // canvas shows every photo the server returned — no client-side project filter.
   const filteredPhotos = useCallback((photos: Photo[]) => photos, []);
 
+  /** Fire-and-forget PATCH of one note (ADR 0041). A failure is reported once,
+   *  in the toast, and the local state is deliberately NOT rolled back: yanking
+   *  a sentence out from under someone mid-note to satisfy the server is worse
+   *  than a stale row. Defined up here because undo/redo needs it. */
+  const patchNote = useCallback(
+    (id: string, patch: PatchAnnotationRequest) => {
+      if (isTmpNote(id)) return; // no row yet; the create carries the current state
+      void fetch(`/api/annotations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+        .then((res) => {
+          if (!res.ok) flashToast("Note not saved");
+        })
+        .catch(() => flashToast("Note not saved"));
+    },
+    [flashToast],
+  );
+
+  /** Undo/redo restores a whole state snapshot, and notes are in it — but a note
+   *  is a row now, not local state, so the snapshot alone would leave Cmd+Z
+   *  silently disagreeing with the database until the next reload. Diff the two
+   *  lists and make the server match.
+   *
+   *  A note the undo brings BACK cannot keep its uuid: that row was deleted, so
+   *  it is re-inserted and the new id adopted in place. Nothing user-visible
+   *  changes — it is the same note, at the same place, saying the same thing. */
+  const reconcileNotes = useCallback(
+    (before: StickyNote[], after: StickyNote[]) => {
+      const beforeById = new Map(before.map((n) => [n.id, n]));
+      const afterById = new Map(after.map((n) => [n.id, n]));
+
+      for (const gone of before) {
+        if (afterById.has(gone.id) || isTmpNote(gone.id)) continue;
+        void fetch(`/api/annotations/${gone.id}`, { method: "DELETE" }).catch(() => {
+          flashToast("Note not deleted");
+        });
+      }
+
+      for (const now of after) {
+        const prev = beforeById.get(now.id);
+        if (prev) {
+          const moved = prev.x !== now.x || prev.y !== now.y || prev.w !== now.w || prev.h !== now.h;
+          const restyled =
+            prev.text !== now.text || prev.color !== now.color || prev.fontSize !== now.fontSize;
+          if (moved || restyled) {
+            patchNote(now.id, {
+              x: now.x,
+              y: now.y,
+              w: now.w,
+              h: now.h,
+              color: now.color,
+              body: { text: now.text },
+              style: { fontSize: now.fontSize },
+            });
+          }
+          continue;
+        }
+        void fetch("/api/annotations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: "note",
+            projectId: currentProjectId === "all" ? null : currentProjectId,
+            x: now.x,
+            y: now.y,
+            w: now.w,
+            h: now.h,
+            color: now.color,
+            body: { text: now.text },
+            style: { fontSize: now.fontSize },
+          }),
+        })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(String(res.status));
+            const saved = annotationToNote(await res.json());
+            setState({
+              stickyNotes: stateRef.current.stickyNotes.map((m) =>
+                m.id === now.id ? { ...m, id: saved.id } : m,
+              ),
+            });
+          })
+          .catch(() => flashToast("Note not restored"));
+      }
+    },
+    [patchNote, currentProjectId, setState, flashToast],
+  );
+
   // ── Undo / redo ──────────────────────────────────────────────────────────
 
   const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
@@ -1060,7 +1209,8 @@ export function useWorkspace(
     const future = s.future.slice();
     future.push(snapshot(s));
     setState({ ...prev, history: hist, future });
-  }, [setState, snapshot]);
+    reconcileNotes(s.stickyNotes, prev.stickyNotes);
+  }, [setState, snapshot, reconcileNotes]);
 
   const redo = useCallback(() => {
     const s = stateRef.current;
@@ -1070,7 +1220,8 @@ export function useWorkspace(
     const hist = s.history.slice();
     hist.push(snapshot(s));
     setState({ ...next, history: hist, future });
-  }, [setState, snapshot]);
+    reconcileNotes(s.stickyNotes, next.stickyNotes);
+  }, [setState, snapshot, reconcileNotes]);
 
   /** Canonical-photo tile positions for whichever view is active — the single
    *  source both the renderer and marquee hit-testing read, so selection and
@@ -1453,6 +1604,28 @@ export function useWorkspace(
     [pushHistory, startPan, gestureClaimed],
   );
 
+  // ── Sticky notes: server-backed (ADR 0041) ─────────────────────────────────
+  // Every mutation is optimistic — the canvas updates immediately and the row
+  // follows — because a note is typed into and dragged around, and a round trip
+  // in either path would be felt. The reconciliation that costs something is
+  // the create: the id only exists after the INSERT returns, so the note lives
+  // under a `tmp-` id until then and anything that happens to it in that window
+  // (typing, dragging, deleting) has to survive the swap.
+
+  /** Flush a pending debounced text save immediately (before a delete, or on
+   *  unmount) so the last keystrokes aren't dropped by the timer never firing. */
+  const flushNoteText = useCallback(
+    (id: string) => {
+      const timer = noteTextTimers.current.get(id);
+      if (!timer) return;
+      clearTimeout(timer);
+      noteTextTimers.current.delete(id);
+      const note = stateRef.current.stickyNotes.find((n) => n.id === id);
+      if (note) patchNote(id, { body: { text: note.text } });
+    },
+    [patchNote],
+  );
+
   const addStickyNote = useCallback(() => {
     const s = stateRef.current;
     const r = rect();
@@ -1460,32 +1633,108 @@ export function useWorkspace(
     const cy = (r.height / 2 - s.ty) / s.scale;
     const w = 180,
       h = 160;
+    const tmpId = TMP_NOTE_PREFIX + Date.now();
     const note: StickyNote = {
-      id: "note" + Date.now(),
+      id: tmpId,
       x: cx - w / 2,
       y: cy - h / 2,
       w,
       h,
       text: "",
       color: STICKY_NOTE_COLORS[s.stickyNotes.length % STICKY_NOTE_COLORS.length],
+      fontSize: "m",
     };
     pushHistory();
     setState({ stickyNotes: [...s.stickyNotes, note] });
-  }, [rect, pushHistory, setState]);
+
+    void fetch("/api/annotations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "note",
+        projectId: currentProjectId === "all" ? null : currentProjectId,
+        x: note.x,
+        y: note.y,
+        w: note.w,
+        h: note.h,
+        color: note.color,
+        body: { text: "" },
+        style: { fontSize: note.fontSize },
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        const saved = annotationToNote(await res.json());
+        const local = stateRef.current.stickyNotes.find((n) => n.id === tmpId);
+        // Dismissed while the insert was in flight — the row exists now and
+        // nothing on screen points at it, so undo the create rather than
+        // orphaning it.
+        if (!local) {
+          void fetch(`/api/annotations/${saved.id}`, { method: "DELETE" });
+          return;
+        }
+        // Keep whatever was typed or dragged in the meantime; take only the id.
+        const merged: StickyNote = { ...local, id: saved.id };
+        setState({
+          stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === tmpId ? merged : n)),
+        });
+        // A pending debounce was keyed to the temp id and can never fire now.
+        const pending = noteTextTimers.current.get(tmpId);
+        if (pending) {
+          clearTimeout(pending);
+          noteTextTimers.current.delete(tmpId);
+        }
+        const diverged =
+          merged.text !== "" || merged.x !== note.x || merged.y !== note.y;
+        if (diverged) {
+          patchNote(merged.id, { x: merged.x, y: merged.y, body: { text: merged.text } });
+        }
+      })
+      .catch(() => {
+        // Nothing was stored, so leaving the card on screen would promise a
+        // persistence that isn't there.
+        setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== tmpId) });
+        flashToast("Could not create the note");
+      });
+  }, [rect, pushHistory, setState, currentProjectId, patchNote, flashToast]);
 
   const updateStickyText = useCallback(
     (id: string, text: string) => {
       setState({ stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === id ? { ...n, text } : n)) });
+      const pending = noteTextTimers.current.get(id);
+      if (pending) clearTimeout(pending);
+      noteTextTimers.current.set(
+        id,
+        setTimeout(() => {
+          noteTextTimers.current.delete(id);
+          patchNote(id, { body: { text } });
+        }, NOTE_TEXT_SAVE_MS),
+      );
     },
-    [setState],
+    [setState, patchNote],
   );
 
   const deleteStickyNote = useCallback(
     (id: string) => {
       pushHistory();
+      // Drop the debounce rather than flushing it — the note is going away, and
+      // a PATCH landing after the DELETE is a 404 and a toast about nothing.
+      const pending = noteTextTimers.current.get(id);
+      if (pending) {
+        clearTimeout(pending);
+        noteTextTimers.current.delete(id);
+      }
       setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== id) });
+      // A temp id has no row yet; the in-flight create sees the note is gone
+      // from state and deletes what it just inserted.
+      if (isTmpNote(id)) return;
+      void fetch(`/api/annotations/${id}`, { method: "DELETE" })
+        .then((res) => {
+          if (!res.ok) flashToast("Note not deleted");
+        })
+        .catch(() => flashToast("Note not deleted"));
     },
-    [pushHistory, setState],
+    [pushHistory, setState, flashToast],
   );
 
   /** Two-finger pinch: zoom AND pan in one pass. The content point that sat
@@ -1743,6 +1992,13 @@ export function useWorkspace(
     dragRef.current = null;
     if (d.mode === "pan") {
       setState({ panning: false });
+    } else if (d.mode === "sticky") {
+      // Persist the drop, not the drag: move() already updated local state on
+      // every pointermove, and PATCHing those would be a request per frame.
+      if (d.moved) {
+        const note = stateRef.current.stickyNotes.find((n) => n.id === d.id);
+        if (note) patchNote(note.id, { x: note.x, y: note.y });
+      }
     } else if (d.mode === "cloudDrag") {
       // A click (no drag) on a label toggles focus on that cloud.
       if (!d.moved) {
@@ -1817,7 +2073,7 @@ export function useWorkspace(
         syncFolderMembership(d.groupCenters ? Object.keys(d.groupCenters) : [d.key]);
       }
     }
-  }, [setState, pushHistory, activeTilePositions, syncFolderMembership]);
+  }, [setState, pushHistory, activeTilePositions, syncFolderMembership, patchNote]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 
@@ -4174,10 +4430,64 @@ export function useWorkspace(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** One-time hand-off of notes written before ADR 0041 (localStorage) to the
+   *  server. Runs only when this scope has NO server notes: the same stale blob
+   *  sitting on a second device must not re-post what the first already
+   *  uploaded, and an empty server side is the only honest evidence that these
+   *  notes were never handed over. Nothing is deleted locally until every POST
+   *  has succeeded, so a failure just means it retries on the next load. */
+  const adoptLegacyNotes = useCallback(
+    async (legacy: LegacyStickyNote[]) => {
+      if (stateRef.current.stickyNotes.length > 0) return;
+      const projectId = currentProjectId === "all" ? null : currentProjectId;
+      const created: StickyNote[] = [];
+      for (const old of legacy) {
+        try {
+          const res = await fetch("/api/annotations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kind: "note",
+              projectId,
+              x: old.x,
+              y: old.y,
+              w: old.w,
+              h: old.h,
+              color: LEGACY_NOTE_COLORS[old.color?.toLowerCase()] ?? "yellow",
+              body: { text: old.text ?? "" },
+              style: { fontSize: "m" },
+            }),
+          });
+          if (!res.ok) return;
+          created.push(annotationToNote(await res.json()));
+        } catch {
+          return;
+        }
+      }
+      setState({ stickyNotes: created });
+      try {
+        const raw = localStorage.getItem(canvasStoreKey(currentProjectId));
+        if (!raw) return;
+        const blob = JSON.parse(raw) as PersistedCanvas;
+        delete blob.stickyNotes;
+        localStorage.setItem(canvasStoreKey(currentProjectId), JSON.stringify(blob));
+      } catch {
+        // The notes are on the server either way; a leftover key is harmless
+        // because the guard above short-circuits once the scope is non-empty.
+      }
+    },
+    [currentProjectId, setState],
+  );
+
   // ── Persist canvas arrangement per project (ADR 0022) ──────────────────────
   // Load once on mount (before the rAF fit reads bounds), so tile drags, frames
-  // and sticky notes are exactly where they were left. localStorage only — this
+  // and folder boxes are exactly where they were left. localStorage only — this
   // is UI state, never a backend concern.
+  //
+  // Sticky notes USED to ride along here and no longer do (ADR 0041): a note's
+  // position is its content, not a view preference, so the whole note lives in
+  // canvas_annotations and arrives via the Server Component. Notes saved by an
+  // older build are still read below — once, to hand them to the server.
   useEffect(() => {
     // The clipboard is workspace-wide and outlives this mount, so it is read
     // back before the 'all'-scope guard below — Copy on the workspace canvas has
@@ -4211,8 +4521,8 @@ export function useWorkspace(
         frames: saved.frames ?? [],
         groupGeom,
         tileZ: saved.tileZ ?? {},
-        stickyNotes: saved.stickyNotes ?? [],
       });
+      if (saved.stickyNotes?.length) void adoptLegacyNotes(saved.stickyNotes);
     } catch {
       // corrupt JSON or storage unavailable (private mode) — start clean
     }
@@ -4234,7 +4544,6 @@ export function useWorkspace(
             frames: state.frames,
             groupGeom: state.groupGeom,
             tileZ: state.tileZ,
-            stickyNotes: state.stickyNotes,
           } satisfies PersistedCanvas),
         );
       } catch {
@@ -4244,12 +4553,16 @@ export function useWorkspace(
     return () => {
       if (persistTimer.current) clearTimeout(persistTimer.current);
     };
-  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.tileZ, state.stickyNotes]);
+  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.tileZ]);
 
   // Flush the latest arrangement on unmount too, so navigating away right after
-  // a drag (before the debounce fires) still saves it.
+  // a drag (before the debounce fires) still saves it. Note text has its own
+  // debounce against the server and is flushed here for the same reason —
+  // closing the tab mid-sentence must not be how a note loses its last words.
   useEffect(() => {
+    const timers = noteTextTimers.current;
     return () => {
+      for (const id of [...timers.keys()]) flushNoteText(id);
       if (currentProjectId === "all") return;
       try {
         const s = stateRef.current;
@@ -4261,7 +4574,6 @@ export function useWorkspace(
             frames: s.frames,
             groupGeom: s.groupGeom,
             tileZ: s.tileZ,
-            stickyNotes: s.stickyNotes,
           } satisfies PersistedCanvas),
         );
       } catch {

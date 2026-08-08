@@ -705,6 +705,106 @@ export const canvasGroupsResponseSchema = z.object({
 });
 export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
 
+// ── Canvas annotations (migration 20260808000002, ADR 0041) ──────────────────
+//
+// Sticky notes now, freehand ink next. The one canvas object that carries its
+// own geometry on the server: a photo exists independently of the canvas and
+// its tile position is a per-user view preference (ADR 0022/0034), but an
+// annotation exists nowhere else — its position IS its content. Rendered and
+// created only on the Workspace (neural) view, which is what lets it get away
+// with having no anchor: there is exactly one arrangement it is positioned
+// against, and the sorting views write to different override buckets entirely.
+
+export const canvasAnnotationKindSchema = z.enum(["note", "ink"]);
+export type CanvasAnnotationKind = z.infer<typeof canvasAnnotationKindSchema>;
+
+/** kind='note' body. `text` is a plain string on purpose: checklist lines are
+ *  markdown-ish (`[ ]` / `[x]` at the start of a line) rendered by the client,
+ *  so adding them never changes the stored shape — and neither undo, autosave
+ *  nor a half-typed line has to know about a block model. */
+export const noteBodySchema = z.object({
+  text: z.string().max(10_000).default(""),
+});
+export type NoteBody = z.infer<typeof noteBodySchema>;
+
+/** kind='note' presentation. Three steps, not a number: a sticky note is sized
+ *  by how much fits, and a free-form point value invites 11.5pt notes nobody
+ *  can scan at canvas zoom. Lives in the `style` jsonb, so the next knob is a
+ *  field here and not a migration. */
+export const noteFontSizeSchema = z.enum(["s", "m", "l"]);
+export type NoteFontSize = z.infer<typeof noteFontSizeSchema>;
+
+export const noteStyleSchema = z.object({
+  fontSize: noteFontSizeSchema.default("m"),
+});
+export type NoteStyle = z.infer<typeof noteStyleSchema>;
+
+/** GET /api/annotations?project= — the read shape the canvas hydrates from.
+ *  `color` is the ADR 0040 seven, reused rather than re-picked so the note
+ *  swatch and the label swatch cannot fork into two palettes (and a renamed
+ *  colour carries its name onto notes for free). */
+export const canvasAnnotationSchema = z.object({
+  id: uuidSchema,
+  kind: canvasAnnotationKindSchema,
+  projectId: uuidSchema.nullable(),
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+  color: assetLabelSchema,
+  body: noteBodySchema,
+  style: noteStyleSchema,
+});
+export type CanvasAnnotation = z.infer<typeof canvasAnnotationSchema>;
+
+export const canvasAnnotationsResponseSchema = z.object({
+  annotations: z.array(canvasAnnotationSchema),
+});
+export type CanvasAnnotationsResponse = z.infer<typeof canvasAnnotationsResponseSchema>;
+
+/** Guard rails on geometry, so a runaway drag or a bad client can't park a note
+ *  at 1e12 where Fit would then try to frame it. Generous enough that no real
+ *  canvas hits them — the workspace grid is a few thousand units across. */
+const CANVAS_COORD_MAX = 1_000_000;
+const annotationGeometrySchema = {
+  x: z.number().finite().min(-CANVAS_COORD_MAX).max(CANVAS_COORD_MAX),
+  y: z.number().finite().min(-CANVAS_COORD_MAX).max(CANVAS_COORD_MAX),
+  w: z.number().finite().min(40).max(4000),
+  h: z.number().finite().min(40).max(4000),
+};
+
+/** POST /api/annotations. The client sends where it put the note, because the
+ *  viewport centre it was dropped at is only known there. */
+export const createAnnotationRequestSchema = z.object({
+  kind: canvasAnnotationKindSchema.default("note"),
+  projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
+  ...annotationGeometrySchema,
+  color: assetLabelSchema.default("yellow"),
+  body: noteBodySchema.default({ text: "" }),
+  style: noteStyleSchema.default({ fontSize: "m" }),
+});
+export type CreateAnnotationRequest = z.infer<typeof createAnnotationRequestSchema>;
+
+/** PATCH /api/annotations/[id] — move, resize, retype, recolour, restyle.
+ *  Every field optional and at least one required: typing sends only `body`
+ *  (debounced), a drag sends only x/y on release, the swatch sends only
+ *  `color`. Sending the whole object on every keystroke is how a drag in one
+ *  tab reverts a recolour in another. */
+export const patchAnnotationRequestSchema = z
+  .object({
+    x: annotationGeometrySchema.x.optional(),
+    y: annotationGeometrySchema.y.optional(),
+    w: annotationGeometrySchema.w.optional(),
+    h: annotationGeometrySchema.h.optional(),
+    color: assetLabelSchema.optional(),
+    body: noteBodySchema.optional(),
+    style: noteStyleSchema.optional(),
+  })
+  .refine((v) => Object.values(v).some((field) => field !== undefined), {
+    message: "at least one field is required",
+  });
+export type PatchAnnotationRequest = z.infer<typeof patchAnnotationRequestSchema>;
+
 // ── Workspace credit / rights block (migration 20260727000001) ───────────────
 //
 // The byline an exported deliverable carries. Workspace-level: the product's user

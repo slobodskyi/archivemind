@@ -73,6 +73,19 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   (`visibleTilePositions`), so artboards, folders and exports keep seeing the
   real geometry; and **LABELS** is the fifth view, one cloud per colour plus
   `No label`, via the same `buildCloudLayout` with the tag web off. Zero credits.
+  **Sticky notes are server rows now, geometry included (ADR 0041, migration
+  `20260808000002`):** `canvas_annotations` — a note (and, next, freehand ink)
+  scoped to a project or the `all` canvas. This is the ONE documented exception
+  to "canvas layout is client-only" (ADR 0022/0034): a photo exists apart from
+  the canvas so its tile position is a per-user preference, but an annotation
+  exists nowhere else, so its x/y *is* its content. Nothing else moved — tiles,
+  frames and folder boxes are still `localStorage`. Notes render and can be
+  created **only on the Workspace (`neural`) view**, behind the same gate
+  `FrameOverlay`/`FolderOverlay` already used; that single-view rule is what
+  lets an annotation have **no anchor** at all, since there is exactly one
+  arrangement it is positioned against. Colour is the ADR 0040 seven (reused,
+  not re-picked, so the two swatch rows can't fork); `style` is jsonb parsed by
+  zod, so the next knob is a field and not a migration. Zero credits.
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
@@ -140,7 +153,9 @@ design from this file:**
   rename; it amends the label ranking and the label-stability rule in 0028 and
   the "Other" fold in 0023) for what ships today. **0040** adds the fifth view
   (LABELS) beside them — colour labels as a human curation axis, and the rule
-  that a label filter hides tiles without moving them.
+  that a label filter hides tiles without moving them. **0041** puts sticky
+  notes (and the ink to come) on the server *with their coordinates* — read it
+  before "correcting" that back to ADR 0022, which it deliberately excepts.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

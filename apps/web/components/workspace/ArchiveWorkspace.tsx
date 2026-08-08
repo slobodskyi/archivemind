@@ -1,6 +1,6 @@
 "use client";
 
-import type { AssetLabel, CanvasGroup, LabelNames } from "@archivemind/shared";
+import type { AssetLabel, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { NO_LABEL_CLOUD_KEY } from "@/lib/labels";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
@@ -52,6 +52,9 @@ interface ArchiveWorkspaceProps {
   initialGroups: CanvasGroup[];
   /** The workspace's colour-label names (defaults with renames applied). */
   initialLabelNames: LabelNames;
+  /** Sticky notes (and later ink) for this scope — ADR 0041. Server-read so the
+   *  first paint already has them, like initialGroups. */
+  initialAnnotations: CanvasAnnotation[];
   account: Account;
 }
 
@@ -62,6 +65,7 @@ export default function ArchiveWorkspace({
   currentProjectId,
   initialGroups,
   initialLabelNames,
+  initialAnnotations,
   account,
 }: ArchiveWorkspaceProps) {
   const ws = useWorkspace(
@@ -71,6 +75,7 @@ export default function ArchiveWorkspace({
     currentProjectId,
     initialGroups,
     initialLabelNames,
+    initialAnnotations,
   );
 
   // The colour the label pickers should ring: what the whole target carries, or
@@ -114,9 +119,13 @@ export default function ArchiveWorkspace({
         animating={ws.tilesAnimating}
         marquee={ws.marquee}
       >
-        {/* Artboards + folders are a Canvas (neural) concept only — their
-            geometry is in neural coordinates, so they'd render misplaced on
-            Timeline/Topic (and Map covers the canvas entirely). */}
+        {/* Artboards, folders and sticky notes are a Workspace (neural) concept
+            only — their geometry is in neural coordinates, so they'd render
+            misplaced on Timeline/Topic/Labels (and Map covers the canvas
+            entirely). A note pinned over one arrangement means nothing over
+            another: every sorting view lays the same tiles out differently, in
+            its own override bucket, so there is no position the note could be
+            carried to that would still say what it said. */}
         {ws.view === "neural" && (
           <>
             <FrameOverlay
@@ -148,14 +157,14 @@ export default function ArchiveWorkspace({
               onRename={ws.renameGroup}
               onDelete={ws.deleteGroup}
             />
+            <StickyNoteOverlay
+              notes={ws.stickyNotes}
+              onDragStart={ws.onStickyDown}
+              onTextChange={ws.updateStickyText}
+              onDelete={ws.deleteStickyNote}
+            />
           </>
         )}
-        <StickyNoteOverlay
-          notes={ws.stickyNotes}
-          onDragStart={ws.onStickyDown}
-          onTextChange={ws.updateStickyText}
-          onDelete={ws.deleteStickyNote}
-        />
         {/* Grouping views draw their colored backdrop + connecting lines behind
             the tiles; the tiles themselves are the same persistent set in every
             view, so switching a sort just reflows (animates) their positions. */}
@@ -373,6 +382,7 @@ export default function ArchiveWorkspace({
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
         isMapView={ws.isMapView}
+        isCanvasView={ws.view === "neural"}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
@@ -551,6 +561,7 @@ export default function ArchiveWorkspace({
       <CanvasContextMenu
         menu={ws.contextMenu}
         allFilesMode={ws.allFilesMode}
+        isCanvasView={ws.view === "neural"}
         selCount={ws.selectedIds.size}
         onClose={ws.closeContextMenu}
         onSelectTool={ws.toolSelect}

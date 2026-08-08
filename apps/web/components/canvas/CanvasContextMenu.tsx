@@ -7,6 +7,10 @@ interface CanvasContextMenuProps {
   /** Hide the project-editing tools (frame/AI/import) that don't apply to the
    *  read-only all-files grid — matches the left toolbar's own gating. */
   allFilesMode: boolean;
+  /** The Workspace (neural) view is showing. A sticky note's position is in
+   *  Workspace coordinates, so it is only offered there — same rule the left
+   *  toolbar and the artboard/folder overlays follow. */
+  isCanvasView: boolean;
   /** Current selection size — with a selection, "Move to Trash" acts on it;
    *  without one it acts on the right-clicked tile (menu.targetId). */
   selCount: number;
@@ -52,6 +56,7 @@ interface CanvasContextMenuProps {
 export default function CanvasContextMenu({
   menu,
   allFilesMode,
+  isCanvasView,
   selCount,
   onClose,
   onSelectTool,
@@ -146,7 +151,7 @@ export default function CanvasContextMenu({
             <Item label="Extract EXIF" onClick={run(onExtractExif)} />
             <Divider />
             <Item label="Add" onClick={run(onAdd)} />
-            <Item label="Sticky Note" onClick={run(onAddStickyNote)} />
+            {isCanvasView && <Item label="Sticky Note" onClick={run(onAddStickyNote)} />}
           </>
         )}
         {allFilesMode && (
