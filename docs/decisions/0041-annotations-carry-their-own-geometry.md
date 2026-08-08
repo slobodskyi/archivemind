@@ -82,6 +82,35 @@ yet.** This migration exists so that freehand ink — the actual motivating feat
 are append-only and owner-gated (CONTRIBUTING.md), so the cost of guessing the
 shape late is much higher than the cost of one unused enum value.
 
+> **Amendment (2026-08-08): ink ships, and the sequencing paid off — no second
+> migration was needed.** A stroke is **one row**, not an accumulating "ink
+> layer": the row's x/y/w/h is then the stroke's own bounding box, which is what
+> the geometry columns mean everywhere else here; erasing is a `DELETE` rather
+> than a read-modify-write of a growing blob; and two people drawing at once
+> touch different rows. `body` is `{ points: [x, y, pressure][], size }`, stored
+> **relative to the row's origin** so a stroke can later be moved by patching two
+> columns instead of rewriting every sample.
+>
+> The read and create schemas became **discriminated unions on `kind`**. They had
+> to: `noteBodySchema.text` has a default, so `{points, size}` parses cleanly as
+> an empty note, and a plain union would have silently turned every stroke into a
+> blank sticky.
+>
+> **Input reads the device before the tool.** A pen draws whatever tool is
+> selected and a finger never does — the iPad interaction Procreate, FigJam and
+> Freeform have all settled on — so the marker button is a convenience for mice,
+> not a mode to remember. Touch pointers are ignored while a stroke is in
+> progress, which is palm rejection for free. The eraser is a real mode, since
+> there is no second Pencil tip to flip over, and it removes a whole stroke
+> rather than pixels.
+>
+> Pressure is stored **per point** even though the renderer bands it into four
+> constant-width runs: those samples are what the Pencil actually reported, and a
+> better renderer should not need a migration or a re-capture. A reported
+> pressure of `0` means *the device said nothing*, not "press infinitely
+> lightly" — one place (`bandOf`) decides what that looks like, or the capture
+> and the render end up disagreeing and every mouse stroke draws at zero width.
+
 **3. Style is a `color` column plus a `style` jsonb, not a column per knob.**
 `color` is real and typed because it must not drift; everything else
 (`fontSize`, and whatever the note gains next) lives in `style` and is parsed by

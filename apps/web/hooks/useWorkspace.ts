@@ -4,13 +4,16 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import { ASSET_LABELS } from "@archivemind/shared";
+import { ASSET_LABELS, INK_MAX_POINTS } from "@archivemind/shared";
 import type {
   AssetLabel,
   CanvasAnnotation,
   CanvasGroup,
   EditRecipe,
+  InkAnnotation,
+  InkPoint,
   LabelNames,
+  NoteAnnotation,
   NoteFontSize,
   PatchAnnotationRequest,
   PatchAssetExifRequest,
@@ -19,6 +22,15 @@ import type {
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, labelCounts as countLabels, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
+import {
+  bandOf,
+  bandWidth,
+  distanceToStroke,
+  simplifyStroke,
+  strokeBounds,
+  strokePath,
+  toRelative,
+} from "@/lib/ink";
 import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -252,6 +264,7 @@ interface ProcState {
 interface Snapshot {
   frames: Frame[];
   stickyNotes: StickyNote[];
+  inkStrokes: InkAnnotation[];
   galleryOverrides: GalleryOverrides;
 }
 
@@ -327,6 +340,19 @@ interface WorkspaceState {
   /** Folder whose Finder-style popup is open (double-click a folder), or null. */
   openFolderId: string | null;
   stickyNotes: StickyNote[];
+  /** Freehand ink, Workspace view only (ADR 0041). One row per stroke, so
+   *  erasing is a DELETE and two people drawing at once touch different rows. */
+  inkStrokes: InkAnnotation[];
+  inkColor: AssetLabel;
+  inkSize: number;
+  /** A stroke is in progress. Only mounts the live path and lights the marker
+   *  button — the stroke's points are in a ref, not here, because a Pencil
+   *  sampling at 120 Hz must not re-render the canvas per sample. */
+  inkDrawing: boolean;
+  inkLiveWidth: number;
+  /** Strokes the current erase drag has swept, dimmed until the pointer lifts:
+   *  a slip is visible before it is committed, and one drag is one undo step. */
+  pendingErase: string[];
   /** Content-space preview rect while the frame tool is actively drawing. */
   frameDraftRect: { x: number; y: number; w: number; h: number } | null;
   history: Snapshot[];
@@ -428,6 +454,11 @@ type DragSession =
       orig: { w: number; h: number };
       moved: boolean;
     }
+  // Ink and erase carry no coordinates: the stroke being drawn lives in a ref
+  // (writing it into React state would be a render per Pencil sample at 120 Hz)
+  // and the pending erase set lives in another.
+  | { mode: "ink" }
+  | { mode: "erase" }
   | {
       mode: "frameDraw";
       startContent: { x: number; y: number };
@@ -716,6 +747,22 @@ export interface Workspace {
   toggleStickyCheck: (id: string, lineIndex: number) => void;
   deleteStickyNote: (id: string) => void;
 
+  // Freehand ink (ADR 0041)
+  inkStrokes: InkAnnotation[];
+  pendingErase: string[];
+  /** Callback ref for `LiveStroke`'s path — the hook writes `d` onto that node
+   *  directly while a stroke is in progress, so a 120 Hz Pencil is not 120
+   *  renders a second. A SETTER rather than the ref object, matching
+   *  `setCanvasRef`: handing the ref itself out taints every `ws.*` read in the
+   *  consumer's render for `react-hooks/refs`. */
+  setInkPathEl: (el: SVGPathElement | null) => void;
+  inkDrawing: boolean;
+  inkLiveWidth: number;
+  inkColor: AssetLabel;
+  setInkColor: (color: AssetLabel) => void;
+  toolInk: () => void;
+  toolEraser: () => void;
+
   // Undo / redo
   canUndo: boolean;
   canRedo: boolean;
@@ -874,8 +921,11 @@ export interface Workspace {
   flashToast: (text: string, action?: { label: string; onAction: () => void }) => void;
 }
 
-/** A `canvas_annotations` row (ADR 0041) → the canvas's own note shape. */
-function annotationToNote(a: CanvasAnnotation): StickyNote {
+/** A `canvas_annotations` row of kind 'note' (ADR 0041) → the canvas's own note
+ *  shape. Takes the narrowed type rather than the union: the discriminant is
+ *  what guarantees `body.text` exists, and widening the parameter would put that
+ *  guarantee back in the caller's hands. */
+function annotationToNote(a: NoteAnnotation): StickyNote {
   return {
     id: a.id,
     x: a.x,
@@ -906,6 +956,21 @@ const NOTE_TEXT_SAVE_MS = 700;
 const NOTE_MIN_SIZE = 120;
 const NOTE_MAX_SIZE = 4000;
 const clampNoteSize = (v: number) => Math.min(NOTE_MAX_SIZE, Math.max(NOTE_MIN_SIZE, Math.round(v)));
+
+/** Eraser reach in SCREEN pixels — divided by scale at use, so the eraser stays
+ *  the same size under the pointer at every zoom. A radius fixed in canvas units
+ *  would be an unusable speck zoomed out and a wrecking ball zoomed in. */
+const ERASER_RADIUS = 14;
+
+/** Default nib, in canvas units. */
+const INK_DEFAULT_SIZE = 3;
+
+/** `e.pressure` is 0.5 for a mouse by spec and 0 when a device reports nothing.
+ *  Pass 0 through untouched — `bandOf` is the single place that decides what
+ *  "unreported" should look like, and duplicating that choice here is how the
+ *  capture and the render end up disagreeing. */
+const pressureOf = (e: { pressure?: number }) =>
+  typeof e.pressure === "number" && e.pressure >= 0 && e.pressure <= 1 ? e.pressure : 0;
 
 export function useWorkspace(
   initialPhotos: Photo[],
@@ -975,7 +1040,15 @@ export function useWorkspace(
     openFolderId: null,
     // Server-backed since ADR 0041 — the Server Component read them, so the
     // first paint already has them and there is no post-mount fetch flicker.
-    stickyNotes: initialAnnotations.filter((a) => a.kind === "note").map(annotationToNote),
+    stickyNotes: initialAnnotations
+      .filter((a): a is NoteAnnotation => a.kind === "note")
+      .map(annotationToNote),
+    inkStrokes: initialAnnotations.filter((a): a is InkAnnotation => a.kind === "ink"),
+    inkColor: "gray",
+    inkSize: INK_DEFAULT_SIZE,
+    inkDrawing: false,
+    inkLiveWidth: INK_DEFAULT_SIZE,
+    pendingErase: [],
     frameDraftRect: null,
     history: [],
     future: [],
@@ -1034,6 +1107,13 @@ export function useWorkspace(
    *  notes can be edited in the same window and a single shared timer would let
    *  the second one's keystrokes cancel the first one's save. */
   const noteTextTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  /** The stroke in progress. A ref, not state: a Pencil samples at 120 Hz and
+   *  every one of those would otherwise re-render the whole canvas. */
+  const inkRef = useRef<{ points: InkPoint[] }>({ points: [] });
+  /** The live `<path>`. `d` is written straight onto the node while drawing. */
+  const inkPathRef = useRef<SVGPathElement | null>(null);
+  /** Strokes an erase drag has swept, before the pointer comes up. */
+  const eraseRef = useRef<Set<string>>(new Set());
   /** The layout the canvas currently renders (committed post-render) — read by
    *  pointer-down handlers so they never recompute a pack/edge pass. */
   const cloudDecorRef = useRef<CloudLayout | null>(null);
@@ -1211,11 +1291,57 @@ export function useWorkspace(
     [patchNote, currentProjectId, setState, flashToast],
   );
 
+  /** The ink half of the same problem `reconcileNotes` solves: undo restores a
+   *  snapshot, and strokes are rows. Simpler than notes, because a stroke is
+   *  only ever created or erased — never edited — so this is add/remove only.
+   *  A stroke an undo brings back is re-INSERTed under a new id; its old row is
+   *  gone and cannot be revived. */
+  const reconcileInk = useCallback(
+    (before: InkAnnotation[], after: InkAnnotation[]) => {
+      const afterIds = new Set(after.map((k) => k.id));
+      const beforeIds = new Set(before.map((k) => k.id));
+
+      for (const gone of before) {
+        if (afterIds.has(gone.id) || isTmpNote(gone.id)) continue;
+        void fetch(`/api/annotations/${gone.id}`, { method: "DELETE" }).catch(() => {
+          flashToast("Some ink was not erased");
+        });
+      }
+      for (const back of after) {
+        if (beforeIds.has(back.id)) continue;
+        void fetch("/api/annotations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: "ink",
+            projectId: back.projectId,
+            x: back.x,
+            y: back.y,
+            w: back.w,
+            h: back.h,
+            color: back.color,
+            body: back.body,
+          }),
+        })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(String(res.status));
+            const saved = (await res.json()) as InkAnnotation;
+            setState({
+              inkStrokes: stateRef.current.inkStrokes.map((k) => (k.id === back.id ? saved : k)),
+            });
+          })
+          .catch(() => flashToast("Ink not restored"));
+      }
+    },
+    [setState, flashToast],
+  );
+
   // ── Undo / redo ──────────────────────────────────────────────────────────
 
   const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
     frames: s.frames,
     stickyNotes: s.stickyNotes,
+    inkStrokes: s.inkStrokes,
     galleryOverrides: s.galleryOverrides,
   }), []);
 
@@ -1235,7 +1361,8 @@ export function useWorkspace(
     future.push(snapshot(s));
     setState({ ...prev, history: hist, future });
     reconcileNotes(s.stickyNotes, prev.stickyNotes);
-  }, [setState, snapshot, reconcileNotes]);
+    reconcileInk(s.inkStrokes, prev.inkStrokes);
+  }, [setState, snapshot, reconcileNotes, reconcileInk]);
 
   const redo = useCallback(() => {
     const s = stateRef.current;
@@ -1246,7 +1373,8 @@ export function useWorkspace(
     hist.push(snapshot(s));
     setState({ ...next, history: hist, future });
     reconcileNotes(s.stickyNotes, next.stickyNotes);
-  }, [setState, snapshot, reconcileNotes]);
+    reconcileInk(s.inkStrokes, next.inkStrokes);
+  }, [setState, snapshot, reconcileNotes, reconcileInk]);
 
   /** Canonical-photo tile positions for whichever view is active — the single
    *  source both the renderer and marquee hit-testing read, so selection and
@@ -1329,6 +1457,142 @@ export function useWorkspace(
     [setState],
   );
 
+  // ── Freehand ink (ADR 0041) ────────────────────────────────────────────────
+
+  /** Ink is a Workspace-view concept, like every other annotation: the four
+   *  sorting views rearrange the same tiles, so a stroke drawn over one of them
+   *  would sit over unrelated photos in the next. The 'all' canvas is excluded
+   *  for the same reason notes are — it is a read-only recovery grid. */
+  const canDraw = useCallback(
+    (s: WorkspaceState) => s.view === "neural" && s.projCurrent !== "all",
+    [],
+  );
+
+  const beginStroke = useCallback(
+    (e: React.PointerEvent) => {
+      const s = stateRef.current;
+      const c = toContent(e.clientX, e.clientY);
+      inkRef.current.points = [[c.x, c.y, pressureOf(e)]];
+      dragRef.current = { mode: "ink" };
+      // Paint the very first sample immediately: a tap that never moves must
+      // still leave a dot, and waiting for a move would drop it.
+      if (inkPathRef.current) inkPathRef.current.setAttribute("d", strokePath(inkRef.current.points));
+      setState({ inkDrawing: true, inkLiveWidth: bandWidth(bandOf(pressureOf(e)), s.inkSize) });
+    },
+    [toContent, setState],
+  );
+
+  /** Add every stroke within the eraser radius of this point to the pending set.
+   *  Marked, not deleted: they dim while the pointer is down and go on release,
+   *  so a slip can be seen before it is committed — and so one erase drag is one
+   *  undo step instead of a dozen. */
+  const markErased = useCallback(
+    (clientX: number, clientY: number) => {
+      const s = stateRef.current;
+      const c = toContent(clientX, clientY);
+      // The radius is in canvas units and divided by scale, so the eraser is a
+      // constant size under the POINTER rather than in the content — zoomed out,
+      // a fixed content radius would be an invisible speck.
+      const radius = ERASER_RADIUS / s.scale;
+      let added = false;
+      for (const stroke of s.inkStrokes) {
+        if (eraseRef.current.has(stroke.id)) continue;
+        const local = { x: c.x - stroke.x, y: c.y - stroke.y };
+        if (distanceToStroke(stroke.body.points, local.x, local.y) <= radius + stroke.body.size / 2) {
+          eraseRef.current.add(stroke.id);
+          added = true;
+        }
+      }
+      if (added) setState({ pendingErase: [...eraseRef.current] });
+    },
+    [toContent, setState],
+  );
+
+  const beginErase = useCallback(
+    (e: React.PointerEvent) => {
+      dragRef.current = { mode: "erase" };
+      eraseRef.current = new Set();
+      // Mark on the press itself, not only on the first move: a tap on a stroke
+      // has to erase it, the same way a tap draws a dot.
+      markErased(e.clientX, e.clientY);
+    },
+    [markErased],
+  );
+
+  /** Pointer up while drawing: simplify, measure, store. Optimistic like every
+   *  other annotation write — the stroke is already on screen and the row
+   *  follows it. On failure the stroke is removed, because leaving ink that
+   *  vanishes on the next reload is worse than losing it while you can see it
+   *  happen. */
+  const commitStroke = useCallback(() => {
+    const raw = inkRef.current.points;
+    inkRef.current.points = [];
+    inkPathRef.current?.setAttribute("d", "");
+    setState({ inkDrawing: false });
+    if (raw.length === 0) return;
+
+    // A single tap is a legitimate dot, but the schema needs two points to
+    // describe a stroke — duplicate it rather than special-casing the renderer.
+    const points = simplifyStroke(raw);
+    const full = points.length >= 2 ? points : [points[0], points[0]];
+    const bounds = strokeBounds(full);
+    const s = stateRef.current;
+    const tmpId = TMP_NOTE_PREFIX + "ink" + Date.now();
+    const body = { points: toRelative(full, bounds), size: s.inkSize };
+    const optimistic: InkAnnotation = {
+      id: tmpId,
+      kind: "ink",
+      projectId: currentProjectId === "all" ? null : currentProjectId,
+      ...bounds,
+      color: s.inkColor,
+      body,
+      style: {},
+    };
+    pushHistory();
+    setState({ inkStrokes: [...s.inkStrokes, optimistic] });
+
+    void fetch("/api/annotations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "ink",
+        projectId: optimistic.projectId,
+        ...bounds,
+        color: optimistic.color,
+        body,
+      }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        const saved = (await res.json()) as InkAnnotation;
+        setState({
+          inkStrokes: stateRef.current.inkStrokes.map((k) => (k.id === tmpId ? saved : k)),
+        });
+      })
+      .catch(() => {
+        setState({ inkStrokes: stateRef.current.inkStrokes.filter((k) => k.id !== tmpId) });
+        flashToast("Stroke not saved");
+      });
+  }, [setState, pushHistory, currentProjectId, flashToast]);
+
+  /** Pointer up while erasing: drop the swept strokes, once, as one undo step. */
+  const commitErase = useCallback(() => {
+    const ids = [...eraseRef.current];
+    eraseRef.current = new Set();
+    setState({ pendingErase: [] });
+    if (ids.length === 0) return;
+    pushHistory();
+    setState({ inkStrokes: stateRef.current.inkStrokes.filter((k) => !ids.includes(k.id)) });
+    for (const id of ids) {
+      // A stroke still carrying a temp id has no row yet; its own POST will see
+      // it is gone from state and clean up after itself.
+      if (isTmpNote(id)) continue;
+      void fetch(`/api/annotations/${id}`, { method: "DELETE" }).catch(() => {
+        flashToast("Some ink was not erased");
+      });
+    }
+  }, [setState, pushHistory, flashToast]);
+
   const onCanvasDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
@@ -1347,6 +1611,23 @@ export function useWorkspace(
       // positions so it selects whatever is on screen, sorted or not.
       // Space-hold pans over anything, so it takes precedence over the frame and
       // select tools; the hand tool pans too.
+      // Ink comes first, and reads the DEVICE before the tool (ADR 0041).
+      //
+      // A pen draws whatever tool is selected, and a finger never does. That is
+      // the iPad interaction every drawing app has settled on — Procreate,
+      // FigJam and Freeform all do it — and it is why the marker button is a
+      // convenience for mice rather than a mode you have to remember to leave.
+      // The eraser is a real mode, though: there is no second Pencil tip here
+      // to flip over.
+      const penDraws = e.pointerType === "pen" && s.tool !== "eraser";
+      if (canDraw(s) && !s.spacePan && (penDraws || s.tool === "ink")) {
+        beginStroke(e);
+        return;
+      }
+      if (canDraw(s) && !s.spacePan && s.tool === "eraser") {
+        beginErase(e);
+        return;
+      }
       if (s.tool === "frame" && !s.spacePan) {
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
@@ -1398,7 +1679,7 @@ export function useWorkspace(
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
-    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed],
+    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed, canDraw, beginStroke, beginErase],
   );
 
   const onGalleryNodeDown = useCallback(
@@ -1867,6 +2148,29 @@ export function useWorkspace(
       const d = dragRef.current;
       if (!d) return;
       const s = stateRef.current;
+      if (d.mode === "ink") {
+        // getCoalescedEvents, not just the event: pointermove is delivered once
+        // per frame while a Pencil samples at 120 Hz, so without this a fast
+        // stroke arrives as a handful of points and renders as a polygon.
+        const samples = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+        for (const sample of samples.length > 0 ? samples : [e]) {
+          const c = toContent(sample.clientX, sample.clientY);
+          inkRef.current.points.push([c.x, c.y, pressureOf(sample)]);
+        }
+        if (inkRef.current.points.length > INK_MAX_POINTS) {
+          // Cap reached mid-stroke: simplify in place rather than refusing more
+          // input, so a very long stroke degrades in fidelity instead of
+          // stopping under the pen.
+          inkRef.current.points = simplifyStroke(inkRef.current.points, 1.2);
+        }
+        // Straight to the DOM — see inkPathRef.
+        inkPathRef.current?.setAttribute("d", strokePath(inkRef.current.points));
+        return;
+      }
+      if (d.mode === "erase") {
+        markErased(e.clientX, e.clientY);
+        return;
+      }
       if (d.mode === "pan") {
         setState({
           tx: d.otx + (e.clientX - d.sx),
@@ -1999,7 +2303,7 @@ export function useWorkspace(
         setState({ tx: rr.width / 2 - targetX * s.scale, ty: rr.height / 2 - targetY * s.scale });
       }
     },
-    [rect, toContent, setState, pushHistory, applyPinch],
+    [rect, toContent, setState, pushHistory, applyPinch, markErased],
   );
 
   /** After a Canvas tile drag, reconcile folder membership (ADR 0034): a tile
@@ -2084,7 +2388,11 @@ export function useWorkspace(
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
-    if (d.mode === "pan") {
+    if (d.mode === "ink") {
+      commitStroke();
+    } else if (d.mode === "erase") {
+      commitErase();
+    } else if (d.mode === "pan") {
       setState({ panning: false });
     } else if (d.mode === "sticky") {
       // Persist the drop, not the drag: move() already updated local state on
@@ -2172,7 +2480,7 @@ export function useWorkspace(
         syncFolderMembership(d.groupCenters ? Object.keys(d.groupCenters) : [d.key]);
       }
     }
-  }, [setState, pushHistory, activeTilePositions, syncFolderMembership, patchNote]);
+  }, [setState, pushHistory, activeTilePositions, syncFolderMembership, patchNote, commitStroke, commitErase]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 
@@ -2186,6 +2494,20 @@ export function useWorkspace(
     () => setState({ tool: stateRef.current.tool === "frame" ? "select" : "frame" }),
     [setState],
   );
+  const toolInk = useCallback(
+    () => setState({ tool: stateRef.current.tool === "ink" ? "select" : "ink" }),
+    [setState],
+  );
+  const toolEraser = useCallback(
+    () => setState({ tool: stateRef.current.tool === "eraser" ? "select" : "eraser" }),
+    [setState],
+  );
+  /** Ink colour is per session, not per stroke row — you pick a pen and draw
+   *  with it, and the strokes already down keep the colour they were made in. */
+  const setInkColor = useCallback((inkColor: AssetLabel) => setState({ inkColor }), [setState]);
+  const setInkPathEl = useCallback((el: SVGPathElement | null) => {
+    inkPathRef.current = el;
+  }, []);
   const deleteFrame = useCallback(
     (id: string) => {
       pushHistory();
@@ -4442,6 +4764,11 @@ export function useWorkspace(
         t.suppress = false;
         t.primary = null;
       }
+      // Palm rejection (ADR 0041). While a stroke is being drawn, a touch is a
+      // hand resting on the glass, not a gesture: registering it here would make
+      // `pointers.size === 2` and hand the canvas to pinch-zoom mid-sentence.
+      // Free for a pen, because pointerType already tells the two apart.
+      if (e.pointerType === "touch" && dragRef.current?.mode === "ink") return;
       t.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (t.pointers.size === 1) {
         t.primary = e.pointerId;
@@ -5163,7 +5490,18 @@ export function useWorkspace(
       ? "grabbing"
       : state.tool === "hand" || state.spacePan
         ? "grab"
-        : "default",
+        : state.tool === "ink" || state.tool === "eraser"
+          ? "crosshair"
+          : "default",
+    inkStrokes: state.inkStrokes,
+    pendingErase: state.pendingErase,
+    setInkPathEl,
+    inkDrawing: state.inkDrawing,
+    inkLiveWidth: state.inkLiveWidth,
+    inkColor: state.inkColor,
+    setInkColor,
+    toolInk,
+    toolEraser,
     marquee,
     drawerPhoto,
     isNeural,
