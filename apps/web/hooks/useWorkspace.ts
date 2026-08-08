@@ -457,8 +457,14 @@ type DragSession =
   // Ink and erase carry no coordinates: the stroke being drawn lives in a ref
   // (writing it into React state would be a render per Pencil sample at 120 Hz)
   // and the pending erase set lives in another.
-  | { mode: "ink" }
-  | { mode: "erase" }
+  //
+  // They DO carry the pointer that started them, which the other modes don't
+  // need: palm rejection keeps a resting hand out of `touch.pointers`, so the
+  // shared bookkeeping at the top of `up` skips that pointer entirely and the
+  // handler falls straight through to the commit. Without this id, lifting a
+  // palm mid-stroke would commit the stroke out from under the pen.
+  | { mode: "ink"; pointerId: number }
+  | { mode: "erase"; pointerId: number }
   | {
       mode: "frameDraw";
       startContent: { x: number; y: number };
@@ -1473,7 +1479,7 @@ export function useWorkspace(
       const s = stateRef.current;
       const c = toContent(e.clientX, e.clientY);
       inkRef.current.points = [[c.x, c.y, pressureOf(e)]];
-      dragRef.current = { mode: "ink" };
+      dragRef.current = { mode: "ink", pointerId: e.pointerId };
       // Paint the very first sample immediately: a tap that never moves must
       // still leave a dot, and waiting for a move would drop it.
       if (inkPathRef.current) inkPathRef.current.setAttribute("d", strokePath(inkRef.current.points));
@@ -1510,7 +1516,7 @@ export function useWorkspace(
 
   const beginErase = useCallback(
     (e: React.PointerEvent) => {
-      dragRef.current = { mode: "erase" };
+      dragRef.current = { mode: "erase", pointerId: e.pointerId };
       eraseRef.current = new Set();
       // Mark on the press itself, not only on the first move: a tap on a stroke
       // has to erase it, the same way a tap draws a dot.
@@ -2388,10 +2394,17 @@ export function useWorkspace(
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
-    if (d.mode === "ink") {
-      commitStroke();
-    } else if (d.mode === "erase") {
-      commitErase();
+    if (d.mode === "ink" || d.mode === "erase") {
+      // Only the pointer that started the stroke ends it. A palm resting on the
+      // glass is deliberately kept out of `touch.pointers` by the rejection
+      // guard, so its pointerup reaches here unfiltered — and would otherwise
+      // commit the stroke mid-sentence while the pen is still writing.
+      if (e.pointerId !== d.pointerId) {
+        dragRef.current = d; // put the live session back; it is not over
+        return;
+      }
+      if (d.mode === "ink") commitStroke();
+      else commitErase();
     } else if (d.mode === "pan") {
       setState({ panning: false });
     } else if (d.mode === "sticky") {
