@@ -9,9 +9,12 @@ interface LabelSwatchRowProps {
    *  mixed selection resolves to one colour instead of flipping each photo. */
   current: AssetLabel | "mixed" | null;
   onPick: (label: AssetLabel | null) => void;
-  /** Hides the ✕. The drawer shows it always; a menu row with nothing to clear
-   *  would offer a dead button. */
-  showClear?: boolean;
+  /** Can the target be left with NO colour? Governs both the ✕ and clicking the
+   *  active swatch — for a photo, unlabelling is a real state and both do it.
+   *  A sticky note (ADR 0041) always has a colour, so it passes false and a
+   *  click on the current swatch is inert rather than a hidden way to break the
+   *  invariant. */
+  clearable?: boolean;
   size?: number;
 }
 
@@ -22,7 +25,7 @@ export default function LabelSwatchRow({
   names,
   current,
   onPick,
-  showClear = true,
+  clearable = true,
   size = 16,
 }: LabelSwatchRowProps) {
   return (
@@ -35,10 +38,11 @@ export default function LabelSwatchRow({
             type="button"
             // Clicking the colour a photo already has removes it — the same
             // toggle Finder has, and the reason Escape isn't needed to undo a
-            // misclick.
-            onClick={() => onPick(active ? null : label)}
+            // misclick. Where there is no "no colour" to fall back to, the
+            // click is simply a no-op.
+            onClick={() => onPick(active ? (clearable ? null : label) : label)}
             title={names[label]}
-            aria-label={active ? `Remove ${names[label]}` : `Mark ${names[label]}`}
+            aria-label={active && clearable ? `Remove ${names[label]}` : `Mark ${names[label]}`}
             aria-pressed={active}
             style={{
               display: "flex",
@@ -68,7 +72,7 @@ export default function LabelSwatchRow({
           </button>
         );
       })}
-      {showClear && (
+      {clearable && (
         <>
           <span style={{ width: 1, height: size - 4, background: "var(--bd)" }} />
           <button
