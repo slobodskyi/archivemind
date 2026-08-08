@@ -1474,6 +1474,28 @@ export function useWorkspace(
     [],
   );
 
+  /** What a press means, before anything else looks at it: a stroke, an erase,
+   *  or nothing to do with ink.
+   *
+   *  ONE function because two call sites need the identical answer. Empty canvas
+   *  goes through `onCanvasDown`, but a press on a PHOTO goes through
+   *  `onGalleryAssetDown`, which stops propagation so the canvas handler never
+   *  runs — so without asking here too, the marker worked on blank space and
+   *  did nothing over a photo. Circling a face is the whole point of drawing on
+   *  a photo archive, so that is not an edge case, it is the feature.
+   *
+   *  Reads the DEVICE before the tool: a pen draws whatever is selected, a
+   *  finger never does (ADR 0041). Space-hold pans over everything, as always. */
+  const inkIntent = useCallback(
+    (s: WorkspaceState, e: React.PointerEvent): "ink" | "erase" | null => {
+      if (!canDraw(s) || s.spacePan) return null;
+      if (s.tool === "eraser") return "erase";
+      if (e.pointerType === "pen" || s.tool === "ink") return "ink";
+      return null;
+    },
+    [canDraw],
+  );
+
   const beginStroke = useCallback(
     (e: React.PointerEvent) => {
       const s = stateRef.current;
@@ -1626,20 +1648,13 @@ export function useWorkspace(
       // positions so it selects whatever is on screen, sorted or not.
       // Space-hold pans over anything, so it takes precedence over the frame and
       // select tools; the hand tool pans too.
-      // Ink comes first, and reads the DEVICE before the tool (ADR 0041).
-      //
-      // A pen draws whatever tool is selected, and a finger never does. That is
-      // the iPad interaction every drawing app has settled on — Procreate,
-      // FigJam and Freeform all do it — and it is why the marker button is a
-      // convenience for mice rather than a mode you have to remember to leave.
-      // The eraser is a real mode, though: there is no second Pencil tip here
-      // to flip over.
-      const penDraws = e.pointerType === "pen" && s.tool !== "eraser";
-      if (canDraw(s) && !s.spacePan && (penDraws || s.tool === "ink")) {
+      // Ink comes first — see `inkIntent` for why the device outranks the tool.
+      const intent = inkIntent(s, e);
+      if (intent === "ink") {
         beginStroke(e);
         return;
       }
-      if (canDraw(s) && !s.spacePan && s.tool === "eraser") {
+      if (intent === "erase") {
         beginErase(e);
         return;
       }
@@ -1694,7 +1709,7 @@ export function useWorkspace(
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
-    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed, canDraw, beginStroke, beginErase],
+    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed, inkIntent, beginStroke, beginErase],
   );
 
   const onGalleryNodeDown = useCallback(
@@ -1759,6 +1774,20 @@ export function useWorkspace(
       if (gestureClaimed()) return;
       e.preventDefault();
       e.stopPropagation();
+      // Drawing outranks the tile. This handler stops propagation, so the
+      // canvas's own pointer-down never runs for a press that lands on a photo
+      // — and without this branch the marker drew on empty canvas and did
+      // nothing at all over an image, which is the one place you most want to
+      // draw. Same `inkIntent` the canvas asks, so the two can't drift.
+      const intent = inkIntent(stateRef.current, e);
+      if (intent === "ink") {
+        beginStroke(e);
+        return;
+      }
+      if (intent === "erase") {
+        beginErase(e);
+        return;
+      }
       // Touch: a second tap on the same tile opens it, the way a double-click
       // does with a mouse. This cannot be a `dblclick` handler — the
       // preventDefault above suppresses the compatibility mouse events that
@@ -1844,7 +1873,18 @@ export function useWorkspace(
               : null,
       };
     },
-    [setState, activeTilePositions, startPan, topicAnchorsFor, labelAnchorsFor, gestureClaimed, openDrawer],
+    [
+      setState,
+      activeTilePositions,
+      startPan,
+      topicAnchorsFor,
+      labelAnchorsFor,
+      gestureClaimed,
+      openDrawer,
+      inkIntent,
+      beginStroke,
+      beginErase,
+    ],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
    *  that matches the active sort, so a tile stays where you drop it within the
