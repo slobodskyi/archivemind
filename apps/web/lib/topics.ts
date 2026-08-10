@@ -1,16 +1,40 @@
-import { UNSORTED_CLOUD_KEY } from "./layout";
+/** Derives each asset's Topic-view identity and display label.
+ *
+ *  The machine-owned baseline is either a stored embedding cluster (ADR 0028)
+ *  or the tag heuristic (ADR 0023). A user assignment is a separate override:
+ *  it wins for the effective topic without erasing the baseline, so "Return to
+ *  AI" can restore the exact topic locally before the next server refresh.
+ *
+ *  Identity is deliberately separate from the renameable label. Stored topics
+ *  use their cluster UUID; heuristic/system topics get namespaced synthetic
+ *  keys. Pure and deterministic: same rows in, same assignments out, regardless
+ *  of row order — safe for SSR + client re-render. */
 
-/** Derives each asset's Topic-view cloud.
- *
- *  Primary source is the STORED semantic cluster label (topic_clusters.label,
- *  ADR 0028): a worker k-means job groups "yoga"/"stretching"/"йога" into one
- *  cloud, stable across sessions and identical in every project. When an asset
- *  has no cluster yet (not analyzed, or clustered before it was added), this
- *  falls back to the tag heuristic (ADR 0023 — event→scene→object priority,
- *  ambient-tag skipping, top-6 + Other). Untagged AND unclustered → Unsorted.
- *
- *  Pure and deterministic: same rows in, same topics out, regardless of row
- *  order — safe for SSR + client re-render (the no-Math.random layout rule). */
+/** Display label for assets that have neither a stored cluster nor useful tags. */
+export const UNSORTED_CLOUD_KEY = "Unsorted";
+
+/** Tagged assets whose tags yield no viable topic. Capitalized on purpose:
+ *  Gemini tags are lowercase, so this cannot collide with a real tag label. */
+export const TOPIC_OTHER_KEY = "Other";
+
+const HEURISTIC_TOPIC_PREFIX = "heuristic:";
+const SYSTEM_TOPIC_PREFIX = "system:";
+
+/** Stable cloud key for a stored topic. Keeping the raw UUID is intentional:
+ *  ADR 0038 drag overrides already persist that value in localStorage, so a
+ *  prefix would make every existing arrangement look stale. */
+export function clusterTopicKey(clusterId: string): string {
+  return clusterId;
+}
+
+/** Stable synthetic key for a tag-derived/system topic. Labels are the source
+ *  of identity only on this fallback path; stored cluster labels never enter
+ *  it, so a human rename cannot change a cloud key or color. */
+export function heuristicTopicKey(label: string): string {
+  if (label === UNSORTED_CLOUD_KEY) return `${SYSTEM_TOPIC_PREFIX}unsorted`;
+  if (label === TOPIC_OTHER_KEY) return `${SYSTEM_TOPIC_PREFIX}other`;
+  return `${HEURISTIC_TOPIC_PREFIX}${label}`;
+}
 
 export interface TopicTag {
   name: string;
@@ -20,9 +44,29 @@ export interface TopicTag {
 export interface TopicAsset {
   id: string;
   tags: readonly TopicTag[];
-  /** Stored cluster label (ADR 0028) — wins over the tag heuristic when set.
-   *  Absent/null/empty means not-yet-clustered → fall back to tags. */
+  /** Machine-owned k-means membership (`assets.cluster_id`). */
+  autoClusterId?: string | null;
+  /** Display label joined through `assets.cluster_id`. */
+  autoClusterLabel?: string | null;
+  /** User-owned effective membership (`topic_cluster_overrides.cluster_id`). */
+  manualClusterId?: string | null;
+  /** Display label joined through the manual override's target cluster. */
+  manualClusterLabel?: string | null;
+  /** Backward-compatible input for focused ADR 0028 tests/callers. New reads
+   *  should pass `autoClusterId` + `autoClusterLabel` together. */
   clusterLabel?: string | null;
+}
+
+/** Full Topic read model for one asset. `topicId` is null only on the
+ *  heuristic/system path; `topicKey` is always stable and layout-safe. */
+export interface TopicAssignment {
+  autoClusterId: string | null;
+  manualClusterId: string | null;
+  autoTopicKey: string;
+  autoTopicLabel: string;
+  topicId: string | null;
+  topicKey: string;
+  label: string;
 }
 
 /** Thematic categories, most to least topical. `place` belongs to the Map
@@ -31,119 +75,127 @@ export const TOPIC_CATEGORY_PRIORITY = ["event", "scene", "object"] as const;
 
 /** A tag carried by more than this share of the tagged assets names the whole
  *  archive, not a theme inside it — skipped while the asset has any more
- *  specific alternative. Assets whose only thematic tags are ambient keep the
- *  ambient tag rather than falling to Other, so a tiny archive sharing one
- *  tag still gets a named cloud instead of renaming itself to "Other" on the
- *  third upload. */
+ *  specific alternative. */
 export const TOPIC_AMBIENT_FRACTION = 0.6;
 
-/** At most this many named topic clouds *derived from tags*; smaller ones fold
- *  into Other so the canvas stays readable. (Colors come from the shared hash
- *  palette and CAN collide between clouds — the cap bounds cloud count, not
- *  colors.)
- *
- *  It does NOT apply to stored cluster labels (ADR 0038). The cap exists to
- *  bound the *heuristic's* sprawl — it is result-set-relative and can invent a
- *  new topic per read. A cluster label is already bounded by the worker's
- *  `pickK` (≤ 12 per workspace) and is the whole point of ADR 0028: folding a
- *  photo that HAS a stable semantic home into "Other" threw that away, and
- *  which clusters survived depended on which project you happened to open. */
+/** At most this many named topics derived from tags. Stored auto/manual
+ *  clusters are already bounded by the worker and never enter this cap. */
 export const TOPIC_CLOUD_CAP = 6;
 
-/** Tagged assets whose tags yield no viable topic. Capitalized on purpose:
- *  Gemini tags are lowercase, so this can never collide with a real tag. */
-export const TOPIC_OTHER_KEY = "Other";
+function clean(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
 
-/**
- * Assigns every asset a topic cloud key:
- * - a stored cluster label (ADR 0028) wins outright, even for a tagless asset;
- * - else untagged (unanalyzed) → Unsorted;
- * - otherwise the asset's most *clustering-useful* tag: walk the category
- *   priority, and within the first category that has any viable tag pick the
- *   one shared with the most other assets (ambient tags excluded), name
- *   tie-break;
- * - if every thematic tag the asset has is ambient, re-walk allowing them —
- *   the asset keeps its ambient tag instead of falling to Other;
- * - no tag in any thematic category at all → Other;
- * - finally only the TOPIC_CLOUD_CAP biggest *heuristic* topics keep their
- *   name — the rest fold into Other so the canvas stays readable. Stored
- *   cluster labels are exempt from that fold (ADR 0038): they are already
- *   bounded per workspace and are not result-set-relative, so folding them
- *   would discard the stable semantic home ADR 0028 exists to give a photo.
- */
-export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string> {
-  const topics = new Map<string, string>();
-  /** Topic keys that came from a stored cluster, never from the heuristic. */
-  const fromCluster = new Set<string>();
+/** Derive the tag-based baseline labels only for assets that do not have a
+ *  stored auto cluster. Tag frequencies still use the whole result set, as in
+ *  ADR 0023; manual overrides do not remove an asset from its AI baseline. */
+function deriveHeuristicLabels(assets: readonly TopicAsset[]): Map<string, string> {
+  const labels = new Map<string, string>();
 
   // Distinct-asset count per tag NAME. Names merge across categories on
-  // purpose: re-analyze can drift a tag's category (the DB unique key is
-  // name+category), and counting the halves separately would let an ambient
-  // name sneak under the threshold. The per-asset Set also keeps a name
-  // carried under two categories from counting its asset twice.
+  // purpose: re-analyze can drift a tag's category, and the per-asset Set keeps
+  // one name carried under two categories from counting its asset twice.
   const counts = new Map<string, number>();
   let taggedCount = 0;
   for (const asset of assets) {
     if (asset.tags.length === 0) continue;
     taggedCount += 1;
-    for (const name of new Set(asset.tags.map((t) => t.name))) {
+    for (const name of new Set(asset.tags.map((tag) => tag.name))) {
       counts.set(name, (counts.get(name) ?? 0) + 1);
     }
   }
-  // floor, not round: a tag on strictly more than the fraction is ambient
-  // (round would let 4-of-6 = 67% pass a 60% threshold).
+  // Floor, not round: a tag on strictly more than the fraction is ambient.
   const ambientMax = Math.max(2, Math.floor(taggedCount * TOPIC_AMBIENT_FRACTION));
 
   for (const asset of assets) {
-    // Stored cluster label wins outright — even for an asset with no tags.
-    const clusterLabel = asset.clusterLabel?.trim();
-    if (clusterLabel) {
-      topics.set(asset.id, clusterLabel);
-      fromCluster.add(clusterLabel);
-      continue;
-    }
+    // A stored label without an id is supported only for the legacy
+    // `clusterLabel` input. It is still a stored topic, not a heuristic one.
+    if (clean(asset.autoClusterId) || clean(asset.autoClusterLabel ?? asset.clusterLabel)) continue;
     if (asset.tags.length === 0) {
-      topics.set(asset.id, UNSORTED_CLOUD_KEY);
+      labels.set(asset.id, UNSORTED_CLOUD_KEY);
       continue;
     }
     const pick = (allowAmbient: boolean): string | null => {
       for (const category of TOPIC_CATEGORY_PRIORITY) {
         const viable = asset.tags
-          .filter((t) => t.category === category)
-          .map((t) => ({ name: t.name, count: counts.get(t.name) ?? 0 }))
-          .filter((t) => allowAmbient || t.count <= ambientMax);
+          .filter((tag) => tag.category === category)
+          .map((tag) => ({ name: tag.name, count: counts.get(tag.name) ?? 0 }))
+          .filter((tag) => allowAmbient || tag.count <= ambientMax);
         if (viable.length === 0) continue;
-        viable.sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : 1));
+        viable.sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
         return viable[0].name;
       }
       return null;
     };
-    topics.set(asset.id, pick(false) ?? pick(true) ?? TOPIC_OTHER_KEY);
+    labels.set(asset.id, pick(false) ?? pick(true) ?? TOPIC_OTHER_KEY);
   }
 
-  // Fold everything past the TOPIC_CLOUD_CAP biggest HEURISTIC topics into
-  // Other (size desc, name asc — deterministic under any input order). Cluster
-  // labels are counted out of the cap entirely and always kept.
+  // Fold everything past the cap into Other (size desc, name asc). This pass
+  // covers the AUTO fallback even for manually-overridden assets, so Return to
+  // AI restores the same baseline the server would derive after a refresh.
   const sizes = new Map<string, number>();
-  for (const topic of topics.values()) {
-    if (topic === UNSORTED_CLOUD_KEY || topic === TOPIC_OTHER_KEY || fromCluster.has(topic)) continue;
-    sizes.set(topic, (sizes.get(topic) ?? 0) + 1);
+  for (const label of labels.values()) {
+    if (label === UNSORTED_CLOUD_KEY || label === TOPIC_OTHER_KEY) continue;
+    sizes.set(label, (sizes.get(label) ?? 0) + 1);
   }
   const keep = new Set(
     [...sizes.entries()]
-      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+      .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
       .slice(0, TOPIC_CLOUD_CAP)
-      .map(([name]) => name),
+      .map(([label]) => label),
   );
-  for (const [id, topic] of topics) {
-    if (
-      topic !== UNSORTED_CLOUD_KEY &&
-      topic !== TOPIC_OTHER_KEY &&
-      !fromCluster.has(topic) &&
-      !keep.has(topic)
-    ) {
-      topics.set(id, TOPIC_OTHER_KEY);
+  for (const [id, label] of labels) {
+    if (label !== UNSORTED_CLOUD_KEY && label !== TOPIC_OTHER_KEY && !keep.has(label)) {
+      labels.set(id, TOPIC_OTHER_KEY);
     }
   }
-  return topics;
+  return labels;
+}
+
+/** Computes both the machine baseline and the effective manual-first topic. */
+export function deriveTopicAssignments(assets: readonly TopicAsset[]): Map<string, TopicAssignment> {
+  const heuristicLabels = deriveHeuristicLabels(assets);
+  const assignments = new Map<string, TopicAssignment>();
+
+  for (const asset of assets) {
+    const autoClusterId = clean(asset.autoClusterId);
+    const storedAutoLabel = clean(asset.autoClusterLabel ?? asset.clusterLabel);
+
+    // A real cluster id is identity even if its joined label is unexpectedly
+    // unavailable (RLS/schema-cache race). One neutral label keeps all members
+    // together rather than splitting the same UUID by per-asset tag guesses.
+    const autoTopicLabel = autoClusterId
+      ? (storedAutoLabel ?? "Untitled topic")
+      : (storedAutoLabel ?? heuristicLabels.get(asset.id) ?? UNSORTED_CLOUD_KEY);
+    const autoTopicKey = autoClusterId
+      ? clusterTopicKey(autoClusterId)
+      : storedAutoLabel
+        ? `${SYSTEM_TOPIC_PREFIX}stored-label:${storedAutoLabel}`
+        : heuristicTopicKey(autoTopicLabel);
+
+    const manualClusterId = clean(asset.manualClusterId);
+    const manualLabel = clean(asset.manualClusterLabel);
+    const topicId = manualClusterId ?? autoClusterId;
+    const label = manualClusterId ? (manualLabel ?? "Untitled topic") : autoTopicLabel;
+    const topicKey = topicId ? clusterTopicKey(topicId) : autoTopicKey;
+
+    assignments.set(asset.id, {
+      autoClusterId,
+      manualClusterId,
+      autoTopicKey,
+      autoTopicLabel,
+      topicId,
+      topicKey,
+      label,
+    });
+  }
+  return assignments;
+}
+
+/** Compatibility projection used by existing topic-label callers/tests. New
+ *  read-model code should consume `deriveTopicAssignments` so identity is not
+ *  thrown away. */
+export function deriveTopics(assets: readonly TopicAsset[]): Map<string, string> {
+  return new Map([...deriveTopicAssignments(assets)].map(([id, assignment]) => [id, assignment.label]));
 }

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { UNSORTED_CLOUD_KEY } from "./layout";
 import {
+  clusterTopicKey,
+  deriveTopicAssignments,
   deriveTopics,
+  heuristicTopicKey,
   TOPIC_CLOUD_CAP,
   TOPIC_OTHER_KEY,
+  UNSORTED_CLOUD_KEY,
   type TopicAsset,
 } from "./topics";
 
@@ -263,5 +266,72 @@ describe("deriveTopics cluster labels (ADR 0028)", () => {
     const forward = deriveTopics(assets);
     const reversed = deriveTopics([...assets].reverse());
     for (const [id, topic] of forward) expect(reversed.get(id)).toBe(topic);
+  });
+});
+
+describe("deriveTopicAssignments (editable Topic read model)", () => {
+  it("lets a manual topic win without erasing the AI baseline", () => {
+    const assignment = deriveTopicAssignments([
+      {
+        id: "a",
+        tags: [{ category: "object", name: "mat" }],
+        autoClusterId: "auto-1",
+        autoClusterLabel: "Yoga",
+        manualClusterId: "manual-2",
+        manualClusterLabel: "Client picks",
+      },
+    ]).get("a")!;
+
+    expect(assignment).toEqual({
+      autoClusterId: "auto-1",
+      manualClusterId: "manual-2",
+      autoTopicKey: clusterTopicKey("auto-1"),
+      autoTopicLabel: "Yoga",
+      topicId: "manual-2",
+      topicKey: clusterTopicKey("manual-2"),
+      label: "Client picks",
+    });
+  });
+
+  it("retains a synthetic AI baseline for Return to AI when a heuristic asset is manually assigned", () => {
+    const assignment = deriveTopicAssignments([
+      {
+        id: "a",
+        tags: [{ category: "object", name: "mat" }],
+        manualClusterId: "manual-1",
+        manualClusterLabel: "Favorites",
+      },
+      asset("b", [["object", "mat"]]),
+    ]).get("a")!;
+
+    expect(assignment.autoClusterId).toBeNull();
+    expect(assignment.autoTopicLabel).toBe("mat");
+    expect(assignment.autoTopicKey).toBe(heuristicTopicKey("mat"));
+    expect(assignment.topicId).toBe("manual-1");
+    expect(assignment.topicKey).toBe(clusterTopicKey("manual-1"));
+    expect(assignment.label).toBe("Favorites");
+  });
+
+  it("gives equal stored labels distinct identities when their cluster ids differ", () => {
+    const assignments = deriveTopicAssignments([
+      { id: "a", tags: [], autoClusterId: "cl-1", autoClusterLabel: "Yoga" },
+      { id: "b", tags: [], autoClusterId: "cl-2", autoClusterLabel: "Yoga" },
+    ]);
+
+    expect(assignments.get("a")?.topicKey).toBe("cl-1");
+    expect(assignments.get("b")?.topicKey).toBe("cl-2");
+    expect(assignments.get("a")?.label).toBe(assignments.get("b")?.label);
+  });
+
+  it("uses stable system keys for Other and Unsorted", () => {
+    const assignments = deriveTopicAssignments([
+      asset("empty", []),
+      asset("other", [["place", "kyiv"]]),
+    ]);
+
+    expect(assignments.get("empty")?.topicKey).toBe(heuristicTopicKey(UNSORTED_CLOUD_KEY));
+    expect(assignments.get("other")?.topicKey).toBe(heuristicTopicKey(TOPIC_OTHER_KEY));
+    expect(assignments.get("empty")?.topicId).toBeNull();
+    expect(assignments.get("other")?.topicId).toBeNull();
   });
 });

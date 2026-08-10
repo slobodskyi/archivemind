@@ -25,6 +25,10 @@ export interface ExistingCluster {
    *  match; it is retained (emptied) so the name survives a corpus dip and can
    *  be re-adopted later. Optional so existing call sites keep compiling. */
   isRenamed?: boolean;
+  /** An effective manual assignment points at this generated cluster. Deleting
+   *  it would violate that assignment (and the FK now RESTRICTs the delete), so
+   *  an unmatched protected row is retained empty like a renamed one (0042). */
+  isProtected?: boolean;
 }
 
 /** A freshly computed cluster before it is matched to an existing row. */
@@ -44,10 +48,9 @@ export interface ClusterPlan {
   /** Existing clusters that no longer match anything — deleted (FK nulls their
    *  members' assets.cluster_id, dropping them back to the tag heuristic). */
   deleteIds: string[];
-  /** Unmatched clusters a human NAMED. Deleting these would throw the rename
-   *  away for good, so they are retained and emptied (size 0, no members)
-   *  instead — invisible in the Topic view until a future run's centroid
-   *  matches them again, at which point the user's name comes back with it. */
+  /** Unmatched clusters a human NAMED or manually assigned INTO. Deleting
+   *  either would throw curation away, so they are retained and emptied
+   *  (size 0 baseline members) instead. */
   retainIds: string[];
 }
 
@@ -469,8 +472,9 @@ export function labelClusters(
   });
 }
 
-/** Disambiguates a label against those already taken this run — two clusters
- *  sharing a label would merge into ONE Topic cloud, which keys on the string.
+/** Disambiguates a label against those already taken this run. Cloud identity
+ *  is now the stable UUID (ADR 0042), so duplicate labels would not merge data,
+ *  but adjacent machine topics still need names a person can distinguish.
  *
  *  It differentiates by SWAPPING a tag, never by appending one: the old widening
  *  loop produced "floor · mat" next to "floor · mat · wall", two names a reader
@@ -553,12 +557,15 @@ export function planClusters(
     existingSorted.map((e) => e.centroid),
   );
 
-  // Unmatched clusters split by who named them: a machine name is dropped, a
-  // human's is retained (emptied) so the rename outlives a corpus dip.
+  // Unmatched clusters split by whether curation refers to them: an unprotected
+  // machine row is dropped; a human name OR a manual assignment retains it
+  // empty so the decision outlives a corpus dip/re-cluster (ADR 0042).
   const deleteIds: string[] = [];
   const retainIds: string[] = [];
   for (const j of unmatchedExisting) {
-    (existingSorted[j].isRenamed ? retainIds : deleteIds).push(existingSorted[j].id);
+    (existingSorted[j].isRenamed || existingSorted[j].isProtected ? retainIds : deleteIds).push(
+      existingSorted[j].id,
+    );
   }
 
   // ── pass 1: reserve every name that survives this run, before choosing any

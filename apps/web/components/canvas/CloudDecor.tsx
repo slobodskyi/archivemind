@@ -21,6 +21,10 @@ interface CloudDecorProps {
   /** When a cloud's label is clicked it becomes the focus; every other cloud
    *  (backdrop + tiles + label) fades back so it stands out. */
   focusedCloudKey: string | null;
+  /** Topic-only semantic drop target. It is intentionally visual-only here;
+   *  hit-testing lives in lib/topic-drag so the blurred blob never becomes an
+   *  accidental membership target. */
+  dropTargetKey?: string | null;
 }
 
 /** Backdrop for the grouping views (Timeline / Map / Topic): the blurred faded
@@ -28,8 +32,8 @@ interface CloudDecorProps {
  *  lines. Rendered *behind* the photo tiles; the labels render on top via
  *  CloudLabels. Tiles themselves are drawn by the shared ProjectAssetView so
  *  they persist (and animate) across every view (ADR 0022). */
-function CloudDecor({ layout, edgesReady, focusedCloudKey }: CloudDecorProps) {
-  const dimOf = (key: string) => (focusedCloudKey && key !== focusedCloudKey ? DIM : 1);
+function CloudDecor({ layout, edgesReady, focusedCloudKey, dropTargetKey = null }: CloudDecorProps) {
+  const dimOf = (key: string) => (key === dropTargetKey ? 1 : focusedCloudKey && key !== focusedCloudKey ? DIM : 1);
   // Timeline's day clouds are pinned bands, so paint them more strongly than
   // Map/Topic's soft blobs — they read as the column, not a faint haze. Topic's
   // blobs are now more saturated too, so a cloud is legible by color alone.
@@ -55,6 +59,7 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey }: CloudDecorProps) {
   const haloAlpha = Math.min(blobAlpha + 0.16, 0.62);
   const haloBlur = Math.max(blobBlur - 10, 13);
   const cloudByKey = new Map(layout.clouds.map((c) => [c.key, c]));
+  const dropTarget = dropTargetKey ? cloudByKey.get(dropTargetKey) : null;
   const outliers = Object.entries(layout.tiles).flatMap(([id, t]) => {
     const c = cloudByKey.get(layout.tileCloud[id]);
     if (!c) return [];
@@ -88,6 +93,28 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey }: CloudDecorProps) {
           }}
         />
       ))}
+
+      {/* A crisp core ring says "this drop changes the Topic". The ordinary
+          cloud remains soft; making its full blurred blob the target would
+          erase the distinction between semantic and positional dragging. */}
+      {dropTarget && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            left: dropTarget.bx - 24,
+            top: dropTarget.by - 24,
+            width: dropTarget.bw + 48,
+            height: dropTarget.bh + 48,
+            border: `2px solid ${hexA(dropTarget.color, 0.82)}`,
+            borderRadius: 24,
+            background: hexA(dropTarget.color, 0.08),
+            boxShadow: `0 0 0 5px ${hexA(dropTarget.color, 0.12)}, 0 0 34px ${hexA(dropTarget.color, 0.34)}`,
+            pointerEvents: "none",
+            zIndex: 1,
+          }}
+        />
+      )}
 
       {/* Color halo behind each dragged-away (outlier) tile — see above. */}
       {outliers.map((o) => (
@@ -190,6 +217,9 @@ interface CloudLabelsProps {
    *  has no name to set). */
   onRenameCloud?: (cloud: CloudNode, name: string) => void;
   canRenameCloud?: (cloud: CloudNode) => boolean;
+  /** Topic-only semantic drop target + the selection it will receive. */
+  dropTargetKey?: string | null;
+  dropCount?: number;
 }
 
 /** How long after a label press a second press still counts as a double-click. */
@@ -207,6 +237,8 @@ function CloudLabelsBase({
   onCloudLabelDown,
   onRenameCloud,
   canRenameCloud,
+  dropTargetKey = null,
+  dropCount = 0,
 }: CloudLabelsProps) {
   const [editing, setEditing] = useState<{ key: string } | null>(null);
   const [draft, setDraft] = useState("");
@@ -264,7 +296,8 @@ function CloudLabelsBase({
     <>
       {layout.clouds.map((c) => {
         const isEditing = editing?.key === c.key;
-        const dim = focusedCloudKey && c.key !== focusedCloudKey && !isEditing ? DIM : 1;
+        const isDropTarget = dropTargetKey === c.key;
+        const dim = isDropTarget ? 1 : focusedCloudKey && c.key !== focusedCloudKey && !isEditing ? DIM : 1;
         const renameable = !!onRenameCloud && (canRenameCloud?.(c) ?? false);
         return (
           <div
@@ -313,7 +346,7 @@ function CloudLabelsBase({
               position: "absolute",
               left: c.labelX,
               top: c.labelY - 34,
-              transform: "translateX(-50%)",
+              transform: `translateX(-50%)${isDropTarget ? " scale(1.05)" : ""}`,
               padding: "3px 8px",
               whiteSpace: "nowrap",
               fontSize: 15,
@@ -321,6 +354,8 @@ function CloudLabelsBase({
               letterSpacing: "0.05em",
               color: c.color,
               textShadow: isEditing ? "none" : `0 0 12px ${hexA(c.color, 0.55)}, 0 1px 3px rgba(0,0,0,0.7)`,
+              background: isDropTarget ? "rgba(8,8,8,.9)" : "transparent",
+              border: isDropTarget ? `1px solid ${hexA(c.color, 0.72)}` : "1px solid transparent",
               // `dim` already exempts the cloud being edited: a rename opens on
               // the second press, after the first has focused some cloud, so
               // without the exemption the input could render at 22% opacity —
@@ -368,7 +403,9 @@ function CloudLabelsBase({
                 }}
               />
             ) : (
-              c.label.toUpperCase()
+              isDropTarget
+                ? `MOVE ${dropCount || 1} TO ${c.label.toUpperCase()}`
+                : c.label.toUpperCase()
             )}
           </div>
         );

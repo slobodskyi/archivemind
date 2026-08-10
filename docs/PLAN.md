@@ -185,6 +185,26 @@ Phases 1–2). What actually remains:
   2026-07-27**, verified via ledger only: Docker on the owner's machine returns
   500, which takes out `db diff`'s shadow database, `db dump`, and makes
   `db push` print a `pgdelta` warning after succeeding.
+- **Editable Topic clouds — ✅ DONE 2026-08-10, migration NOT yet on prod** —
+  Topic now keeps the machine answer and the person's decision as different
+  facts ([ADR 0042](decisions/0042-editable-topic-clouds.md)):
+  `assets.cluster_id` remains the latest deterministic k-means baseline, while
+  one RLS-scoped `topic_cluster_overrides` row can replace it at read time;
+  deleting that row is **Return to AI** with no reconstruction or model call.
+  `topic_clusters.origin = generated | manual` keeps centroid-bearing worker
+  clusters separate from centroid-less human topics, and stable UUID identity
+  means rename never changes membership, colour or saved arrangement. A normal
+  empty-space drag still arranges the current canvas; membership changes only
+  through a deliberate cloud drop target or Move-to-topic menu, with bulk
+  create/move/reset, repacking and Undo. `GET/POST /api/topics`,
+  `PUT /api/topics/assignments` and manual-only `DELETE /api/topics/:id` resolve
+  the workspace server-side and call three atomic, editor-gated RPCs. Re-cluster
+  ignores manual rows and retains generated rows referenced by overrides, so it
+  refreshes the AI baseline without erasing curation and still costs zero
+  credits. Migration `20260810000001` (`topic_clusters.origin` + nullable/check-
+  constrained centroid + `topic_cluster_overrides` + RPCs; pgTAP `014`, 36
+  assertions) — **owner push still pending**; the asset read retries without the
+  new relation during the web-before-migration deploy gap.
 - **Colour labels + the LABELS view — ✅ DONE 2026-08-08, migration NOT yet on
   prod** — the archive had four ways to group photos and all four were derived
   from the file (date, GPS, the model's reading, none). This adds the first one

@@ -1,4 +1,14 @@
+"use client";
+
 import { memo } from "react";
+import TopicMembershipMenu, {
+  type TopicMembershipMenuProps,
+} from "@/components/toolbar/TopicMembershipMenu";
+
+/** Membership controls are optional so Timeline / Labels keep their existing
+ * narrow bar. Topic supplies this object once its persisted manual-assignment
+ * layer is available. `selectionCount` comes from the bar's existing prop. */
+export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "selectionCount">;
 
 /** Bottom action bar for the SORTING views (Topic / Timeline) — ADR 0038.
  *
@@ -10,11 +20,12 @@ import { memo } from "react";
  *  frame, and its "Tidy up" writes the `asset` bucket, so on Topic it would
  *  silently rearrange the Canvas instead.
  *
- *  Deliberately narrow: two buttons, ≤ 46 px tall at bottom:20 so `BulkAiPanel`
- *  (hardcoded to bottom:78) still clears it, and z-index 35 like every other
- *  canvas bar — `lib/ui.ts` reserves 0–35 for canvas internals, and anything
- *  higher would paint over the chat and trash panels. */
-interface SortingActionBarProps {
+ *  Deliberately narrow: layout controls plus Topic's explicit membership menu,
+ *  all ≤ 46 px tall at bottom:20 so `BulkAiPanel` (hardcoded to bottom:78)
+ *  still clears it. z-index 35 matches every other canvas bar — `lib/ui.ts`
+ *  reserves 0–35 for canvas internals, and anything higher would paint over
+ *  the chat and trash panels. */
+export interface SortingActionBarProps {
   /** Topic gets Re-cluster; Timeline's day columns are not clustered. */
   showRecluster: boolean;
   /** There is something to regroup — no drag overrides means no-op. */
@@ -25,6 +36,9 @@ interface SortingActionBarProps {
   selCount: number;
   onRegroup: () => void;
   onRecluster: () => void;
+  /** Explicit semantic grouping actions for Topic only. The canvas may call
+   * the same mutations after an intentional dwell-and-drop target. */
+  topicMembership?: SortingTopicMembershipProps;
 }
 
 const gp = {
@@ -105,6 +119,7 @@ function SortingActionBar({
   selCount,
   onRegroup,
   onRecluster,
+  topicMembership,
 }: SortingActionBarProps) {
   return (
     <div
@@ -132,11 +147,17 @@ function SortingActionBar({
       >
         <RegroupGlyph />
       </Btn>
+      {showRecluster && topicMembership && selCount > 0 && (
+        <>
+          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <TopicMembershipMenu {...topicMembership} selectionCount={selCount} />
+        </>
+      )}
       {showRecluster && (
         <>
           <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
           <Btn
-            title={busy ? "A job is already running" : "Re-cluster topics (free — no AI credits)"}
+            title={busy ? "A job is already running" : "Refresh AI grouping — manual moves stay (free)"}
             disabled={busy}
             onClick={onRecluster}
           >

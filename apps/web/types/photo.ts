@@ -100,14 +100,27 @@ export interface Photo {
   time: string;
   /** Display-only 'Mon DD'. */
   day: string;
+  /** Effective Topic display label. This is deliberately not cloud identity:
+   *  a stored cluster can be renamed without moving its files or changing its
+   *  color. See `topicKey` below. */
   group: PhotoGroup;
-  /** The stored semantic cluster this photo belongs to (`assets.cluster_id`,
-   *  ADR 0028), or null when it is unclustered and `group` came from the tag
-   *  heuristic. The cloud *key* is the label string, which changes whenever the
-   *  worker relabels or a user renames — this id does not, which is why the
-   *  Topic canvas anchors its drag overrides to it (ADR 0038). Absent on mock
-   *  rows. */
-  clusterId?: string | null;
+  /** Machine-owned k-means baseline (`assets.cluster_id`). It remains visible
+   *  while a manual assignment wins so Return to AI does not need to guess. */
+  autoClusterId?: string | null;
+  /** User-owned membership override. Null means the AI baseline is effective. */
+  manualClusterId?: string | null;
+  /** Stable key + display label of the AI baseline, including a namespaced
+   *  synthetic key when the baseline came from the tag heuristic. */
+  autoTopicKey?: string | null;
+  autoTopicLabel?: PhotoGroup | null;
+  /** Effective stored cluster UUID (manual first, then auto), or null on the
+   *  heuristic/system path. Kept separate from `topicKey` so callers can tell
+   *  whether rename/assignment APIs apply. */
+  topicId?: string | null;
+  /** Effective stable cloud identity. Stored topics use their UUID; heuristic
+   *  and system topics use synthetic keys from `lib/topics.ts`. Topic layout,
+   *  focus and color use this field; `group` is display-only. */
+  topicKey?: string | null;
   country: string;
   /** User-assigned colour label (`assets.label`, migration 20260808000001) —
    *  null/absent = unlabelled. Human curation, never AI: it is what the LABELS

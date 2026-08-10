@@ -4,7 +4,7 @@ import type pg from "pg";
 const deleteObject = vi.fn<(key: string) => Promise<void>>(async () => {});
 vi.mock("../services/r2", () => ({ deleteObject: (key: string) => deleteObject(key) }));
 
-const { purgeExportArtifacts } = await import("./purge");
+const { purgeExportArtifacts, purgeHandler } = await import("./purge");
 
 /** Minimal pg.Pool stand-in: the select answers with `rows`, updates are recorded. */
 function fakePool(rows: { id: string; result_key: string | null }[]) {
@@ -81,5 +81,43 @@ describe("purgeExportArtifacts", () => {
     await expect(purgeExportArtifacts(pool, "asset-1")).rejects.toThrow("r2 down");
     // Clearing the key on a failed delete would orphan the object for good.
     expect(queries.filter((q) => q.sql.includes("update ai_jobs"))).toHaveLength(0);
+  });
+});
+
+describe("purgeHandler editable-Topic cleanup (ADR 0042)", () => {
+  it("removes the override when permanent purge leaves the asset tombstone behind", async () => {
+    const queries: string[] = [];
+    const pool = {
+      query: vi.fn(async (sql: string) => {
+        queries.push(sql);
+        if (sql.startsWith("update assets set purged_at")) return { rows: [], rowCount: 1 };
+        return { rows: [], rowCount: 0 };
+      }),
+    } as unknown as pg.Pool;
+
+    await purgeHandler({
+      pool,
+      job: {
+        id: "00000000-0000-0000-0000-000000000001",
+        workspace_id: "00000000-0000-0000-0000-00000000aaaa",
+        user_id: null,
+        project_id: null,
+        type: "purge",
+        payload: { asset_ids: ["00000000-0000-0000-0000-0000000000f1"] },
+        attempts: 1,
+        total_items: 1,
+        done_items: 0,
+      },
+      progress: vi.fn(async () => {}),
+    });
+
+    const overrideDelete = queries.findIndex((sql) =>
+      sql.includes("delete from topic_cluster_overrides where asset_id = $1"),
+    );
+    const tombstoneUpdate = queries.findIndex((sql) =>
+      sql.includes("update assets set cluster_id = null"),
+    );
+    expect(overrideDelete).toBeGreaterThan(-1);
+    expect(tombstoneUpdate).toBeGreaterThan(overrideDelete);
   });
 });

@@ -10,6 +10,8 @@ import {
   exportFilename,
   exportFormatSchema,
   canvasGroupKindSchema,
+  createTopicRequestSchema,
+  createTopicResponseSchema,
   createCanvasGroupRequestSchema,
   createExportRequestSchema,
   exportJobPayloadSchema,
@@ -45,6 +47,9 @@ import {
   searchParseSchema,
   searchResponseSchema,
   searchResultSchema,
+  assignTopicAssetsRequestSchema,
+  topicMutationResponseSchema,
+  topicsResponseSchema,
   workspaceInfoSchema,
 } from "./index";
 
@@ -106,6 +111,59 @@ describe("uuidSchema", () => {
     expect(uuidSchema.parse("4df136fe-a1a4-49c1-ab22-1f1713a1c53c")).toBeTruthy(); // gen_random_uuid
     expect(uuidSchema.safeParse("not-a-uuid").success).toBe(false);
     expect(ingestJobPayloadSchema.safeParse({ asset_ids: [] }).success).toBe(false);
+  });
+});
+
+describe("editable Topic contracts (ADR 0042)", () => {
+  const a = "00000000-0000-0000-0000-0000000000a1";
+  const b = "00000000-0000-0000-0000-0000000000b2";
+  const cluster = "00000000-0000-0000-0000-00000000c001";
+
+  it("creates a named topic from a bounded, deduped selection", () => {
+    expect(createTopicRequestSchema.parse({ label: "  Family  ", assetIds: [a, a, b] })).toEqual({
+      label: "Family",
+      assetIds: [a, b],
+    });
+    expect(createTopicRequestSchema.safeParse({ label: " ", assetIds: [a] }).success).toBe(false);
+    expect(createTopicRequestSchema.safeParse({ label: "x", assetIds: [] }).success).toBe(false);
+    expect(createTopicRequestSchema.safeParse({ label: "x", assetIds: Array(501).fill(a) }).success).toBe(false);
+    // Workspace tenancy is server-resolved and therefore not part of the body.
+    expect(createTopicRequestSchema.parse({ label: "Family", assetIds: [a], workspaceId: b })).toEqual({
+      label: "Family",
+      assetIds: [a],
+    });
+  });
+
+  it("assigns to a topic or explicitly resets to the AI baseline", () => {
+    expect(assignTopicAssetsRequestSchema.parse({ assetIds: [a, a], clusterId: cluster })).toEqual({
+      assetIds: [a],
+      clusterId: cluster,
+    });
+    expect(assignTopicAssetsRequestSchema.parse({ assetIds: [a], clusterId: null })).toEqual({
+      assetIds: [a],
+      clusterId: null,
+    });
+    expect(assignTopicAssetsRequestSchema.safeParse({ assetIds: [a] }).success).toBe(false);
+    expect(assignTopicAssetsRequestSchema.safeParse({ assetIds: [], clusterId: null }).success).toBe(false);
+  });
+
+  it("pins the create/list/success response envelopes consumed by the canvas", () => {
+    expect(createTopicResponseSchema.parse({ topic: { id: cluster, label: "Family" } })).toEqual({
+      topic: { id: cluster, label: "Family" },
+    });
+    expect(
+      topicsResponseSchema.parse({
+        topics: [
+          { id: cluster, label: "Family", origin: "manual" },
+          { id: a, label: "Street", origin: "generated" },
+        ],
+      }),
+    ).toBeTruthy();
+    expect(topicsResponseSchema.safeParse({ topics: [{ id: cluster, label: "x", origin: "human" }] }).success).toBe(
+      false,
+    );
+    expect(topicMutationResponseSchema.parse({ ok: true })).toEqual({ ok: true });
+    expect(topicMutationResponseSchema.safeParse({ ok: false }).success).toBe(false);
   });
 });
 

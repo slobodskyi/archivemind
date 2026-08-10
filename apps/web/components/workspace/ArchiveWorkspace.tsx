@@ -192,7 +192,14 @@ export default function ArchiveWorkspace({
         {/* Grouping views draw their colored backdrop + connecting lines behind
             the tiles; the tiles themselves are the same persistent set in every
             view, so switching a sort just reflows (animates) their positions. */}
-        {ws.cloudDecor && <CloudDecor layout={ws.cloudDecor} edgesReady={!ws.tilesAnimating} focusedCloudKey={ws.focusedCloudKey} />}
+        {ws.cloudDecor && (
+          <CloudDecor
+            layout={ws.cloudDecor}
+            edgesReady={!ws.tilesAnimating}
+            focusedCloudKey={ws.focusedCloudKey}
+            dropTargetKey={ws.isSenseView ? ws.topicDropTargetKey : null}
+          />
+        )}
         <ProjectAssetView
           // visiblePhotos, not projectPhotos: the label filter narrows what is
           // DRAWN while every layout above still runs over the full set, so a
@@ -244,6 +251,8 @@ export default function ArchiveWorkspace({
                     (cloud) => cloud.key !== NO_LABEL_CLOUD_KEY
                   : undefined
             }
+            dropTargetKey={ws.isSenseView ? ws.topicDropTargetKey : null}
+            dropCount={ws.selectedIds.size}
           />
         )}
       </PanZoomCanvas>
@@ -487,6 +496,19 @@ export default function ArchiveWorkspace({
           selCount={ws.selectedIds.size}
           onRegroup={ws.regroupClouds}
           onRecluster={ws.recluster}
+          topicMembership={
+            ws.isSenseView
+              ? {
+                  targets: ws.topicOptions,
+                  currentTopicId: ws.selectedTopicId,
+                  canReturnToAi: ws.canReturnSelectionToAi,
+                  busy: ws.topicMutationBusy,
+                  onMove: ws.moveSelectionToTopic,
+                  onCreate: ws.createTopicFromSelection,
+                  onReturnToAi: ws.returnSelectionToAi,
+                }
+              : undefined
+          }
         />
       )}
 

@@ -199,13 +199,67 @@ export const clusterJobPayloadSchema = z.object({
 });
 export type ClusterJobPayload = z.infer<typeof clusterJobPayloadSchema>;
 
-/** PATCH /api/topics/[id] — rename a Topic cloud (ADR 0038). The label is the
- *  cloud key the canvas groups by, so it is trimmed and bounded here rather
- *  than in SQL (the schema carries no CHECK constraints by convention); the
+// ── Editable Topic clouds (ADR 0042) ───────────────────────────────────────
+
+/** A stored Topic's author. Generated rows carry a non-null k-means centroid;
+ *  manual rows deliberately do not pretend a human pile is a model result. */
+export const topicClusterOriginSchema = z.enum(["generated", "manual"]);
+export type TopicClusterOrigin = z.infer<typeof topicClusterOriginSchema>;
+
+export const topicLabelSchema = z.string().trim().min(1).max(60);
+
+/** One entry in GET /api/topics. The route includes every non-empty topic plus
+ *  protected empty rows (manual, renamed, or referenced by an override), so a
+ *  Move-to-topic menu is workspace-complete rather than current-project-only. */
+export const topicSummarySchema = z.object({
+  id: uuidSchema,
+  label: z.string(),
+  origin: topicClusterOriginSchema,
+});
+export type TopicSummary = z.infer<typeof topicSummarySchema>;
+
+export const topicsResponseSchema = z.object({ topics: z.array(topicSummarySchema) });
+export type TopicsResponse = z.infer<typeof topicsResponseSchema>;
+
+const topicAssetIdsSchema = z
+  .array(uuidSchema)
+  .min(1)
+  .max(500)
+  .transform((ids) => [...new Set(ids)]);
+
+/** POST /api/topics — create a manual topic and seed its membership atomically.
+ *  workspaceId is intentionally absent: the route resolves it from the caller. */
+export const createTopicRequestSchema = z.object({
+  label: topicLabelSchema,
+  assetIds: topicAssetIdsSchema,
+});
+export type CreateTopicRequest = z.infer<typeof createTopicRequestSchema>;
+
+export const createTopicResponseSchema = z.object({
+  topic: z.object({ id: uuidSchema, label: z.string() }),
+});
+export type CreateTopicResponse = z.infer<typeof createTopicResponseSchema>;
+
+/** PUT /api/topics/assignments. A cluster id pins the effective topic without
+ *  touching assets.cluster_id; null deletes the override (Return to AI). */
+export const assignTopicAssetsRequestSchema = z.object({
+  assetIds: topicAssetIdsSchema,
+  clusterId: uuidSchema.nullable(),
+});
+export type AssignTopicAssetsRequest = z.infer<typeof assignTopicAssetsRequestSchema>;
+
+/** Shared success envelope for assignment/reset and manual-topic deletion. */
+export const topicMutationResponseSchema = z.object({ ok: z.literal(true) });
+export type TopicMutationResponse = z.infer<typeof topicMutationResponseSchema>;
+
+/** PATCH /api/topics/[id] — rename a Topic cloud (ADR 0038/0042). The cluster
+ *  UUID is the stable cloud key and the label is display-only, so a rename
+ *  changes no membership or arrangement. It is trimmed and bounded here rather
+ *  than in SQL (the schema carries no label CHECK by convention); the
  *  route writes `label` + `is_renamed` and nothing else, because the column
  *  grant on topic_clusters permits exactly those two. */
 export const renameTopicClusterRequestSchema = z.object({
-  label: z.string().trim().min(1).max(60),
+  label: topicLabelSchema,
 });
 export type RenameTopicClusterRequest = z.infer<typeof renameTopicClusterRequestSchema>;
 
