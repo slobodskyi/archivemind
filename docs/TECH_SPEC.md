@@ -383,7 +383,8 @@ create index usage_ws_idx on usage_events (workspace_id, created_at);
 --   effective topic = manual override ?? assets.cluster_id ?? tag heuristic
 --
 -- Deleting an override is therefore a lossless "Return to AI"; it never
--- rewrites the latest k-means baseline. Migration NOT yet on prod 2026-08-10.
+-- rewrites the latest k-means baseline. Migration on prod 2026-08-10 (linked
+-- ledger + clean post-push dry-run; local Docker 500 blocked `db diff`).
 
 -- ============ canvas layouts ============
 create table canvas_layouts (
@@ -599,10 +600,10 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `POST /api/jobs` | `{type:'ingest'|'analyze'|'caption', assetIds}` → insert `ai_jobs`. **Not** export/edit/purge/cluster: every arm of `createJobRequestSchema` is asset-id-shaped, so each job type that isn't gets its own route |
 | `POST /api/topics/recluster` | **shipped (ADR 0038)** — re-run the workspace's semantic clustering on demand. Workspace-scoped, so it is a route rather than a `createJobRequestSchema` arm. Zero credits (pure CPU over stored embeddings, no Gemini call); `queued\|running` backlog guard; `workspace_id` built from the caller's server-resolved membership, never the body |
 | `PATCH /api/topics/:id` | **shipped (ADR 0038)** — rename one Topic cloud. Writes `label` + `is_renamed` and nothing else: migration `20260727000003` narrowed the UPDATE grant to those two columns, so an extra key raises 42501 rather than silently updating the k-means `centroid` |
-| `GET /api/topics` | **implemented (ADR 0042; migration not yet on prod)** — list every usable destination in the current workspace, not only topics represented in the open project. Includes non-empty generated topics, protected/pinned generated topics, and manual topics |
-| `POST /api/topics` | **implemented (ADR 0042; migration not yet on prod)** — `{label, assetIds}` → `{topic:{id,label}}`; atomically create a centroid-less manual topic and seed a non-empty selection |
-| `PUT /api/topics/assignments` | **implemented (ADR 0042; migration not yet on prod)** — `{assetIds, clusterId|null}` → `{ok:true}`; move up to 500 assets atomically, or delete their overrides for Return to AI. `workspaceId` is never accepted from the body |
-| `DELETE /api/topics/:id` | **implemented (ADR 0042; migration not yet on prod)** — delete only an `origin='manual'` topic; its overrides are removed in the same transaction, revealing each asset's unchanged AI baseline |
+| `GET /api/topics` | **shipped (ADR 0042; migration on prod 2026-08-10)** — list every usable destination in the current workspace, not only topics represented in the open project. Includes non-empty generated topics, protected/pinned generated topics, and manual topics |
+| `POST /api/topics` | **shipped (ADR 0042; migration on prod 2026-08-10)** — `{label, assetIds}` → `{topic:{id,label}}`; atomically create a centroid-less manual topic and seed a non-empty selection |
+| `PUT /api/topics/assignments` | **shipped (ADR 0042; migration on prod 2026-08-10)** — `{assetIds, clusterId|null}` → `{ok:true}`; move up to 500 assets atomically, or delete their overrides for Return to AI. `workspaceId` is never accepted from the body |
+| `DELETE /api/topics/:id` | **shipped (ADR 0042; migration on prod 2026-08-10)** — delete only an `origin='manual'` topic; its overrides are removed in the same transaction, revealing each asset's unchanged AI baseline |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |
 | `GET  /api/search?q=&projectId=` | §8.4 |
 | `GET  /api/usage` | **shipped (ADR 0037)** — the Usage & Storage snapshot: storage by bucket, this month's credits, the analyzed/captioned funnel, per-project and per-source attribution, 30 days of activity. One `workspace_usage()` RPC (SECURITY INVOKER — RLS is the boundary). Only for the client-side view switch; `/account/usage` awaits the same reader server-side |
