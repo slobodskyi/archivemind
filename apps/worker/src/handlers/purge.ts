@@ -20,8 +20,8 @@ import type { HandlerContext } from "./index";
  *  3. Export ARTIFACTS containing the asset — a PDF embeds a JPEG of it, a ZIP
  *     embeds the file, so erasing the asset's own bytes and leaving those is not
  *     erasure. Contained rather than throwing (see the call site).
- *  4. Derivative rows (previews/edits/tags/captions/facts/embeddings/EXIF) and
- *     files.r2_key + content_hash — clearing the hash releases the dedup claim
+ *  4. Derivative rows (including the human Topic override), then files.r2_key
+ *     + content_hash — clearing the hash releases the dedup claim
  *     (files_dedup_idx), so re-importing the same bytes later ingests cleanly
  *     as a fresh asset instead of merging into an empty tombstone.
  *
@@ -138,6 +138,12 @@ async function purgeAsset(pool: pg.Pool, assetId: string): Promise<"purged" | "s
   await pool.query(`delete from facts where asset_id = $1`, [assetId]);
   await pool.query(`delete from embeddings where asset_id = $1`, [assetId]);
   await pool.query(`delete from asset_exif where asset_id = $1`, [assetId]);
+  // Soft trash keeps curation so Restore is lossless. Permanent purge is the
+  // boundary where it must go: the asset row survives only as a dedup
+  // tombstone, so its ON DELETE CASCADE will never fire on its own. Leaving the
+  // override would keep a generated destination protected forever and inflate
+  // a manual topic's live size with an asset that can no longer render.
+  await pool.query(`delete from topic_cluster_overrides where asset_id = $1`, [assetId]);
   // The files row survives (provenance: origin/source_file_id/title live on),
   // but holds no bytes and no dedup claim from here on.
   await pool.query(`update files set r2_key = null, content_hash = null where asset_id = $1`, [

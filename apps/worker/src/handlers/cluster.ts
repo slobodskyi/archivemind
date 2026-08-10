@@ -26,6 +26,7 @@ interface ExistingRow {
   label: string;
   centroid: string;
   is_renamed: boolean;
+  has_overrides: boolean;
 }
 
 export async function clusterHandler({ pool, job, progress }: HandlerContext): Promise<void> {
@@ -76,8 +77,17 @@ export async function clusterHandler({ pool, job, progress }: HandlerContext): P
     // commits, then sees its clusters as `existing` and matches them out.
     await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [workspace_id]);
     const { rows: existingRows } = await client.query<ExistingRow>(
-      `select id, label, is_renamed, centroid::text as centroid from topic_clusters
-       where workspace_id = $1`,
+      `select tc.id,
+              tc.label,
+              tc.is_renamed,
+              tc.centroid::text as centroid,
+              exists (
+                select 1 from topic_cluster_overrides o where o.cluster_id = tc.id
+              ) as has_overrides
+         from topic_clusters tc
+        where tc.workspace_id = $1
+          and tc.origin = 'generated'
+          and tc.centroid is not null`,
       [workspace_id],
     );
 
@@ -86,6 +96,7 @@ export async function clusterHandler({ pool, job, progress }: HandlerContext): P
       label: r.label,
       centroid: JSON.parse(r.centroid) as number[],
       isRenamed: r.is_renamed,
+      isProtected: r.has_overrides,
     }));
 
     const plan = planClusters(inputs, existing, workspace_id);
@@ -94,16 +105,34 @@ export async function clusterHandler({ pool, job, progress }: HandlerContext): P
       // Below the clustering floor (corpus too small, or shrank below it): drop
       // the machine-named clusters so the read-time tag heuristic takes over
       // cleanly (FK sets each member's assets.cluster_id back to null).
-      // User-renamed clusters are KEPT and emptied instead (ADR 0038) — wiping
-      // them would silently destroy names a human typed, and this branch runs
-      // on any workspace that dips under MIN_CLUSTER_ASSETS. With size 0 and no
-      // members they render nothing, and a later run can match them again.
-      await client.query(`delete from topic_clusters where workspace_id = $1 and is_renamed = false`, [
-        workspace_id,
-      ]);
-      await client.query(`update topic_clusters set size = 0 where workspace_id = $1 and is_renamed = true`, [
-        workspace_id,
-      ]);
+      // User-renamed clusters are KEPT and emptied instead (ADR 0038), as are
+      // generated clusters an override points at (ADR 0042) — wiping either
+      // would violate curation (and the FK rejects it). With machine size 0 they still render
+      // whenever effective override members point at them, and a later run can
+      // match their centroid again.
+      await client.query(
+        `delete from topic_clusters tc
+          where tc.workspace_id = $1
+            and tc.origin = 'generated'
+            and tc.is_renamed = false
+            and not exists (
+              select 1 from topic_cluster_overrides o where o.cluster_id = tc.id
+            )`,
+        [workspace_id],
+      );
+      await client.query(
+        `update topic_clusters tc
+            set size = 0
+          where tc.workspace_id = $1
+            and tc.origin = 'generated'
+            and (
+              tc.is_renamed = true
+              or exists (
+                select 1 from topic_cluster_overrides o where o.cluster_id = tc.id
+              )
+            )`,
+        [workspace_id],
+      );
       await client.query(`update assets set cluster_id = null where workspace_id = $1 and cluster_id is not null`, [
         workspace_id,
       ]);
@@ -117,8 +146,8 @@ export async function clusterHandler({ pool, job, progress }: HandlerContext): P
     // Inserts first so new rows exist before assets reference them.
     for (const c of plan.insert) {
       const { rows } = await client.query<{ id: string }>(
-        `insert into topic_clusters (workspace_id, label, size, centroid)
-         values ($1, $2, $3, $4::vector) returning id`,
+        `insert into topic_clusters (workspace_id, label, size, centroid, origin)
+         values ($1, $2, $3, $4::vector, 'generated') returning id`,
         [workspace_id, c.label, c.size, JSON.stringify(c.centroid)],
       );
       await repoint(client, workspace_id, rows[0].id, c.assetIds);
@@ -134,20 +163,36 @@ export async function clusterHandler({ pool, job, progress }: HandlerContext): P
             set centroid = $2::vector,
                 size = $3,
                 label = case when is_renamed then label else coalesce($4, label) end
-          where id = $1`,
+          where id = $1 and origin = 'generated'`,
         [c.id, JSON.stringify(c.centroid), c.size, c.relabel],
       );
       await repoint(client, workspace_id, c.id, c.assetIds);
     }
 
     if (plan.deleteIds.length > 0) {
-      await client.query(`delete from topic_clusters where id = any($1::uuid[])`, [plan.deleteIds]);
+      // SQL repeats the override guard even though planClusters saw the
+      // protected bit under the same advisory lock. It is cheap defence in
+      // depth against a future caller that forgets to take that lock.
+      await client.query(
+        `delete from topic_clusters tc
+          where tc.id = any($1::uuid[])
+            and tc.origin = 'generated'
+            and tc.is_renamed = false
+            and not exists (
+              select 1 from topic_cluster_overrides o where o.cluster_id = tc.id
+            )`,
+        [plan.deleteIds],
+      );
     }
 
-    // Renamed clusters that matched nothing this run: kept, but emptied, so the
-    // human's name survives without showing an out-of-date cloud (ADR 0038).
+    // Renamed or override-referenced clusters that matched nothing this run:
+    // kept, but emptied on the machine axis so curation survives (0038/0042).
     if (plan.retainIds.length > 0) {
-      await client.query(`update topic_clusters set size = 0 where id = any($1::uuid[])`, [plan.retainIds]);
+      await client.query(
+        `update topic_clusters set size = 0
+          where id = any($1::uuid[]) and origin = 'generated'`,
+        [plan.retainIds],
+      );
     }
 
     await client.query("commit");

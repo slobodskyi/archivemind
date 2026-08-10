@@ -16,10 +16,12 @@ import {
   TAG_LINK_MEMBER_CAP,
   timelineAxisLayout,
   topicCloudLayout,
+  topicKeyOf,
   type Bounds,
   type Frame,
   type TilePos,
 } from "./layout";
+import { heuristicTopicKey } from "./topics";
 
 type AssetInput = Parameters<typeof assetGallery>[0][number];
 
@@ -360,7 +362,7 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     // Unanalyzed assets share the one Unsorted cloud; the shared tag still
     // links them — in the Unsorted gray (ADR 0022 supersedes 0018's "no
     // lines" rule; files with no tags at all are the ones with no lines).
-    expect(layout.clouds.map((c) => c.key)).toEqual(["Unsorted"]);
+    expect(layout.clouds.map((c) => c.key)).toEqual([heuristicTopicKey("Unsorted")]);
     expect(layout.edges).toHaveLength(1);
     expect(layout.edges[0].strokeStart).toBe("#8a8f98");
   });
@@ -469,13 +471,13 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
 
   // ── ADR 0038: an override belongs to the cloud it was dropped in ──────────
 
-  const cloudOf = (photos: Photo[], key: string, overrides = {}) =>
-    topicCloudLayout(photos, overrides).clouds.find((c) => c.key === key)!;
+  const cloudOf = (photos: Photo[], label: string, overrides = {}) =>
+    topicCloudLayout(photos, overrides).clouds.find((c) => c.label === label)!;
 
   it("applies an override whose anchor still matches the tile's cluster", () => {
     const photos = [
-      photo("a", { group: "yoga", clusterId: "cl-1" }),
-      photo("b", { group: "yoga", clusterId: "cl-1" }),
+      photo("a", { group: "yoga", topicId: "cl-1", topicKey: "cl-1" }),
+      photo("b", { group: "yoga", topicId: "cl-1", topicKey: "cl-1" }),
     ];
     const moved = topicCloudLayout(photos, { a: { x: 4000, y: 400, cloud: "cl-1" } });
     expect(moved.tiles.a.cx).toBe(4000);
@@ -485,8 +487,8 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     // Dropped while in cl-1; a re-cluster has since put it in cl-2. Honouring
     // the coordinate would strand the tile thousands of px from its new cloud.
     const photos = [
-      photo("a", { group: "rubble", clusterId: "cl-2" }),
-      photo("b", { group: "rubble", clusterId: "cl-2" }),
+      photo("a", { group: "rubble", topicId: "cl-2", topicKey: "cl-2" }),
+      photo("b", { group: "rubble", topicId: "cl-2", topicKey: "cl-2" }),
     ];
     const layout = topicCloudLayout(photos, { a: { x: 4000, y: 400, cloud: "cl-1" } });
     expect(layout.tiles.a.cx).not.toBe(4000);
@@ -494,10 +496,10 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   });
 
   it("a rename does not reset the arrangement — the anchor is the cluster id, not the label", () => {
-    const before = topicCloudLayout([photo("a", { group: "yoga", clusterId: "cl-1" })], {
+    const before = topicCloudLayout([photo("a", { group: "yoga", topicId: "cl-1", topicKey: "cl-1" })], {
       a: { x: 3000, y: 300, cloud: "cl-1" },
     });
-    const after = topicCloudLayout([photo("a", { group: "Morning practice", clusterId: "cl-1" })], {
+    const after = topicCloudLayout([photo("a", { group: "Morning practice", topicId: "cl-1", topicKey: "cl-1" })], {
       a: { x: 3000, y: 300, cloud: "cl-1" },
     });
     expect(after.tiles.a.cx).toBe(before.tiles.a.cx);
@@ -505,7 +507,7 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   });
 
   it("honours a legacy override that predates anchors", () => {
-    const layout = topicCloudLayout([photo("a", { group: "yoga", clusterId: "cl-9" })], { a: { x: 2500, y: 250 } });
+    const layout = topicCloudLayout([photo("a", { group: "yoga", topicId: "cl-9", topicKey: "cl-9" })], { a: { x: 2500, y: 250 } });
     expect(layout.tiles.a.cx).toBe(2500);
   });
 
@@ -519,7 +521,7 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   // ── ADR 0038: one far-dragged tile must not drag the cloud's name away ────
 
   it("keeps the label on the cloud's core when a single tile is flung away", () => {
-    const photos = Array.from({ length: 6 }, (_, i) => photo(`m${i}`, { group: "rubble", clusterId: "cl-1" }));
+    const photos = Array.from({ length: 6 }, (_, i) => photo(`m${i}`, { group: "rubble", topicId: "cl-1", topicKey: "cl-1" }));
     const stray = { m0: { x: 6000, y: 400, cloud: "cl-1" } };
     const clean = cloudOf(photos, "rubble");
     const strayed = cloudOf(photos, "rubble", stray);
@@ -540,13 +542,13 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   });
 
   it("still follows a whole-cloud drag, where every tile moves together", () => {
-    const photos = Array.from({ length: 6 }, (_, i) => photo(`m${i}`, { group: "rubble", clusterId: "cl-1" }));
+    const photos = Array.from({ length: 6 }, (_, i) => photo(`m${i}`, { group: "rubble", topicId: "cl-1", topicKey: "cl-1" }));
     const clean = topicCloudLayout(photos, {});
     const shifted = Object.fromEntries(
       photos.map((p) => [p.id, { x: clean.tiles[p.id].cx + 900, y: clean.tiles[p.id].cy + 500, cloud: "cl-1" }]),
     );
     const moved = cloudOf(photos, "rubble", shifted);
-    const before = clean.clouds.find((c) => c.key === "rubble")!;
+    const before = clean.clouds.find((c) => c.label === "rubble")!;
     expect(moved.labelX).toBeCloseTo(before.labelX + 900, 6);
     expect(moved.labelY).toBeCloseTo(before.labelY + 500, 6);
   });
@@ -562,19 +564,53 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(cloud.bh).toBe(tile.h);
   });
 
-  it("surfaces a cloud's cluster id only when it maps to exactly one cluster", () => {
-    const single = cloudOf([photo("a", { group: "yoga", clusterId: "cl-1" })], "yoga");
+  it("keeps same-label stored clusters separate and surfaces each target id", () => {
+    const single = cloudOf([photo("a", { group: "yoga", topicId: "cl-1", topicKey: "cl-1" })], "yoga");
     expect(single.clusterId).toBe("cl-1");
 
-    // Two distinct clusters that happen to share a label render as ONE cloud;
-    // renaming "it" would silently rename only one of them.
-    const collided = cloudOf(
-      [photo("a", { group: "yoga", clusterId: "cl-1" }), photo("b", { group: "yoga", clusterId: "cl-2" })],
+    // Label is display-only: two distinct ids must remain two assignment and
+    // rename targets even if their current labels collide.
+    const first = cloudOf(
+      [
+        photo("a", { group: "yoga", topicId: "cl-1", topicKey: "cl-1" }),
+        photo("b", { group: "yoga", topicId: "cl-2", topicKey: "cl-2" }),
+      ],
       "yoga",
     );
-    expect(collided.clusterId).toBeNull();
+    expect(first.clusterId).toBe("cl-1");
+    const distinct = topicCloudLayout(
+      [
+        photo("a", { group: "yoga", topicId: "cl-1", topicKey: "cl-1" }),
+        photo("b", { group: "yoga", topicId: "cl-2", topicKey: "cl-2" }),
+      ],
+      {},
+    );
+    expect(distinct.clouds.map((cloud) => cloud.key).sort()).toEqual(["cl-1", "cl-2"]);
+    expect(distinct.tileCloud).toEqual({ a: "cl-1", b: "cl-2" });
 
     expect(cloudOf([photo("a", { group: "mat" })], "mat").clusterId).toBeNull();
+  });
+
+  it("keeps cloud identity and color stable when a stored topic is renamed", () => {
+    const before = topicCloudLayout(
+      // "rescue" has a curated mock color. A stored cloud must still hash its
+      // id, or this rename would silently cross color-selection branches.
+      [photo("a", { group: "rescue", topicId: "cl-stable", topicKey: "cl-stable" })],
+      {},
+    ).clouds[0];
+    const after = topicCloudLayout(
+      [photo("a", { group: "Morning practice", topicId: "cl-stable", topicKey: "cl-stable" })],
+      {},
+    ).clouds[0];
+
+    expect(after.key).toBe(before.key);
+    expect(after.color).toBe(before.color);
+    expect(after.label).toBe("Morning practice");
+  });
+
+  it("uses a synthetic key for a heuristic topic and the stored id for a real one", () => {
+    expect(topicKeyOf(photo("fallback", { group: "mat" }))).toBe(heuristicTopicKey("mat"));
+    expect(topicKeyOf(photo("stored", { group: "mat", topicId: "cl-7", topicKey: "cl-7" }))).toBe("cl-7");
   });
 });
 

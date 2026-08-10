@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { renameTopicClusterRequestSchema, uuidSchema } from "@archivemind/shared";
+import { renameTopicClusterRequestSchema, topicMutationResponseSchema, uuidSchema } from "@archivemind/shared";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentWorkspaceId } from "@/lib/workspace";
+import { topicRpcError } from "../rpc-error";
 
 /** PATCH /api/topics/[id] — rename one Topic cloud (ADR 0038).
  *
@@ -53,4 +55,34 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (!row) return NextResponse.json({ error: "topic not found" }, { status: 404 });
 
   return NextResponse.json(row);
+}
+
+/** DELETE /api/topics/[id] — delete a human-created topic (ADR 0042).
+ *
+ * The RPC deletes the manual row and its overrides atomically, so every member
+ * immediately falls back to its untouched assets.cluster_id AI baseline. A
+ * generated topic is worker-owned and deliberately returns not-found here. */
+export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  if (!uuidSchema.safeParse(id).success) {
+    return NextResponse.json({ error: "invalid cluster id" }, { status: 400 });
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const workspaceId = await getCurrentWorkspaceId(supabase);
+  if (!workspaceId) return NextResponse.json({ error: "no workspace" }, { status: 403 });
+
+  const { data: deleted, error } = await supabase.rpc("delete_manual_topic", {
+    p_workspace_id: workspaceId,
+    p_cluster_id: id,
+  });
+  if (error) return topicRpcError(error);
+  if (deleted !== true) return NextResponse.json({ error: "topic not found" }, { status: 404 });
+
+  return NextResponse.json(topicMutationResponseSchema.parse({ ok: true }));
 }

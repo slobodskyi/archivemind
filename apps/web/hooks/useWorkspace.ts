@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import { ASSET_LABELS, INK_MAX_POINTS } from "@archivemind/shared";
+import { ASSET_LABELS, INK_MAX_POINTS, topicsResponseSchema } from "@archivemind/shared";
 import type {
   AssetLabel,
   CanvasAnnotation,
@@ -18,6 +18,7 @@ import type {
   PatchAnnotationRequest,
   PatchAssetExifRequest,
   TrashedAsset,
+  TopicSummary,
 } from "@archivemind/shared";
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, labelCounts as countLabels, type LabelFilter } from "@/lib/labels";
@@ -83,11 +84,16 @@ import {
 } from "@/lib/layout";
 import type { SearchResponse } from "@archivemind/shared";
 import { CHAT_GREETING } from "@/lib/chat";
+import { clusterTopicKey } from "@/lib/topics";
+import { committedTopicDropKey, topicDropTargetAt } from "@/lib/topic-drag";
 
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
 /** Stable empty tile→cloud map (Canvas / all-files mode) so the value identity
  *  doesn't change each render and defeat ProjectAssetView's memo. */
 const EMPTY_TILE_CLOUD: Record<string, string> = {};
+/** A brief hover distinguishes an intentional semantic drop from a tile merely
+ * crossing another cloud during free-position dragging. */
+const TOPIC_DROP_DWELL_MS = 240;
 
 /** Per-project canvas arrangement (tile drags, frames, sticky notes) is kept in
  *  localStorage so it survives leaving and re-opening the project (ADR 0022).
@@ -218,6 +224,42 @@ export interface ProjectOption {
   id: string;
   name: string;
   count: number;
+}
+
+/** A persisted Topic cloud that can receive an explicit user assignment. */
+export interface TopicOption {
+  id: string;
+  label: string;
+  color?: string;
+  manual?: boolean;
+  pinned?: boolean;
+}
+
+interface TopicTarget {
+  id: string;
+  label: string;
+}
+
+interface TopicPhotoState {
+  id: string;
+  group: Photo["group"];
+  manualClusterId: string | null;
+  topicId: string | null;
+  topicKey: string;
+}
+
+function topicPhotoState(photo: Photo): TopicPhotoState {
+  return {
+    id: photo.id,
+    group: photo.group,
+    manualClusterId: photo.manualClusterId ?? null,
+    topicId: photo.topicId ?? null,
+    topicKey: photo.topicKey ?? photo.group,
+  };
+}
+
+function withTopicState(photo: Photo, topic: Omit<TopicPhotoState, "id">): Photo {
+  return { ...photo, ...topic };
 }
 
 /** Deterministic accent color per project id (stable across renders). */
@@ -733,6 +775,22 @@ export interface Workspace {
   recluster: () => void;
   /** Rename one Topic cloud (ADR 0038); null clusterId clouds aren't renameable. */
   renameCloud: (clusterId: string, label: string) => void;
+  /** Persisted Topic destinations in the workspace, including clouds not
+   * represented in the currently open project. */
+  topicOptions: TopicOption[];
+  /** Effective stored topic shared by the selection, or null for mixed/
+   * heuristic selections. */
+  selectedTopicId: string | null;
+  /** At least one selected asset currently carries a human override. */
+  canReturnSelectionToAi: boolean;
+  /** A create/move/reset mutation is waiting on the server. */
+  topicMutationBusy: boolean;
+  moveSelectionToTopic: (topicId: string) => void;
+  createTopicFromSelection: (label: string) => void;
+  returnSelectionToAi: () => void;
+  /** Explicit semantic drop target armed after the pointer dwells over a
+   * different Topic cloud. Null keeps ordinary free-position drag semantics. */
+  topicDropTargetKey: string | null;
   addToNewArtboard: () => void;
   addToExistingArtboard: (frameId: string) => void;
 
@@ -1075,6 +1133,14 @@ export function useWorkspace(
   // Right-click menu on the grid — a lightweight overlay, kept out of the main
   // reducer state since it never needs undo/persist and closes on any action.
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; targetId: string | null } | null>(null);
+  const [topicMutationBusy, setTopicMutationBusyState] = useState(false);
+  const [topicCatalog, setTopicCatalog] = useState<TopicSummary[]>([]);
+  const topicMutationBusyRef = useRef(false);
+  const setTopicMutationBusy = useCallback((busy: boolean) => {
+    topicMutationBusyRef.current = busy;
+    setTopicMutationBusyState(busy);
+  }, []);
+  const [topicDropTargetKey, setTopicDropTargetKey] = useState<string | null>(null);
 
   // Mirror of committed state, kept current for window-level event handlers.
   const stateRef = useRef(state);
@@ -1123,6 +1189,14 @@ export function useWorkspace(
   /** The layout the canvas currently renders (committed post-render) — read by
    *  pointer-down handlers so they never recompute a pack/edge pass. */
   const cloudDecorRef = useRef<CloudLayout | null>(null);
+  /** Semantic Topic drop is armed only after a short dwell. Candidate and
+   * armed target live in refs because pointermove must read them without
+   * waiting for React to commit a render. */
+  const topicDropRef = useRef<{
+    candidateKey: string | null;
+    targetKey: string | null;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({ candidateKey: null, targetKey: null, timer: null });
   const activeJobId = useRef<string | null>(null);
   /** Queued second leg of an "analyze, then caption" run. The two are separate
    *  job types and captions read the facts analyze writes, so they can't be one
@@ -1189,6 +1263,32 @@ export function useWorkspace(
     [rect],
   );
 
+  const clearTopicDropTarget = useCallback(() => {
+    const current = topicDropRef.current;
+    if (current.timer) clearTimeout(current.timer);
+    const changed = current.candidateKey !== null || current.targetKey !== null;
+    topicDropRef.current = { candidateKey: null, targetKey: null, timer: null };
+    if (changed) setTopicDropTargetKey(null);
+  }, []);
+
+  const armTopicDropTarget = useCallback(
+    (key: string | null) => {
+      const current = topicDropRef.current;
+      if (key === current.candidateKey) return;
+      if (current.timer) clearTimeout(current.timer);
+      topicDropRef.current = { candidateKey: key, targetKey: null, timer: null };
+      if (current.targetKey !== null) setTopicDropTargetKey(null);
+      if (!key) return;
+      const timer = setTimeout(() => {
+        if (topicDropRef.current.candidateKey !== key) return;
+        topicDropRef.current = { candidateKey: key, targetKey: key, timer: null };
+        setTopicDropTargetKey(key);
+      }, TOPIC_DROP_DWELL_MS);
+      topicDropRef.current.timer = timer;
+    },
+    [],
+  );
+
   const flashToast = useCallback(
     (text: string, action?: { label: string; onAction: () => void }) => {
       setState({
@@ -1202,6 +1302,243 @@ export function useWorkspace(
       );
     },
     [setState],
+  );
+
+  const scheduleTopicAnimationEnd = useCallback(() => {
+    if (animTimer.current) clearTimeout(animTimer.current);
+    animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+  }, [setState]);
+
+  const applyTopicTargetLocally = useCallback(
+    (ids: readonly string[], target: TopicTarget | null, consumeDragHistory = false) => {
+      const idSet = new Set(ids);
+      setState((previous) => {
+        const topicOverrides = { ...previous.galleryOverrides.topic };
+        for (const id of idSet) delete topicOverrides[id];
+        return {
+          photos: previous.photos.map((photo) => {
+            if (!idSet.has(photo.id)) return photo;
+            return target
+              ? withTopicState(photo, {
+                  group: target.label,
+                  manualClusterId: target.id,
+                  topicId: target.id,
+                  topicKey: clusterTopicKey(target.id),
+                })
+              : withTopicState(photo, {
+                  group: photo.autoTopicLabel ?? photo.group,
+                  manualClusterId: null,
+                  topicId: photo.autoClusterId ?? null,
+                  topicKey: photo.autoTopicKey ?? photo.group,
+                });
+          }),
+          galleryOverrides: { ...previous.galleryOverrides, topic: topicOverrides },
+          history: consumeDragHistory ? previous.history.slice(0, -1) : previous.history,
+          future: consumeDragHistory ? [] : previous.future,
+          focusedCloudKey: null,
+          tilesAnimating: true,
+        };
+      });
+      scheduleTopicAnimationEnd();
+    },
+    [scheduleTopicAnimationEnd, setState],
+  );
+
+  const restoreTopicStateLocally = useCallback(
+    (before: readonly TopicPhotoState[], topicOverrides: Record<string, CanvasOverride>) => {
+      const byId = new Map(before.map((photo) => [photo.id, photo]));
+      setState((previous) => ({
+        photos: previous.photos.map((photo) => {
+          const snapshot = byId.get(photo.id);
+          return snapshot
+            ? withTopicState(photo, {
+                group: snapshot.group,
+                manualClusterId: snapshot.manualClusterId,
+                topicId: snapshot.topicId,
+                topicKey: snapshot.topicKey,
+              })
+            : photo;
+        }),
+        galleryOverrides: { ...previous.galleryOverrides, topic: { ...topicOverrides } },
+        focusedCloudKey: null,
+        tilesAnimating: true,
+      }));
+      scheduleTopicAnimationEnd();
+    },
+    [scheduleTopicAnimationEnd, setState],
+  );
+
+  const writeTopicAssignments = useCallback(async (assetIds: readonly string[], clusterId: string | null) => {
+    const response = await fetch("/api/topics/assignments", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assetIds, clusterId }),
+    });
+    if (response.ok) return;
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? String(response.status));
+  }, []);
+
+  const restoreTopicAssignmentsOnServer = useCallback(
+    async (before: readonly TopicPhotoState[]) => {
+      const groups = new Map<string | null, string[]>();
+      for (const photo of before) {
+        const key = photo.manualClusterId;
+        const ids = groups.get(key) ?? [];
+        ids.push(photo.id);
+        groups.set(key, ids);
+      }
+      const results = await Promise.allSettled(
+        [...groups].map(([clusterId, ids]) => writeTopicAssignments(ids, clusterId)),
+      );
+      const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failed) throw failed.reason;
+    },
+    [writeTopicAssignments],
+  );
+
+  const persistTopicAssignment = useCallback(
+    async (
+      ids: readonly string[],
+      target: TopicTarget | null,
+      options?: { beforeTopicOverrides?: Record<string, CanvasOverride>; consumeDragHistory?: boolean },
+    ) => {
+      if (topicMutationBusyRef.current) {
+        flashToast("A topic change is already being saved");
+        return;
+      }
+      const idSet = new Set(ids);
+      const current = stateRef.current;
+      const before = current.photos.filter((photo) => idSet.has(photo.id)).map(topicPhotoState);
+      if (before.length === 0) return;
+      if (target && before.every((photo) => photo.manualClusterId === target.id)) return;
+      if (!target && before.every((photo) => photo.manualClusterId === null)) return;
+
+      const beforeOverrides = { ...(options?.beforeTopicOverrides ?? current.galleryOverrides.topic) };
+      setTopicMutationBusy(true);
+      applyTopicTargetLocally(before.map((photo) => photo.id), target, options?.consumeDragHistory ?? false);
+      try {
+        await writeTopicAssignments(before.map((photo) => photo.id), target?.id ?? null);
+        router.refresh();
+        const count = before.length;
+        const message = target
+          ? `Moved ${count} ${count === 1 ? "file" : "files"} to ${target.label}`
+          : `Returned ${count} ${count === 1 ? "file" : "files"} to AI`;
+        flashToast(message, {
+          label: "Undo",
+          onAction: () => {
+            restoreTopicStateLocally(before, beforeOverrides);
+            setTopicMutationBusy(true);
+            void restoreTopicAssignmentsOnServer(before)
+              .then(() => {
+                router.refresh();
+                flashToast("Topic change undone");
+              })
+              .catch(() => {
+                router.refresh();
+                flashToast("Couldn't undo that topic change — refresh to see the saved state");
+              })
+              .finally(() => setTopicMutationBusy(false));
+          },
+        });
+      } catch {
+        restoreTopicStateLocally(before, beforeOverrides);
+        // A lost response is ambiguous: the RPC may have committed even though
+        // fetch rejected. Restore immediately for continuity, then let the
+        // server read settle the truth instead of leaving a split-brain canvas.
+        router.refresh();
+        flashToast("Couldn't confirm that topic change — refreshing the saved state");
+      } finally {
+        setTopicMutationBusy(false);
+      }
+    },
+    [
+      applyTopicTargetLocally,
+      flashToast,
+      restoreTopicAssignmentsOnServer,
+      restoreTopicStateLocally,
+      router,
+      setTopicMutationBusy,
+      writeTopicAssignments,
+    ],
+  );
+
+  const createTopicForAssets = useCallback(
+    async (label: string, ids: readonly string[]) => {
+      const trimmed = label.trim();
+      if (!trimmed || ids.length === 0) return;
+      if (topicMutationBusyRef.current) {
+        flashToast("A topic change is already being saved");
+        return;
+      }
+      const idSet = new Set(ids);
+      const current = stateRef.current;
+      const before = current.photos.filter((photo) => idSet.has(photo.id)).map(topicPhotoState);
+      if (before.length === 0) return;
+      const beforeOverrides = { ...current.galleryOverrides.topic };
+
+      setTopicMutationBusy(true);
+      try {
+        const response = await fetch("/api/topics", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: trimmed, assetIds: before.map((photo) => photo.id) }),
+        });
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+          topic?: TopicTarget;
+        } | null;
+        if (!response.ok || !body?.topic) throw new Error(body?.error ?? String(response.status));
+
+        const target = body.topic;
+        setTopicCatalog((previous) => [
+          ...previous.filter((topic) => topic.id !== target.id),
+          { id: target.id, label: target.label, origin: "manual" },
+        ]);
+        applyTopicTargetLocally(before.map((photo) => photo.id), target);
+        router.refresh();
+        const count = before.length;
+        flashToast(`Created ${target.label} with ${count} ${count === 1 ? "file" : "files"}`, {
+          label: "Undo",
+          onAction: () => {
+            restoreTopicStateLocally(before, beforeOverrides);
+            setTopicMutationBusy(true);
+            void fetch(`/api/topics/${target.id}`, { method: "DELETE" })
+              .then((deleteResponse) => {
+                if (!deleteResponse.ok) throw new Error(String(deleteResponse.status));
+                setTopicCatalog((previous) => previous.filter((topic) => topic.id !== target.id));
+                return restoreTopicAssignmentsOnServer(before);
+              })
+              .then(() => {
+                router.refresh();
+                flashToast("New topic removed");
+              })
+              .catch(() => {
+                router.refresh();
+                flashToast("Couldn't undo that topic creation — refresh to see the saved state");
+              })
+              .finally(() => setTopicMutationBusy(false));
+          },
+        });
+      } catch {
+        // The create RPC is atomic but the response can still be lost after
+        // commit. A refresh reveals the resulting manual topic/assignments if
+        // that happened; if it did not, the current selection simply remains.
+        router.refresh();
+        flashToast("Couldn't confirm topic creation — refreshing the saved state");
+      } finally {
+        setTopicMutationBusy(false);
+      }
+    },
+    [
+      applyTopicTargetLocally,
+      flashToast,
+      restoreTopicAssignmentsOnServer,
+      restoreTopicStateLocally,
+      router,
+      setTopicCatalog,
+      setTopicMutationBusy,
+    ],
   );
 
   // Real data is already scoped by the route (getPhotos(projectId)), so the
@@ -1359,6 +1696,10 @@ export function useWorkspace(
   }, [setState, snapshot]);
 
   const undo = useCallback(() => {
+    if (topicMutationBusyRef.current) {
+      flashToast("Wait for the current topic change to finish");
+      return;
+    }
     const s = stateRef.current;
     if (!s.history.length) return;
     const hist = s.history.slice();
@@ -1368,9 +1709,13 @@ export function useWorkspace(
     setState({ ...prev, history: hist, future });
     reconcileNotes(s.stickyNotes, prev.stickyNotes);
     reconcileInk(s.inkStrokes, prev.inkStrokes);
-  }, [setState, snapshot, reconcileNotes, reconcileInk]);
+  }, [setState, snapshot, reconcileNotes, reconcileInk, flashToast]);
 
   const redo = useCallback(() => {
+    if (topicMutationBusyRef.current) {
+      flashToast("Wait for the current topic change to finish");
+      return;
+    }
     const s = stateRef.current;
     if (!s.future.length) return;
     const future = s.future.slice();
@@ -1380,7 +1725,7 @@ export function useWorkspace(
     setState({ ...next, history: hist, future });
     reconcileNotes(s.stickyNotes, next.stickyNotes);
     reconcileInk(s.inkStrokes, next.inkStrokes);
-  }, [setState, snapshot, reconcileNotes, reconcileInk]);
+  }, [setState, snapshot, reconcileNotes, reconcileInk, flashToast]);
 
   /** Canonical-photo tile positions for whichever view is active — the single
    *  source both the renderer and marquee hit-testing read, so selection and
@@ -1774,6 +2119,11 @@ export function useWorkspace(
       if (gestureClaimed()) return;
       e.preventDefault();
       e.stopPropagation();
+      clearTopicDropTarget();
+      if (kind === "topic" && topicMutationBusyRef.current) {
+        flashToast("Wait for the current topic change to finish");
+        return;
+      }
       // Drawing outranks the tile. This handler stops propagation, so the
       // canvas's own pointer-down never runs for a press that lands on a photo
       // — and without this branch the marker drew on empty canvas and did
@@ -1884,6 +2234,8 @@ export function useWorkspace(
       inkIntent,
       beginStroke,
       beginErase,
+      clearTopicDropTarget,
+      flashToast,
     ],
   );
   /** One tile-drag entry point for every view — routes to the override bucket
@@ -2259,6 +2611,16 @@ export function useWorkspace(
         setState({
           galleryOverrides: { ...s.galleryOverrides, [d.kind]: bucket },
         });
+        if (d.kind === "topic" && !topicMutationBusyRef.current) {
+          const draggedIds = d.groupCenters ? Object.keys(d.groupCenters) : [d.key];
+          const layout = cloudDecorRef.current;
+          const target = layout
+            ? topicDropTargetAt(layout, toContent(e.clientX, e.clientY), draggedIds)
+            : null;
+          armTopicDropTarget(target?.key ?? null);
+        } else {
+          clearTopicDropTarget();
+        }
       } else if (d.mode === "cloudDrag") {
         // Timeline's whole-cloud drag is VERTICAL-only (ADR 0024): the label,
         // tick and band are pinned to the date column and every tile's x is
@@ -2358,7 +2720,16 @@ export function useWorkspace(
         setState({ tx: rr.width / 2 - targetX * s.scale, ty: rr.height / 2 - targetY * s.scale });
       }
     },
-    [rect, toContent, setState, pushHistory, applyPinch, markErased],
+    [
+      rect,
+      toContent,
+      setState,
+      pushHistory,
+      applyPinch,
+      markErased,
+      armTopicDropTarget,
+      clearTopicDropTarget,
+    ],
   );
 
   /** After a Canvas tile drag, reconcile folder membership (ADR 0034): a tile
@@ -2441,7 +2812,10 @@ export function useWorkspace(
       if (!wasPrimary) return;
     }
     const d = dragRef.current;
-    if (!d) return;
+    if (!d) {
+      clearTopicDropTarget();
+      return;
+    }
     dragRef.current = null;
     if (d.mode === "ink" || d.mode === "erase") {
       // Only the pointer that started the stroke ends it. A palm resting on the
@@ -2512,6 +2886,34 @@ export function useWorkspace(
         setState({ tool: "select" });
       }
     } else if (d.mode === "gallery") {
+      // A cancelled pointer never authorises a workspace-wide write. The tile
+      // may keep the positional nudge already rendered by pointermove, but only
+      // an actual pointerup can turn an armed highlight into membership.
+      const armedTopicKey =
+        d.kind === "topic" ? committedTopicDropKey(e.type, topicDropRef.current.targetKey) : null;
+      clearTopicDropTarget();
+      if (d.moved && d.kind === "topic" && armedTopicKey) {
+        const s = stateRef.current;
+        const layout = cloudDecorRef.current;
+        const target = layout?.clouds.find((cloud) => cloud.key === armedTopicKey);
+        if (layout && target) {
+          const draggedIds = d.groupCenters ? Object.keys(d.groupCenters) : [d.key];
+          const lastHistory = d.historyPushed ? s.history[s.history.length - 1] : undefined;
+          const beforeTopicOverrides = lastHistory?.galleryOverrides.topic ?? s.galleryOverrides.topic;
+          const options = {
+            beforeTopicOverrides,
+            consumeDragHistory: d.historyPushed,
+          };
+
+          if (!target.clusterId) return;
+          void persistTopicAssignment(
+            draggedIds,
+            { id: target.clusterId, label: target.label },
+            options,
+          );
+          return;
+        }
+      }
       // Anti-full-occlusion (Canvas only): a single tile dropped near-exactly on
       // another cascades off so a sliver of the one underneath always shows. Free
       // overlap is still allowed — this only prevents a 100% cover. Group moves
@@ -2542,7 +2944,17 @@ export function useWorkspace(
         syncFolderMembership(d.groupCenters ? Object.keys(d.groupCenters) : [d.key]);
       }
     }
-  }, [setState, pushHistory, activeTilePositions, syncFolderMembership, patchNote, commitStroke, commitErase]);
+  }, [
+    setState,
+    pushHistory,
+    activeTilePositions,
+    syncFolderMembership,
+    patchNote,
+    commitStroke,
+    commitErase,
+    clearTopicDropTarget,
+    persistTopicAssignment,
+  ]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
 
@@ -2659,10 +3071,9 @@ export function useWorkspace(
     }
   }, [flashToast, setState]);
 
-  /** Rename one Topic cloud (ADR 0038). The label IS the cloud key the canvas
-   *  groups by, so the refresh is what re-derives every photo's `group`; the
-   *  arrangement survives because overrides are anchored to the cluster id, not
-   *  to the name. */
+  /** Rename one Topic cloud (ADR 0038). The stable cluster id remains the
+   *  canvas key; the refresh only re-derives the display label. Positional
+   *  overrides therefore survive unchanged. */
   const renameCloud = useCallback(
     async (clusterId: string, label: string) => {
       const trimmed = label.trim();
@@ -2674,14 +3085,52 @@ export function useWorkspace(
           body: JSON.stringify({ label: trimmed }),
         });
         if (!resp.ok) throw new Error(String(resp.status));
+        setTopicCatalog((previous) =>
+          previous.map((topic) => (topic.id === clusterId ? { ...topic, label: trimmed } : topic)),
+        );
         setState({ focusedCloudKey: null });
         router.refresh();
       } catch {
         flashToast("Couldn't rename that topic — try again");
       }
     },
-    [flashToast, router, setState],
+    [flashToast, router, setState, setTopicCatalog],
   );
+
+  const moveSelectionToTopic = useCallback(
+    (topicId: string) => {
+      const cloud = cloudDecorRef.current?.clouds.find((candidate) => candidate.clusterId === topicId);
+      const catalogTopic = topicCatalog.find((candidate) => candidate.id === topicId);
+      const label = cloud?.label ?? catalogTopic?.label;
+      if (!label) {
+        flashToast("That topic isn't available on this canvas");
+        return;
+      }
+      void persistTopicAssignment(stateRef.current.selectedIds, { id: topicId, label });
+    },
+    [flashToast, persistTopicAssignment, topicCatalog],
+  );
+
+  const createTopicFromSelection = useCallback(
+    (label: string) => {
+      const ids = stateRef.current.selectedIds.slice();
+      if (ids.length === 0) {
+        flashToast("Select files to create a topic");
+        return;
+      }
+      void createTopicForAssets(label, ids);
+    },
+    [createTopicForAssets, flashToast],
+  );
+
+  const returnSelectionToAi = useCallback(() => {
+    const ids = stateRef.current.selectedIds.slice();
+    if (ids.length === 0) {
+      flashToast("Select files to return to AI grouping");
+      return;
+    }
+    void persistTopicAssignment(ids, null);
+  }, [flashToast, persistTopicAssignment]);
 
   // ── Colour labels ─────────────────────────────────────────────────────────
 
@@ -4818,6 +5267,7 @@ export function useWorkspace(
       // OS took for a system gesture) would leave a phantom finger in the map
       // and turn the NEXT single press into a two-pointer pinch.
       if (e.isPrimary) {
+        clearTopicDropTarget();
         if (t.longPress) clearTimeout(t.longPress);
         t.pointers.clear();
         t.pinch = null;
@@ -4863,6 +5313,7 @@ export function useWorkspace(
             if (c.pointers.size !== 1 || !c.longPressAt) return;
             c.suppress = true;
             dragRef.current = null;
+            clearTopicDropTarget();
             setState({ marquee: null, frameDraftRect: null, panning: false });
             // targetId null: the menu acts on the selection, and the press that
             // started this hold has already selected whatever it landed on.
@@ -4878,6 +5329,7 @@ export function useWorkspace(
         // it already moved stays where it is — undo covers a stray nudge, and
         // reverting here would fight the user's own correction.
         dragRef.current = null;
+        clearTopicDropTarget();
         const s = stateRef.current;
         const [a, b] = Array.from(t.pointers.values());
         t.suppress = true;
@@ -5210,6 +5662,7 @@ export function useWorkspace(
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (copyTimer.current) clearTimeout(copyTimer.current);
       if (animTimer.current) clearTimeout(animTimer.current);
+      if (topicDropRef.current.timer) clearTimeout(topicDropRef.current.timer);
       for (const url of objectUrls.values()) URL.revokeObjectURL(url);
       objectUrls.clear();
     };
@@ -5305,6 +5758,35 @@ export function useWorkspace(
   // Selection + add-to-project work the same in every project view now, not just
   // Canvas — the views differ only in how tiles are sorted (ADR 0022).
   const showAddToProject = projectMode && selectedIds.size > 0;
+
+  // The canvas contains only the current project's files, but Topic membership
+  // is workspace-wide. Load the durable catalog so “Move to…” can also target a
+  // cloud that happens to have no member in this project. If the additive
+  // migration is still rolling out, visible canvas clouds remain a safe
+  // fallback and the write route will report the unavailable feature.
+  useEffect(() => {
+    if (!isSenseView) return;
+    const controller = new AbortController();
+    let active = true;
+    void fetch("/api/topics", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        const parsed = topicsResponseSchema.safeParse(await response.json());
+        if (!parsed.success) throw new Error("invalid topic catalog");
+        if (active) setTopicCatalog(parsed.data.topics);
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+          // Visible layout topics are merged below, so a transient catalog read
+          // failure need not interrupt the canvas with a toast.
+          setTopicCatalog([]);
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isSenseView, state.proc.active]);
 
   const projectPhotos = useMemo(
     () => filteredPhotos(state.photos),
@@ -5426,6 +5908,43 @@ export function useWorkspace(
     }
     return { ...cloudDecor, clouds: cloudDecor.clouds.filter((c) => live.has(c.key)), edges: [] };
   }, [cloudDecor, state.labelFilter, activePositions]);
+
+  const topicOptions = useMemo<TopicOption[]>(() => {
+    const options = new Map<string, TopicOption>(
+      topicCatalog.map((topic) => [
+        topic.id,
+        {
+          id: topic.id,
+          label: topic.label,
+          manual: topic.origin === "manual",
+        },
+      ]),
+    );
+    for (const cloud of topicLayoutResult?.clouds ?? []) {
+      if (!cloud.clusterId) continue;
+      options.set(cloud.clusterId, {
+        ...options.get(cloud.clusterId),
+        id: cloud.clusterId,
+        label: cloud.label,
+        color: cloud.color,
+      });
+    }
+    return [...options.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [topicCatalog, topicLayoutResult]);
+
+  const selectedTopicId = useMemo(() => {
+    if (state.selectedIds.length === 0) return null;
+    const byId = new Map(state.photos.map((photo) => [photo.id, photo]));
+    const first = byId.get(state.selectedIds[0])?.topicId ?? null;
+    if (!first) return null;
+    return state.selectedIds.every((id) => byId.get(id)?.topicId === first) ? first : null;
+  }, [state.photos, state.selectedIds]);
+
+  const canReturnSelectionToAi = useMemo(() => {
+    if (state.selectedIds.length === 0) return false;
+    const selected = new Set(state.selectedIds);
+    return state.photos.some((photo) => selected.has(photo.id) && Boolean(photo.manualClusterId));
+  }, [state.photos, state.selectedIds]);
 
   // Committed after every render so pointer-down handlers (onCloudLabelDown)
   // read the exact layout the canvas is showing instead of recomputing it.
@@ -5658,6 +6177,14 @@ export function useWorkspace(
       (isLabelsView && Object.keys(state.galleryOverrides.label).length > 0),
     recluster,
     renameCloud,
+    topicOptions,
+    selectedTopicId,
+    canReturnSelectionToAi,
+    topicMutationBusy,
+    moveSelectionToTopic,
+    createTopicFromSelection,
+    returnSelectionToAi,
+    topicDropTargetKey,
     addToNewArtboard,
     addToExistingArtboard,
 

@@ -2,6 +2,11 @@ import type { AssetLabel, LabelNames, NoteFontSize } from "@archivemind/shared";
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { LABEL_COLORS, NO_LABEL_CLOUD_KEY, NO_LABEL_COLOR } from "./labels";
 import { GROUPS, SOURCES } from "./mock-data";
+import { heuristicTopicKey, UNSORTED_CLOUD_KEY } from "./topics";
+
+// Kept as a layout re-export for existing callers. The constant itself lives
+// with topic derivation now, avoiding a topics → layout → topics cycle.
+export { UNSORTED_CLOUD_KEY } from "./topics";
 
 /**
  * Pure, deterministic layout algorithms — no randomness anywhere; every
@@ -548,10 +553,10 @@ export interface CloudNode {
   label: string;
   color: string;
   count: number;
-  /** The `topic_clusters` row behind this cloud, when there is exactly one —
-   *  what makes it renameable (ADR 0038). Null for a heuristic topic, for
-   *  Unsorted/Other, for every Timeline day, and for the (possible) case of two
-   *  distinct clusters that share a label and therefore render as one cloud. */
+  /** The effective `topic_clusters` row behind this cloud — what makes it
+   *  renameable and a valid assignment target. Null for a heuristic topic,
+   *  Unsorted/Other, LABELS and every Timeline day. Topic clouds key by this
+   *  stable id, so two distinct clusters with the same label stay distinct. */
   clusterId?: string | null;
   /** Label anchor: top-center of the cloud's *current* tile bbox (override-aware),
    *  so the label sits on the colored backdrop above the tiles — visible, and
@@ -600,7 +605,6 @@ export interface CloudLayout {
   axis?: { y: number; x1: number; x2: number };
 }
 
-export const UNSORTED_CLOUD_KEY = "Unsorted";
 const UNSORTED_CLOUD_COLOR = "#8a8f98";
 
 /** Cap 1 (ADR 0022): a tag attached to more linkable files than this is treated
@@ -705,11 +709,15 @@ export function packCircles(
 const MAP_CLOUD_COLORS = ["#39ff6a", "#5b9bff", "#ff7a5c", "#ffd166", "#c084fc", "#4fd1c5"];
 
 
-function topicCloudColor(key: string): string {
-  if (key === UNSORTED_CLOUD_KEY) return UNSORTED_CLOUD_COLOR;
-  // Mock seed groups keep their curated GROUPS colors; real tag-derived
-  // topics (ADR 0023) are arbitrary strings and hash into the shared palette.
-  return GROUPS[key as PhotoGroup]?.color ?? MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
+function topicCloudColor(key: string, label: string, stored: boolean): string {
+  // Stored topics always hash their stable UUID, even if their current label
+  // happens to equal a mock/system label. Otherwise renaming "rescue" or
+  // "Unsorted" would cross a special-case boundary and recolor the cloud.
+  if (stored) return MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
+  if (label === UNSORTED_CLOUD_KEY) return UNSORTED_CLOUD_COLOR;
+  // Mock seed/fallback topics keep curated colors where one exists; otherwise
+  // their namespaced synthetic key hashes into the shared palette.
+  return GROUPS[label as PhotoGroup]?.color ?? MAP_CLOUD_COLORS[hash(key) % MAP_CLOUD_COLORS.length];
 }
 
 /** A stable color per Timeline date key, drawn from the same palette Map uses. */
@@ -732,6 +740,9 @@ function buildCloudLayout(
    *  instead of stranding itself (and its cloud's label) across the canvas.
    *  Null means "this view does not re-cluster", and every override applies. */
   anchorOf: ((p: Photo) => string) | null,
+  /** Effective stored topic id to surface on the cloud. Null for views whose
+   *  clouds are not topic-cluster rows (LABELS). */
+  clusterIdOf: ((p: Photo) => string | null) | null,
   /** Draw the shared-AI-tag web between tiles (ADR 0022). True for Topic, where
    *  the lines ARE the structure the view is about. False for LABELS: there the
    *  colour is the whole statement, and a tag web over it would assert an AI
@@ -816,10 +827,9 @@ function buildCloudLayout(
       yb = Math.max(yb, t.y + t.h);
     }
 
-    // A cloud is renameable only when it maps to exactly one stored cluster —
-    // two clusters sharing a label render as one cloud, and renaming "it" would
-    // silently rename only one of them.
-    const clusterIds = new Set(items.map((p) => p.clusterId).filter((id): id is string => !!id));
+    const clusterIds = new Set(
+      clusterIdOf ? items.map(clusterIdOf).filter((id): id is string => Boolean(id)) : [],
+    );
     clouds.push({
       key: k,
       label: labelOf(k),
@@ -970,32 +980,56 @@ function buildCloudLayout(
   return { clouds, tiles, edges, tileCloud: tileCluster, bounds: positionsBounds(tiles) };
 }
 
-/** The identity a Topic override is anchored to (ADR 0038). The stored cluster
- *  id when the photo has one — it survives a relabel AND a user rename, so
- *  neither resets the user's arrangement — else the derived topic key, so a
- *  heuristic topic that changes still re-packs. Exported for the drag path,
- *  which has to stamp the same value it will later be compared against. */
-export function topicAnchorOf(photo: Pick<Photo, "clusterId" | "group">): string {
-  return photo.clusterId ?? photo.group;
+/** Effective stable Topic cloud key. Real server rows carry `topicKey`; the
+ *  fallback keeps untouched mock constructors working without making their
+ *  display label the identity of a stored cluster. */
+export function topicKeyOf(photo: Pick<Photo, "topicKey" | "topicId" | "group">): string {
+  return photo.topicKey ?? photo.topicId ?? heuristicTopicKey(photo.group);
 }
 
-/** Topic: clouds are `photo.group` — for real assets the stored cluster label
- *  (ADR 0028) or a tag-derived topic (ADR 0023), labeled by its own key
- *  (`Other`/`Unsorted` for the buckets); only retired mock seed groups still
- *  resolve through GROUPS. Lines are shared-AI-tag relations (ADR 0022). */
+/** The identity a Topic override is anchored to (ADR 0038). Stored membership
+ *  uses the effective cluster UUID. Heuristic membership keeps the raw label
+ *  for compatibility with already-persisted pre-editable-Topic overrides; its
+ *  synthetic layout key still comes from `topicKeyOf`. */
+export function topicAnchorOf(photo: Pick<Photo, "topicId" | "group">): string {
+  return photo.topicId ?? photo.group;
+}
+
+/** Topic: grouping/key/color use stable identity; `photo.group` supplies only
+ *  the display label. Lines remain shared-AI-tag relations (ADR 0022). */
 export function topicCloudLayout(
   photos: readonly Photo[],
   topicOverrides: Record<string, CanvasOverride>,
   frames: readonly Frame[] = [],
 ): CloudLayout {
+  // A healthy stored cluster has one label for every member. Resolve the rare
+  // inconsistent optimistic/intermediate state deterministically so reversing
+  // input order cannot change SSR output.
+  const labelsByKey = new Map<string, string>();
+  const labelCandidates = new Map<string, Set<string>>();
+  const storedKeys = new Set<string>();
+  for (const photo of photos) {
+    const key = topicKeyOf(photo);
+    if (photo.topicId) storedKeys.add(key);
+    const labels = labelCandidates.get(key) ?? new Set<string>();
+    labels.add(photo.group);
+    labelCandidates.set(key, labels);
+  }
+  for (const [key, labels] of labelCandidates) {
+    labelsByKey.set(key, [...labels].sort()[0] ?? key);
+  }
   return buildCloudLayout(
     photos,
-    (p) => p.group,
-    topicCloudColor,
-    (key) => GROUPS[key as PhotoGroup]?.label ?? key,
+    topicKeyOf,
+    (key) => topicCloudColor(key, labelsByKey.get(key) ?? key, storedKeys.has(key)),
+    (key) => {
+      const label = labelsByKey.get(key) ?? key;
+      return GROUPS[label as PhotoGroup]?.label ?? label;
+    },
     topicOverrides,
     frames,
     topicAnchorOf,
+    (photo) => photo.topicId ?? null,
     true,
   );
 }
@@ -1027,6 +1061,7 @@ export function labelCloudLayout(
     labelOverrides,
     frames,
     labelAnchorOf,
+    null,
     false,
   );
 }

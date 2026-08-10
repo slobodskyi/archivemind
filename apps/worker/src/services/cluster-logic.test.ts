@@ -367,6 +367,24 @@ describe("planClusters — renamed clusters are pinned (ADR 0038)", () => {
     expect(plan.retainIds).toEqual(["human"]);
   });
 
+  it("retains an unmatched generated cluster when a manual override points at it", () => {
+    const plan = planClusters(
+      rows,
+      [
+        { id: "free", label: "obsolete", centroid: near(8, 5) },
+        {
+          id: "assigned-into",
+          label: "Family",
+          centroid: near(8, 6),
+          isProtected: true,
+        },
+      ],
+      "ws",
+    )!;
+    expect(plan.deleteIds).toEqual(["free"]);
+    expect(plan.retainIds).toEqual(["assigned-into"]);
+  });
+
   it("is deterministic under any input ordering", () => {
     const existing: ExistingCluster[] = firstRun().insert.map((c, i) => ({
       id: `c${i}`,

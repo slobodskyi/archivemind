@@ -8,15 +8,20 @@ import {
 } from "@archivemind/shared";
 import type { ExifData, Photo, PhotoCaptions } from "@/types";
 import { presignGet } from "@/lib/r2";
-import { UNSORTED_CLOUD_KEY } from "@/lib/layout";
-import { deriveTopics } from "@/lib/topics";
+import {
+  deriveTopicAssignments,
+  heuristicTopicKey,
+  UNSORTED_CLOUD_KEY,
+  type TopicAssignment,
+} from "@/lib/topics";
 
 /** Real assets → the mockup's Photo shape (server-side; RLS-scoped query +
  *  presigned preview URLs). Per the 2026-07-10 product decision the canvas
  *  shows ONLY real files — no mock mixing; the demo archive is issue #42.
- *  `group` is DERIVED from the asset's AI tags (lib/topics.ts, ADR 0023);
- *  fields the backend doesn't own yet (country/project) keep inert defaults
- *  until their phases (#17–#21). */
+ *  Topic identity/label come from the manual-first read model in lib/topics.ts:
+ *  an explicit override wins, then the stored embedding cluster (ADR 0028),
+ *  then the tag heuristic (ADR 0023). Inert country/project defaults survive
+ *  only for retired mockup fields that no current view reads. */
 
 interface PreviewRow {
   size: string;
@@ -71,15 +76,23 @@ interface AssetEditRow {
   edited_medium_key: string | null;
 }
 
+/** One-to-one user override (`asset_id` is the table PK), with its target
+ *  topic embedded through the override's `cluster_id` FK. */
+interface TopicClusterOverrideRow {
+  cluster_id: string;
+  topic_clusters: { label: string } | null;
+}
+
 interface AssetRow {
   id: string;
   title: string | null;
   status: string;
   ai_processed_at: string | null;
   created_at: string;
-  label: AssetLabel | null;
+  label?: AssetLabel | null;
   cluster_id: string | null;
   topic_clusters: { label: string } | null;
+  topic_cluster_overrides?: TopicClusterOverrideRow | null;
   files: FileOriginRow[];
   asset_previews: PreviewRow[];
   asset_exif: ExifRow | null;
@@ -136,7 +149,7 @@ function toExifData(e: ExifRow | null, fallbackDate: Date): ExifData {
   };
 }
 
-async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
+async function toPhoto(a: AssetRow, topic: TopicAssignment): Promise<Photo> {
   const thumb = a.asset_previews.find((p) => p.size === "thumb");
   // A non-destructive edit (ADR 0030) redirects src to the edited thumb; the
   // originals in asset_previews are left untouched (a reset just drops the row).
@@ -203,11 +216,16 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
     facts,
     time: `${pad(takenAt.getMonth() + 1)}-${pad(takenAt.getDate())} ${pad(takenAt.getHours())}:${pad(takenAt.getMinutes())}`,
     day: `${MONTHS[takenAt.getMonth()]} ${takenAt.getDate()}`,
-    group: topic,
-    // The cluster's stable identity, kept alongside its (renameable, relabelable)
-    // label so the Topic canvas can anchor drag overrides to something that does
-    // not change when the cloud is renamed — ADR 0038.
-    clusterId: a.cluster_id,
+    group: topic.label,
+    // Keep the machine baseline and the user override side-by-side. The
+    // effective key/id are precomputed so every client consumer uses the same
+    // manual-first rule and the same synthetic fallback keys.
+    autoClusterId: topic.autoClusterId,
+    manualClusterId: topic.manualClusterId,
+    autoTopicKey: topic.autoTopicKey,
+    autoTopicLabel: topic.autoTopicLabel,
+    topicId: topic.topicId,
+    topicKey: topic.topicKey,
     country: "Ukraine",
     // `label ?? null` rather than `a.label`: the pre-migration fallback select
     // omits the column entirely, and an undefined there would read as "not
@@ -222,9 +240,8 @@ async function toPhoto(a: AssetRow, topic: string): Promise<Photo> {
   return photo;
 }
 
-/** Everything the canvas needs EXCEPT `assets.label` — the fallback select for
- *  a database that has not had migration 20260808000001 pushed yet. */
-const ASSET_SELECT_PRE_LABEL = `id, title, status, ai_processed_at, created_at, cluster_id,
+/** Relations/columns that predate editable Topic. */
+const ASSET_SELECT_BASE = `id, title, status, ai_processed_at, created_at, cluster_id,
        topic_clusters ( label ),
        files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),
@@ -234,7 +251,15 @@ const ASSET_SELECT_PRE_LABEL = `id, title, status, ai_processed_at, created_at, 
        facts ( id, text, status ),
        captions ( id, lang, style, text, is_edited )`;
 
-const ASSET_SELECT = `label, ${ASSET_SELECT_PRE_LABEL}`;
+/** New one-to-one manual membership relation. Kept as a select fragment so a
+ *  web-before-migration deploy can retry without it. */
+const TOPIC_OVERRIDE_SELECT = `topic_cluster_overrides ( cluster_id, topic_clusters ( label ) )`;
+
+function assetSelect(includeLabel: boolean, includeTopicOverrides: boolean): string {
+  return [includeLabel ? "label" : null, includeTopicOverrides ? TOPIC_OVERRIDE_SELECT : null, ASSET_SELECT_BASE]
+    .filter((part): part is string => part !== null)
+    .join(", ");
+}
 
 /** The caller's trashed photos (ADR 0033) — the photo half of the Trash view,
  *  read by GET /api/assets?scope=trash. Un-purged trash only: a purged
@@ -293,32 +318,69 @@ function selectAssets(supabase: SupabaseClient, projectId: string | undefined, s
   return query.eq("status", "active").order("created_at", { ascending: false }).limit(500);
 }
 
+function isMissingTopicOverrideRelation(error: {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+}): boolean {
+  if (error.code === "42P01") return true;
+  if (error.code !== "PGRST200" && error.code !== "PGRST204") return false;
+  return [error.message, error.details, error.hint].some((part) => part?.includes("topic_cluster_overrides"));
+}
+
 /** The caller's assets (RLS-scoped). `projectId` filters to one project's M:N
  *  membership; omit (or pass "all") for the whole workspace. */
 export async function getRealPhotos(supabase: SupabaseClient, projectId?: string): Promise<Photo[]> {
-  let { data, error } = await selectAssets(supabase, projectId, ASSET_SELECT);
-  // `label` (migration 20260808000001) is the newest column here, and web
-  // deploys are not transactional with migration pushes — main merging ships
-  // this code to Vercel before the owner runs `db push` (CONTRIBUTING.md).
-  // Everywhere else that gap degrades a panel; here it would 42703 the ONE
-  // query the canvas is made of and leave the archive blank, so retry without
-  // it rather than take the whole view down over a colour dot.
-  if (error?.code === "42703") {
-    ({ data, error } = await selectAssets(supabase, projectId, ASSET_SELECT_PRE_LABEL));
+  let includeLabel = true;
+  let includeTopicOverrides = true;
+  let { data, error } = await selectAssets(
+    supabase,
+    projectId,
+    assetSelect(includeLabel, includeTopicOverrides),
+  );
+  // The color-label column and editable-Topic relation can each deploy after
+  // this web read. Peel off only the unavailable feature and retry, so either
+  // migration gap degrades to the previous behavior instead of blanking the
+  // ONE query the canvas is made of.
+  for (let retry = 0; error && retry < 2; retry += 1) {
+    if (error.code === "42703" && includeLabel) {
+      includeLabel = false;
+    } else if (includeTopicOverrides && isMissingTopicOverrideRelation(error)) {
+      includeTopicOverrides = false;
+    } else {
+      break;
+    }
+    ({ data, error } = await selectAssets(
+      supabase,
+      projectId,
+      assetSelect(includeLabel, includeTopicOverrides),
+    ));
   }
   if (error) throw error;
   const rows = (data ?? []) as unknown as AssetRow[];
-  // Topic = the stored semantic cluster label when present (ADR 0028: stable
-  // across sessions, identical in every project), else the RESULT-SET-relative
-  // tag heuristic (ADR 0023) over exactly the rows this call returns — the
-  // fallback for assets not yet clustered. Under RLS a cross-workspace cluster
-  // embeds as null, so the join can only ever surface the caller's own labels.
-  const topics = deriveTopics(
+  // Preserve the AI baseline even when a manual target wins. Both target labels
+  // are RLS-scoped joins, while heuristic fallback remains result-set-relative
+  // over exactly the rows this call returned (ADR 0023).
+  const topics = deriveTopicAssignments(
     rows.map((r) => ({
       id: r.id,
-      clusterLabel: r.topic_clusters?.label ?? null,
+      autoClusterId: r.cluster_id,
+      autoClusterLabel: r.topic_clusters?.label ?? null,
+      manualClusterId: r.topic_cluster_overrides?.cluster_id ?? null,
+      manualClusterLabel: r.topic_cluster_overrides?.topic_clusters?.label ?? null,
       tags: r.asset_tags.flatMap((t) => (t.tags ? [{ name: t.tags.name, category: t.tags.category }] : [])),
     })),
   );
-  return Promise.all(rows.map((r) => toPhoto(r, topics.get(r.id) ?? UNSORTED_CLOUD_KEY)));
+  const fallbackKey = heuristicTopicKey(UNSORTED_CLOUD_KEY);
+  const fallbackTopic: TopicAssignment = {
+    autoClusterId: null,
+    manualClusterId: null,
+    autoTopicKey: fallbackKey,
+    autoTopicLabel: UNSORTED_CLOUD_KEY,
+    topicId: null,
+    topicKey: fallbackKey,
+    label: UNSORTED_CLOUD_KEY,
+  };
+  return Promise.all(rows.map((r) => toPhoto(r, topics.get(r.id) ?? fallbackTopic)));
 }

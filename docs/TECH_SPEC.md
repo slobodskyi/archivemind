@@ -372,6 +372,18 @@ create index usage_ws_idx on usage_events (workspace_id, created_at);
 -- revoked and re-granted on (label, is_renamed) only, because the same row holds
 -- the k-means `centroid` and a forged one corrupts every future clustering of
 -- the workspace rather than a single row.
+-- Migration 20260810000001 (ADR 0042) separates the worker-owned Topic answer
+-- from human curation. `topic_clusters.origin` is `generated | manual`;
+-- generated rows keep a non-null centroid, while manual rows have no centroid
+-- and never enter worker matching. `topic_cluster_overrides` stores at most one
+-- human destination per asset (RLS SELECT; writes only through the narrow,
+-- editor-gated `create_manual_topic`, `assign_topic_assets` and
+-- `delete_manual_topic` RPCs). Its FK is ON DELETE RESTRICT. The read rule is:
+--
+--   effective topic = manual override ?? assets.cluster_id ?? tag heuristic
+--
+-- Deleting an override is therefore a lossless "Return to AI"; it never
+-- rewrites the latest k-means baseline. Migration NOT yet on prod 2026-08-10.
 
 -- ============ canvas layouts ============
 create table canvas_layouts (
@@ -485,6 +497,20 @@ Person-related output restricted to **attributes** (never identity). Store tags 
 **Embedding:** `gemini-embedding-2` (GA), input = the image itself, `output_dimensionality=768` (auto-normalized) → `embeddings(kind='image')`. **One `Content` object per image** — multiple `Part`s in one `Content` collapse to a single aggregated vector (silent index corruption); no `task_type` param on embedding-2, frame the task via a text instruction. **No fallback** (`gemini-embedding-001` retires 2026-07-14, incompatible space). Same for PDF: chunk text ~1500 tokens, one `Content` per chunk → `kind='doc_chunk'`.
 Per asset: 1 usage_event `image_analyzed` + 1 `embedding`. Set `assets.ai_processed_at`.
 
+#### 8.2.1 Topic clustering (`type='cluster'`)
+
+After analyze, deterministic spherical k-means groups stored image embeddings
+and writes the machine baseline to generated `topic_clusters` rows plus
+`assets.cluster_id` (ADR 0028). Editable Topics do not feed manual moves back
+into that mathematics (ADR 0042): the handler locks the workspace, matches only
+`origin='generated' AND centroid IS NOT NULL`, and never updates or deletes a
+manual row. An unmatched generated row referenced by
+`topic_cluster_overrides` is retained with baseline `size=0`; the override FK
+also rejects an accidental delete. Re-cluster refreshes the AI baseline while
+preserving every manual destination and costs zero credits (no Gemini call).
+Soft trash keeps the override for Restore; permanent purge deletes it explicitly
+because the retained asset tombstone never fires an asset-delete cascade.
+
 ### 8.3 Captions (`type='caption'`, payload: asset_ids, langs[], style)
 Per asset × lang: prompt = base template (in `packages/shared/prompts.ts`, per style) + `projects.caption_prompt` (if run in project context) + known metadata (date, GPS label, confirmed facts) + medium preview → text → upsert `captions`. Editing a caption in UI sets `is_edited=true`; regenerate never silently overwrites edited captions (UI confirms).
 
@@ -573,6 +599,10 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `POST /api/jobs` | `{type:'ingest'|'analyze'|'caption', assetIds}` → insert `ai_jobs`. **Not** export/edit/purge/cluster: every arm of `createJobRequestSchema` is asset-id-shaped, so each job type that isn't gets its own route |
 | `POST /api/topics/recluster` | **shipped (ADR 0038)** — re-run the workspace's semantic clustering on demand. Workspace-scoped, so it is a route rather than a `createJobRequestSchema` arm. Zero credits (pure CPU over stored embeddings, no Gemini call); `queued\|running` backlog guard; `workspace_id` built from the caller's server-resolved membership, never the body |
 | `PATCH /api/topics/:id` | **shipped (ADR 0038)** — rename one Topic cloud. Writes `label` + `is_renamed` and nothing else: migration `20260727000003` narrowed the UPDATE grant to those two columns, so an extra key raises 42501 rather than silently updating the k-means `centroid` |
+| `GET /api/topics` | **implemented (ADR 0042; migration not yet on prod)** — list every usable destination in the current workspace, not only topics represented in the open project. Includes non-empty generated topics, protected/pinned generated topics, and manual topics |
+| `POST /api/topics` | **implemented (ADR 0042; migration not yet on prod)** — `{label, assetIds}` → `{topic:{id,label}}`; atomically create a centroid-less manual topic and seed a non-empty selection |
+| `PUT /api/topics/assignments` | **implemented (ADR 0042; migration not yet on prod)** — `{assetIds, clusterId|null}` → `{ok:true}`; move up to 500 assets atomically, or delete their overrides for Return to AI. `workspaceId` is never accepted from the body |
+| `DELETE /api/topics/:id` | **implemented (ADR 0042; migration not yet on prod)** — delete only an `origin='manual'` topic; its overrides are removed in the same transaction, revealing each asset's unchanged AI baseline |
 | `GET  /api/jobs/:id` | status (primary channel is Realtime; this is fallback) |
 | `GET  /api/search?q=&projectId=` | §8.4 |
 | `GET  /api/usage` | **shipped (ADR 0037)** — the Usage & Storage snapshot: storage by bucket, this month's credits, the analyzed/captioned funnel, per-project and per-source attribution, 30 days of activity. One `workspace_usage()` RPC (SECURITY INVOKER — RLS is the boundary). Only for the client-side view switch; `/account/usage` awaits the same reader server-side |
@@ -600,6 +630,18 @@ The ported mockup's `lib/api.ts` is the swap point. Mapping:
 | canned chat replies | `GET /api/search` results panel (chat UI stays; answers = search) |
 
 New pieces: Supabase auth screens/guard; upload flow (presign → PUT → complete) with per-file progress; Picker/Chooser launchers → `POST /api/imports`; Realtime hook `useJobProgress(workspaceId)`.
+
+**Topic read and interaction (ADR 0042):** the asset query reads both the AI
+baseline (`assets.cluster_id` → generated topic) and the optional
+`topic_cluster_overrides` target, then derives one stable effective topic id and
+label with `override ?? AI ?? heuristic/Unsorted` precedence. A pre-migration
+deploy retries without the override relation and preserves the old AI-first
+view. Empty-space tile drag remains project-local geometry; membership changes
+only through a persisted cloud's explicit drop target or Move-to-topic menu;
+heuristic clouds require the selection-only New topic action, and pointercancel
+never writes. A semantic move clears the old Topic coordinate override and
+repacks the tile. Bulk move and Return to AI update optimistically; create,
+move and reset all expose Undo.
 
 **Canvas at scale (mandatory):** the mockup renders 235 nodes; real archives are 10k–30k. Neural view must consume `GET /api/canvas` aggregates — render hubs/folders with counts, materialize individual tiles only for expanded folders / current viewport, cap simultaneously-mounted tiles (~300) and virtualize. "Organize" modes (`source|date|place|similarity`) recluster client-side from aggregate data; `similarity` uses server-provided cluster ids (post-MVP: k-means over embeddings; MVP may ship `source|date|place` only).
 
