@@ -185,7 +185,7 @@ Phases 1–2). What actually remains:
   2026-07-27**, verified via ledger only: Docker on the owner's machine returns
   500, which takes out `db diff`'s shadow database, `db dump`, and makes
   `db push` print a `pgdelta` warning after succeeding.
-- **Editable Topic clouds — ✅ DONE 2026-08-10, migration NOT yet on prod** —
+- **Editable Topic clouds — ✅ DONE 2026-08-10, on prod** —
   Topic now keeps the machine answer and the person's decision as different
   facts ([ADR 0042](decisions/0042-editable-topic-clouds.md)):
   `assets.cluster_id` remains the latest deterministic k-means baseline, while
@@ -203,10 +203,12 @@ Phases 1–2). What actually remains:
   refreshes the AI baseline without erasing curation and still costs zero
   credits. Migration `20260810000001` (`topic_clusters.origin` + nullable/check-
   constrained centroid + `topic_cluster_overrides` + RPCs; pgTAP `014`, 36
-  assertions) — **owner push still pending**; the asset read retries without the
-  new relation during the web-before-migration deploy gap.
-- **Colour labels + the LABELS view — ✅ DONE 2026-08-08, migration NOT yet on
-  prod** — the archive had four ways to group photos and all four were derived
+  assertions) — **on prod 2026-08-10**, verified through the linked migration
+  ledger and a clean post-push dry-run. Docker on the owner's machine still
+  returns 500 while provisioning `db diff`'s shadow database, so that optional
+  drift check could not run; the asset read keeps its migration-gap fallback.
+- **Colour labels + the LABELS view — ✅ DONE 2026-08-08, on prod** — the
+  archive had four ways to group photos and all four were derived
   from the file (date, GPS, the model's reading, none). This adds the first one
   that records a *decision*
   ([ADR 0040](decisions/0040-colour-labels-as-a-human-curation-axis.md)):
@@ -230,8 +232,9 @@ Phases 1–2). What actually remains:
   re-colouring a dragged tile re-packs it) and the tag web switched off. Zero
   credits (ADR 0037 — no model runs). Migration `20260808000001`
   (`asset_label` enum + `assets.label` + `workspace_labels` + RLS; pgTAP `012`,
-  18 assertions) — **owner push still pending**; the canvas read already
-  degrades to the pre-label select on `42703` so the deploy can land first.
+  18 assertions) — **on prod 2026-08-08** (reconfirmed in the linked ledger on
+  2026-08-10); the canvas read still degrades to the pre-label select on `42703`
+  for migration-gap resilience.
 - **Image editing — Tier 0 (crop / rotate 90° / straighten / flip) — ✅ DONE
   2026-07-22 (#126; live-refresh fix #128), LIVE on prod** — **non-destructive**
   ([ADR 0030](decisions/0030-non-destructive-image-editing.md)): a stored,
