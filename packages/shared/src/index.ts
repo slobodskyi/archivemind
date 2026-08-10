@@ -772,12 +772,39 @@ export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
 export const canvasAnnotationKindSchema = z.enum(["note", "ink"]);
 export type CanvasAnnotationKind = z.infer<typeof canvasAnnotationKindSchema>;
 
-/** kind='note' body. `text` is a plain string on purpose: checklist lines are
- *  markdown-ish (`[ ]` / `[x]` at the start of a line) rendered by the client,
- *  so adding them never changes the stored shape — and neither undo, autosave
- *  nor a half-typed line has to know about a block model. */
+/** A freehand sample: `[x, y, pressure]`. Shared by standalone ink (dormant) and
+ *  a sticky note's own strokes. Pressure 0 means "device didn't say" (a mouse) —
+ *  the renderer substitutes its default rather than drawing a zero-width line. */
+export const inkPointSchema = z.tuple([z.number(), z.number(), z.number().min(0).max(1)]);
+export type InkPoint = z.infer<typeof inkPointSchema>;
+
+/** A stroke is capped so one runaway drag can't post a megabyte of samples.
+ *  ~4000 points is a very long continuous stroke at 120 Hz (30+ seconds without
+ *  lifting the pen); the capture simplifies well below this before sending. */
+export const INK_MAX_POINTS = 4000;
+
+/** One freehand stroke drawn ON a sticky note (not the canvas). Points are
+ *  RELATIVE to the note's own top-left, so the whole drawing moves and resizes
+ *  with the card and needs no separate geometry. Colour + nib travel per stroke
+ *  because a note's pencil can change mid-drawing. Lives in the note `body`
+ *  jsonb — additive, so no migration. */
+export const noteStrokeSchema = z.object({
+  points: z.array(inkPointSchema).min(2).max(INK_MAX_POINTS),
+  color: assetLabelSchema.default("gray"),
+  size: z.number().min(0.5).max(64).default(3),
+});
+export type NoteStroke = z.infer<typeof noteStrokeSchema>;
+
+/** kind='note' body. `text` is a plain string on purpose: checklist lines and
+ *  the rich-text marks (bold `**`, strikethrough `~~`, `#`/`-`/`1.` line
+ *  prefixes) are markdown-ish rendered by the client, so adding them never
+ *  changes the stored shape — and neither undo, autosave nor a half-typed line
+ *  has to know about a block model. `strokes` is the note's own freehand
+ *  drawing (ADR 0041 folded ink into the note), capped so a scribble can't
+ *  bloat one row. */
 export const noteBodySchema = z.object({
   text: z.string().max(10_000).default(""),
+  strokes: z.array(noteStrokeSchema).max(2000).default([]),
 });
 export type NoteBody = z.infer<typeof noteBodySchema>;
 
@@ -793,31 +820,13 @@ export const noteStyleSchema = z.object({
 });
 export type NoteStyle = z.infer<typeof noteStyleSchema>;
 
-/** kind='ink' body — one freehand stroke per row (ADR 0041).
+/** kind='ink' body — one freehand stroke per row (ADR 0041). Now DORMANT: the
+ *  standalone canvas ink tool was folded into the sticky note (drawing lives in
+ *  `noteBodySchema.strokes`). The schema stays so existing rows still parse and
+ *  the pgTAP suite is untouched — nothing new writes `kind:'ink'`.
  *
- *  ONE STROKE PER ROW, not one accumulating "ink layer": the row's x/y/w/h is
- *  then the stroke's own bounding box, which is exactly what the geometry
- *  columns mean everywhere else here; erasing is a DELETE rather than a
- *  read-modify-write of a growing blob; and two people drawing at once touch
- *  different rows instead of clobbering one.
- *
- *  Points are `[x, y, pressure]`, stored RELATIVE to the row's x/y. Relative
- *  keeps the numbers small and — more to the point — lets a stroke be moved
- *  later by patching two columns instead of rewriting every sample.
- *
- *  Pressure is kept per point even though today's renderer bands it: the samples
- *  are what the Pencil actually reported, and a better renderer should not need
- *  a migration or a re-capture to use them. 0 means "device didn't say"
- *  (a mouse) — the renderer substitutes its own default rather than drawing a
- *  zero-width line. */
-export const inkPointSchema = z.tuple([z.number(), z.number(), z.number().min(0).max(1)]);
-export type InkPoint = z.infer<typeof inkPointSchema>;
-
-/** A stroke is capped so one runaway drag can't post a megabyte of samples.
- *  ~4000 points is a very long continuous stroke at 120 Hz (30+ seconds without
- *  lifting the pen); the capture simplifies well below this before sending. */
-export const INK_MAX_POINTS = 4000;
-
+ *  Points are `[x, y, pressure]`, stored RELATIVE to the row's x/y; `inkPointSchema`
+ *  and `INK_MAX_POINTS` are defined above (shared with note strokes). */
 export const inkBodySchema = z.object({
   points: z.array(inkPointSchema).min(2).max(INK_MAX_POINTS),
   /** Nib width in canvas units at pressure 1, before the per-point banding. */
@@ -909,7 +918,7 @@ export const createAnnotationRequestSchema = z.discriminatedUnion("kind", [
     projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
     ...noteGeometrySchema,
     color: assetLabelSchema.default("yellow"),
-    body: noteBodySchema.default({ text: "" }),
+    body: noteBodySchema.default({ text: "", strokes: [] }),
     style: noteStyleSchema.default({ fontSize: "m" }),
   }),
   z.object({

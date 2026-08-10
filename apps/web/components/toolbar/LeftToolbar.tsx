@@ -8,10 +8,7 @@ import {
   ExifIcon,
   AddIcon,
   FitIcon,
-  LabelsIcon,
   StickyNoteIcon,
-  InkToolIcon,
-  EraserToolIcon,
   TrashIcon,
 } from "@/components/icons/icons";
 
@@ -43,22 +40,8 @@ interface LeftToolbarProps {
   onExtractExif?: () => void;
   onAdd?: () => void;
   onAddStickyNote?: () => void;
-  /** Marker + eraser (ADR 0041). Workspace view only, like the ink itself.
-   *  The marker is a convenience for pointing devices that aren't a pen — an
-   *  Apple Pencil draws whatever tool is selected, so on a tablet this button
-   *  is never the thing standing between you and a stroke. */
-  onInkTool?: () => void;
-  onEraserTool?: () => void;
   onToggleTrash?: () => void;
   trashOpen?: boolean;
-  /** Colour-label filter (migration 20260808000001). Lives on the tool rail
-   *  rather than in the header: it is a lens on the canvas, like Search, and
-   *  the header's three slots are navigation, view and account. */
-  onToggleLabels?: () => void;
-  labelsOpen?: boolean;
-  /** A filter is active — the button stays lit even when the panel is closed,
-   *  so a canvas that is hiding files can never look like an empty one. */
-  labelFilterActive?: boolean;
   onFit?: () => void;
   onZoomReset?: () => void;
   onAddToProject?: () => void;
@@ -118,13 +101,8 @@ function LeftToolbar({
   onExtractExif,
   onAdd,
   onAddStickyNote,
-  onInkTool,
-  onEraserTool,
   onToggleTrash,
   trashOpen = false,
-  onToggleLabels,
-  labelsOpen = false,
-  labelFilterActive = false,
   onFit,
   onZoomReset,
   onAddToProject,
@@ -202,13 +180,6 @@ function LeftToolbar({
       <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
         <SearchIcon />
       </TbButton>
-      <TbButton
-        onClick={onToggleLabels}
-        title={labelFilterActive ? "Labels — filter is on" : "Labels"}
-        active={labelsOpen || labelFilterActive}
-      >
-        <LabelsIcon width={16} height={16} />
-      </TbButton>
       <TbButton onClick={onToggleTrash} title="Trash" active={trashOpen}>
         <TrashIcon />
       </TbButton>
@@ -273,55 +244,6 @@ function LeftToolbar({
           <span className="tip">Sticky Note</span>
         </button>
       )}
-      {!allFilesMode && isCanvasView && (
-        <>
-          <button
-            onClick={onInkTool}
-            title="Marker — an Apple Pencil draws without this"
-            aria-label="Marker"
-            aria-pressed={tool === "ink"}
-            className="tw"
-            style={{
-              display: "flex",
-              width: 34,
-              height: 34,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              borderRadius: 2,
-              cursor: "pointer",
-              background: tool === "ink" ? "var(--bd)" : "transparent",
-              color: tool === "ink" ? "var(--t1)" : "var(--t2)",
-            }}
-          >
-            <InkToolIcon />
-            <span className="tip">Marker</span>
-          </button>
-          <button
-            onClick={onEraserTool}
-            title="Eraser — removes a whole stroke"
-            aria-label="Eraser"
-            aria-pressed={tool === "eraser"}
-            className="tw"
-            style={{
-              display: "flex",
-              width: 34,
-              height: 34,
-              alignItems: "center",
-              justifyContent: "center",
-              border: 0,
-              borderRadius: 2,
-              cursor: "pointer",
-              background: tool === "eraser" ? "var(--bd)" : "transparent",
-              color: tool === "eraser" ? "var(--t1)" : "var(--t2)",
-            }}
-          >
-            <EraserToolIcon />
-            <span className="tip">Eraser</span>
-          </button>
-        </>
-      )}
-
       {/* Fit + zoom act on the tile canvas — on Map they'd move the hidden
           neural surface, so they're suppressed there (MapLibre has its own). */}
       {!isMapView && (

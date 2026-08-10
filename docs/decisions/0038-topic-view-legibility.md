@@ -211,3 +211,14 @@ you happened to open, since the fold counts only the rows that read returned.
   photo returns to that cluster. Regroup is the only thing that clears them.
 - The Map bucket (`galleryOverrides.map`) remains the dead path it was: nothing
   reads it. Untouched here on purpose.
+
+## Amendment (2026-08-10) — Topic draws no connecting lines
+
+The tag-driven connecting lines (`layout.edges`, rendered by `CloudDecor`) were
+removed from the Topic view. The colour clouds carry the grouping on their own,
+and the web of lines competed with them for legibility more than it explained
+anything. `CloudDecor` no longer renders the edge `<svg>`; `buildCloudLayout`
+still computes edges (the landing-page `ScrubDemo` animation has its own copy and
+is unaffected), they simply go undrawn in the workspace. The "files are related by
+shared tags" idea from ADR 0022 is superseded here by an *opt-in* relationship:
+the all-to-all mesh an artboard draws after **Connect** (ADR 0043).

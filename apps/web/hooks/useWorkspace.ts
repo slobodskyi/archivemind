@@ -4,17 +4,16 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import { ASSET_LABELS, INK_MAX_POINTS, topicsResponseSchema } from "@archivemind/shared";
+import { ASSET_LABELS, topicsResponseSchema } from "@archivemind/shared";
 import type {
   AssetLabel,
   CanvasAnnotation,
   CanvasGroup,
   EditRecipe,
-  InkAnnotation,
-  InkPoint,
   LabelNames,
   NoteAnnotation,
   NoteFontSize,
+  NoteStroke,
   PatchAnnotationRequest,
   PatchAssetExifRequest,
   TrashedAsset,
@@ -23,15 +22,6 @@ import type {
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, labelCounts as countLabels, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
-import {
-  bandOf,
-  bandWidth,
-  distanceToStroke,
-  simplifyStroke,
-  strokeBounds,
-  strokePath,
-  toRelative,
-} from "@/lib/ink";
 import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
 import { cloudErrorCopy } from "@/lib/drive-errors";
 import { photoSrc } from "@/lib/img";
@@ -54,6 +44,7 @@ import type {
 } from "@/types";
 import {
   appendClusterAnchor,
+  artboardMesh,
   assetGallery,
   centerAtScale,
   fitBounds,
@@ -62,7 +53,6 @@ import {
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
   labelAnchorOf,
-  labelCloudLayout as computeLabelLayout,
   nudgeOffOverlap,
   packGrid,
   positionsBounds,
@@ -72,6 +62,7 @@ import {
   timelineAxisLayout as computeTimelineLayout,
   topicAnchorOf,
   topicCloudLayout as computeTopicLayout,
+  type ArtboardEdge,
   type Bounds,
   type CanvasOverride,
   type CloudLayout,
@@ -306,7 +297,6 @@ interface ProcState {
 interface Snapshot {
   frames: Frame[];
   stickyNotes: StickyNote[];
-  inkStrokes: InkAnnotation[];
   galleryOverrides: GalleryOverrides;
 }
 
@@ -382,19 +372,6 @@ interface WorkspaceState {
   /** Folder whose Finder-style popup is open (double-click a folder), or null. */
   openFolderId: string | null;
   stickyNotes: StickyNote[];
-  /** Freehand ink, Workspace view only (ADR 0041). One row per stroke, so
-   *  erasing is a DELETE and two people drawing at once touch different rows. */
-  inkStrokes: InkAnnotation[];
-  inkColor: AssetLabel;
-  inkSize: number;
-  /** A stroke is in progress. Only mounts the live path and lights the marker
-   *  button — the stroke's points are in a ref, not here, because a Pencil
-   *  sampling at 120 Hz must not re-render the canvas per sample. */
-  inkDrawing: boolean;
-  inkLiveWidth: number;
-  /** Strokes the current erase drag has swept, dimmed until the pointer lifts:
-   *  a slip is visible before it is committed, and one drag is one undo step. */
-  pendingErase: string[];
   /** Content-space preview rect while the frame tool is actively drawing. */
   frameDraftRect: { x: number; y: number; w: number; h: number } | null;
   history: Snapshot[];
@@ -496,17 +473,6 @@ type DragSession =
       orig: { w: number; h: number };
       moved: boolean;
     }
-  // Ink and erase carry no coordinates: the stroke being drawn lives in a ref
-  // (writing it into React state would be a render per Pencil sample at 120 Hz)
-  // and the pending erase set lives in another.
-  //
-  // They DO carry the pointer that started them, which the other modes don't
-  // need: palm rejection keeps a resting hand out of `touch.pointers`, so the
-  // shared bookkeeping at the top of `up` skips that pointer entirely and the
-  // handler falls straight through to the commit. Without this id, lifting a
-  // palm mid-stroke would commit the stroke out from under the pen.
-  | { mode: "ink"; pointerId: number }
-  | { mode: "erase"; pointerId: number }
   | {
       mode: "frameDraw";
       startContent: { x: number; y: number };
@@ -645,7 +611,6 @@ export interface Workspace {
   isTimelineView: boolean;
   isMapView: boolean;
   isSenseView: boolean;
-  isLabelsView: boolean;
   showViewTabs: boolean;
   showAddToProject: boolean;
   /** Legacy workspace recovery grid; it is not part of primary navigation. */
@@ -712,11 +677,17 @@ export interface Workspace {
   frames: Frame[];
   frameDraft: { x: number; y: number; w: number; h: number } | null;
   frameCounts: Record<string, number>;
+  /** All-to-all connection lines for every connected artboard (ADR 0043). */
+  artboardEdges: ArtboardEdge[];
   deleteFrame: (id: string) => void;
   deleteFrameWithContent: (id: string) => void;
   renameFrame: (id: string, label: string) => void;
   selectFrame: (id: string) => void;
   exportFrame: (id: string) => void;
+  /** Mark an artboard connected (draws the mesh + reveals ＋). */
+  connectArtboard: (id: string) => void;
+  /** ＋ on a connected artboard — create a new file from the pack (stubbed). */
+  createPackFile: (id: string, format: string) => void;
   beginFrameMove: (id: string) => void;
   beginFrameResize: (id: string, handle: "nw" | "ne" | "sw" | "se") => void;
   frameGestureMove: (dx: number, dy: number) => void;
@@ -809,23 +780,11 @@ export interface Workspace {
   setStickyFontSize: (id: string, fontSize: NoteFontSize) => void;
   /** Tick/untick one `[ ]` line from the rendered body, no editor involved. */
   toggleStickyCheck: (id: string, lineIndex: number) => void;
+  /** Replace a note's freehand drawing (ADR 0041 — ink lives ON the note now).
+   *  Persists the whole `body` (text + strokes together) so a text save can't
+   *  wipe the drawing and vice versa; pushes history so Cmd+Z reaches it. */
+  setStickyStrokes: (id: string, strokes: NoteStroke[]) => void;
   deleteStickyNote: (id: string) => void;
-
-  // Freehand ink (ADR 0041)
-  inkStrokes: InkAnnotation[];
-  pendingErase: string[];
-  /** Callback ref for `LiveStroke`'s path — the hook writes `d` onto that node
-   *  directly while a stroke is in progress, so a 120 Hz Pencil is not 120
-   *  renders a second. A SETTER rather than the ref object, matching
-   *  `setCanvasRef`: handing the ref itself out taints every `ws.*` read in the
-   *  consumer's render for `react-hooks/refs`. */
-  setInkPathEl: (el: SVGPathElement | null) => void;
-  inkDrawing: boolean;
-  inkLiveWidth: number;
-  inkColor: AssetLabel;
-  setInkColor: (color: AssetLabel) => void;
-  toolInk: () => void;
-  toolEraser: () => void;
 
   // Undo / redo
   canUndo: boolean;
@@ -997,6 +956,7 @@ function annotationToNote(a: NoteAnnotation): StickyNote {
     w: a.w,
     h: a.h,
     text: a.body.text,
+    strokes: a.body.strokes,
     color: a.color,
     fontSize: a.style.fontSize,
   };
@@ -1020,21 +980,6 @@ const NOTE_TEXT_SAVE_MS = 700;
 const NOTE_MIN_SIZE = 120;
 const NOTE_MAX_SIZE = 4000;
 const clampNoteSize = (v: number) => Math.min(NOTE_MAX_SIZE, Math.max(NOTE_MIN_SIZE, Math.round(v)));
-
-/** Eraser reach in SCREEN pixels — divided by scale at use, so the eraser stays
- *  the same size under the pointer at every zoom. A radius fixed in canvas units
- *  would be an unusable speck zoomed out and a wrecking ball zoomed in. */
-const ERASER_RADIUS = 14;
-
-/** Default nib, in canvas units. */
-const INK_DEFAULT_SIZE = 3;
-
-/** `e.pressure` is 0.5 for a mouse by spec and 0 when a device reports nothing.
- *  Pass 0 through untouched — `bandOf` is the single place that decides what
- *  "unreported" should look like, and duplicating that choice here is how the
- *  capture and the render end up disagreeing. */
-const pressureOf = (e: { pressure?: number }) =>
-  typeof e.pressure === "number" && e.pressure >= 0 && e.pressure <= 1 ? e.pressure : 0;
 
 export function useWorkspace(
   initialPhotos: Photo[],
@@ -1107,12 +1052,6 @@ export function useWorkspace(
     stickyNotes: initialAnnotations
       .filter((a): a is NoteAnnotation => a.kind === "note")
       .map(annotationToNote),
-    inkStrokes: initialAnnotations.filter((a): a is InkAnnotation => a.kind === "ink"),
-    inkColor: "gray",
-    inkSize: INK_DEFAULT_SIZE,
-    inkDrawing: false,
-    inkLiveWidth: INK_DEFAULT_SIZE,
-    pendingErase: [],
     frameDraftRect: null,
     history: [],
     future: [],
@@ -1179,13 +1118,6 @@ export function useWorkspace(
    *  notes can be edited in the same window and a single shared timer would let
    *  the second one's keystrokes cancel the first one's save. */
   const noteTextTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  /** The stroke in progress. A ref, not state: a Pencil samples at 120 Hz and
-   *  every one of those would otherwise re-render the whole canvas. */
-  const inkRef = useRef<{ points: InkPoint[] }>({ points: [] });
-  /** The live `<path>`. `d` is written straight onto the node while drawing. */
-  const inkPathRef = useRef<SVGPathElement | null>(null);
-  /** Strokes an erase drag has swept, before the pointer comes up. */
-  const eraseRef = useRef<Set<string>>(new Set());
   /** The layout the canvas currently renders (committed post-render) — read by
    *  pointer-down handlers so they never recompute a pack/edge pass. */
   const cloudDecorRef = useRef<CloudLayout | null>(null);
@@ -1590,7 +1522,10 @@ export function useWorkspace(
         if (prev) {
           const moved = prev.x !== now.x || prev.y !== now.y || prev.w !== now.w || prev.h !== now.h;
           const restyled =
-            prev.text !== now.text || prev.color !== now.color || prev.fontSize !== now.fontSize;
+            prev.text !== now.text ||
+            prev.color !== now.color ||
+            prev.fontSize !== now.fontSize ||
+            prev.strokes !== now.strokes;
           if (moved || restyled) {
             patchNote(now.id, {
               x: now.x,
@@ -1598,7 +1533,8 @@ export function useWorkspace(
               w: now.w,
               h: now.h,
               color: now.color,
-              body: { text: now.text },
+              // Whole body together (text + strokes) — see setStickyStrokes.
+              body: { text: now.text, strokes: now.strokes },
               style: { fontSize: now.fontSize },
             });
           }
@@ -1615,7 +1551,7 @@ export function useWorkspace(
             w: now.w,
             h: now.h,
             color: now.color,
-            body: { text: now.text },
+            body: { text: now.text, strokes: now.strokes },
             style: { fontSize: now.fontSize },
           }),
         })
@@ -1634,57 +1570,11 @@ export function useWorkspace(
     [patchNote, currentProjectId, setState, flashToast],
   );
 
-  /** The ink half of the same problem `reconcileNotes` solves: undo restores a
-   *  snapshot, and strokes are rows. Simpler than notes, because a stroke is
-   *  only ever created or erased — never edited — so this is add/remove only.
-   *  A stroke an undo brings back is re-INSERTed under a new id; its old row is
-   *  gone and cannot be revived. */
-  const reconcileInk = useCallback(
-    (before: InkAnnotation[], after: InkAnnotation[]) => {
-      const afterIds = new Set(after.map((k) => k.id));
-      const beforeIds = new Set(before.map((k) => k.id));
-
-      for (const gone of before) {
-        if (afterIds.has(gone.id) || isTmpNote(gone.id)) continue;
-        void fetch(`/api/annotations/${gone.id}`, { method: "DELETE" }).catch(() => {
-          flashToast("Some ink was not erased");
-        });
-      }
-      for (const back of after) {
-        if (beforeIds.has(back.id)) continue;
-        void fetch("/api/annotations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            kind: "ink",
-            projectId: back.projectId,
-            x: back.x,
-            y: back.y,
-            w: back.w,
-            h: back.h,
-            color: back.color,
-            body: back.body,
-          }),
-        })
-          .then(async (res) => {
-            if (!res.ok) throw new Error(String(res.status));
-            const saved = (await res.json()) as InkAnnotation;
-            setState({
-              inkStrokes: stateRef.current.inkStrokes.map((k) => (k.id === back.id ? saved : k)),
-            });
-          })
-          .catch(() => flashToast("Ink not restored"));
-      }
-    },
-    [setState, flashToast],
-  );
-
   // ── Undo / redo ──────────────────────────────────────────────────────────
 
   const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
     frames: s.frames,
     stickyNotes: s.stickyNotes,
-    inkStrokes: s.inkStrokes,
     galleryOverrides: s.galleryOverrides,
   }), []);
 
@@ -1708,8 +1598,7 @@ export function useWorkspace(
     future.push(snapshot(s));
     setState({ ...prev, history: hist, future });
     reconcileNotes(s.stickyNotes, prev.stickyNotes);
-    reconcileInk(s.inkStrokes, prev.inkStrokes);
-  }, [setState, snapshot, reconcileNotes, reconcileInk, flashToast]);
+  }, [setState, snapshot, reconcileNotes, flashToast]);
 
   const redo = useCallback(() => {
     if (topicMutationBusyRef.current) {
@@ -1724,8 +1613,7 @@ export function useWorkspace(
     hist.push(snapshot(s));
     setState({ ...next, history: hist, future });
     reconcileNotes(s.stickyNotes, next.stickyNotes);
-    reconcileInk(s.inkStrokes, next.inkStrokes);
-  }, [setState, snapshot, reconcileNotes, reconcileInk, flashToast]);
+  }, [setState, snapshot, reconcileNotes, flashToast]);
 
   /** Canonical-photo tile positions for whichever view is active — the single
    *  source both the renderer and marquee hit-testing read, so selection and
@@ -1737,9 +1625,7 @@ export function useWorkspace(
           ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles
           : s.view === "sense"
             ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles
-            : s.view === "labels"
-              ? computeLabelLayout(s.photos, s.galleryOverrides.label, s.labelNames, s.frames).tiles
-              : assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
+            : assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
       // Deliberately NOT filtered. This is the geometry seam — artboard
       // membership, folder drops, frame move/resize, Tidy up, the delete-time
       // position freeze and the export's reading order all read it, and every
@@ -1808,173 +1694,6 @@ export function useWorkspace(
     [setState],
   );
 
-  // ── Freehand ink (ADR 0041) ────────────────────────────────────────────────
-
-  /** Ink is a Workspace-view concept, like every other annotation: the four
-   *  sorting views rearrange the same tiles, so a stroke drawn over one of them
-   *  would sit over unrelated photos in the next. The 'all' canvas is excluded
-   *  for the same reason notes are — it is a read-only recovery grid. */
-  const canDraw = useCallback(
-    (s: WorkspaceState) => s.view === "neural" && s.projCurrent !== "all",
-    [],
-  );
-
-  /** What a press means, before anything else looks at it: a stroke, an erase,
-   *  or nothing to do with ink.
-   *
-   *  ONE function because two call sites need the identical answer. Empty canvas
-   *  goes through `onCanvasDown`, but a press on a PHOTO goes through
-   *  `onGalleryAssetDown`, which stops propagation so the canvas handler never
-   *  runs — so without asking here too, the marker worked on blank space and
-   *  did nothing over a photo. Circling a face is the whole point of drawing on
-   *  a photo archive, so that is not an edge case, it is the feature.
-   *
-   *  Reads the DEVICE before the tool: a pen draws whatever is selected, a
-   *  finger never does (ADR 0041). Space-hold pans over everything, as always. */
-  const inkIntent = useCallback(
-    (s: WorkspaceState, e: React.PointerEvent): "ink" | "erase" | null => {
-      if (!canDraw(s) || s.spacePan) return null;
-      if (s.tool === "eraser") return "erase";
-      if (e.pointerType === "pen" || s.tool === "ink") return "ink";
-      return null;
-    },
-    [canDraw],
-  );
-
-  const beginStroke = useCallback(
-    (e: React.PointerEvent) => {
-      const s = stateRef.current;
-      const c = toContent(e.clientX, e.clientY);
-      inkRef.current.points = [[c.x, c.y, pressureOf(e)]];
-      dragRef.current = { mode: "ink", pointerId: e.pointerId };
-      // Paint the very first sample immediately: a tap that never moves must
-      // still leave a dot, and waiting for a move would drop it.
-      if (inkPathRef.current) inkPathRef.current.setAttribute("d", strokePath(inkRef.current.points));
-      setState({ inkDrawing: true, inkLiveWidth: bandWidth(bandOf(pressureOf(e)), s.inkSize) });
-    },
-    [toContent, setState],
-  );
-
-  /** Add every stroke within the eraser radius of this point to the pending set.
-   *  Marked, not deleted: they dim while the pointer is down and go on release,
-   *  so a slip can be seen before it is committed — and so one erase drag is one
-   *  undo step instead of a dozen. */
-  const markErased = useCallback(
-    (clientX: number, clientY: number) => {
-      const s = stateRef.current;
-      const c = toContent(clientX, clientY);
-      // The radius is in canvas units and divided by scale, so the eraser is a
-      // constant size under the POINTER rather than in the content — zoomed out,
-      // a fixed content radius would be an invisible speck.
-      const radius = ERASER_RADIUS / s.scale;
-      let added = false;
-      for (const stroke of s.inkStrokes) {
-        if (eraseRef.current.has(stroke.id)) continue;
-        const local = { x: c.x - stroke.x, y: c.y - stroke.y };
-        if (distanceToStroke(stroke.body.points, local.x, local.y) <= radius + stroke.body.size / 2) {
-          eraseRef.current.add(stroke.id);
-          added = true;
-        }
-      }
-      if (added) setState({ pendingErase: [...eraseRef.current] });
-    },
-    [toContent, setState],
-  );
-
-  const beginErase = useCallback(
-    (e: React.PointerEvent) => {
-      dragRef.current = { mode: "erase", pointerId: e.pointerId };
-      eraseRef.current = new Set();
-      // Mark on the press itself, not only on the first move: a tap on a stroke
-      // has to erase it, the same way a tap draws a dot.
-      markErased(e.clientX, e.clientY);
-    },
-    [markErased],
-  );
-
-  /** Pointer up while drawing: simplify, measure, store. Optimistic like every
-   *  other annotation write — the stroke is already on screen and the row
-   *  follows it. On failure the stroke is removed, because leaving ink that
-   *  vanishes on the next reload is worse than losing it while you can see it
-   *  happen. */
-  const commitStroke = useCallback(() => {
-    const raw = inkRef.current.points;
-    inkRef.current.points = [];
-    inkPathRef.current?.setAttribute("d", "");
-    setState({ inkDrawing: false });
-    if (raw.length === 0) return;
-
-    // A single tap is a legitimate dot, but the schema needs two points to
-    // describe a stroke — duplicate it rather than special-casing the renderer.
-    const points = simplifyStroke(raw);
-    const full = points.length >= 2 ? points : [points[0], points[0]];
-    const bounds = strokeBounds(full);
-    const s = stateRef.current;
-    const tmpId = TMP_NOTE_PREFIX + "ink" + Date.now();
-    const body = { points: toRelative(full, bounds), size: s.inkSize };
-    const optimistic: InkAnnotation = {
-      id: tmpId,
-      kind: "ink",
-      projectId: currentProjectId === "all" ? null : currentProjectId,
-      ...bounds,
-      color: s.inkColor,
-      body,
-      style: {},
-    };
-    pushHistory();
-    setState({ inkStrokes: [...s.inkStrokes, optimistic] });
-
-    void fetch("/api/annotations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        kind: "ink",
-        projectId: optimistic.projectId,
-        ...bounds,
-        color: optimistic.color,
-        body,
-      }),
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        const saved = (await res.json()) as InkAnnotation;
-        // Erased (or undone) while the insert was in flight: the row exists now
-        // and nothing on screen points at it, so undo the create rather than
-        // leaving an orphan that reappears on the next load. Same guard the
-        // note create makes — commitErase deliberately skips DELETE for a tmp
-        // id, on the understanding that this is where it gets cleaned up.
-        if (!stateRef.current.inkStrokes.some((k) => k.id === tmpId)) {
-          void fetch(`/api/annotations/${saved.id}`, { method: "DELETE" });
-          return;
-        }
-        setState({
-          inkStrokes: stateRef.current.inkStrokes.map((k) => (k.id === tmpId ? saved : k)),
-        });
-      })
-      .catch(() => {
-        setState({ inkStrokes: stateRef.current.inkStrokes.filter((k) => k.id !== tmpId) });
-        flashToast("Stroke not saved");
-      });
-  }, [setState, pushHistory, currentProjectId, flashToast]);
-
-  /** Pointer up while erasing: drop the swept strokes, once, as one undo step. */
-  const commitErase = useCallback(() => {
-    const ids = [...eraseRef.current];
-    eraseRef.current = new Set();
-    setState({ pendingErase: [] });
-    if (ids.length === 0) return;
-    pushHistory();
-    setState({ inkStrokes: stateRef.current.inkStrokes.filter((k) => !ids.includes(k.id)) });
-    for (const id of ids) {
-      // A stroke still carrying a temp id has no row yet; its own POST will see
-      // it is gone from state and clean up after itself.
-      if (isTmpNote(id)) continue;
-      void fetch(`/api/annotations/${id}`, { method: "DELETE" }).catch(() => {
-        flashToast("Some ink was not erased");
-      });
-    }
-  }, [setState, pushHistory, flashToast]);
-
   const onCanvasDown = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
@@ -1993,16 +1712,6 @@ export function useWorkspace(
       // positions so it selects whatever is on screen, sorted or not.
       // Space-hold pans over anything, so it takes precedence over the frame and
       // select tools; the hand tool pans too.
-      // Ink comes first — see `inkIntent` for why the device outranks the tool.
-      const intent = inkIntent(s, e);
-      if (intent === "ink") {
-        beginStroke(e);
-        return;
-      }
-      if (intent === "erase") {
-        beginErase(e);
-        return;
-      }
       if (s.tool === "frame" && !s.spacePan) {
         const c = toContent(e.clientX, e.clientY);
         const dx0 = e.clientX - r.left,
@@ -2054,7 +1763,7 @@ export function useWorkspace(
         setState({ marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 } });
       }
     },
-    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed, inkIntent, beginStroke, beginErase],
+    [rect, toContent, setState, activeTilePositions, startPan, gestureClaimed],
   );
 
   const onGalleryNodeDown = useCallback(
@@ -2122,20 +1831,6 @@ export function useWorkspace(
       clearTopicDropTarget();
       if (kind === "topic" && topicMutationBusyRef.current) {
         flashToast("Wait for the current topic change to finish");
-        return;
-      }
-      // Drawing outranks the tile. This handler stops propagation, so the
-      // canvas's own pointer-down never runs for a press that lands on a photo
-      // — and without this branch the marker drew on empty canvas and did
-      // nothing at all over an image, which is the one place you most want to
-      // draw. Same `inkIntent` the canvas asks, so the two can't drift.
-      const intent = inkIntent(stateRef.current, e);
-      if (intent === "ink") {
-        beginStroke(e);
-        return;
-      }
-      if (intent === "erase") {
-        beginErase(e);
         return;
       }
       // Touch: a second tap on the same tile opens it, the way a double-click
@@ -2231,9 +1926,6 @@ export function useWorkspace(
       labelAnchorsFor,
       gestureClaimed,
       openDrawer,
-      inkIntent,
-      beginStroke,
-      beginErase,
       clearTopicDropTarget,
       flashToast,
     ],
@@ -2245,15 +1937,7 @@ export function useWorkspace(
     (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
       const v = stateRef.current.view;
       const kind =
-        v === "timeline"
-          ? "timeline"
-          : v === "map"
-            ? "map"
-            : v === "sense"
-              ? "topic"
-              : v === "labels"
-                ? "label"
-                : "asset";
+        v === "timeline" ? "timeline" : v === "map" ? "map" : v === "sense" ? "topic" : "asset";
       onGalleryAssetDown(kind, e, id, origCenter);
     },
     [onGalleryAssetDown],
@@ -2276,7 +1960,7 @@ export function useWorkspace(
         return;
       }
       const bucket =
-        s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "labels" ? "label" : null;
+        s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
       const layout = cloudDecorRef.current;
       if (!bucket || !layout) return;
       const origCenters: Record<string, { x: number; y: number }> = {};
@@ -2292,15 +1976,10 @@ export function useWorkspace(
         origCenters,
         moved: false,
         historyPushed: false,
-        anchors:
-          bucket === "topic"
-            ? topicAnchorsFor(s, Object.keys(origCenters))
-            : bucket === "label"
-              ? labelAnchorsFor(s, Object.keys(origCenters))
-              : null,
+        anchors: bucket === "topic" ? topicAnchorsFor(s, Object.keys(origCenters)) : null,
       };
     },
-    [startPan, topicAnchorsFor, labelAnchorsFor, gestureClaimed],
+    [startPan, topicAnchorsFor, gestureClaimed],
   );
 
   const onStickyDown = useCallback(
@@ -2344,7 +2023,7 @@ export function useWorkspace(
       clearTimeout(timer);
       noteTextTimers.current.delete(id);
       const note = stateRef.current.stickyNotes.find((n) => n.id === id);
-      if (note) patchNote(id, { body: { text: note.text } });
+      if (note) patchNote(id, { body: { text: note.text, strokes: note.strokes } });
     },
     [patchNote],
   );
@@ -2364,6 +2043,7 @@ export function useWorkspace(
       w,
       h,
       text: "",
+      strokes: [],
       color: STICKY_NOTE_COLORS[s.stickyNotes.length % STICKY_NOTE_COLORS.length],
       fontSize: "m",
     };
@@ -2381,7 +2061,7 @@ export function useWorkspace(
         w: note.w,
         h: note.h,
         color: note.color,
-        body: { text: "" },
+        body: { text: "", strokes: [] },
         style: { fontSize: note.fontSize },
       }),
     })
@@ -2408,9 +2088,13 @@ export function useWorkspace(
           noteTextTimers.current.delete(tmpId);
         }
         const diverged =
-          merged.text !== "" || merged.x !== note.x || merged.y !== note.y;
+          merged.text !== "" || merged.strokes.length > 0 || merged.x !== note.x || merged.y !== note.y;
         if (diverged) {
-          patchNote(merged.id, { x: merged.x, y: merged.y, body: { text: merged.text } });
+          patchNote(merged.id, {
+            x: merged.x,
+            y: merged.y,
+            body: { text: merged.text, strokes: merged.strokes },
+          });
         }
       })
       .catch(() => {
@@ -2430,11 +2114,31 @@ export function useWorkspace(
         id,
         setTimeout(() => {
           noteTextTimers.current.delete(id);
-          patchNote(id, { body: { text } });
+          // Full body: text and strokes share one jsonb column, so a text-only
+          // patch would parse as `{ text, strokes: [] }` and wipe the drawing.
+          const note = stateRef.current.stickyNotes.find((n) => n.id === id);
+          patchNote(id, { body: { text, strokes: note?.strokes ?? [] } });
         }, NOTE_TEXT_SAVE_MS),
       );
     },
     [setState, patchNote],
+  );
+
+  /** Replace a note's drawing (ADR 0041 — the pencil lives on the note now).
+   *  Strokes save immediately like colour, not on the text debounce: a lifted
+   *  pen is a finished, discrete edit. The PATCH carries the whole body so the
+   *  in-flight text of a note being typed and drawn on at once is preserved. */
+  const setStickyStrokes = useCallback(
+    (id: string, strokes: NoteStroke[]) => {
+      const note = stateRef.current.stickyNotes.find((n) => n.id === id);
+      if (!note) return;
+      pushHistory();
+      setState({
+        stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === id ? { ...n, strokes } : n)),
+      });
+      patchNote(id, { body: { text: note.text, strokes } });
+    },
+    [pushHistory, setState, patchNote],
   );
 
   /** Colour and font size are single discrete choices, so they save immediately
@@ -2555,29 +2259,6 @@ export function useWorkspace(
       const d = dragRef.current;
       if (!d) return;
       const s = stateRef.current;
-      if (d.mode === "ink") {
-        // getCoalescedEvents, not just the event: pointermove is delivered once
-        // per frame while a Pencil samples at 120 Hz, so without this a fast
-        // stroke arrives as a handful of points and renders as a polygon.
-        const samples = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
-        for (const sample of samples.length > 0 ? samples : [e]) {
-          const c = toContent(sample.clientX, sample.clientY);
-          inkRef.current.points.push([c.x, c.y, pressureOf(sample)]);
-        }
-        if (inkRef.current.points.length > INK_MAX_POINTS) {
-          // Cap reached mid-stroke: simplify in place rather than refusing more
-          // input, so a very long stroke degrades in fidelity instead of
-          // stopping under the pen.
-          inkRef.current.points = simplifyStroke(inkRef.current.points, 1.2);
-        }
-        // Straight to the DOM — see inkPathRef.
-        inkPathRef.current?.setAttribute("d", strokePath(inkRef.current.points));
-        return;
-      }
-      if (d.mode === "erase") {
-        markErased(e.clientX, e.clientY);
-        return;
-      }
       if (d.mode === "pan") {
         setState({
           tx: d.otx + (e.clientX - d.sx),
@@ -2726,7 +2407,6 @@ export function useWorkspace(
       setState,
       pushHistory,
       applyPinch,
-      markErased,
       armTopicDropTarget,
       clearTopicDropTarget,
     ],
@@ -2817,18 +2497,7 @@ export function useWorkspace(
       return;
     }
     dragRef.current = null;
-    if (d.mode === "ink" || d.mode === "erase") {
-      // Only the pointer that started the stroke ends it. A palm resting on the
-      // glass is deliberately kept out of `touch.pointers` by the rejection
-      // guard, so its pointerup reaches here unfiltered — and would otherwise
-      // commit the stroke mid-sentence while the pen is still writing.
-      if (e.pointerId !== d.pointerId) {
-        dragRef.current = d; // put the live session back; it is not over
-        return;
-      }
-      if (d.mode === "ink") commitStroke();
-      else commitErase();
-    } else if (d.mode === "pan") {
+    if (d.mode === "pan") {
       setState({ panning: false });
     } else if (d.mode === "sticky") {
       // Persist the drop, not the drag: move() already updated local state on
@@ -2950,8 +2619,6 @@ export function useWorkspace(
     activeTilePositions,
     syncFolderMembership,
     patchNote,
-    commitStroke,
-    commitErase,
     clearTopicDropTarget,
     persistTopicAssignment,
   ]);
@@ -2968,20 +2635,6 @@ export function useWorkspace(
     () => setState({ tool: stateRef.current.tool === "frame" ? "select" : "frame" }),
     [setState],
   );
-  const toolInk = useCallback(
-    () => setState({ tool: stateRef.current.tool === "ink" ? "select" : "ink" }),
-    [setState],
-  );
-  const toolEraser = useCallback(
-    () => setState({ tool: stateRef.current.tool === "eraser" ? "select" : "eraser" }),
-    [setState],
-  );
-  /** Ink colour is per session, not per stroke row — you pick a pen and draw
-   *  with it, and the strokes already down keep the colour they were made in. */
-  const setInkColor = useCallback((inkColor: AssetLabel) => setState({ inkColor }), [setState]);
-  const setInkPathEl = useCallback((el: SVGPathElement | null) => {
-    inkPathRef.current = el;
-  }, []);
   const deleteFrame = useCallback(
     (id: string) => {
       pushHistory();
@@ -3249,15 +2902,12 @@ export function useWorkspace(
   );
   const closeLabelFilterPanel = useCallback(() => setState({ labelFilterOpen: false }), [setState]);
   const toggleLabelMenu = useCallback(() => {
-    // The action bar's buttons are only visually disabled (the bar has always
-    // worked that way), so say what is missing rather than opening a picker
-    // with nothing to apply it to — same as "Select files to put in a folder".
-    if (stateRef.current.selectedIds.length === 0) {
-      flashToast("Select files to label");
-      return;
-    }
+    // Context-sensitive (ADR 0040 amended): with a selection the swatch labels
+    // it, with none it filters the canvas by colour — both are useful, so the
+    // menu always opens. (It used to refuse with an empty selection, back when
+    // the swatch only ever labelled.)
     setState((prev) => ({ labelMenuOpen: !prev.labelMenuOpen }));
-  }, [flashToast, setState]);
+  }, [setState]);
   const closeLabelMenu = useCallback(() => setState({ labelMenuOpen: false }), [setState]);
 
   /** Rename a colour for the whole workspace — "Red" is a colour, "Rejected" is
@@ -3712,7 +3362,6 @@ export function useWorkspace(
         return fit({ tiles: gallery.pos, bounds: gallery.bounds });
       }
       if (view === "sense") return fit(computeTopicLayout(allPhotos, overrides.topic, frames));
-      if (view === "labels") return fit(computeLabelLayout(allPhotos, overrides.label, s.labelNames, frames));
       return fit(computeTimelineLayout(allPhotos, overrides.timeline));
     },
     [rect, neuralGalleryFor, fitDefaultZoom, visibleBounds],
@@ -3738,11 +3387,9 @@ export function useWorkspace(
     const layout =
       s.view === "sense"
         ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames)
-        : s.view === "labels"
-          ? computeLabelLayout(s.photos, s.galleryOverrides.label, s.labelNames, s.frames)
-          : s.view === "timeline"
-            ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline)
-            : neural();
+        : s.view === "timeline"
+          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline)
+          : neural();
     setState({ ...fitBounds(visibleBounds(layout, s.photos, s.labelFilter), r), tilesAnimating: true });
     if (animTimer.current) clearTimeout(animTimer.current);
     animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
@@ -4228,6 +3875,39 @@ export function useWorkspace(
     [frameContentIds, openExportFor],
   );
 
+  /** "Connect" an artboard (ADR 0043): mark it connected so its files draw
+   *  all-to-all and the ＋ appears. Frontend-only today — the real AI pass that
+   *  reads every member (photos, voice, pdf, notes) and synthesises a content
+   *  pack is Oleksandr's backend (POST /api/artboards/connect); this flags the
+   *  artboard and says the analysis is pending. */
+  const connectArtboard = useCallback(
+    (frameId: string) => {
+      const s = stateRef.current;
+      const frame = s.frames.find((f) => f.id === frameId);
+      if (!frame) return;
+      const members = frameContentIds(frame);
+      if (members.length < 2) {
+        flashToast("Add at least two files to the artboard first");
+        return;
+      }
+      pushHistory();
+      setState({ frames: s.frames.map((f) => (f.id === frameId ? { ...f, connected: true } : f)) });
+      flashToast(`Connected ${members.length} files — AI analysis coming soon`);
+    },
+    [frameContentIds, pushHistory, setState, flashToast],
+  );
+
+  /** The ＋ on a connected artboard (ADR 0043): create a new file synthesised
+   *  from the pack. The generation is backend (POST /api/artboards/[packId]/
+   *  generate) — stubbed here so the surface exists for the teammate to wire. */
+  const createPackFile = useCallback(
+    (frameId: string, format: string) => {
+      if (!stateRef.current.frames.some((f) => f.id === frameId)) return;
+      flashToast(`Creating a ${format} from this pack is coming soon`);
+    },
+    [flashToast],
+  );
+
   /** Delete a frame AND its content — the photos go to Trash through the normal
    *  soft-delete flow (undo toast + bulk-confirm ≥8, ADR 0033); the rect is
    *  removed either way. */
@@ -4373,7 +4053,7 @@ export function useWorkspace(
   const regroupClouds = useCallback(() => {
     const s = stateRef.current;
     const bucketKey =
-      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "labels" ? "label" : null;
+      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
     if (!bucketKey) return;
     const current = s.galleryOverrides[bucketKey];
     let next: Record<string, CanvasOverride>;
@@ -5276,11 +4956,6 @@ export function useWorkspace(
         t.suppress = false;
         t.primary = null;
       }
-      // Palm rejection (ADR 0041). While a stroke is being drawn, a touch is a
-      // hand resting on the glass, not a gesture: registering it here would make
-      // `pointers.size === 2` and hand the canvas to pinch-zoom mid-sentence.
-      // Free for a pen, because pointerType already tells the two apart.
-      if (e.pointerType === "touch" && dragRef.current?.mode === "ink") return;
       t.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (t.pointers.size === 1) {
         t.primary = e.pointerId;
@@ -5726,6 +5401,22 @@ export function useWorkspace(
     return counts;
   }, [state.frames, state.photos, neuralGalleryPos]);
 
+  // All-to-all connection lines for connected artboards (ADR 0043), over the
+  // neural tile positions the artboards are framed against. One flat list across
+  // every connected frame; ids are frame-prefixed so React keys stay unique.
+  const artboardEdges = useMemo(() => {
+    const out: ArtboardEdge[] = [];
+    for (const f of state.frames) {
+      if (!f.connected) continue;
+      const centers = state.photos
+        .map((p) => ({ id: p.id, t: neuralGalleryPos[p.id] }))
+        .filter((c): c is { id: string; t: TilePos } => !!c.t && c.t.cx >= f.x && c.t.cx <= f.x + f.w && c.t.cy >= f.y && c.t.cy <= f.y + f.h)
+        .map((c) => ({ id: c.id, cx: c.t.cx, cy: c.t.cy }));
+      for (const e of artboardMesh(centers)) out.push({ ...e, id: `${f.id}:${e.id}` });
+    }
+    return out;
+  }, [state.frames, state.photos, neuralGalleryPos]);
+
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
   const aiBusyIds = useMemo(() => new Set(state.aiBusyIds), [state.aiBusyIds]);
 
@@ -5751,7 +5442,6 @@ export function useWorkspace(
   const isTimelineView = state.view === "timeline" && state.projCurrent !== "all";
   const isMapView = state.view === "map" && state.projCurrent !== "all";
   const isSenseView = state.view === "sense" && state.projCurrent !== "all";
-  const isLabelsView = state.view === "labels" && state.projCurrent !== "all";
   const showViewTabs = state.projCurrent !== "all";
   const allFilesMode = state.projCurrent === "all";
   const projectMode = !allFilesMode;
@@ -5851,14 +5541,6 @@ export function useWorkspace(
     [isSenseView, projectPhotos, state.galleryOverrides.topic, state.frames],
   );
 
-  const labelLayoutResult = useMemo(
-    () =>
-      isLabelsView
-        ? computeLabelLayout(projectPhotos, state.galleryOverrides.label, state.labelNames, state.frames)
-        : null,
-    [isLabelsView, projectPhotos, state.galleryOverrides.label, state.labelNames, state.frames],
-  );
-
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
   // panel is the progress indicator even without a canvas selection.
   // Canvas selection when present; otherwise the source-browser selection —
@@ -5882,9 +5564,7 @@ export function useWorkspace(
     ? timelineLayoutResult
     : isSenseView
       ? topicLayoutResult
-      : isLabelsView
-        ? labelLayoutResult
-        : null;
+      : null;
   // Filter applied here and nowhere else on the render path: the layouts above
   // keep every tile's real coordinate, and what is hidden simply loses its
   // entry, so clearing the filter puts everything back exactly where it was.
@@ -6071,18 +5751,7 @@ export function useWorkspace(
       ? "grabbing"
       : state.tool === "hand" || state.spacePan
         ? "grab"
-        : state.tool === "ink" || state.tool === "eraser"
-          ? "crosshair"
-          : "default",
-    inkStrokes: state.inkStrokes,
-    pendingErase: state.pendingErase,
-    setInkPathEl,
-    inkDrawing: state.inkDrawing,
-    inkLiveWidth: state.inkLiveWidth,
-    inkColor: state.inkColor,
-    setInkColor,
-    toolInk,
-    toolEraser,
+        : "default",
     marquee,
     drawerPhoto,
     isNeural,
@@ -6132,11 +5801,14 @@ export function useWorkspace(
     frames: state.frames,
     frameDraft,
     frameCounts,
+    artboardEdges,
     deleteFrame,
     deleteFrameWithContent,
     renameFrame,
     selectFrame,
     exportFrame,
+    connectArtboard,
+    createPackFile,
     beginFrameMove,
     beginFrameResize,
     frameGestureMove,
@@ -6173,8 +5845,7 @@ export function useWorkspace(
     regroupClouds,
     canRegroup:
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
-      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
-      (isLabelsView && Object.keys(state.galleryOverrides.label).length > 0),
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
     recluster,
     renameCloud,
     topicOptions,
@@ -6200,6 +5871,7 @@ export function useWorkspace(
     setStickyFontSize,
     toggleStickyCheck,
     updateStickyText,
+    setStickyStrokes,
     deleteStickyNote,
 
     canUndo,
@@ -6308,7 +5980,6 @@ export function useWorkspace(
     labelSelection,
     labelOne,
     renameLabel,
-    isLabelsView,
     visiblePhotos,
     visiblePreviews,
 

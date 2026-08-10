@@ -106,3 +106,24 @@ answer.
   support ticket, not a feature.
 - Applying a filter narrows the current selection to what survives it. Without
   that, "Move 40 to Trash" would act on photos nobody could see.
+
+## Amendment (2026-08-10) — the LABELS view is retired
+
+The colour-label *sorting view* was removed. It grouped tiles into label clouds,
+but a whole view for a seven-value axis earned its own tab less than the other
+three sorts did, and the label is more useful as a per-file marker you can see
+everywhere at once.
+
+- `ViewMode` drops `"labels"`; the LABELS tab, `labelCloudLayout` wiring, and
+  `isLabelsView` are gone (`types/view.ts`, `ViewTabs`, `useWorkspace`).
+- The colour dot on every `PhotoTile` (already rendered in every view) is now the
+  only place a label shows — which is the point: you read the human axis without
+  leaving Canvas / Timeline / Topic.
+- **Add + filter fold into the bottom bar and off the left toolbar.** The left
+  toolbar's label button (and `LabelFilterPanel`) are removed. `WorkspaceActionBar`'s
+  swatch row is now **context-sensitive**: with a selection it labels the selection
+  (as before); with nothing selected it *filters* the canvas by colour
+  (`labelFilter` / `setLabelFilter`). Adding a label is Workspace-only, because a
+  sorting view cannot reorder by a label you set from inside it.
+- `filterByLabel` and the `labelFilter` state are unchanged — filtering was always
+  separate from the view and still applies in every view.

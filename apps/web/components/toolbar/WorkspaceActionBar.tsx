@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import type { Tool } from "@/types";
+import type { LabelFilter } from "@/lib/labels";
 import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import { FrameToolIcon, CopyIcon, TrashIcon, FolderIcon, LabelsIcon } from "@/components/icons/icons";
 
@@ -20,12 +21,16 @@ interface WorkspaceActionBarProps {
   /** Wrap the selection in a real folder (collapsible tile + Finder popup). */
   onFolder: () => void;
   onDelete: () => void;
-  /** Colour label for the selection — the swatch row opens above the bar. */
+  /** Colour-label control — the swatch row opens above the bar. It is
+   *  context-sensitive (ADR 0040 amended): with a selection it LABELS the
+   *  selection; with nothing selected it FILTERS the canvas to one colour. */
   labelNames: LabelNames;
   labelMenuOpen: boolean;
   selectionLabel: AssetLabel | "mixed" | null;
+  labelFilter: LabelFilter;
   onToggleLabelMenu: () => void;
   onPickLabel: (label: AssetLabel | null) => void;
+  onSetFilter: (filter: LabelFilter) => void;
 }
 
 /* Inline glyphs for the actions without an existing icon (mono/line style). */
@@ -110,10 +115,15 @@ function WorkspaceActionBar({
   labelNames,
   labelMenuOpen,
   selectionLabel,
+  labelFilter,
   onToggleLabelMenu,
   onPickLabel,
+  onSetFilter,
 }: WorkspaceActionBarProps) {
   const noSel = selCount === 0;
+  // The "none" filter (files with no colour) has no swatch — map it to the
+  // cleared ring; picking a colour or the ✕ drives the filter directly.
+  const filterCurrent: AssetLabel | "mixed" | null = labelFilter === "none" ? null : labelFilter;
   return (
     <div
       style={{
@@ -154,8 +164,9 @@ function WorkspaceActionBar({
 
       {/* The swatch row pops ABOVE the bar rather than replacing its buttons —
           labelling is usually a run of many, and a picker that closed the bar
-          would cost a re-open per photo. */}
-      {labelMenuOpen && !noSel && (
+          would cost a re-open per photo. With no selection the same row filters
+          the canvas by colour instead. */}
+      {labelMenuOpen && (
         <div
           style={{
             position: "absolute",
@@ -171,13 +182,25 @@ function WorkspaceActionBar({
             boxShadow: "0 8px 32px rgba(0,0,0,.45)",
           }}
         >
-          <LabelSwatchRow names={labelNames} current={selectionLabel} onPick={onPickLabel} size={18} />
+          <LabelSwatchRow
+            names={labelNames}
+            current={noSel ? filterCurrent : selectionLabel}
+            onPick={noSel ? onSetFilter : onPickLabel}
+            size={18}
+          />
         </div>
       )}
       <Btn
-        title={selCount >= 2 ? `Label ${selCount} (keys 1–7)` : "Label (keys 1–7)"}
-        active={labelMenuOpen}
-        disabled={noSel}
+        title={
+          noSel
+            ? labelFilter !== null
+              ? "Filter by colour — on"
+              : "Filter by colour"
+            : selCount >= 2
+              ? `Label ${selCount} (keys 1–7)`
+              : "Label (keys 1–7)"
+        }
+        active={labelMenuOpen || (noSel && labelFilter !== null)}
         onClick={onToggleLabelMenu}
       >
         <LabelsIcon width={16} height={16} />

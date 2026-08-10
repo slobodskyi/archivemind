@@ -12,12 +12,6 @@ const DIM = 0.22;
 
 interface CloudDecorProps {
   layout: CloudLayout;
-  /** The colored clouds (blobs) render immediately with the grouping so the
-   *  backdrop appears the same instant the tiles start reflowing (ADR 0024). Only
-   *  the connecting lines wait for `edgesReady` — they're drawn between final
-   *  tile centers, so showing them mid-glide would leave lines floating to empty
-   *  space; they fade in once the tiles have settled. */
-  edgesReady: boolean;
   /** When a cloud's label is clicked it becomes the focus; every other cloud
    *  (backdrop + tiles + label) fades back so it stands out. */
   focusedCloudKey: string | null;
@@ -27,12 +21,12 @@ interface CloudDecorProps {
   dropTargetKey?: string | null;
 }
 
-/** Backdrop for the grouping views (Timeline / Map / Topic): the blurred faded
- *  color cloud behind each group, the timeline date borders, and the connecting
- *  lines. Rendered *behind* the photo tiles; the labels render on top via
- *  CloudLabels. Tiles themselves are drawn by the shared ProjectAssetView so
- *  they persist (and animate) across every view (ADR 0022). */
-function CloudDecor({ layout, edgesReady, focusedCloudKey, dropTargetKey = null }: CloudDecorProps) {
+/** Backdrop for the grouping views (Timeline / Topic): the blurred faded colour
+ *  cloud behind each group and the timeline date borders. Rendered *behind* the
+ *  photo tiles; the labels render on top via CloudLabels. Tiles themselves are
+ *  drawn by the shared ProjectAssetView so they persist (and animate) across
+ *  every view (ADR 0022). Connecting lines were removed (ADR 0022/0038 amended). */
+function CloudDecor({ layout, focusedCloudKey, dropTargetKey = null }: CloudDecorProps) {
   const dimOf = (key: string) => (key === dropTargetKey ? 1 : focusedCloudKey && key !== focusedCloudKey ? DIM : 1);
   // Timeline's day clouds are pinned bands, so paint them more strongly than
   // Map/Topic's soft blobs — they read as the column, not a faint haze. Topic's
@@ -168,37 +162,9 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey, dropTargetKey = null 
           ))}
         </>
       )}
-
-      <svg style={{ position: "absolute", left: 0, top: 0, width: 1600, height: 1100, overflow: "visible", pointerEvents: "none", opacity: edgesReady ? 1 : 0, transition: "opacity .3s ease" }}>
-        <defs>
-          {layout.edges
-            .filter((e) => e.strokeStart !== e.strokeEnd)
-            .map((e) => (
-              <linearGradient key={e.id} id={`cloud-grad-${e.id}`} gradientUnits="userSpaceOnUse" x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}>
-                <stop offset="0%" stopColor={e.strokeStart} />
-                <stop offset="100%" stopColor={e.strokeEnd} />
-              </linearGradient>
-            ))}
-        </defs>
-        {layout.edges.map((e) => (
-          <path
-            key={e.id}
-            d={e.d}
-            stroke={e.strokeStart === e.strokeEnd ? e.strokeStart : `url(#cloud-grad-${e.id})`}
-            strokeWidth={e.w}
-            strokeOpacity={e.op}
-            strokeLinecap="round"
-            fill="none"
-            // When a cloud is focused, its own same-cloud lines stay bright;
-            // everything else — other clouds' lines AND every cross-cloud
-            // bridge (cloudKey is undefined on bridges, including the focused
-            // cloud's own) — fades only halfway, so cross-cloud connections
-            // stay readable (less faded than the inactive clouds themselves).
-            opacity={focusedCloudKey && e.cloudKey !== focusedCloudKey ? 0.5 : 1}
-            style={{ transition: "opacity .2s ease" }}
-          />
-        ))}
-      </svg>
+      {/* Topic no longer draws connecting lines between tiles (ADR 0022/0038
+          amended) — the colour clouds carry the grouping on their own, and the
+          tag-edge mesh moved to the opt-in artboard "Connect" (ADR 0043). */}
     </>
   );
 }

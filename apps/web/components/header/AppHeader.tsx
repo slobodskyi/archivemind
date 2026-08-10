@@ -49,17 +49,22 @@ export default function AppHeader({
   return (
     <div
       style={{
-        position: "absolute",
+        // `fixed`, not `absolute`: absolute resolves against the 100dvh
+        // workspace root, which the mobile keyboard resizes out from under the
+        // bar when a sticky-note textarea is focused. Fixed anchors to the
+        // viewport top on every device regardless of that (or any future scroll
+        // container). The safe-area inset keeps the 52px row clear of a notch.
+        position: "fixed",
         top: 0,
         left: 0,
         right: 0,
-        height: 52,
+        height: "calc(52px + env(safe-area-inset-top, 0px))",
         background: "var(--bg-nb)",
         borderBottom: "1px solid var(--bd)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "0 14px",
+        padding: "env(safe-area-inset-top, 0px) 14px 0",
         zIndex: 40,
       }}
     >

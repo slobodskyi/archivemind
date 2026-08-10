@@ -1,4 +1,4 @@
-import type { AssetLabel, LabelNames, NoteFontSize } from "@archivemind/shared";
+import type { AssetLabel, LabelNames, NoteFontSize, NoteStroke } from "@archivemind/shared";
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { LABEL_COLORS, NO_LABEL_CLOUD_KEY, NO_LABEL_COLOR } from "./labels";
 import { GROUPS, SOURCES } from "./mock-data";
@@ -22,6 +22,37 @@ export interface Frame {
   w: number;
   h: number;
   label: string;
+  /** The artboard has been "connected" (ADR 0043): its files are drawn all-to-all
+   *  and a ＋ offers to create a new file from the pack. Client-only for now — the
+   *  server-side content-pack model is Oleksandr's follow-up (ADR 0043). */
+  connected?: boolean;
+}
+
+/** One straight connection line between two tile centres — the shape
+ *  `ArtboardConnections` renders. Deliberately tiny and separate from the
+ *  tag-driven `CloudEdge`: an artboard mesh is "these all belong together,"
+ *  not "these share a tag." */
+export interface ArtboardEdge {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** All-to-all mesh over an artboard's tile centres (ADR 0043). Every pair once,
+ *  so N files give N·(N−1)/2 lines. Pure/deterministic like the rest of this
+ *  module — no `Math.random`. */
+export function artboardMesh(centers: { id: string; cx: number; cy: number }[]): ArtboardEdge[] {
+  const edges: ArtboardEdge[] = [];
+  for (let i = 0; i < centers.length; i++) {
+    for (let j = i + 1; j < centers.length; j++) {
+      const a = centers[i];
+      const b = centers[j];
+      edges.push({ id: `${a.id}~${b.id}`, x1: a.cx, y1: a.cy, x2: b.cx, y2: b.cy });
+    }
+  }
+  return edges;
 }
 
 /** A sticky note as the canvas holds it. Server-backed since ADR 0041 — the id
@@ -40,6 +71,10 @@ export interface StickyNote {
    *  paper tone the card is actually filled with. */
   color: AssetLabel;
   fontSize: NoteFontSize;
+  /** The note's own freehand drawing (ADR 0041 — ink lives on the note now).
+   *  Points are relative to the note's top-left, so the drawing moves and
+   *  resizes with the card. */
+  strokes: NoteStroke[];
 }
 
 /** Default colours for successive new notes — a rotation, not a palette: the

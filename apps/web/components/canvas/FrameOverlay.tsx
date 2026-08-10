@@ -15,6 +15,10 @@ interface FrameOverlayProps {
   onExportFrame: (id: string) => void;
   onDeleteFrame: (id: string) => void;
   onRenameFrame: (id: string, label: string) => void;
+  /** "Connect" the artboard into a content pack (ADR 0043). */
+  onConnect: (id: string) => void;
+  /** ＋ on a connected artboard — create a new file of `format` from the pack. */
+  onCreateFile: (id: string, format: string) => void;
   onBeginMove: (id: string) => void;
   onBeginResize: (id: string, handle: Handle) => void;
   onGestureMove: (dx: number, dy: number) => void;
@@ -22,6 +26,14 @@ interface FrameOverlayProps {
 }
 
 const DRAG_THRESHOLD = 3;
+
+/** The ＋ menu's offer (ADR 0043). Text + PDF now; more as the backend generator
+ *  grows. The `format` string is what reaches `onCreateFile` (and, later, the
+ *  generate endpoint). */
+const FILE_TYPES: { format: string; label: string }[] = [
+  { format: "text", label: "Text file" },
+  { format: "pdf", label: "PDF document" },
+];
 
 const btn: React.CSSProperties = {
   display: "flex",
@@ -59,6 +71,8 @@ export default function FrameOverlay({
   onExportFrame,
   onDeleteFrame,
   onRenameFrame,
+  onConnect,
+  onCreateFile,
   onBeginMove,
   onBeginResize,
   onGestureMove,
@@ -66,6 +80,8 @@ export default function FrameOverlay({
 }: FrameOverlayProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
+  // Which connected artboard has its ＋ "create file" menu open.
+  const [menuFrameId, setMenuFrameId] = useState<string | null>(null);
   const gesture = useRef<{ id: string; mode: "move" | "resize"; handle: Handle; sx: number; sy: number; began: boolean } | null>(null);
 
   const commitRename = () => {
@@ -200,6 +216,87 @@ export default function FrameOverlay({
               </span>
             )}
             <span style={{ fontSize: 10, color: "var(--t3)", opacity: 0.8 }}>{counts[fr.id] ?? 0}</span>
+
+            {/* Connect → content pack (ADR 0043). Before connecting: a Connect
+                pill. After: a ＋ that opens a file-type menu (stubbed). */}
+            {fr.connected ? (
+              <div style={{ position: "relative" }}>
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuFrameId((cur) => (cur === fr.id ? null : fr.id));
+                  }}
+                  title="Create a new file from this pack"
+                  aria-label="Create a new file from this pack"
+                  style={{ ...btn, background: "var(--ac)", color: "#050505", fontWeight: 700 }}
+                >
+                  ＋
+                </button>
+                {menuFrameId === fr.id && (
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      right: 0,
+                      marginTop: 4,
+                      display: "flex",
+                      flexDirection: "column",
+                      minWidth: 116,
+                      padding: 4,
+                      background: "rgba(18,18,18,.97)",
+                      border: "1px solid var(--bd)",
+                      borderRadius: 2,
+                      backdropFilter: "blur(20px)",
+                      boxShadow: "0 20px 60px rgba(0,0,0,.7)",
+                      zIndex: 5,
+                    }}
+                  >
+                    {FILE_TYPES.map((ft) => (
+                      <button
+                        key={ft.format}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuFrameId(null);
+                          onCreateFile(fr.id, ft.format);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          height: 26,
+                          padding: "0 8px",
+                          border: 0,
+                          borderRadius: 2,
+                          background: "transparent",
+                          color: "var(--t1)",
+                          fontSize: 12,
+                          fontFamily: "inherit",
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {ft.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConnect(fr.id);
+                }}
+                title="Connect these files into a content pack"
+                aria-label="Connect artboard"
+                style={{ ...btn, width: "auto", padding: "0 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.04em" }}
+              >
+                CONNECT
+              </button>
+            )}
+
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
