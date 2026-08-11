@@ -126,7 +126,7 @@ const MARQUEE = [
   "Hybrid search",
 ];
 
-export default function LandingShell({ fontClass, year }: { fontClass: string; year: number }) {
+export default function LandingShell({ year }: { year: number }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
 
@@ -140,7 +140,7 @@ export default function LandingShell({ fontClass, year }: { fontClass: string; y
   }, []);
 
   return (
-    <div ref={scrollRef} className={`${styles.root} ${fontClass}`}>
+    <div ref={scrollRef} className={styles.root}>
       <header className={`${styles.nav}${stuck ? ` ${styles.navStuck}` : ""}`}>
         <Link href="/" className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true" />

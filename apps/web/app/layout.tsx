@@ -1,25 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Mono, JetBrains_Mono } from "next/font/google";
 import TopProgressBar from "@/components/nav/TopProgressBar";
+import "@fontsource/space-mono/latin-400.css";
+import "@fontsource/space-mono/latin-700.css";
+import "@fontsource/jetbrains-mono/cyrillic-400.css";
+import "@fontsource/jetbrains-mono/cyrillic-700.css";
+import "@fontsource-variable/inter-tight/wght.css";
 import "./globals.css";
-
-const spaceMono = Space_Mono({
-  variable: "--font-space-mono",
-  subsets: ["latin"],
-  weight: ["400", "700"],
-  display: "swap",
-});
 
 // Space Mono ships no Cyrillic glyphs, so Ukrainian/Russian text fell through to
 // the system monospace (oversized, off-brand). JetBrains Mono has full Cyrillic
 // and a near-identical mono footprint; it's the per-glyph fallback after Space
-// Mono, so Latin stays Space Mono and only Cyrillic uses it.
-const monoCyrillic = JetBrains_Mono({
-  variable: "--font-mono-cy",
-  subsets: ["latin", "cyrillic"],
-  weight: ["400", "700"],
-  display: "swap",
-});
+// Mono, so Latin stays Space Mono and only Cyrillic uses it. Fontsource keeps
+// both families inside the build instead of fetching Google assets at build
+// time; Google can remove a versioned file and otherwise break every deploy.
 
 export const metadata: Metadata = {
   title: "ArchiveMind",
@@ -46,7 +39,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${spaceMono.variable} ${monoCyrillic.variable}`}>
+    <html lang="en">
       <body>
         <TopProgressBar />
         {children}
