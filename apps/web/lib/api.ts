@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GroupMeta, Photo, Project, SourceMeta } from "@/types";
 import { GROUP_LIST, PROJECTS, SOURCE_LIST } from "./mock-data";
-import { getRealPhotos } from "./assets";
+import { getRealPhotoWindow, type PhotoWindow } from "./assets";
 import { createClient } from "./supabase/server";
 
 /**
@@ -20,14 +20,20 @@ import { createClient } from "./supabase/server";
 /** Pass the page's own RLS-scoped `supabase` when it has already auth-guarded
  *  the request — that skips a second client + a second network `getUser()`
  *  round trip (one full hop off the canvas load). */
-export async function getPhotos(projectId?: string, supabase?: SupabaseClient): Promise<Photo[]> {
-  if (supabase) return getRealPhotos(supabase, projectId);
+export async function getPhotoWindow(projectId?: string, supabase?: SupabaseClient): Promise<PhotoWindow> {
+  if (supabase) return getRealPhotoWindow(supabase, projectId);
   const client = await createClient();
   const {
     data: { user },
   } = await client.auth.getUser();
-  if (!user) return [];
-  return getRealPhotos(client, projectId);
+  if (!user) return { photos: [], total: 0 };
+  return getRealPhotoWindow(client, projectId);
+}
+
+/** Backward-compatible photo-only reader. The canvas page uses the richer
+ *  window above so a bounded response can never look like missing uploads. */
+export async function getPhotos(projectId?: string, supabase?: SupabaseClient): Promise<Photo[]> {
+  return (await getPhotoWindow(projectId, supabase)).photos;
 }
 
 export async function getPhoto(id: string): Promise<Photo | null> {

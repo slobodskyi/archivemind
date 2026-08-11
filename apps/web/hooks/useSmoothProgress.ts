@@ -12,11 +12,6 @@ import { useEffect, useRef, useState } from "react";
 export function useSmoothProgress(target: number, active: boolean): number {
   const [display, setDisplay] = useState(0);
   const raw = useRef(0);
-  const targetRef = useRef(target);
-
-  useEffect(() => {
-    targetRef.current = target;
-  }, [target]);
 
   useEffect(() => {
     if (!active) {
@@ -26,7 +21,7 @@ export function useSmoothProgress(target: number, active: boolean): number {
     }
     let raf = 0;
     const tick = () => {
-      const t = targetRef.current;
+      const t = target;
       let v = raw.current;
       if (t + 0.5 < v) {
         v = t; // new run started while the hook stayed active
@@ -46,7 +41,10 @@ export function useSmoothProgress(target: number, active: boolean): number {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [active]);
+  // Restarting on target changes is intentional. Once a run reaches 1 the
+  // rAF loop stops; a persistent upload summary can then begin a retry while
+  // `active` stays true, and the 1 → 0 target change must start a fresh loop.
+  }, [active, target]);
 
   return display;
 }

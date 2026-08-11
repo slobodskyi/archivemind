@@ -8,6 +8,8 @@ import { getCurrentWorkspaceId } from "@/lib/workspace";
  *  Single presigned PUT ≤ 100 MiB; multipart for larger files is a Phase-1
  *  follow-up (the shared schema already rejects oversize with a clean 400). */
 export async function POST(request: Request) {
+  const batchId = request.headers.get("x-archivemind-upload-batch") ?? "untracked";
+  const inputIndex = request.headers.get("x-archivemind-upload-index") ?? "unknown";
   const supabase = await createClient();
   const {
     data: { user },
@@ -23,7 +25,16 @@ export async function POST(request: Request) {
   }
 
   const r2Key = originalKey(workspaceId, parsed.data.filename);
-  const uploadUrl = await presignPut(r2Key, parsed.data.mime);
-  const body: PresignUploadResponse = { uploadUrl, r2Key };
-  return NextResponse.json(body);
+  try {
+    const uploadUrl = await presignPut(r2Key, parsed.data.mime);
+    const body: PresignUploadResponse = { uploadUrl, r2Key };
+    return NextResponse.json(body);
+  } catch (error) {
+    console.error("upload presign failed", {
+      batchId,
+      inputIndex,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return NextResponse.json({ error: "presign failed", batchId }, { status: 500 });
+  }
 }

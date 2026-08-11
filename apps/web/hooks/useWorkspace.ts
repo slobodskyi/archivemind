@@ -609,6 +609,11 @@ function canPreviewLocally(file: File): boolean {
   return /\.(?:jpe?g|png|webp|gif|avif)$/i.test(file.name);
 }
 
+/** Keep a large drop from asking the browser to retain and decode hundreds of
+ * full-size local blobs at once. Tiles beyond this cap still appear immediately
+ * with their filename placeholder and reconcile to the server preview normally. */
+const MAX_LOCAL_UPLOAD_PREVIEWS_PER_BATCH = 50;
+
 export interface Workspace {
   scale: number;
   tx: number;
@@ -4868,27 +4873,62 @@ export function useWorkspace(
     (batch: UploadBatchStart) => {
       const s = stateRef.current;
       if (s.projCurrent === "all") return;
-      const r = rect();
-      const clientIds = batch.files.map((item) => `${batch.batchId}:${item.inputIndex}`);
+      const existingByClientId = new Map(s.uploadPreviews.map((preview) => [preview.clientId, preview]));
+      const incomingFilesByClientId = new Map(
+        batch.files.map((item) => [`${batch.batchId}:${item.inputIndex}`, item]),
+      );
+      const incomingClientIds = new Set(batch.files.map((item) => `${batch.batchId}:${item.inputIndex}`));
+      const newFiles = batch.files.filter(
+        (item) => !existingByClientId.has(`${batch.batchId}:${item.inputIndex}`),
+      );
+      const newClientIds = newFiles.map((item) => `${batch.batchId}:${item.inputIndex}`);
+
+      // A retry reuses the original batch/id pair. Revoke any stale URL before
+      // replacing it, and count the other live URLs so this batch never retains
+      // more than the local-preview cap at once.
+      const retainedPreviewCount = s.uploadPreviews.filter(
+        (preview) =>
+          preview.batchId === batch.batchId &&
+          preview.localUrl !== null &&
+          !incomingClientIds.has(preview.clientId),
+      ).length;
+      let previewSlots = Math.max(0, MAX_LOCAL_UPLOAD_PREVIEWS_PER_BATCH - retainedPreviewCount);
+      const localUrls = new Map<string, string | null>();
+      for (const item of batch.files) {
+        const clientId = `${batch.batchId}:${item.inputIndex}`;
+        const previousUrl = objectUrlsRef.current.get(clientId);
+        if (previousUrl) URL.revokeObjectURL(previousUrl);
+        objectUrlsRef.current.delete(clientId);
+        const localUrl = previewSlots > 0 && canPreviewLocally(item.file)
+          ? URL.createObjectURL(item.file)
+          : null;
+        if (localUrl) {
+          previewSlots -= 1;
+          objectUrlsRef.current.set(clientId, localUrl);
+        }
+        localUrls.set(clientId, localUrl);
+      }
+
       // A freshly dropped file has no capture date / topic to sort by, so it can
       // only live on the Canvas. If the drop landed in a sorted view the pointer
       // was over the Timeline/Topic layout — a meaningless grid anchor — so append
       // the batch as a neat cluster just below the existing Canvas content and
       // snap to Canvas (below). In Canvas, cluster around the real drop point.
-      const droppedIntoSortedView = s.view !== "neural";
-      let anchor: CanvasPoint;
-      if (droppedIntoSortedView) {
-        const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
-        anchor = appendClusterAnchor(bounds, clientIds.length);
-      } else {
+      const droppedIntoSortedView = newFiles.length > 0 && s.view !== "neural";
+      let centers: Record<string, CanvasPoint> = {};
+      if (newFiles.length > 0) {
+        const r = rect();
         const clientPoint = batch.clientPoint ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-        anchor = toContent(clientPoint.x, clientPoint.y);
+        const anchor = droppedIntoSortedView
+          ? appendClusterAnchor(
+            neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds,
+            newClientIds.length,
+          )
+          : toContent(clientPoint.x, clientPoint.y);
+        centers = droppedAssetCenters(newClientIds, anchor);
       }
-      const centers = droppedAssetCenters(clientIds, anchor);
-      const previews = batch.files.map((item): CanvasUploadPreview => {
+      const previews = newFiles.map((item): CanvasUploadPreview => {
         const clientId = `${batch.batchId}:${item.inputIndex}`;
-        const localUrl = canPreviewLocally(item.file) ? URL.createObjectURL(item.file) : null;
-        if (localUrl) objectUrlsRef.current.set(clientId, localUrl);
         return {
           clientId,
           batchId: batch.batchId,
@@ -4897,7 +4937,7 @@ export function useWorkspace(
           jobId: null,
           filename: item.file.name,
           mime: item.file.type || "application/octet-stream",
-          localUrl,
+          localUrl: localUrls.get(clientId) ?? null,
           center: centers[clientId],
           width: 4,
           height: 3,
@@ -4906,7 +4946,22 @@ export function useWorkspace(
         };
       });
       setState((previous) => ({
-        uploadPreviews: [...previous.uploadPreviews, ...previews],
+        uploadPreviews: [
+          ...previous.uploadPreviews.map((preview): CanvasUploadPreview => {
+            if (!incomingClientIds.has(preview.clientId)) return preview;
+            const item = incomingFilesByClientId.get(preview.clientId);
+            if (!item) return preview;
+            return {
+              ...preview,
+              filename: item.file.name,
+              mime: item.file.type || "application/octet-stream",
+              localUrl: localUrls.get(preview.clientId) ?? null,
+              stage: "uploading",
+              message: null,
+            };
+          }),
+          ...previews,
+        ],
         galleryOverrides: {
           ...previous.galleryOverrides,
           asset: { ...previous.galleryOverrides.asset, ...centers },
@@ -4921,7 +4976,18 @@ export function useWorkspace(
       // processed asset lands (seconds later). Measuring the already-loaded local
       // bytes now settles the tile to its real aspect within a frame or two, and
       // the canonical asset (same dimensions) then arrives with no further reflow.
-      for (const preview of previews) {
+      const previewsToProbe = [
+        ...previews,
+        ...s.uploadPreviews
+          .filter(
+            (preview) =>
+              incomingClientIds.has(preview.clientId) &&
+              preview.width === 4 &&
+              preview.height === 3,
+          )
+          .map((preview) => ({ ...preview, localUrl: localUrls.get(preview.clientId) ?? null })),
+      ];
+      for (const preview of previewsToProbe) {
         const localUrl = preview.localUrl;
         if (!localUrl) continue;
         const clientId = preview.clientId;
@@ -4946,13 +5012,17 @@ export function useWorkspace(
   const onUploadBatchSettled = useCallback(
     (result: UploadBatchResult) => {
       if (stateRef.current.projCurrent === "all") return;
-      const uploaded = new Map(result.uploaded.map((item) => [item.inputIndex, item.assetId]));
+      const attempted = new Set(result.attemptedIndexes);
+      const uploaded = new Map(result.uploaded.map((item) => [item.inputIndex, item]));
       const failed = new Set(result.failedIndexes);
-      const linkFailed = result.projectLink === "failed";
+      const linkFailed = new Set(result.projectLinkFailedIndexes);
       const errorClientIds = stateRef.current.uploadPreviews
         .filter((preview) =>
           preview.batchId === result.batchId &&
-          (linkFailed || !uploaded.has(preview.inputIndex) || failed.has(preview.inputIndex)),
+          attempted.has(preview.inputIndex) &&
+          (failed.has(preview.inputIndex) ||
+            linkFailed.has(preview.inputIndex) ||
+            !uploaded.has(preview.inputIndex)),
         )
         .map((preview) => preview.clientId);
       for (const clientId of errorClientIds) {
@@ -4963,22 +5033,23 @@ export function useWorkspace(
       setState((previous) => {
         const assetOverrides = { ...previous.galleryOverrides.asset };
         const uploadPreviews = previous.uploadPreviews.map((preview): CanvasUploadPreview => {
-          if (preview.batchId !== result.batchId) return preview;
-          const assetId = uploaded.get(preview.inputIndex);
-          if (!assetId || failed.has(preview.inputIndex)) {
+          if (preview.batchId !== result.batchId || !attempted.has(preview.inputIndex)) return preview;
+          const uploadedFile = uploaded.get(preview.inputIndex);
+          if (!uploadedFile || failed.has(preview.inputIndex)) {
             return { ...preview, localUrl: null, stage: "error", message: "Upload failed" };
           }
           const center = assetOverrides[preview.clientId] ?? preview.center;
           delete assetOverrides[preview.clientId];
-          assetOverrides[assetId] = center;
+          assetOverrides[uploadedFile.assetId] = center;
+          const couldNotLink = linkFailed.has(preview.inputIndex);
           return {
             ...preview,
-            assetId,
-            jobId: result.jobId,
+            assetId: uploadedFile.assetId,
+            jobId: uploadedFile.jobId,
             center,
-            localUrl: linkFailed ? null : preview.localUrl,
-            stage: linkFailed ? "error" : "processing",
-            message: linkFailed ? "Uploaded, but couldn’t add to this project" : null,
+            localUrl: couldNotLink ? null : preview.localUrl,
+            stage: couldNotLink ? "error" : "processing",
+            message: couldNotLink ? "Uploaded, but couldn’t add to this project" : null,
           };
         });
         return {

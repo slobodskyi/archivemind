@@ -120,6 +120,8 @@ export function assetKindFromMime(mime: string): AssetKind {
  *  larger files is a Phase-1 follow-up — the schema caps at the single-PUT
  *  limit so the UI gets a clean error instead of a broken upload. */
 export const SINGLE_PUT_MAX_BYTES = 100 * 1024 * 1024;
+/** The atomic upload-completion RPC bounds one transaction and ingest job. */
+export const COMPLETE_UPLOAD_MAX_ITEMS = 100;
 
 export const presignUploadRequestSchema = z.object({
   filename: z.string().min(1).max(512),
@@ -135,17 +137,22 @@ export const presignUploadResponseSchema = z.object({
 export type PresignUploadResponse = z.infer<typeof presignUploadResponseSchema>;
 
 export const completeUploadRequestSchema = z.object({
+  /** Idempotency key for exactly this completion payload. A browser retry of
+   *  the same request reuses it; an explicit user retry creates a new one. */
+  completionId: uuidSchema,
+  /** When present, membership is created before the ingest job can run. */
+  projectId: uuidSchema.optional(),
   uploads: z
     .array(
       z.object({
         r2Key: z.string().min(1),
         filename: z.string().min(1).max(512),
         mime: z.string().min(1).max(255),
-        size: z.number().int().nonnegative(),
+        size: z.number().int().positive().max(SINGLE_PUT_MAX_BYTES),
       }),
     )
     .min(1)
-    .max(500),
+    .max(COMPLETE_UPLOAD_MAX_ITEMS),
 });
 export type CompleteUploadRequest = z.infer<typeof completeUploadRequestSchema>;
 
@@ -154,6 +161,15 @@ export const completeUploadResponseSchema = z.object({
   jobId: uuidSchema,
 });
 export type CompleteUploadResponse = z.infer<typeof completeUploadResponseSchema>;
+
+/** Database shape returned by complete_upload_batch. Kept beside the public
+ *  camelCase response so the route validates the RPC boundary before mapping
+ *  it back to the browser contract. */
+export const completeUploadRpcResponseSchema = z.object({
+  asset_ids: z.array(uuidSchema),
+  job_id: uuidSchema,
+});
+export type CompleteUploadRpcResponse = z.infer<typeof completeUploadRpcResponseSchema>;
 
 /** ai_jobs.payload for type='ingest' (spec §8.1) — produced by the web
  *  complete/imports routes, consumed by the worker handler.

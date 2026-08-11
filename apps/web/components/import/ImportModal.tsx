@@ -11,11 +11,19 @@ import { DriveAuthError, openDrivePicker, requestPickerToken } from "@/lib/googl
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import {
   createUploadBatchId,
+  retryProjectLinks,
   runUpload,
   uploadCandidates,
   type UploadProgress,
 } from "@/lib/upload-client";
-import type { UploadBatchResult, UploadBatchStart, UploadResult } from "@/types";
+import type {
+  IndexedUploadFile,
+  UploadedFileResult,
+  UploadBatchResult,
+  UploadBatchStart,
+  UploadResult,
+  UploadSkipReason,
+} from "@/types";
 
 /** Import modal (issue #17): opens on a fresh project (or via the toolbar
  *  "Add"). Left = source picker (Local active; Drive/Dropbox land in Phase 6);
@@ -27,6 +35,93 @@ import type { UploadBatchResult, UploadBatchStart, UploadResult } from "@/types"
 type Source = "local" | "gdrive" | "dropbox";
 type Phase = "idle" | "uploading" | "done";
 type DrivePhase = "idle" | "picking" | "importing" | "done";
+
+interface LinkRetry {
+  file: IndexedUploadFile;
+  uploaded: UploadedFileResult;
+}
+
+interface LocalUploadResult {
+  batchId: string;
+  projectId: string;
+  uploadedCount: number;
+  skippedCount: number;
+  skippedReasons: Record<UploadSkipReason, number>;
+  retryFiles: IndexedUploadFile[];
+  retryLinks: LinkRetry[];
+  errors: string[];
+  hiddenErrorCount: number;
+}
+
+const MAX_VISIBLE_UPLOAD_ERRORS = 3;
+const EMPTY_SKIP_COUNTS: Record<UploadSkipReason, number> = {
+  empty: 0,
+  "too-large": 0,
+  "batch-limit": 0,
+};
+
+function emptyUploadResult(): UploadResult {
+  return {
+    attemptedIndexes: [],
+    assetIds: [],
+    uploaded: [],
+    failedIndexes: [],
+    skippedIndexes: [],
+    skippedFiles: [],
+    jobIds: [],
+    projectLink: "not-requested",
+    projectLinkFailedIndexes: [],
+    errors: [],
+    skipped: 0,
+  };
+}
+
+function failedUploadResult(indexes: number[], message: string): UploadResult {
+  return {
+    ...emptyUploadResult(),
+    attemptedIndexes: indexes,
+    failedIndexes: indexes,
+    errors: [message],
+  };
+}
+
+function boundedErrors(errors: readonly string[]) {
+  const unique = Array.from(new Set(errors));
+  return {
+    errors: unique.slice(0, MAX_VISIBLE_UPLOAD_ERRORS),
+    hiddenErrorCount: Math.max(0, unique.length - MAX_VISIBLE_UPLOAD_ERRORS),
+  };
+}
+
+function mergeSkipCounts(
+  previous: Record<UploadSkipReason, number>,
+  uploadResult: UploadResult,
+): Record<UploadSkipReason, number> {
+  const next = { ...previous };
+  for (const skipped of uploadResult.skippedFiles) next[skipped.reason] += 1;
+  return next;
+}
+
+function retryFilesFor(
+  files: readonly IndexedUploadFile[],
+  result: UploadResult,
+): IndexedUploadFile[] {
+  const failed = new Set(result.failedIndexes);
+  return files.filter((item) => failed.has(item.inputIndex));
+}
+
+function linkRetriesFor(
+  files: readonly IndexedUploadFile[],
+  result: UploadResult,
+): LinkRetry[] {
+  const filesByIndex = new Map(files.map((item) => [item.inputIndex, item]));
+  const uploadedByIndex = new Map(result.uploaded.map((item) => [item.inputIndex, item]));
+  return result.projectLinkFailedIndexes.flatMap((inputIndex): LinkRetry[] => {
+    const file = filesByIndex.get(inputIndex);
+    const uploaded = uploadedByIndex.get(inputIndex);
+    return file && uploaded ? [{ file, uploaded }] : [];
+  });
+}
 
 export default function ImportModal({
   open,
@@ -47,7 +142,8 @@ export default function ImportModal({
   const [source, setSource] = useState<Source>("local");
   const [phase, setPhase] = useState<Phase>("idle");
   const [prog, setProg] = useState<UploadProgress>({ totalFiles: 0, doneFiles: 0, progress: 0, stage: "uploading" });
-  const [result, setResult] = useState<{ added: number; errors: string[] } | null>(null);
+  const [result, setResult] = useState<LocalUploadResult | null>(null);
+  const [syncedOpen, setSyncedOpen] = useState(open);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const busyRef = useRef(false);
@@ -70,6 +166,17 @@ export default function ImportModal({
   const dbxBusy = dbxPhase === "picking" || dbxPhase === "importing";
   const blocked = phase === "uploading" || busyDrive || dbxBusy;
 
+  // The modal stays mounted while hidden. Reset its local File references on
+  // an owner-driven close; the guarded render adjustment avoids an extra
+  // effect/render cycle and mirrors the prop-sync pattern used by useWorkspace.
+  if (syncedOpen !== open) {
+    setSyncedOpen(open);
+    if (!open) {
+      setPhase("idle");
+      setResult(null);
+    }
+  }
+
   useEffect(() => {
     if (open && source === "gdrive" && !gdrive.loaded) void refreshGdrive();
   }, [open, source, gdrive.loaded, refreshGdrive]);
@@ -80,7 +187,11 @@ export default function ImportModal({
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !blocked) onClose();
+      if (e.key === "Escape" && !blocked) {
+        setPhase("idle");
+        setResult(null);
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -164,36 +275,145 @@ export default function ImportModal({
     let uploadResult: UploadResult;
     try {
       uploadResult = await runUpload(files, {
+        batchId: id,
         projectId,
         onProgress: (p) => setProg(p),
       });
     } catch (error) {
-      uploadResult = {
-        assetIds: [],
-        uploaded: [],
-        failedIndexes: candidates.map((item) => item.inputIndex),
-        skippedIndexes: [],
-        jobId: null,
-        projectLink: "not-requested",
-        errors: [error instanceof Error ? error.message : "Upload failed"],
-        skipped: 0,
-      };
+      uploadResult = failedUploadResult(
+        candidates.map((item) => item.inputIndex),
+        error instanceof Error ? error.message : "Upload failed",
+      );
     } finally {
       busyRef.current = false;
     }
     if (candidates.length > 0) onBatchSettled?.({ batchId: id, ...uploadResult });
-    const errs = [...uploadResult.errors];
-    if (uploadResult.skipped > 0) errs.push(`${uploadResult.skipped} file(s) skipped — empty, over 100 MiB, or beyond the 500-file batch limit`);
     if (uploadResult.assetIds.length > 0) router.refresh();
-    setResult({ added: uploadResult.assetIds.length, errors: errs });
+    setResult({
+      batchId: id,
+      projectId,
+      uploadedCount: uploadResult.uploaded.length,
+      skippedCount: uploadResult.skipped,
+      skippedReasons: mergeSkipCounts(EMPTY_SKIP_COUNTS, uploadResult),
+      retryFiles: retryFilesFor(candidates, uploadResult),
+      retryLinks: linkRetriesFor(candidates, uploadResult),
+      ...boundedErrors(uploadResult.errors),
+    });
     setPhase("done");
+  }
+
+  async function retryFailed() {
+    if (!result || busyRef.current) return;
+    const retryInputs = [
+      ...result.retryFiles,
+      ...result.retryLinks.map((item) => item.file),
+    ];
+    if (retryInputs.length === 0) return;
+
+    busyRef.current = true;
+    onBatchStart?.({
+      batchId: result.batchId,
+      origin: "import-modal",
+      clientPoint: null,
+      files: retryInputs,
+    });
+    setProg({
+      totalFiles: retryInputs.length,
+      doneFiles: 0,
+      progress: result.retryFiles.length > 0 ? 0 : 0.96,
+      stage: result.retryFiles.length > 0 ? "uploading" : "finalizing",
+    });
+    setPhase("uploading");
+
+    const uploadPromise = result.retryFiles.length > 0
+      ? runUpload(result.retryFiles, {
+        batchId: result.batchId,
+        projectId: result.projectId,
+        onProgress: (progress) => setProg({
+          ...progress,
+          // Link-only failures already own real assets and retry alongside the
+          // byte failures; do not announce completion until both legs settle.
+          stage: progress.stage === "done" && result.retryLinks.length > 0
+            ? "finalizing"
+            : progress.stage,
+        }),
+      }).catch((error) => failedUploadResult(
+        result.retryFiles.map((item) => item.inputIndex),
+        error instanceof Error ? error.message : "Upload failed",
+      ))
+      : Promise.resolve(emptyUploadResult());
+    const linkPromise = result.retryLinks.length > 0
+      ? retryProjectLinks(
+        result.retryLinks.map((item) => item.uploaded),
+        { projectId: result.projectId, batchId: result.batchId },
+      ).catch((error) => ({
+        failedIndexes: result.retryLinks.map((item) => item.file.inputIndex),
+        errors: [error instanceof Error ? error.message : "add to project failed"],
+      }))
+      : Promise.resolve({ failedIndexes: [] as number[], errors: [] as string[] });
+
+    const [uploadResult, linkResult] = await Promise.all([uploadPromise, linkPromise]);
+    busyRef.current = false;
+    const previousLinksByIndex = new Map(
+      result.retryLinks.map((item) => [item.file.inputIndex, item]),
+    );
+    const remainingPreviousLinks = linkResult.failedIndexes.flatMap((inputIndex): LinkRetry[] => {
+      const retry = previousLinksByIndex.get(inputIndex);
+      return retry ? [retry] : [];
+    });
+    const newLinkRetries = linkRetriesFor(result.retryFiles, uploadResult);
+    const retriedLinkUploads = result.retryLinks.map((item) => item.uploaded);
+    const linkFailedIndexes = Array.from(new Set([
+      ...uploadResult.projectLinkFailedIndexes,
+      ...linkResult.failedIndexes,
+    ])).sort((a, b) => a - b);
+    const combinedResult: UploadResult = {
+      ...uploadResult,
+      attemptedIndexes: Array.from(new Set([
+        ...uploadResult.attemptedIndexes,
+        ...retriedLinkUploads.map((item) => item.inputIndex),
+      ])),
+      assetIds: [...uploadResult.assetIds, ...retriedLinkUploads.map((item) => item.assetId)],
+      uploaded: [...uploadResult.uploaded, ...retriedLinkUploads],
+      jobIds: Array.from(new Set([
+        ...uploadResult.jobIds,
+        ...retriedLinkUploads.map((item) => item.jobId),
+      ])),
+      projectLink: result.projectId === "all"
+        ? "not-requested"
+        : linkFailedIndexes.length > 0 ? "failed" : "linked",
+      projectLinkFailedIndexes: linkFailedIndexes,
+      errors: [...uploadResult.errors, ...linkResult.errors],
+    };
+    onBatchSettled?.({ batchId: result.batchId, ...combinedResult });
+    if (combinedResult.assetIds.length > 0) router.refresh();
+    setResult({
+      ...result,
+      uploadedCount: result.uploadedCount + uploadResult.uploaded.length,
+      skippedCount: result.skippedCount + uploadResult.skipped,
+      skippedReasons: mergeSkipCounts(result.skippedReasons, uploadResult),
+      retryFiles: retryFilesFor(result.retryFiles, uploadResult),
+      retryLinks: [...remainingPreviousLinks, ...newLinkRetries],
+      ...boundedErrors(combinedResult.errors),
+    });
+    setPhase("done");
+  }
+
+  function dismissLocalSummary() {
+    setPhase("idle");
+    setResult(null);
+  }
+
+  function closeModal() {
+    dismissLocalSummary();
+    onClose();
   }
 
   const isProject = projectId !== "all";
 
   return (
     <div
-      onClick={blocked ? undefined : onClose}
+      onClick={blocked ? undefined : closeModal}
       style={{
         position: "fixed",
         inset: 0,
@@ -242,7 +462,7 @@ export default function ImportModal({
               {source === "local" ? "Local files" : source === "gdrive" ? "Google Drive" : "Dropbox"}
             </span>
             <button
-              onClick={blocked ? undefined : onClose}
+              onClick={blocked ? undefined : closeModal}
               disabled={blocked}
               aria-label="Close"
               style={{ display: "flex", width: 24, height: 24, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", color: "var(--t2b)", cursor: blocked ? "default" : "pointer", opacity: blocked ? 0.45 : 1, borderRadius: 2 }}
@@ -290,7 +510,7 @@ export default function ImportModal({
                       Pick more
                     </button>
                     <button
-                      onClick={onClose}
+                      onClick={closeModal}
                       style={{ padding: "7px 14px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                     >
                       Done
@@ -355,7 +575,7 @@ export default function ImportModal({
                       Pick more
                     </button>
                     <button
-                      onClick={onClose}
+                      onClick={closeModal}
                       style={{ padding: "7px 14px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                     >
                       Done
@@ -447,21 +667,64 @@ export default function ImportModal({
                 ) : phase === "done" && result ? (
                   <>
                     <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 700 }}>
-                      {result.added} file{result.added === 1 ? "" : "s"} added
+                      {result.uploadedCount} file{result.uploadedCount === 1 ? "" : "s"} uploaded
                     </div>
-                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Processing previews — they’ll appear on the canvas shortly.</div>
+                    {result.uploadedCount > 0 && (
+                      <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Processing previews — they’ll appear on the canvas shortly.</div>
+                    )}
+                    {(result.retryFiles.length > 0 || result.retryLinks.length > 0 || result.skippedCount > 0) && (
+                      <div style={{ fontSize: 10, color: "var(--tm)", letterSpacing: ".04em" }}>
+                        Batch {result.batchId.slice(0, 8)}
+                      </div>
+                    )}
+                    {result.retryFiles.length > 0 && (
+                      <div style={{ fontSize: 10.5, color: "var(--red)" }}>
+                        {result.retryFiles.length} file{result.retryFiles.length === 1 ? "" : "s"} failed to upload.
+                      </div>
+                    )}
+                    {result.retryLinks.length > 0 && (
+                      <div style={{ fontSize: 10.5, color: "var(--red)" }}>
+                        {result.retryLinks.length} uploaded file{result.retryLinks.length === 1 ? " was" : "s were"} not added to this project.
+                      </div>
+                    )}
+                    {result.skippedCount > 0 && (
+                      <div style={{ fontSize: 10.5, color: "var(--t3)" }}>
+                        Skipped: {[
+                          result.skippedReasons.empty > 0 ? `${result.skippedReasons.empty} empty` : null,
+                          result.skippedReasons["too-large"] > 0
+                            ? `${result.skippedReasons["too-large"]} over 100 MiB`
+                            : null,
+                          result.skippedReasons["batch-limit"] > 0
+                            ? `${result.skippedReasons["batch-limit"]} beyond 500`
+                            : null,
+                        ].filter(Boolean).join(" · ")}.
+                      </div>
+                    )}
                     {result.errors.map((err) => (
                       <div key={err} style={{ fontSize: 10.5, color: "var(--red)" }}>{err}</div>
                     ))}
+                    {result.hiddenErrorCount > 0 && (
+                      <div style={{ fontSize: 10.5, color: "var(--t3)" }}>
+                        + {result.hiddenErrorCount} more error{result.hiddenErrorCount === 1 ? "" : "s"}
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      {(result.retryFiles.length > 0 || result.retryLinks.length > 0) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void retryFailed(); }}
+                          style={{ padding: "7px 12px", background: "var(--bg-el)", color: "var(--t1)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                        >
+                          Retry failed ({result.retryFiles.length + result.retryLinks.length})
+                        </button>
+                      )}
                       <button
-                        onClick={(e) => { e.stopPropagation(); setPhase("idle"); setResult(null); }}
+                        onClick={(e) => { e.stopPropagation(); dismissLocalSummary(); }}
                         style={{ padding: "7px 12px", background: "var(--bg-el)", color: "var(--t2)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
                       >
-                        Add more
+                        Dismiss
                       </button>
                       <button
-                        onClick={(e) => { e.stopPropagation(); onClose(); }}
+                        onClick={(e) => { e.stopPropagation(); closeModal(); }}
                         style={{ padding: "7px 14px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                       >
                         Done
