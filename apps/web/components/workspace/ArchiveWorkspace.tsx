@@ -48,6 +48,9 @@ interface Account {
 
 interface ArchiveWorkspaceProps {
   initialPhotos: Photo[];
+  /** Exact active-asset count for this scope. `initialPhotos` is intentionally
+   *  bounded until the canvas is virtualized (Phase 5 / #18). */
+  initialPhotoTotal: number;
   workspaceId: string;
   projects: ProjectOption[];
   currentProjectId: string;
@@ -62,6 +65,7 @@ interface ArchiveWorkspaceProps {
 
 export default function ArchiveWorkspace({
   initialPhotos,
+  initialPhotoTotal,
   workspaceId,
   projects,
   currentProjectId,
@@ -98,6 +102,7 @@ export default function ArchiveWorkspace({
   // fires on every pointermove, and rebuilding this inline would make each one
   // a new object and defeat the memo it exists to feed.
   const pendingEraseSet = useMemo(() => new Set(ws.pendingErase), [ws.pendingErase]);
+  const hiddenPhotoCount = Math.max(0, initialPhotoTotal - initialPhotos.length);
 
   return (
     <div
@@ -381,6 +386,38 @@ export default function ArchiveWorkspace({
           ) : undefined
         }
       />
+
+      {/* Persistent by design: this is archive-integrity information, not a
+          transient toast. Until #18 virtualizes the canvas, the newest 500 are
+          the working set and this makes the remainder impossible to mistake
+          for a failed upload. */}
+      {hiddenPhotoCount > 0 && (
+        <div
+          role="status"
+          style={{
+            position: "absolute",
+            top: 60,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 34,
+            maxWidth: "calc(100vw - 32px)",
+            padding: "6px 10px",
+            background: "rgba(8,8,8,.88)",
+            border: "1px solid var(--bd)",
+            borderRadius: 2,
+            boxShadow: "0 8px 24px rgba(0,0,0,.32)",
+            color: "var(--t2)",
+            fontSize: 10.5,
+            lineHeight: 1.35,
+            letterSpacing: "0.02em",
+            textAlign: "center",
+            pointerEvents: "none",
+          }}
+        >
+          Showing newest {initialPhotos.length} of {initialPhotoTotal} files on this canvas. The other{" "}
+          {hiddenPhotoCount} remain in your archive.
+        </div>
+      )}
 
       <ZoomDropdown
         open={ws.zoomMenuOpen}

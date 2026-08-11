@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAPTION_LANG_NAMES,
   CAPTION_PROMPTS,
+  COMPLETE_UPLOAD_MAX_ITEMS,
   SINGLE_PUT_MAX_BYTES,
   addProjectAssetsRequestSchema,
   EXPORT_ARTIFACTS,
@@ -24,6 +25,7 @@ import {
   captionStyleSchema,
   clusterJobPayloadSchema,
   completeUploadRequestSchema,
+  completeUploadRpcResponseSchema,
   createJobRequestSchema,
   createProjectRequestSchema,
   driveFileIdSchema,
@@ -211,11 +213,42 @@ describe("upload contracts", () => {
     expect(presignUploadRequestSchema.safeParse({ filename: "a.jpg", mime: "image/jpeg", size: 1.5 }).success).toBe(false);
   });
 
-  it("caps complete batches at 500 and requires at least one upload", () => {
+  it("requires a completion UUID and caps each atomic complete batch at 100", () => {
     const one = { r2Key: "ws/originals/x/a.jpg", filename: "a.jpg", mime: "image/jpeg", size: 10 };
-    expect(completeUploadRequestSchema.parse({ uploads: [one] })).toBeTruthy();
-    expect(completeUploadRequestSchema.safeParse({ uploads: [] }).success).toBe(false);
-    expect(completeUploadRequestSchema.safeParse({ uploads: Array(501).fill(one) }).success).toBe(false);
+    const completionId = "8df136fe-a1a4-49c1-ab22-1f1713a1c53c";
+    expect(completeUploadRequestSchema.parse({ completionId, uploads: [one] })).toBeTruthy();
+    expect(completeUploadRequestSchema.parse({
+      completionId,
+      projectId: "4df136fe-a1a4-49c1-ab22-1f1713a1c53c",
+      uploads: [one],
+    })).toBeTruthy();
+    expect(completeUploadRequestSchema.safeParse({ uploads: [one] }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({ completionId: "not-a-uuid", uploads: [one] }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({ completionId, projectId: "not-a-uuid", uploads: [one] }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({ completionId, uploads: [] }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({
+      completionId,
+      uploads: Array(COMPLETE_UPLOAD_MAX_ITEMS + 1).fill(one),
+    }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({
+      completionId,
+      uploads: [{ ...one, size: 0 }],
+    }).success).toBe(false);
+    expect(completeUploadRequestSchema.safeParse({
+      completionId,
+      uploads: [{ ...one, size: SINGLE_PUT_MAX_BYTES + 1 }],
+    }).success).toBe(false);
+  });
+
+  it("validates the snake_case result returned by the completion RPC", () => {
+    expect(completeUploadRpcResponseSchema.parse({
+      asset_ids: ["4df136fe-a1a4-49c1-ab22-1f1713a1c53c"],
+      job_id: "8df136fe-a1a4-49c1-ab22-1f1713a1c53c",
+    })).toBeTruthy();
+    expect(completeUploadRpcResponseSchema.safeParse({
+      assetIds: ["4df136fe-a1a4-49c1-ab22-1f1713a1c53c"],
+      jobId: "8df136fe-a1a4-49c1-ab22-1f1713a1c53c",
+    }).success).toBe(false);
   });
 
   it("classifies asset kind from MIME identically for web and worker", () => {

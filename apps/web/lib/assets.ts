@@ -6,14 +6,14 @@ import {
   type AssetLabel,
   type TrashedAsset,
 } from "@archivemind/shared";
-import type { ExifData, Photo, PhotoCaptions } from "@/types";
-import { presignGet } from "@/lib/r2";
+import type { ExifData, Photo, PhotoCaptions } from "../types";
+import { presignGet } from "./r2";
 import {
   deriveTopicAssignments,
   heuristicTopicKey,
   UNSORTED_CLOUD_KEY,
   type TopicAssignment,
-} from "@/lib/topics";
+} from "./topics";
 
 /** Real assets → the mockup's Photo shape (server-side; RLS-scoped query +
  *  presigned preview URLs). Per the 2026-07-10 product decision the canvas
@@ -101,6 +101,16 @@ interface AssetRow {
   facts: FactRow[];
   captions: CaptionDbRow[];
 }
+
+/** The bounded set mounted by today's non-virtualized canvas, plus the exact
+ *  number of matching rows. The total keeps the performance guard honest: a
+ *  larger archive is never mistaken for files that failed to upload. */
+export interface PhotoWindow {
+  photos: Photo[];
+  total: number;
+}
+
+export const CANVAS_ASSET_LIMIT = 500;
 
 /** DB caption enums → the mockup's UI labels. */
 const CAPTION_LANG_UP = { en: "EN", uk: "UK", ru: "RU" } as const;
@@ -312,10 +322,18 @@ function selectAssets(supabase: SupabaseClient, projectId: string | undefined, s
   const query = scoped
     ? supabase
         .from("assets")
-        .select(`${select}, project_assets!inner ( project_id )`)
+        .select(`${select}, project_assets!inner ( project_id )`, { count: "exact" })
         .eq("project_assets.project_id", projectId)
-    : supabase.from("assets").select(select);
-  return query.eq("status", "active").order("created_at", { ascending: false }).limit(500);
+    : supabase.from("assets").select(select, { count: "exact" });
+  return query
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    // A deterministic tie-breaker matters for any later cursor/range paging:
+    // one upload batch can create many rows with the same timestamp.
+    .order("id", { ascending: false })
+    // PostgREST ranges are inclusive. Keep every request below Supabase's own
+    // max_rows guard while exposing the exact count alongside this window.
+    .range(0, CANVAS_ASSET_LIMIT - 1);
 }
 
 function isMissingTopicOverrideRelation(error: {
@@ -329,12 +347,13 @@ function isMissingTopicOverrideRelation(error: {
   return [error.message, error.details, error.hint].some((part) => part?.includes("topic_cluster_overrides"));
 }
 
-/** The caller's assets (RLS-scoped). `projectId` filters to one project's M:N
- *  membership; omit (or pass "all") for the whole workspace. */
-export async function getRealPhotos(supabase: SupabaseClient, projectId?: string): Promise<Photo[]> {
+/** The caller's newest canvas window (RLS-scoped) and exact matching row count.
+ *  `projectId` filters to one project's M:N membership; omit (or pass "all")
+ *  for the whole workspace. */
+export async function getRealPhotoWindow(supabase: SupabaseClient, projectId?: string): Promise<PhotoWindow> {
   let includeLabel = true;
   let includeTopicOverrides = true;
-  let { data, error } = await selectAssets(
+  let { data, error, count } = await selectAssets(
     supabase,
     projectId,
     assetSelect(includeLabel, includeTopicOverrides),
@@ -351,7 +370,7 @@ export async function getRealPhotos(supabase: SupabaseClient, projectId?: string
     } else {
       break;
     }
-    ({ data, error } = await selectAssets(
+    ({ data, error, count } = await selectAssets(
       supabase,
       projectId,
       assetSelect(includeLabel, includeTopicOverrides),
@@ -382,5 +401,14 @@ export async function getRealPhotos(supabase: SupabaseClient, projectId?: string
     topicKey: fallbackKey,
     label: UNSORTED_CLOUD_KEY,
   };
-  return Promise.all(rows.map((r) => toPhoto(r, topics.get(r.id) ?? fallbackTopic)));
+  const photos = await Promise.all(rows.map((r) => toPhoto(r, topics.get(r.id) ?? fallbackTopic)));
+  // Exact count can be null when a non-PostgREST test double or future backend
+  // omits Content-Range. Never report fewer rows than we actually mapped.
+  return { photos, total: Math.max(count ?? rows.length, rows.length) };
+}
+
+/** Backward-compatible photo-only reader for callers that do not need to
+ *  surface whether the canvas window is truncated. */
+export async function getRealPhotos(supabase: SupabaseClient, projectId?: string): Promise<Photo[]> {
+  return (await getRealPhotoWindow(supabase, projectId)).photos;
 }

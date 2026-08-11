@@ -11,6 +11,7 @@
  * own — near-black, neon green, mono eyebrows over a tight-tracked grotesque. */
 
 .root {
+  --font-display: "Inter Tight Variable";
   /* globals.css pins body{overflow:hidden} for the app canvas, so the landing
      brings its own scroll container. position:sticky resolves against this
      element, which is exactly what the scrubbed sections need. */

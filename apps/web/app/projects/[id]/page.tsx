@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
-import { getPhotos } from "@/lib/api";
+import { getPhotoWindow } from "@/lib/api";
 import { ensureWorkspace } from "@/lib/bootstrap";
 import { getCanvasAnnotations } from "@/lib/annotations";
 import { getCanvasGroups } from "@/lib/canvas-groups";
@@ -19,13 +19,13 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   } = await supabase.auth.getUser();
   if (!user) redirect("/auth/reset");
 
-  // Parallel: ensureWorkspace is idempotent bootstrap, and getPhotos reuses
-  // this page's client (skipping its internal re-auth) — the canvas load drops
-  // from four sequential round trips to two.
-  const [workspaceId, photos, projectCards, groups, labelNames, annotations, { data: profile }] =
+  // Parallel: ensureWorkspace is idempotent bootstrap, and getPhotoWindow
+  // reuses this page's client (skipping its internal re-auth) — the canvas load
+  // drops from four sequential round trips to two.
+  const [workspaceId, photoWindow, projectCards, groups, labelNames, annotations, { data: profile }] =
     await Promise.all([
       ensureWorkspace(supabase, user),
-      getPhotos(id, supabase),
+      getPhotoWindow(id, supabase),
       getProjectCards(supabase),
       getCanvasGroups(supabase, id),
       getLabelNames(supabase),
@@ -45,7 +45,8 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   return (
     <ArchiveWorkspace
       key={`ws-${id}`}
-      initialPhotos={photos}
+      initialPhotos={photoWindow.photos}
+      initialPhotoTotal={photoWindow.total}
       workspaceId={workspaceId}
       projects={projects}
       currentProjectId={id}

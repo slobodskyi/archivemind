@@ -7,6 +7,8 @@ import { getCurrentWorkspaceId } from "@/lib/workspace";
  *  a project. RLS scopes both sides (project_assets_insert = is_editor_of_asset
  *  AND is_editor of the project's workspace). Idempotent: on-conflict ignore. */
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
+  const batchId = request.headers.get("x-archivemind-upload-batch") ?? "untracked";
+  const chunk = request.headers.get("x-archivemind-upload-chunk") ?? "unknown";
   const { id } = await ctx.params;
   if (!uuidSchema.safeParse(id).success) {
     return NextResponse.json({ error: "invalid project id" }, { status: 400 });
@@ -40,7 +42,10 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     .select("id")
     .in("id", parsed.data.assetIds)
     .eq("status", "active");
-  if (ownedErr) return NextResponse.json({ error: ownedErr.message }, { status: 500 });
+  if (ownedErr) {
+    console.error("upload project asset lookup failed", { batchId, chunk, projectId: id, error: ownedErr.message });
+    return NextResponse.json({ error: ownedErr.message, batchId }, { status: 500 });
+  }
   const assetIds = (owned ?? []).map((a) => a.id as string);
   if (assetIds.length === 0) return NextResponse.json({ error: "no matching assets" }, { status: 404 });
 
@@ -52,7 +57,11 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   const { error: linkErr } = await supabase
     .from("project_assets")
     .upsert(rows, { onConflict: "project_id,asset_id", ignoreDuplicates: true });
-  if (linkErr) return NextResponse.json({ error: linkErr.message }, { status: 500 });
+  if (linkErr) {
+    console.error("upload project link failed", { batchId, chunk, projectId: id, error: linkErr.message });
+    return NextResponse.json({ error: linkErr.message, batchId }, { status: 500 });
+  }
 
+  console.info("upload project link complete", { batchId, chunk, projectId: id, files: assetIds.length });
   return NextResponse.json({ added: assetIds.length });
 }
