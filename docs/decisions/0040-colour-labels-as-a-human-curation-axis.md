@@ -123,7 +123,10 @@ everywhere at once.
   toolbar's label button (and `LabelFilterPanel`) are removed. `WorkspaceActionBar`'s
   swatch row is now **context-sensitive**: with a selection it labels the selection
   (as before); with nothing selected it *filters* the canvas by colour
-  (`labelFilter` / `setLabelFilter`). Adding a label is Workspace-only, because a
-  sorting view cannot reorder by a label you set from inside it.
+  (`labelFilter` / `setLabelFilter`).
+- The same context-sensitive swatch also lives on the **sorting views**
+  (`SortingActionBar`): organizing in Timeline / Topic / Map is exactly where you
+  pick the files to mark and bring back to the workspace, so labelling belongs
+  there too (a later revision of the original "Workspace-only" call).
 - `filterByLabel` and the `labelFilter` state are unchanged — filtering was always
   separate from the view and still applies in every view.

@@ -1,6 +1,10 @@
 "use client";
 
 import { memo } from "react";
+import type { AssetLabel, LabelNames } from "@archivemind/shared";
+import type { LabelFilter } from "@/lib/labels";
+import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
+import { LabelsIcon } from "@/components/icons/icons";
 import TopicMembershipMenu, {
   type TopicMembershipMenuProps,
 } from "@/components/toolbar/TopicMembershipMenu";
@@ -26,19 +30,29 @@ export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "select
  *  reserves 0–35 for canvas internals, and anything higher would paint over
  *  the chat and trash panels. */
 export interface SortingActionBarProps {
-  /** Topic gets Re-cluster; Timeline's day columns are not clustered. */
+  /** Canvas / Timeline / Topic can Regroup (snap tiles back); Map can't. */
+  showRegroup: boolean;
+  /** Topic shows its membership editor; the other sorting views don't. */
   showRecluster: boolean;
   /** There is something to regroup — no drag overrides means no-op. */
   canRegroup: boolean;
-  /** A job is already in flight; the worker has one lane for all of them. */
-  busy: boolean;
   /** ≥ 2 selected regroups only those, matching Tidy up's selection-first rule. */
   selCount: number;
   onRegroup: () => void;
-  onRecluster: () => void;
   /** Explicit semantic grouping actions for Topic only. The canvas may call
    * the same mutations after an intentional dwell-and-drop target. */
   topicMembership?: SortingTopicMembershipProps;
+  /** Colour-label control — the same context-sensitive swatch the workspace bar
+   *  has (ADR 0040). Organizing in a sorting view is exactly where you pick the
+   *  files to mark, so it belongs here too: with a selection it labels, with none
+   *  it filters. */
+  labelNames: LabelNames;
+  labelMenuOpen: boolean;
+  selectionLabel: AssetLabel | "mixed" | null;
+  labelFilter: LabelFilter;
+  onToggleLabelMenu: () => void;
+  onPickLabel: (label: AssetLabel | null) => void;
+  onSetFilter: (filter: LabelFilter) => void;
 }
 
 const gp = {
@@ -61,25 +75,17 @@ const RegroupGlyph = () => (
   </svg>
 );
 
-/* Re-cluster: a refresh arc over grouped dots. */
-const ReclusterGlyph = () => (
-  <svg {...gp}>
-    <path d="M20 12a8 8 0 1 1-2.4-5.7" />
-    <path d="M20 3.5V7h-3.5" />
-    <circle cx="10" cy="11" r="1.3" />
-    <circle cx="14" cy="14" r="1.3" />
-    <circle cx="9.5" cy="15" r="1.3" />
-  </svg>
-);
 
 function Btn({
   title,
   disabled,
+  active,
   onClick,
   children,
 }: {
   title: string;
   disabled?: boolean;
+  active?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -101,8 +107,8 @@ function Btn({
         border: 0,
         borderRadius: 2,
         cursor: disabled ? "default" : "pointer",
-        background: "transparent",
-        color: "var(--t2)",
+        background: active ? "color-mix(in srgb,var(--ac) 12%,transparent)" : "transparent",
+        color: active ? "var(--ac)" : "var(--t2)",
         opacity: disabled ? 0.4 : 1,
       }}
     >
@@ -113,20 +119,29 @@ function Btn({
 }
 
 function SortingActionBar({
+  showRegroup,
   showRecluster,
   canRegroup,
-  busy,
   selCount,
   onRegroup,
-  onRecluster,
   topicMembership,
+  labelNames,
+  labelMenuOpen,
+  selectionLabel,
+  labelFilter,
+  onToggleLabelMenu,
+  onPickLabel,
+  onSetFilter,
 }: SortingActionBarProps) {
+  const noSel = selCount === 0;
+  const filterCurrent: AssetLabel | "mixed" | null = labelFilter === "none" ? null : labelFilter;
   return (
     <div
       style={{
         position: "absolute",
         left: "50%",
-        bottom: 20,
+        // Sits ABOVE the bottom view switcher (which owns bottom:20 centre).
+        bottom: 66,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",
@@ -140,29 +155,56 @@ function SortingActionBar({
         zIndex: 35,
       }}
     >
+      {/* Colour-label control (ADR 0040) — labels the selection, or filters by
+          colour when nothing is selected. */}
+      {labelMenuOpen && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            bottom: "100%",
+            marginBottom: 8,
+            transform: "translateX(-50%)",
+            padding: "4px 6px",
+            background: "rgba(20,20,20,.96)",
+            border: "1px solid var(--bd)",
+            borderRadius: 2,
+            backdropFilter: "blur(16px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,.45)",
+          }}
+        >
+          <LabelSwatchRow
+            names={labelNames}
+            current={noSel ? filterCurrent : selectionLabel}
+            onPick={noSel ? onSetFilter : onPickLabel}
+            size={18}
+          />
+        </div>
+      )}
       <Btn
-        title={selCount >= 2 ? `Regroup ${selCount} selected` : "Regroup — snap tiles back into their clouds"}
-        disabled={!canRegroup}
-        onClick={onRegroup}
+        title={noSel ? (labelFilter !== null ? "Filter by colour — on" : "Filter by colour") : selCount >= 2 ? `Label ${selCount}` : "Label"}
+        active={labelMenuOpen || (noSel && labelFilter !== null)}
+        onClick={onToggleLabelMenu}
       >
-        <RegroupGlyph />
+        <LabelsIcon width={16} height={16} />
       </Btn>
+
+      {showRegroup && (
+        <>
+          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <Btn
+            title={selCount >= 2 ? `Regroup ${selCount} selected` : "Regroup — snap tiles back into their clouds"}
+            disabled={!canRegroup}
+            onClick={onRegroup}
+          >
+            <RegroupGlyph />
+          </Btn>
+        </>
+      )}
       {showRecluster && topicMembership && selCount > 0 && (
         <>
           <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
           <TopicMembershipMenu {...topicMembership} selectionCount={selCount} />
-        </>
-      )}
-      {showRecluster && (
-        <>
-          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
-          <Btn
-            title={busy ? "A job is already running" : "Refresh AI grouping — manual moves stay (free)"}
-            disabled={busy}
-            onClick={onRecluster}
-          >
-            <ReclusterGlyph />
-          </Btn>
         </>
       )}
     </div>

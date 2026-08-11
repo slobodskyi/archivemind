@@ -44,7 +44,6 @@ import type {
 } from "@/types";
 import {
   appendClusterAnchor,
-  artboardMesh,
   assetGallery,
   centerAtScale,
   fitBounds,
@@ -62,7 +61,6 @@ import {
   timelineAxisLayout as computeTimelineLayout,
   topicAnchorOf,
   topicCloudLayout as computeTopicLayout,
-  type ArtboardEdge,
   type Bounds,
   type CanvasOverride,
   type CloudLayout,
@@ -677,16 +675,15 @@ export interface Workspace {
   frames: Frame[];
   frameDraft: { x: number; y: number; w: number; h: number } | null;
   frameCounts: Record<string, number>;
-  /** All-to-all connection lines for every connected artboard (ADR 0043). */
-  artboardEdges: ArtboardEdge[];
+  /** The artboard currently selected (its contents == the selection), or null —
+   *  drives the green outline on the artboard rect. */
+  selectedFrameId: string | null;
   deleteFrame: (id: string) => void;
   deleteFrameWithContent: (id: string) => void;
   renameFrame: (id: string, label: string) => void;
   selectFrame: (id: string) => void;
   exportFrame: (id: string) => void;
-  /** Mark an artboard connected (draws the mesh + reveals ＋). */
-  connectArtboard: (id: string) => void;
-  /** ＋ on a connected artboard — create a new file from the pack (stubbed). */
+  /** ＋ on a content-pack artboard — create a new file from the pack (stubbed). */
   createPackFile: (id: string, format: string) => void;
   beginFrameMove: (id: string) => void;
   beginFrameResize: (id: string, handle: "nw" | "ne" | "sw" | "se") => void;
@@ -989,8 +986,13 @@ export function useWorkspace(
   initialGroups: CanvasGroup[],
   initialLabelNames: LabelNames,
   initialAnnotations: CanvasAnnotation[],
+  /** When a Workspace (board) is open, the ids it contains — every layout then
+   *  runs over just those files. `null` = no board open (sorting mode), the
+   *  whole project. ADR 0044. */
+  boardScopeIds: readonly string[] | null = null,
 ): Workspace {
   const router = useRouter();
+  const boardScope = useMemo(() => (boardScopeIds ? new Set(boardScopeIds) : null), [boardScopeIds]);
   const [state, setStateRaw] = useState<WorkspaceState>({
     // Start at the 75% default so the first paint matches every view's fit,
     // even in the brief window before tryFit centers on the real content (ADR 0022).
@@ -1475,7 +1477,14 @@ export function useWorkspace(
 
   // Real data is already scoped by the route (getPhotos(projectId)), so the
   // canvas shows every photo the server returned — no client-side project filter.
-  const filteredPhotos = useCallback((photos: Photo[]) => photos, []);
+  // The board scope (ADR 0044) is applied HERE, at the layout seam, not at the
+  // render seam the label filter uses: an open Workspace should lay its files out
+  // as if the others don't exist, whereas a label filter only hides tiles from a
+  // full-project arrangement.
+  const filteredPhotos = useCallback(
+    (photos: Photo[]) => (boardScope ? photos.filter((p) => boardScope.has(p.id)) : photos),
+    [boardScope],
+  );
 
   /** Fire-and-forget PATCH of one note (ADR 0041). A failure is reported once,
    *  in the toast, and the local state is deliberately NOT rolled back: yanking
@@ -3875,31 +3884,10 @@ export function useWorkspace(
     [frameContentIds, openExportFor],
   );
 
-  /** "Connect" an artboard (ADR 0043): mark it connected so its files draw
-   *  all-to-all and the ＋ appears. Frontend-only today — the real AI pass that
-   *  reads every member (photos, voice, pdf, notes) and synthesises a content
-   *  pack is Oleksandr's backend (POST /api/artboards/connect); this flags the
-   *  artboard and says the analysis is pending. */
-  const connectArtboard = useCallback(
-    (frameId: string) => {
-      const s = stateRef.current;
-      const frame = s.frames.find((f) => f.id === frameId);
-      if (!frame) return;
-      const members = frameContentIds(frame);
-      if (members.length < 2) {
-        flashToast("Add at least two files to the artboard first");
-        return;
-      }
-      pushHistory();
-      setState({ frames: s.frames.map((f) => (f.id === frameId ? { ...f, connected: true } : f)) });
-      flashToast(`Connected ${members.length} files — AI analysis coming soon`);
-    },
-    [frameContentIds, pushHistory, setState, flashToast],
-  );
-
-  /** The ＋ on a connected artboard (ADR 0043): create a new file synthesised
-   *  from the pack. The generation is backend (POST /api/artboards/[packId]/
-   *  generate) — stubbed here so the surface exists for the teammate to wire. */
+  /** The ＋ on a content-pack artboard (ADR 0043): create a new file synthesised
+   *  from the pack. An artboard with ≥2 files is a pack automatically (no Connect
+   *  button); the generation is backend (POST /api/artboards/[packId]/generate) —
+   *  stubbed here so the surface exists for the teammate to wire. */
   const createPackFile = useCallback(
     (frameId: string, format: string) => {
       if (!stateRef.current.frames.some((f) => f.id === frameId)) return;
@@ -4053,7 +4041,13 @@ export function useWorkspace(
   const regroupClouds = useCallback(() => {
     const s = stateRef.current;
     const bucketKey =
-      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
+      s.view === "timeline"
+        ? "timeline"
+        : s.view === "sense"
+          ? "topic"
+          : s.view === "neural"
+            ? "asset" // Canvas is a browse grid now — Regroup snaps its tiles back too.
+            : null;
     if (!bucketKey) return;
     const current = s.galleryOverrides[bucketKey];
     let next: Record<string, CanvasOverride>;
@@ -5401,21 +5395,31 @@ export function useWorkspace(
     return counts;
   }, [state.frames, state.photos, neuralGalleryPos]);
 
-  // All-to-all connection lines for connected artboards (ADR 0043), over the
-  // neural tile positions the artboards are framed against. One flat list across
-  // every connected frame; ids are frame-prefixed so React keys stay unique.
-  const artboardEdges = useMemo(() => {
-    const out: ArtboardEdge[] = [];
+  // The artboard whose contents ARE the current selection — it then shows the
+  // same green outline a selected tile does (the user clicked its header, which
+  // selects everything inside). Derived, so it clears itself the moment the
+  // selection changes to anything else.
+  const selectedFrameId = useMemo(() => {
+    const sel = state.selectedIds;
+    if (sel.length === 0) return null;
+    const selSet = new Set(sel);
     for (const f of state.frames) {
-      if (!f.connected) continue;
-      const centers = state.photos
-        .map((p) => ({ id: p.id, t: neuralGalleryPos[p.id] }))
-        .filter((c): c is { id: string; t: TilePos } => !!c.t && c.t.cx >= f.x && c.t.cx <= f.x + f.w && c.t.cy >= f.y && c.t.cy <= f.y + f.h)
-        .map((c) => ({ id: c.id, cx: c.t.cx, cy: c.t.cy }));
-      for (const e of artboardMesh(centers)) out.push({ ...e, id: `${f.id}:${e.id}` });
+      let inFrame = 0;
+      let allSelected = true;
+      for (const p of state.photos) {
+        const t = neuralGalleryPos[p.id];
+        if (t && t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h) {
+          inFrame++;
+          if (!selSet.has(p.id)) {
+            allSelected = false;
+            break;
+          }
+        }
+      }
+      if (inFrame > 0 && allSelected && inFrame === sel.length) return f.id;
     }
-    return out;
-  }, [state.frames, state.photos, neuralGalleryPos]);
+    return null;
+  }, [state.frames, state.photos, state.selectedIds, neuralGalleryPos]);
 
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
   const aiBusyIds = useMemo(() => new Set(state.aiBusyIds), [state.aiBusyIds]);
@@ -5801,13 +5805,12 @@ export function useWorkspace(
     frames: state.frames,
     frameDraft,
     frameCounts,
-    artboardEdges,
+    selectedFrameId,
     deleteFrame,
     deleteFrameWithContent,
     renameFrame,
     selectFrame,
     exportFrame,
-    connectArtboard,
     createPackFile,
     beginFrameMove,
     beginFrameResize,
@@ -5845,7 +5848,8 @@ export function useWorkspace(
     regroupClouds,
     canRegroup:
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
-      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
+      (isNeural && projectMode && Object.keys(state.galleryOverrides.asset).length > 0),
     recluster,
     renameCloud,
     topicOptions,

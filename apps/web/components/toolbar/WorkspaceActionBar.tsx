@@ -1,16 +1,15 @@
 import { memo } from "react";
 import type { AssetLabel, LabelNames } from "@archivemind/shared";
-import type { Tool } from "@/types";
 import type { LabelFilter } from "@/lib/labels";
 import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
-import { FrameToolIcon, CopyIcon, TrashIcon, FolderIcon, LabelsIcon } from "@/components/icons/icons";
+import { StickyNoteIcon, MagicWandIcon, CopyIcon, TrashIcon, FolderIcon, LabelsIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
-  tool: Tool;
   selCount: number;
   /** The AI panel is open for this selection — keeps the ✨ button lit. */
   aiOpen: boolean;
-  onArtboard: () => void;
+  /** Drop a new sticky note on the board canvas. */
+  onAddStickyNote: () => void;
   onTidy: () => void;
   /** Opens the AI panel over the selection (analyze / captions). */
   onAi: () => void;
@@ -39,10 +38,6 @@ const ExportGlyph = () => (<svg {...gp}><path d="M12 3v12" /><path d="m8 7 4-4 4
 /* Group: two overlapping tiles bound by a corner-bracket frame — a set that
    moves and edits as one, not a container. */
 const GroupGlyph = () => (<svg {...gp}><path d="M3 8V4a1 1 0 0 1 1-1h4" /><path d="M21 8V4a1 1 0 0 0-1-1h-4" /><path d="M3 16v4a1 1 0 0 0 1 1h4" /><path d="M21 16v4a1 1 0 0 1-1 1h-4" /><rect x="8.5" y="8.5" width="7" height="7" rx="1" /></svg>);
-/* Analyze with AI: a magic wand throwing sparkles — the universal "let the AI
-   work on these" glyph, and unlike a bare sparkle it won't read as decoration
-   or collide with Search's magnifier. */
-const AnalyzeGlyph = () => (<svg {...gp}><path d="M15 6 6 15l-2.5 5.5L9 18l9-9z" /><path d="m14 7 3 3" /><path d="M18 3v3M16.5 4.5h3" /><path d="M20 11v2M19 12h2" /></svg>);
 /* Tidy up: four photo-tile-shaped cells snapping into an even grid. */
 const TidyGlyph = () => (<svg {...gp}><rect x="3" y="4" width="8" height="6" rx="1" /><rect x="13" y="4" width="8" height="6" rx="1" /><rect x="3" y="14" width="8" height="6" rx="1" /><rect x="13" y="14" width="8" height="6" rx="1" /></svg>);
 
@@ -101,10 +96,9 @@ function Divider() {
  *  asset archiving is a real feature), and so is the AI button. (Duplicate was
  *  removed — Copy already covers it.) */
 function WorkspaceActionBar({
-  tool,
   selCount,
   aiOpen,
-  onArtboard,
+  onAddStickyNote,
   onTidy,
   onAi,
   onCopy,
@@ -129,7 +123,8 @@ function WorkspaceActionBar({
       style={{
         position: "absolute",
         left: "50%",
-        bottom: 20,
+        // Sits ABOVE the bottom view switcher (which owns bottom:20 centre).
+        bottom: 66,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",
@@ -143,8 +138,8 @@ function WorkspaceActionBar({
         zIndex: 35,
       }}
     >
-      <Btn title="Artboard" active={tool === "frame"} onClick={onArtboard}>
-        <FrameToolIcon />
+      <Btn title="Sticky note" onClick={onAddStickyNote}>
+        <StickyNoteIcon width={16} height={16} />
       </Btn>
       <Btn title={selCount >= 2 ? "Tidy up selection" : "Tidy up canvas"} onClick={onTidy}>
         <TidyGlyph />
@@ -157,7 +152,7 @@ function WorkspaceActionBar({
           the eye goes after selecting tiles, so the most common bulk action was
           the hardest one to find. */}
       <Btn title={selCount >= 2 ? `Analyze ${selCount} with AI` : "Analyze with AI"} active={aiOpen} disabled={noSel} onClick={onAi}>
-        <AnalyzeGlyph />
+        <MagicWandIcon width={16} height={16} />
       </Btn>
 
       <Divider />
@@ -209,9 +204,6 @@ function WorkspaceActionBar({
       <Btn title="Copy" disabled={noSel} onClick={onCopy}>
         <CopyIcon width={16} height={16} />
       </Btn>
-      <Btn title="Export" disabled={noSel} onClick={onExport}>
-        <ExportGlyph />
-      </Btn>
       <Btn title={selCount >= 2 ? `Group ${selCount} (move & edit together)` : "Group"} disabled={noSel} onClick={onGroup}>
         <GroupGlyph />
       </Btn>
@@ -221,6 +213,11 @@ function WorkspaceActionBar({
 
       <Divider />
 
+      {/* Export sits with Delete in the closing section — the two "send it out /
+          take it away" actions, at the end of the bar. */}
+      <Btn title="Export" disabled={noSel} onClick={onExport}>
+        <ExportGlyph />
+      </Btn>
       <Btn title="Delete" danger disabled={noSel} onClick={onDelete}>
         <TrashIcon width={16} height={16} />
       </Btn>

@@ -113,16 +113,58 @@ export function SelectToolIcon({ width = 16, height = 16, ...props }: IconProps)
 }
 
 export function HandToolIcon({ width = 16, height = 16, ...props }: IconProps) {
-  // Pan → the standard 4-way move icon (crosshair of arrows), clearer than a
-  // grabbing hand and consistent with the other line tools.
+  // Pan → a pointing hand (index finger up, others curled), matching the design
+  // reference. Conventional grab/pan glyph.
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M12 4v16" />
-      <path d="M4 12h16" />
-      <path d="M9 7l3-3 3 3" />
-      <path d="M9 17l3 3 3-3" />
-      <path d="M7 9l-3 3 3 3" />
-      <path d="M17 9l3 3-3 3" />
+      <path d="M18 11V10a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
+      <path d="M14 10V9a2 2 0 0 0-2-2 2 2 0 0 0-2 2v1" />
+      <path d="M10 9.5V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v10" />
+      <path d="M18 11a2 2 0 0 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+    </svg>
+  );
+}
+
+/** AI assistant (the renamed Smart Search) — an "AI" bubble with a sparkle, per
+ *  the design reference. */
+export function AiAssistantIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x={3} y={3} width={14} height={14} rx={3.5} />
+      <text x={10} y={13.2} fontSize={8.5} fontWeight={700} fill="currentColor" stroke="none" textAnchor="middle" fontFamily="var(--font-space-mono), monospace">
+        AI
+      </text>
+      <path fill="currentColor" stroke="none" d="M19 13.5l1.05 2.45L22.5 17l-2.45 1.05L19 20.5l-1.05-2.45L15.5 17l2.45-1.05z" />
+    </svg>
+  );
+}
+
+/** Artboard — a document with a folded corner and a ＋ at its top-left, per the
+ *  design reference ("new framed region"). */
+export function ArtboardIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M8 8h8l4 4v8a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1z" />
+      <path d="M16 8v3a1 1 0 0 0 1 1h3" />
+      <path d="M2 8h3.5" />
+      <path d="M8 2v3.5" />
+    </svg>
+  );
+}
+
+/** Analyze with AI — a magic wand with sparkles, per the design reference. */
+export function MagicWandIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="m3 21 9-9" />
+      <path d="M15 4V2" />
+      <path d="M15 16v-2" />
+      <path d="M8 9h2" />
+      <path d="M20 9h2" />
+      <path d="M17.8 11.8 19 13" />
+      <path d="M17.8 6.2 19 5" />
+      <path d="m12.2 6.2 1.8-1.4" />
+      <path d="M15 9h.01" />
     </svg>
   );
 }
@@ -399,11 +441,10 @@ export function ViewSenseIcon({ width = 14, height = 14, ...props }: IconProps) 
    tag/price-tag glyph: TagIcon already means AI tags in this toolbar, and the
    whole point of colour labels is that they are not those. */
 export function LabelsIcon({ width = 14, height = 14, ...props }: IconProps) {
+  // One circle — a single colour label (not the old cluster of three).
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx={7} cy={8} r={3.1} />
-      <circle cx={16.5} cy={7} r={3.1} />
-      <circle cx={11.5} cy={16.5} r={3.1} />
+      <circle cx={12} cy={12} r={6.5} />
     </svg>
   );
 }

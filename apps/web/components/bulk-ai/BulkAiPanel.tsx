@@ -123,7 +123,8 @@ export default function BulkAiPanel({
     <div
       style={{
         position: "absolute",
-        bottom: 78,
+        // Clears the action bar (bottom:66) which now sits above the view switcher.
+        bottom: 124,
         left: "50%",
         transform: "translateX(-50%)",
         width: 430,

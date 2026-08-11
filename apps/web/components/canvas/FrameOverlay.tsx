@@ -8,16 +8,16 @@ interface FrameOverlayProps {
   frames: Frame[];
   /** How many tiles sit inside each frame (positional) — header badge. */
   counts: Record<string, number>;
+  /** The selected artboard (its contents == the selection) — gets a green
+   *  outline, the same cue a selected tile shows. */
+  selectedFrameId: string | null;
   draft: { x: number; y: number; w: number; h: number } | null;
   /** Canvas zoom, to convert screen-space drag deltas into content space. */
   scale: number;
   onSelectFrame: (id: string) => void;
-  onExportFrame: (id: string) => void;
   onDeleteFrame: (id: string) => void;
   onRenameFrame: (id: string, label: string) => void;
-  /** "Connect" the artboard into a content pack (ADR 0043). */
-  onConnect: (id: string) => void;
-  /** ＋ on a connected artboard — create a new file of `format` from the pack. */
+  /** ＋ on a content-pack artboard — create a new file of `format` from the pack. */
   onCreateFile: (id: string, format: string) => void;
   onBeginMove: (id: string) => void;
   onBeginResize: (id: string, handle: Handle) => void;
@@ -65,13 +65,12 @@ const HANDLE_CURSOR: Record<Handle, string> = {
 export default function FrameOverlay({
   frames,
   counts,
+  selectedFrameId,
   draft,
   scale,
   onSelectFrame,
-  onExportFrame,
   onDeleteFrame,
   onRenameFrame,
-  onConnect,
   onCreateFile,
   onBeginMove,
   onBeginResize,
@@ -139,7 +138,9 @@ export default function FrameOverlay({
 
   return (
     <>
-      {frames.map((fr) => (
+      {frames.map((fr) => {
+        const selected = fr.id === selectedFrameId;
+        return (
         <div
           key={fr.id}
           style={{
@@ -148,8 +149,15 @@ export default function FrameOverlay({
             top: fr.y,
             width: fr.w,
             height: fr.h,
-            border: "1px solid var(--bdh)",
-            background: "rgba(255,255,255,0.012)",
+            // Green outline when selected — the same cue a selected tile shows.
+            border: selected ? "2px solid var(--ac)" : "1px solid var(--bdh)",
+            // A visible panel fill (was near-transparent) so the board reads as a
+            // real surface on the dark canvas — plus a faint green wash when
+            // selected so the whole board reads as picked, not just its outline.
+            // Sits at zIndex 0, below the tiles (zIndex ≥2), so it never covers a
+            // photo.
+            background: selected ? "color-mix(in srgb, var(--ac) 10%, rgba(255,255,255,0.05))" : "rgba(255,255,255,0.05)",
+            boxShadow: selected ? "0 0 0 1px var(--ac)" : "none",
             zIndex: 0,
             pointerEvents: "none",
           }}
@@ -217,9 +225,10 @@ export default function FrameOverlay({
             )}
             <span style={{ fontSize: 10, color: "var(--t3)", opacity: 0.8 }}>{counts[fr.id] ?? 0}</span>
 
-            {/* Connect → content pack (ADR 0043). Before connecting: a Connect
-                pill. After: a ＋ that opens a file-type menu (stubbed). */}
-            {fr.connected ? (
+            {/* An artboard with ≥2 files is automatically a content pack (ADR
+                0043) — no Connect button, the analysis happens on file-add. The
+                ＋ offers to create a new file synthesised from the pack. */}
+            {(counts[fr.id] ?? 0) >= 2 && (
               <div style={{ position: "relative" }}>
                 <button
                   onPointerDown={(e) => e.stopPropagation()}
@@ -282,33 +291,9 @@ export default function FrameOverlay({
                   </div>
                 )}
               </div>
-            ) : (
-              <button
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onConnect(fr.id);
-                }}
-                title="Connect these files into a content pack"
-                aria-label="Connect artboard"
-                style={{ ...btn, width: "auto", padding: "0 6px", fontSize: 10, fontWeight: 700, letterSpacing: "0.04em" }}
-              >
-                CONNECT
-              </button>
             )}
 
-            <button
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                onExportFrame(fr.id);
-              }}
-              title="Export artboard to PDF"
-              aria-label="Export artboard to PDF"
-              style={btn}
-            >
-              ↑
-            </button>
+            {/* Export lives in the bottom action bar now, not on the artboard. */}
             <button
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
@@ -328,7 +313,8 @@ export default function FrameOverlay({
             <div key={h} onPointerDown={(e) => beginPointer(e, fr.id, "resize", h)} style={handleStyle(h)} />
           ))}
         </div>
-      ))}
+        );
+      })}
       {draft && (
         <div
           style={{

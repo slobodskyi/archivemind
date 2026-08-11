@@ -3,13 +3,9 @@ import type { Tool } from "@/types";
 import {
   SelectToolIcon,
   HandToolIcon,
-  SearchIcon,
-  TagIcon,
-  ExifIcon,
+  AiAssistantIcon,
   AddIcon,
   FitIcon,
-  StickyNoteIcon,
-  TrashIcon,
 } from "@/components/icons/icons";
 
 interface LeftToolbarProps {
@@ -20,28 +16,16 @@ interface LeftToolbarProps {
   /** Map is a separate MapLibre surface — Fit/zoom would move the hidden canvas
    * underneath it, so those tools are hidden on Map. */
   isMapView?: boolean;
-  /** The Workspace (neural) view is showing. A sticky note's position is in
-   * Workspace coordinates, so it is only offered — and only drawn — there;
-   * every sorting view arranges the same tiles differently and a note pinned
-   * over one arrangement means nothing over another. Same rule the artboard
-   * and folder overlays already follow in ArchiveWorkspace. */
-  isCanvasView?: boolean;
   showAddToProject?: boolean;
   selCount?: number;
   zoomPct?: string;
-  /** Smart Search panel open? (the magnifier is the single search entry point). */
+  /** AI assistant panel open? (the single AI-assistant/search entry point). */
   searchOpen?: boolean;
-  bulkPanelOpen?: boolean;
   onSelectTool?: () => void;
   onHandTool?: () => void;
-  /** Toggle the Smart Search panel (the real search — see ChatPanel). */
+  /** Toggle the AI assistant panel (search + help — see ChatPanel). */
   onOpenSearch?: () => void;
-  onToggleBulkPanel?: () => void;
-  onExtractExif?: () => void;
   onAdd?: () => void;
-  onAddStickyNote?: () => void;
-  onToggleTrash?: () => void;
-  trashOpen?: boolean;
   onFit?: () => void;
   onZoomReset?: () => void;
   onAddToProject?: () => void;
@@ -88,21 +72,14 @@ function LeftToolbar({
   tool = "select",
   allFilesMode = false,
   isMapView = false,
-  isCanvasView = true,
   showAddToProject = false,
   selCount = 0,
   zoomPct = "100%",
   searchOpen = false,
-  bulkPanelOpen = false,
   onSelectTool,
   onHandTool,
   onOpenSearch,
-  onToggleBulkPanel,
-  onExtractExif,
   onAdd,
-  onAddStickyNote,
-  onToggleTrash,
-  trashOpen = false,
   onFit,
   onZoomReset,
   onAddToProject,
@@ -177,32 +154,20 @@ function LeftToolbar({
       </button>
       <Divider />
 
-      <TbButton onClick={onOpenSearch} title="Smart Search" active={searchOpen}>
-        <SearchIcon />
+      {/* AI actions, Trash and Extract EXIF moved off this rail: the first two
+          duplicate the bottom action bar, and every file is analyzed on upload
+          so EXIF extraction is no longer a manual step. */}
+      <TbButton onClick={onOpenSearch} title="AI assistant" active={searchOpen}>
+        <AiAssistantIcon />
       </TbButton>
-      <TbButton onClick={onToggleTrash} title="Trash" active={trashOpen}>
-        <TrashIcon />
-      </TbButton>
-      {!allFilesMode && (
-        <>
-          {/* Was "Generate Captions", which named one of the two operations in
-              the panel it opens — and not the one the panel actually ran. */}
-          <TbButton onClick={onToggleBulkPanel} title="AI actions" active={bulkPanelOpen}>
-            <TagIcon />
-          </TbButton>
-          <TbButton onClick={onExtractExif} title="Extract EXIF">
-            <ExifIcon />
-          </TbButton>
-        </>
-      )}
 
       <Divider />
 
       {!allFilesMode && (
         <button
           onClick={onAdd}
-          title="Add"
-          aria-label="Add"
+          title="Add files"
+          aria-label="Add files"
           className="tw"
           style={{
             display: "flex",
@@ -218,32 +183,11 @@ function LeftToolbar({
           }}
         >
           <AddIcon />
-          <span className="tip">Add</span>
+          <span className="tip">Add files</span>
         </button>
       )}
-      {!allFilesMode && isCanvasView && (
-        <button
-          onClick={onAddStickyNote}
-          title="Sticky Note"
-          aria-label="Add sticky note"
-          className="tw"
-          style={{
-            display: "flex",
-            width: 34,
-            height: 34,
-            alignItems: "center",
-            justifyContent: "center",
-            border: 0,
-            borderRadius: 2,
-            cursor: "pointer",
-            background: "transparent",
-            color: "var(--t2)",
-          }}
-        >
-          <StickyNoteIcon />
-          <span className="tip">Sticky Note</span>
-        </button>
-      )}
+      {/* Sticky notes are a Workspace tool now (Stage 2), not a sorting-view one,
+          so the rail is identical on every sorting view. */}
       {/* Fit + zoom act on the tile canvas — on Map they'd move the hidden
           neural surface, so they're suppressed there (MapLibre has its own). */}
       {!isMapView && (

@@ -2,7 +2,8 @@
 
 Date: 2026-08-10
 
-Status: Proposed (frontend shipped; backend is this document's build list)
+Status: Superseded by [0044](0044-workspaces-replace-artboards.md) — artboards were
+removed and their working-surface + content-pack role moved onto Workspaces.
 
 Builds on [0034](0034-canvas-groups-folders-and-artboards.md) (artboards are a
 client-only rect over the canvas) and [0041](0041-annotations-carry-their-own-geometry.md)
@@ -46,17 +47,17 @@ The forces:
 Split the feature at the client/server seam.
 
 ### What ships now (frontend — already implemented)
-- `Frame` (`apps/web/lib/layout.ts`) gained `connected?: boolean`, persisted in the
-  localStorage canvas store.
-- `FrameOverlay` shows a **CONNECT** button on each artboard; clicking it calls
-  `connectArtboard(frameId)` (`hooks/useWorkspace.ts`), which flags the frame
-  connected and toasts "AI analysis coming soon".
-- A connected artboard draws an **all-to-all mesh** between its tiles
-  (`artboardMesh` in `lib/layout.ts` → `ArtboardConnections` overlay) and swaps the
-  CONNECT button for a **＋** whose menu (`Text file`, `PDF document`) calls
-  `createPackFile(frameId, format)` — today a `flashToast` stub.
-- No new asset ids, no server calls yet. `connected` is a client flag; the mesh is
-  recomputed from `neuralGalleryPos`.
+- An artboard becomes a content pack **automatically** once it holds **≥2 files** —
+  there is no Connect button and no manual step. (An earlier revision had a CONNECT
+  button and drew an all-to-all mesh between the tiles; both were removed — the
+  button because connection should be implicit on file-add, the mesh because it
+  fought the Topic view's own lines for meaning. `Frame.connected`, `artboardMesh`
+  and the `ArtboardConnections` overlay are gone.)
+- `FrameOverlay` shows a **＋** on any artboard with ≥2 files; its menu (`Text file`,
+  `PDF document`) calls `createPackFile(frameId, format)` (`hooks/useWorkspace.ts`) —
+  today a `flashToast` stub.
+- No new asset ids, no server calls yet. "Which files are in the pack" is derived
+  client-side from the artboard rect (`frameContentIds`).
 
 ### What the backend must build
 

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Z } from "@/lib/ui";
-import { AddIcon, FrameToolIcon } from "@/components/icons/icons";
+import { AddIcon } from "@/components/icons/icons";
 
 export interface AddToProjectListItem {
   key: string;
@@ -8,9 +8,10 @@ export interface AddToProjectListItem {
   color: string;
 }
 
-export interface AddToArtboardListItem {
+export interface AddToWorkspaceListItem {
   key: string;
   label: string;
+  color: string;
 }
 
 interface AddToProjectPopoverProps {
@@ -19,11 +20,11 @@ interface AddToProjectPopoverProps {
   onClose: () => void;
   onSelect: (key: string) => void;
   onCreateNew: () => void;
-  /** Artboards (frames) in the current project — the selection can be added to
-   *  any existing one, or wrapped in a new one. Omit/empty to hide the section. */
-  artboards?: AddToArtboardListItem[];
-  onSelectArtboard?: (key: string) => void;
-  onCreateArtboard?: () => void;
+  /** Workspaces (boards) in the current project — the selection can be added to
+   *  any existing one, or gathered into a new one (ADR 0044). Omit to hide. */
+  workspaces?: AddToWorkspaceListItem[];
+  onSelectWorkspace?: (key: string) => void;
+  onCreateWorkspace?: () => void;
   /** Overrides the default toolbar-anchored position (left:76,bottom:20) — used when this popover is nested inside another panel, e.g. the source browser sidebar. */
   positionStyle?: CSSProperties;
 }
@@ -34,9 +35,9 @@ export default function AddToProjectPopover({
   onClose,
   onSelect,
   onCreateNew,
-  artboards,
-  onSelectArtboard,
-  onCreateArtboard,
+  workspaces,
+  onSelectWorkspace,
+  onCreateWorkspace,
   positionStyle,
 }: AddToProjectPopoverProps) {
   if (!open) return null;
@@ -83,32 +84,30 @@ export default function AddToProjectPopover({
           New project
         </button>
 
-        {onCreateArtboard && (
+        {onCreateWorkspace && (
           <>
             <div style={{ height: 1, background: "var(--bd)", margin: "4px 0" }} />
             <div style={{ padding: "6px 8px 8px", fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--tm)" }}>
-              Add to artboard
+              Add to workspace
             </div>
-            {(artboards ?? []).map((it) => (
+            {(workspaces ?? []).map((it) => (
               <button
                 key={it.key}
-                onClick={() => onSelectArtboard?.(it.key)}
+                onClick={() => onSelectWorkspace?.(it.key)}
                 className="am-mi"
                 style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 10px", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit" }}
               >
-                <span style={{ display: "flex", flex: "0 0 auto", color: "var(--t3)" }}>
-                  <FrameToolIcon width={13} height={13} />
-                </span>
+                <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", background: it.color }} />
                 <span style={{ flex: 1, fontSize: 13, color: "var(--t1)", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
               </button>
             ))}
             <button
-              onClick={onCreateArtboard}
+              onClick={onCreateWorkspace}
               className="am-mi"
               style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 10px", border: 0, borderRadius: 2, cursor: "pointer", fontFamily: "inherit", color: "var(--ac)", fontSize: 13 }}
             >
               <AddIcon width={13} height={13} strokeWidth={1.6} />
-              New artboard
+              New workspace
             </button>
           </>
         )}

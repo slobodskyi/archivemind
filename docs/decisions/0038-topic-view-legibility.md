@@ -212,13 +212,11 @@ you happened to open, since the fold counts only the rows that read returned.
 - The Map bucket (`galleryOverrides.map`) remains the dead path it was: nothing
   reads it. Untouched here on purpose.
 
-## Amendment (2026-08-10) — Topic draws no connecting lines
+## Amendment (2026-08-10, revised) — Topic keeps its connecting lines
 
-The tag-driven connecting lines (`layout.edges`, rendered by `CloudDecor`) were
-removed from the Topic view. The colour clouds carry the grouping on their own,
-and the web of lines competed with them for legibility more than it explained
-anything. `CloudDecor` no longer renders the edge `<svg>`; `buildCloudLayout`
-still computes edges (the landing-page `ScrubDemo` animation has its own copy and
-is unaffected), they simply go undrawn in the workspace. The "files are related by
-shared tags" idea from ADR 0022 is superseded here by an *opt-in* relationship:
-the all-to-all mesh an artboard draws after **Connect** (ADR 0043).
+An earlier revision of this amendment removed the tag-driven connecting lines
+(`layout.edges`) from Topic. That was reverted: the lines are back, because the
+clouds alone lost the "these files are related" signal the web carries. `CloudDecor`
+renders the edge `<svg>` as before (ADR 0022). The short-lived artboard "mesh"
+(all-to-all lines on an artboard) was dropped entirely — an artboard is now a
+content pack by virtue of holding files, with no lines of its own (ADR 0043).

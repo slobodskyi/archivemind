@@ -1,27 +1,28 @@
 "use client";
 
+import { useEffect } from "react";
 import type { AssetLabel, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
-import InfiniteGrid from "@/components/canvas/InfiniteGrid";
-import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
-import FrameOverlay from "@/components/canvas/FrameOverlay";
-import ArtboardConnections from "@/components/canvas/ArtboardConnections";
+import { useBoards } from "@/hooks/useBoards";
+import { LABEL_COLORS } from "@/lib/labels";
+import BoardBrowser from "@/components/header/BoardBrowser";
 import FolderOverlay from "@/components/canvas/FolderOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
+import WorkspaceActionBar from "@/components/toolbar/WorkspaceActionBar";
+import InfiniteGrid from "@/components/canvas/InfiniteGrid";
+import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
 import GeoMapPane from "@/components/map/GeoMapPane";
 import AppHeader from "@/components/header/AppHeader";
-import ViewTabs from "@/components/header/ViewTabs";
-import WorkspaceToggle from "@/components/header/WorkspaceToggle";
+import ViewSwitcher from "@/components/toolbar/ViewSwitcher";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
 import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
 import ChatPanel from "@/components/chat/ChatPanel";
 import LeftToolbar from "@/components/toolbar/LeftToolbar";
 import SortingActionBar from "@/components/toolbar/SortingActionBar";
-import WorkspaceActionBar from "@/components/toolbar/WorkspaceActionBar";
 import Minimap from "@/components/toolbar/Minimap";
 import TrashPanel from "@/components/trash/TrashPanel";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
@@ -67,6 +68,12 @@ export default function ArchiveWorkspace({
   initialAnnotations,
   account,
 }: ArchiveWorkspaceProps) {
+  // Workspaces (boards) — the entity that replaced artboards (ADR 0044). A board
+  // scopes the canvas to its files and turns it into a working surface; with no
+  // board open you're in the sorting views over the whole project.
+  const bd = useBoards(currentProjectId);
+  const boardMode = bd.activeBoardId !== null;
+
   const ws = useWorkspace(
     initialPhotos,
     workspaceId,
@@ -75,7 +82,21 @@ export default function ArchiveWorkspace({
     initialGroups,
     initialLabelNames,
     initialAnnotations,
+    bd.scopeIds,
   );
+
+  // A board is a single working canvas — force the Canvas (neural) view while one
+  // is open; the sorting views (Timeline/Topic/Map) belong to "All files".
+  const { setView } = ws;
+  useEffect(() => {
+    if (boardMode) setView("neural");
+  }, [boardMode, setView]);
+
+  const boardCounts: Record<string, number> = {};
+  for (const b of bd.boards) {
+    const ids = new Set(b.assetIds);
+    boardCounts[b.id] = ws.photos.filter((p) => ids.has(p.id)).length;
+  }
 
   // The colour the label pickers should ring: what the whole target carries, or
   // "mixed" when it disagrees. Target = the selection, else the right-clicked
@@ -104,7 +125,9 @@ export default function ArchiveWorkspace({
         background: "var(--bg)",
       }}
     >
-      <InfiniteGrid gridSize={ws.gridSize} gridPos={ws.gridPos} gridOpacity={ws.gridOpacity} />
+      {/* A Workspace (board) canvas uses a lines grid; the sorting/browse views
+          use dots, so the two surfaces read apart by design (ADR 0044). */}
+      <InfiniteGrid gridSize={ws.gridSize} gridPos={ws.gridPos} gridOpacity={ws.gridOpacity} variant={boardMode ? "lines" : "dots"} />
 
       <PanZoomCanvas
         setCanvasRef={ws.setCanvasRef}
@@ -118,34 +141,11 @@ export default function ArchiveWorkspace({
         animating={ws.tilesAnimating}
         marquee={ws.marquee}
       >
-        {/* Artboards, folders and sticky notes are a Workspace (neural) concept
-            only — their geometry is in neural coordinates, so they'd render
-            misplaced on Timeline/Topic/Labels (and Map covers the canvas
-            entirely). A note pinned over one arrangement means nothing over
-            another: every sorting view lays the same tiles out differently, in
-            its own override bucket, so there is no position the note could be
-            carried to that would still say what it said. */}
-        {ws.view === "neural" && (
+        {/* The working overlays (folders, sticky notes) live on a Workspace
+            (board) canvas now, not the sorting views (ADR 0044). Artboards are
+            gone — a whole board is the working region a sub-frame used to be. */}
+        {boardMode && (
           <>
-            {/* Connection lines for connected artboards — under the tiles (they
-                are the nodes) but over the artboard rects (ADR 0043). */}
-            <ArtboardConnections edges={ws.artboardEdges} />
-            <FrameOverlay
-              frames={ws.frames}
-              counts={ws.frameCounts}
-              draft={ws.frameDraft}
-              scale={ws.scale}
-              onSelectFrame={ws.selectFrame}
-              onExportFrame={ws.exportFrame}
-              onDeleteFrame={ws.deleteFrameWithContent}
-              onRenameFrame={ws.renameFrame}
-              onConnect={ws.connectArtboard}
-              onCreateFile={ws.createPackFile}
-              onBeginMove={ws.beginFrameMove}
-              onBeginResize={ws.beginFrameResize}
-              onGestureMove={ws.frameGestureMove}
-              onEndGesture={ws.endFrameGesture}
-            />
             <FolderOverlay
               folders={ws.folders}
               scale={ws.scale}
@@ -181,6 +181,7 @@ export default function ArchiveWorkspace({
         {ws.cloudDecor && (
           <CloudDecor
             layout={ws.cloudDecor}
+            edgesReady={!ws.tilesAnimating}
             focusedCloudKey={ws.focusedCloudKey}
             dropTargetKey={ws.isSenseView ? ws.topicDropTargetKey : null}
           />
@@ -353,10 +354,17 @@ export default function ArchiveWorkspace({
         onOpenAcct={ws.openAcct}
         accountInitials={account.initials}
         accountName={account.name}
-        viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
         afterProject={
           ws.projectMode ? (
-            <WorkspaceToggle active={ws.view === "neural"} onSelect={() => ws.setView("neural")} />
+            <BoardBrowser
+              boards={bd.boards}
+              activeBoardId={bd.activeBoardId}
+              counts={boardCounts}
+              onSelect={bd.selectBoard}
+              onCreate={() => bd.createBoard()}
+              onRename={bd.renameBoard}
+              onDelete={bd.deleteBoard}
+            />
           ) : undefined
         }
       />
@@ -394,21 +402,14 @@ export default function ArchiveWorkspace({
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
         isMapView={ws.isMapView}
-        isCanvasView={ws.view === "neural"}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
         searchOpen={ws.chatOpen}
-        bulkPanelOpen={ws.bulkPanelOpen}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
         onOpenSearch={ws.toggleChat}
-        onToggleBulkPanel={ws.toggleBulkPanel}
-        onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
-        onAddStickyNote={ws.addStickyNote}
-        onToggleTrash={ws.toggleTrash}
-        trashOpen={ws.trashOpen}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
@@ -422,20 +423,19 @@ export default function ArchiveWorkspace({
         onPurge={ws.purgeFromTrash}
       />
 
-      {/* Workspace-only bottom action bar — hosts the artboard tool (moved off
-          the left toolbar) plus selection actions. Absent on the sorting views. */}
-      {ws.view === "neural" && ws.projectMode && (
+      {/* A Workspace (board) canvas gets the full working action bar; the sorting
+          views get the narrow organize bar. Never both. */}
+      {boardMode && (
         <WorkspaceActionBar
-          tool={ws.tool}
           selCount={ws.selectedIds.size}
           aiOpen={ws.bulkPanelOpen}
-          onArtboard={ws.toolFrame}
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
           onCopy={ws.copyFiles}
           onExport={ws.exportFiles}
           onGroup={ws.groupFiles}
           onFolder={ws.folderFiles}
+          onAddStickyNote={ws.addStickyNote}
           onDelete={ws.deleteSelected}
           labelNames={ws.labelNames}
           labelMenuOpen={ws.labelMenuOpen}
@@ -447,20 +447,16 @@ export default function ArchiveWorkspace({
         />
       )}
 
-      {/* The sorting views get their own, much narrower bar (ADR 0038): the
-          Workspace one above acts on the `asset` bucket and a selection these
-          views don't frame, so widening its gate would have Tidy up silently
-          rearranging Canvas from inside Topic. Gated on isSenseView/
-          isTimelineView, not on `view` — both also require a real project, and
-          `view` can still read "sense" in all-files mode where no cloud exists. */}
-      {(ws.isSenseView || ws.isTimelineView) && (
+      {/* One sorting tools panel above the switcher, for every sorting view in a
+          project. Colour-label control on all four; Regroup on Canvas / Timeline /
+          Topic (not Map); the Topic editor on Topic only. */}
+      {ws.projectMode && !boardMode && (
         <SortingActionBar
+          showRegroup={!ws.isMapView}
           showRecluster={ws.isSenseView}
           canRegroup={ws.canRegroup}
-          busy={ws.proc.active}
           selCount={ws.selectedIds.size}
           onRegroup={ws.regroupClouds}
-          onRecluster={ws.recluster}
           topicMembership={
             ws.isSenseView
               ? {
@@ -474,8 +470,19 @@ export default function ArchiveWorkspace({
                 }
               : undefined
           }
+          labelNames={ws.labelNames}
+          labelMenuOpen={ws.labelMenuOpen}
+          selectionLabel={currentLabel}
+          labelFilter={ws.labelFilter}
+          onToggleLabelMenu={ws.toggleLabelMenu}
+          onPickLabel={(label) => ws.labelSelection(label)}
+          onSetFilter={ws.setLabelFilter}
         />
       )}
+
+      {/* The bottom view switcher — only in "All files" (sorting) mode; inside a
+          Workspace you're on its single working canvas. */}
+      <ViewSwitcher show={ws.showViewTabs && !boardMode} view={ws.view} onSelect={ws.setView} />
 
       {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
           show/pan the hidden neural grid and physically cover MapLibre's own
@@ -488,14 +495,15 @@ export default function ArchiveWorkspace({
         onClose={ws.closeAddProj}
         onSelect={ws.addToProject}
         onCreateNew={ws.createNewProject}
-        artboards={ws.frames.map((f) => ({ key: f.id, label: f.label }))}
-        onSelectArtboard={(id) => {
+        workspaces={bd.boards.map((b) => ({ key: b.id, label: b.name, color: LABEL_COLORS[b.color] }))}
+        onSelectWorkspace={(id) => {
+          bd.addToBoard(id, [...ws.selectedIds]);
+          ws.flashToast("Added to workspace");
           ws.closeAddProj();
-          ws.addToExistingArtboard(id);
         }}
-        onCreateArtboard={() => {
+        onCreateWorkspace={() => {
+          bd.createBoard(undefined, [...ws.selectedIds]);
           ws.closeAddProj();
-          ws.addToNewArtboard();
         }}
       />
 
