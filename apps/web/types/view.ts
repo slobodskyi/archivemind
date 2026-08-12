@@ -4,7 +4,7 @@
  *  without leaving the view you're in, not a fourth way to sort. */
 export type ViewMode = "neural" | "timeline" | "map" | "sense";
 
-/** `ink` and `eraser` are Workspace-view-only (ADR 0041), like the annotations
- *  they act on. Note that the tool is not the only way to draw: an Apple Pencil
- *  draws whatever tool is selected — see `useWorkspace`'s pointer handling. */
-export type Tool = "select" | "hand" | "frame" | "ink" | "eraser";
+/** Drawing moved onto the sticky note (ADR 0041 as amended) — there is no
+ *  standalone canvas pencil or eraser any more, so no tool for one. A note owns
+ *  its own pencil, in its own mode, inside its own card. */
+export type Tool = "select" | "hand" | "frame";

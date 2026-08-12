@@ -20,6 +20,61 @@ export function ShareIcon({ width = 13, height = 13, ...props }: IconProps) {
   );
 }
 
+/* Sticky-note text formatting (ADR 0041 as amended). Each mark is markdown-ish
+   syntax in the note's plain-string body — see lib/notes.ts. */
+export function TypeIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M5 19 12 5l7 14" />
+      <path d="M7.5 14h9" />
+    </svg>
+  );
+}
+export function BulletListIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M9 6h11M9 12h11M9 18h11" />
+      <circle cx="4.5" cy="6" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="4.5" cy="18" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+export function NumberedListIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M10 6h10M10 12h10M10 18h10" />
+      <path d="M3.5 4.5 4.7 4v4M3.3 8h1.8" strokeWidth={1.3} />
+      <path d="M3.2 12.6c.1-.6.7-1 1.3-.9.6 0 1 .5 1 1 0 .9-1.4 1.4-2.3 2.7h2.4" strokeWidth={1.3} />
+    </svg>
+  );
+}
+export function BoldIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M7 5h6.2a3.4 3.4 0 0 1 0 6.8H7Z" />
+      <path d="M7 11.8h7a3.6 3.6 0 0 1 0 7.2H7Z" />
+    </svg>
+  );
+}
+export function TitleIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M5 6h14" />
+      <path d="M12 6v13" />
+    </svg>
+  );
+}
+export function StrikethroughIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 12h16" />
+      <path d="M7 8.5C7 6.5 9 5 12 5c2.2 0 3.8.8 4.6 2" />
+      <path d="M8 15c.5 2 2.4 3 4.4 3 2.6 0 4.6-1.3 4.6-3.4" />
+    </svg>
+  );
+}
+
 /** AI assistant — a chat bubble marked "AI" with a spark. The rail's single AI
  *  entry point (it opens the Smart Search / assistant panel); the ✨ that RUNS a
  *  job lives on the action bar and the tiles, and reads as a different thing on

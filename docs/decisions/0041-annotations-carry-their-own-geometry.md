@@ -177,3 +177,54 @@ column now would very likely be the wrong shape — deliberately left out rather
 than guessed at. Annotations also do not appear in exports; a PDF is built
 server-side from asset ids and an artboard's ink is a working mark, not part of
 the deliverable (same call FigJam makes).
+
+## Amendment (2026-08-12) — drawing moves onto the sticky note
+
+The standalone canvas marker and eraser are gone. Drawing now happens **inside a
+sticky note**, in the note's own pencil mode, and a note's strokes live in its
+`body` jsonb beside its text.
+
+### What changed
+
+- `noteBodySchema` gains `strokes: NoteStroke[]` (capped at 2000). Additive to a
+  jsonb column, so **no migration** — a note written before this parses with an
+  empty array, exactly as `style` did when notes gained settings.
+- Stroke points are in a **fixed 0..1000 virtual space** per note, not canvas
+  units, and the SVG stretches them with `preserveAspectRatio="none"`. This is
+  the whole reason the drawing survives a resize: the stored numbers never depend
+  on how big the card was when the pen touched it.
+- `Tool` drops `"ink"` and `"eraser"`; `InkOverlay`, the ink drag modes, the
+  live-stroke ref plumbing, `reconcileInk` and the ink half of the undo snapshot
+  are deleted from `useWorkspace`.
+- `NoteToolsPanel` (pinned to the note's left edge) replaces
+  `NoteOptionsPopover`: paper colour, a type/pencil mode toggle, then the tools
+  for the active mode — text marks in type mode, pen colour / nib / eraser in
+  pencil mode. Font size is a button there rather than a popover row.
+- `lib/notes.ts` grows the rest of the rich-text vocabulary — `#` title, `-`
+  bullet, `1.` numbered, `**bold**`, `~~strike~~` — on the same rule the
+  checklist already followed: **marks are syntax in a plain string, never a
+  stored block model.** Undo, the autosave debounce and a half-typed line still
+  know nothing about them.
+
+### What this costs, stated plainly
+
+- **`kind='ink'` rows are now orphaned.** The standalone marker shipped, so rows
+  may exist. `inkBodySchema` is kept and `lib/annotations.ts` still parses them —
+  which is deliberate: the alternative, deleting the schema, would make
+  `rowToAnnotation` fall through to `noteBodySchema` and hand back a *blank
+  sticky note* where a stroke used to be. Nothing renders them any more, so
+  existing canvas ink is invisible and cannot be erased from the UI. Nothing
+  writes `kind='ink'` again. Whether those rows are deleted is a separate,
+  reversible decision and is not made here.
+- **A stroke is no longer its own row.** One note's drawing is one jsonb array,
+  so erasing is a read-modify-write of that array rather than a `DELETE`, and two
+  people drawing on the *same note* can clobber each other. Two people drawing on
+  different notes cannot. Accepted: a note is a small, single-author object in a
+  way the shared canvas was not.
+- **The "a pen draws, a finger never does" rule is retired.** Drawing is now a
+  mode you enter on one card, not a live interpretation of every pointer over the
+  whole canvas, so the rule has nothing left to protect — and inside that mode a
+  finger drawing is what a user asks for. Palm rejection survives in the form
+  that still matters: `NoteInkLayer` binds a stroke to the pointer that started
+  it, so a palm landing mid-sentence cannot reset the stroke and its lift cannot
+  commit it.

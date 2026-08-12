@@ -1,4 +1,4 @@
-import type { AssetLabel, NoteFontSize } from "@archivemind/shared";
+import type { AssetLabel, NoteFontSize, NoteStroke } from "@archivemind/shared";
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
 import { GROUPS, SOURCES } from "./mock-data";
 import { heuristicTopicKey, UNSORTED_CLOUD_KEY } from "./topics";
@@ -39,6 +39,10 @@ export interface StickyNote {
    *  paper tone the card is actually filled with. */
   color: AssetLabel;
   fontSize: NoteFontSize;
+  /** The note's own freehand drawing (ADR 0041 as amended — ink lives on the
+   *  note now). Points are in the note's fixed 0..1000 virtual space, so the
+   *  drawing moves and scales with the card. */
+  strokes: NoteStroke[];
 }
 
 /** Default colours for successive new notes — a rotation, not a palette: the
