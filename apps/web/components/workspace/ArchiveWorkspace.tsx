@@ -126,14 +126,17 @@ export default function ArchiveWorkspace({
         background: "var(--bg)",
       }}
     >
-      {/* Canvas gets ruled lines — it is the surface you arrange files on. The
-          sorting views get dots: their arrangement is computed, and a ruled grid
-          there would promise a snap that isn't on offer. */}
+      {/* Ruled lines mean "you are inside a Workspace"; dots mean the whole
+          project. The background carries the SCOPE, not the activity: whether a
+          view is for building or for browsing is already shouted by the working
+          action bar and the notes and folders on screen, whereas a narrowed
+          canvas looks exactly like a full one and is otherwise announced only by
+          a chip in the header — which is how "where did my photos go" happens. */}
       <InfiniteGrid
         gridSize={ws.gridSize}
         gridPos={ws.gridPos}
         gridOpacity={ws.gridOpacity}
-        variant={ws.view === "neural" ? "lines" : "dots"}
+        variant={bd.activeBoardId !== null ? "lines" : "dots"}
       />
 
       <PanZoomCanvas
