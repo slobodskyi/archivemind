@@ -20,6 +20,39 @@ export function ShareIcon({ width = 13, height = 13, ...props }: IconProps) {
   );
 }
 
+/** AI assistant — a chat bubble marked "AI" with a spark. The rail's single AI
+ *  entry point (it opens the Smart Search / assistant panel); the ✨ that RUNS a
+ *  job lives on the action bar and the tiles, and reads as a different thing on
+ *  purpose. */
+export function AiAssistantIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x={3} y={3} width={14} height={14} rx={3.5} />
+      <text x={10} y={13.2} fontSize={8.5} fontWeight={700} fill="currentColor" stroke="none" textAnchor="middle" fontFamily="var(--font-space-mono), monospace">
+        AI
+      </text>
+      <path fill="currentColor" stroke="none" d="M19 13.5l1.05 2.45L22.5 17l-2.45 1.05L19 20.5l-1.05-2.45L15.5 17l2.45-1.05z" />
+    </svg>
+  );
+}
+
+/** Magic wand — "run the AI on this selection". */
+export function MagicWandIcon({ width = 16, height = 16, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="m3 21 9-9" />
+      <path d="M15 4V2" />
+      <path d="M15 16v-2" />
+      <path d="M8 9h2" />
+      <path d="M20 9h2" />
+      <path d="M17.8 11.8 19 13" />
+      <path d="M17.8 6.2 19 5" />
+      <path d="m12.2 6.2 1.8-1.4" />
+      <path d="M15 9h.01" />
+    </svg>
+  );
+}
+
 export function SearchIcon({ width = 16, height = 16, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>

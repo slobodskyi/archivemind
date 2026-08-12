@@ -1,8 +1,9 @@
 import { memo } from "react";
 import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import type { Tool } from "@/types";
-import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
-import { FrameToolIcon, CopyIcon, TrashIcon, FolderIcon, LabelsIcon } from "@/components/icons/icons";
+import type { LabelFilter } from "@/lib/labels";
+import LabelBarControl from "@/components/labels/LabelBarControl";
+import { FrameToolIcon, StickyNoteIcon, CopyIcon, TrashIcon, FolderIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
   tool: Tool;
@@ -10,6 +11,9 @@ interface WorkspaceActionBarProps {
   /** The AI panel is open for this selection — keeps the ✨ button lit. */
   aiOpen: boolean;
   onArtboard: () => void;
+  /** Drop a new sticky note on the canvas — moved off the left rail, which is
+   *  now identical in every view. */
+  onAddStickyNote: () => void;
   onTidy: () => void;
   /** Opens the AI panel over the selection (analyze / captions). */
   onAi: () => void;
@@ -20,12 +24,16 @@ interface WorkspaceActionBarProps {
   /** Wrap the selection in a real folder (collapsible tile + Finder popup). */
   onFolder: () => void;
   onDelete: () => void;
-  /** Colour label for the selection — the swatch row opens above the bar. */
+  /** Colour-label control — the swatch row opens above the bar. Context
+   *  sensitive (ADR 0040 amended): it marks the selection, or filters the canvas
+   *  by colour when there is no selection to mark. */
   labelNames: LabelNames;
   labelMenuOpen: boolean;
   selectionLabel: AssetLabel | "mixed" | null;
+  labelFilter: LabelFilter;
   onToggleLabelMenu: () => void;
   onPickLabel: (label: AssetLabel | null) => void;
+  onSetFilter: (filter: LabelFilter) => void;
 }
 
 /* Inline glyphs for the actions without an existing icon (mono/line style). */
@@ -100,6 +108,7 @@ function WorkspaceActionBar({
   selCount,
   aiOpen,
   onArtboard,
+  onAddStickyNote,
   onTidy,
   onAi,
   onCopy,
@@ -110,8 +119,10 @@ function WorkspaceActionBar({
   labelNames,
   labelMenuOpen,
   selectionLabel,
+  labelFilter,
   onToggleLabelMenu,
   onPickLabel,
+  onSetFilter,
 }: WorkspaceActionBarProps) {
   const noSel = selCount === 0;
   return (
@@ -137,6 +148,9 @@ function WorkspaceActionBar({
       <Btn title="Artboard" active={tool === "frame"} onClick={onArtboard}>
         <FrameToolIcon />
       </Btn>
+      <Btn title="Sticky note" onClick={onAddStickyNote}>
+        <StickyNoteIcon />
+      </Btn>
       <Btn title={selCount >= 2 ? "Tidy up selection" : "Tidy up canvas"} onClick={onTidy}>
         <TidyGlyph />
       </Btn>
@@ -153,36 +167,19 @@ function WorkspaceActionBar({
 
       <Divider />
 
-      {/* The swatch row pops ABOVE the bar rather than replacing its buttons —
+      {/* The row pops ABOVE the bar rather than replacing its buttons —
           labelling is usually a run of many, and a picker that closed the bar
           would cost a re-open per photo. */}
-      {labelMenuOpen && !noSel && (
-        <div
-          style={{
-            position: "absolute",
-            left: "50%",
-            bottom: "100%",
-            marginBottom: 8,
-            transform: "translateX(-50%)",
-            padding: "4px 6px",
-            background: "rgba(20,20,20,.96)",
-            border: "1px solid var(--bd)",
-            borderRadius: 2,
-            backdropFilter: "blur(16px)",
-            boxShadow: "0 8px 32px rgba(0,0,0,.45)",
-          }}
-        >
-          <LabelSwatchRow names={labelNames} current={selectionLabel} onPick={onPickLabel} size={18} />
-        </div>
-      )}
-      <Btn
-        title={selCount >= 2 ? `Label ${selCount} (keys 1–7)` : "Label (keys 1–7)"}
-        active={labelMenuOpen}
-        disabled={noSel}
-        onClick={onToggleLabelMenu}
-      >
-        <LabelsIcon width={16} height={16} />
-      </Btn>
+      <LabelBarControl
+        names={labelNames}
+        open={labelMenuOpen}
+        onToggle={onToggleLabelMenu}
+        selCount={selCount}
+        selectionLabel={selectionLabel}
+        filter={labelFilter}
+        onPickLabel={onPickLabel}
+        onSetFilter={onSetFilter}
+      />
 
       <Btn title="Copy" disabled={noSel} onClick={onCopy}>
         <CopyIcon width={16} height={16} />

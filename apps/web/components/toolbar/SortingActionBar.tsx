@@ -1,16 +1,20 @@
 "use client";
 
 import { memo } from "react";
+import type { AssetLabel, LabelNames } from "@archivemind/shared";
+import type { LabelFilter } from "@/lib/labels";
+import LabelBarControl from "@/components/labels/LabelBarControl";
 import TopicMembershipMenu, {
   type TopicMembershipMenuProps,
 } from "@/components/toolbar/TopicMembershipMenu";
 
-/** Membership controls are optional so Timeline / Labels keep their existing
- * narrow bar. Topic supplies this object once its persisted manual-assignment
- * layer is available. `selectionCount` comes from the bar's existing prop. */
+/** Membership controls are optional so Timeline keeps its narrow bar. Topic
+ * supplies this object once its persisted manual-assignment layer is available.
+ * `selectionCount` comes from the bar's existing prop. */
 export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "selectionCount">;
 
-/** Bottom action bar for the SORTING views (Topic / Timeline) — ADR 0038.
+/** Bottom action bar for the SORTING views (Topic / Timeline / Map) and for the
+ *  all-files grid — ADR 0038, extended by ADR 0040's amendment.
  *
  *  The Canvas has had `WorkspaceActionBar` since #3, but it is gated on
  *  `view === "neural"`, so Topic and Timeline shipped with no layout controls
@@ -28,6 +32,12 @@ export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "select
 export interface SortingActionBarProps {
   /** Topic gets Re-cluster; Timeline's day columns are not clustered. */
   showRecluster: boolean;
+  /** Regroup acts on an override bucket, and Map has none (its positions come
+   *  from EXIF, not from drags) — nor does the read-only all-files grid. */
+  showRegroup: boolean;
+  /** `ViewSwitcher` is on screen below this bar, so it sits one row up. False in
+   *  all-files, where there is no switcher and the gap would just be dead space. */
+  aboveSwitcher: boolean;
   /** There is something to regroup — no drag overrides means no-op. */
   canRegroup: boolean;
   /** A job is already in flight; the worker has one lane for all of them. */
@@ -39,6 +49,16 @@ export interface SortingActionBarProps {
   /** Explicit semantic grouping actions for Topic only. The canvas may call
    * the same mutations after an intentional dwell-and-drop target. */
   topicMembership?: SortingTopicMembershipProps;
+  /** Colour-label control — marks the selection, or filters when there is none.
+   *  Present on every view this bar appears on, including Map and all-files:
+   *  the filter is a lens on the photo set, not on one arrangement of it. */
+  labelNames: LabelNames;
+  labelMenuOpen: boolean;
+  selectionLabel: AssetLabel | "mixed" | null;
+  labelFilter: LabelFilter;
+  onToggleLabelMenu: () => void;
+  onPickLabel: (label: AssetLabel | null) => void;
+  onSetFilter: (filter: LabelFilter) => void;
 }
 
 const gp = {
@@ -114,20 +134,29 @@ function Btn({
 
 function SortingActionBar({
   showRecluster,
+  showRegroup,
+  aboveSwitcher,
   canRegroup,
   busy,
   selCount,
   onRegroup,
   onRecluster,
   topicMembership,
+  labelNames,
+  labelMenuOpen,
+  selectionLabel,
+  labelFilter,
+  onToggleLabelMenu,
+  onPickLabel,
+  onSetFilter,
 }: SortingActionBarProps) {
   return (
     <div
       style={{
         position: "absolute",
         left: "50%",
-        // Stacks above ViewSwitcher, which owns bottom:20.
-        bottom: 66,
+        // Stacks above ViewSwitcher (bottom:20) when it is showing.
+        bottom: aboveSwitcher ? 66 : 20,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",
@@ -141,13 +170,28 @@ function SortingActionBar({
         zIndex: 35,
       }}
     >
-      <Btn
-        title={selCount >= 2 ? `Regroup ${selCount} selected` : "Regroup — snap tiles back into their clouds"}
-        disabled={!canRegroup}
-        onClick={onRegroup}
-      >
-        <RegroupGlyph />
-      </Btn>
+      <LabelBarControl
+        names={labelNames}
+        open={labelMenuOpen}
+        onToggle={onToggleLabelMenu}
+        selCount={selCount}
+        selectionLabel={selectionLabel}
+        filter={labelFilter}
+        onPickLabel={onPickLabel}
+        onSetFilter={onSetFilter}
+      />
+      {showRegroup && (
+        <>
+          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <Btn
+            title={selCount >= 2 ? `Regroup ${selCount} selected` : "Regroup — snap tiles back into their clouds"}
+            disabled={!canRegroup}
+            onClick={onRegroup}
+          >
+            <RegroupGlyph />
+          </Btn>
+        </>
+      )}
       {showRecluster && topicMembership && selCount > 0 && (
         <>
           <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />

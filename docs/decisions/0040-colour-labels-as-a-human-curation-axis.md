@@ -139,3 +139,34 @@ Consequences worth stating plainly:
   `resolveLabelNames` are all kept and still work — `LabelNames` is threaded to
   every swatch row for tooltips regardless, so the reader cost is zero and the
   route is one component away from being reachable again.
+
+## Amendment (2026-08-12) — the filter moves onto the bottom bars
+
+`LabelFilterPanel` and the left rail's Labels button are gone. The colour control
+is now one object, `LabelBarControl`, on both bottom bars, and it is
+**context-sensitive**: with a selection the swatch row marks it (unchanged), with
+nothing selected it filters the canvas.
+
+The two jobs never overlap, which is what makes one control honest — an empty
+selection is exactly when "mark the selection" has nothing to do. Before this,
+the one axis was operated from opposite edges of the screen: marking on the
+bottom bar, filtering on the left rail.
+
+- `toggleLabelMenu` no longer refuses on an empty selection. That refusal was
+  right when the row only marked and is wrong now.
+- **The filter is reachable in all-files.** `SortingActionBar` shows wherever
+  `WorkspaceActionBar` does not — the sorting views *and* the all-files grid,
+  where it carries the colour control and nothing else (no override bucket to
+  Regroup, no clusters to re-cluster). The untriaged pile is usually what you
+  open all-files to find, so that is the one place the filter must not be
+  missing.
+- **`LabelSwatchRow` gains `none`** — a hollow dashed ring for "photos with no
+  colour at all". It is not the ✕: the ✕ clears the filter and shows everything,
+  the ring narrows to the unmarked. Collapsing them would make `LabelFilter`'s
+  `"none"` unreachable and the untriaged pile impossible to look at. The ✕'s
+  disabled state keys on "no colour ringed **and** the untriaged filter off",
+  because otherwise the only way back to the full canvas greys itself out.
+- **Lost with the panel: the per-colour counts.** The strip showed how many
+  photos carried each colour; the swatch row does not. Accepted — `labelCounts`
+  is deleted rather than left dangling, and it is a pure function of the loaded
+  photos if a future surface wants it back.
