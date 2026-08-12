@@ -222,3 +222,45 @@ the project canvas.
 The connected-project analysis (a job that synthesises a summary + embedding when
 membership changes) remains unbuilt, and per-workspace tile *arrangements* still
 share the project's one `galleryOverrides.asset` bucket.
+
+## Amendment (2026-08-13) — drag onto a chip, and sorting leaves the Workspace
+
+### Dropping onto a Workspace chip
+A photo, a sticky note or a folder can be dragged onto a chip in the header to
+put it in that Workspace, the way a file is dropped on a folder. **Nothing
+leaves All files.** A photo joins a many-to-many, so it is still in the project
+and in any other workspace; a note or a folder changes its single owner, and the
+project canvas shows every object regardless of owner. The gesture adds, it
+never moves-out.
+
+- **Hit-testing, not HTML5 drag-and-drop.** The canvas drives its own pointer
+  drags and calls `preventDefault()` on pointerdown, so `dragover`/`drop` never
+  fire and a header could not receive a drop the normal way. Chips carry
+  `data-board-chip` and `boardChipAt()` resolves the pointer through
+  `elementFromPoint` — which is also what lets a drag that began on the canvas
+  finish on a `position: fixed` header. Cached rects were rejected: the chip row
+  scrolls and overflows, so a rect taken at drag start is wrong by the time the
+  pointer arrives.
+- **`All files` carries the attribute with an empty value.** Passing over it
+  disarms, instead of leaving the last chip lit while the pointer is somewhere
+  that means "no workspace".
+- **A drop is a change of membership, not of position.** The dragged tiles go
+  back where they were picked up, restored from the drag's own history snapshot
+  (exact — an override the tile already had survives) with that entry consumed,
+  so it is one action rather than an undo step for a move nobody asked to keep.
+  This is the bargain the Topic drop already makes. A note restores from
+  `d.orig` and saves no move; a folder replays its accumulated delta backwards,
+  because `FolderOverlay` applies moves incrementally and keeps no origin.
+- **Only a real `pointerup` commits.** A `pointercancel` disarms and writes
+  nothing — an armed highlight is not consent.
+- Folders run their own window listeners rather than the canvas drag session, so
+  they hit-test themselves with the same helper. Their armed chip is tracked in
+  `ArchiveWorkspace` beside the canvas one and the header takes whichever is set.
+
+### Sorting views are an All-files activity
+`ViewSwitcher` is hidden inside a Workspace, and opening one puts you on its
+Canvas. Canvas / Timeline / Topic / Map re-arrange the **whole project**, which
+is not the question a Workspace answers — and leaving someone inside one on
+Timeline showed them a bar and a grid for a different scope with no switcher to
+get back. Done in the open/create handlers rather than an effect, because
+opening a Workspace *is* the action that puts you on its canvas.

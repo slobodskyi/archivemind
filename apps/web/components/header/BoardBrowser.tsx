@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Board } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
 import { AddIcon, ChevronDownIcon } from "@/components/icons/icons";
+import { BOARD_CHIP_ATTR } from "@/lib/board-drop";
 
 interface BoardBrowserProps {
   boards: Board[];
@@ -13,6 +14,10 @@ interface BoardBrowserProps {
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  /** The chip a canvas drag is currently over, if any (ADR 0044). The drag is
+   *  the canvas's own pointer drag, not HTML5 DnD, so the header is told which
+   *  chip is armed rather than receiving a `dragover`. */
+  dropTargetId?: string | null;
 }
 
 /** How many board chips show inline before the rest fold into a "+N ▾" menu. */
@@ -22,7 +27,7 @@ const VISIBLE_CAP = 4;
  *  views over the whole project) then a chip per workspace — colour dot · name ·
  *  count — a ＋ to create one, and a "+N ▾" overflow. Selecting a chip opens that
  *  workspace's working canvas; "All files" returns to browsing the whole project. */
-export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, onCreate, onRename, onDelete }: BoardBrowserProps) {
+export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, onCreate, onRename, onDelete, dropTargetId = null }: BoardBrowserProps) {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -47,9 +52,11 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
 
   const chip = (b: Board) => {
     const active = b.id === activeBoardId;
+    const armed = b.id === dropTargetId;
     return (
       <div
         key={b.id}
+        {...{ [BOARD_CHIP_ATTR]: b.id }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -57,8 +64,18 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
           height: 30,
           padding: "0 11px",
           borderRadius: 2,
-          border: active ? "1px solid var(--bdh)" : "1px solid transparent",
-          background: active ? "var(--bg-el)" : "transparent",
+          // Armed beats active: while something is being dragged over it, the
+          // chip has to read as a target, not as the workspace you are in.
+          border: armed
+            ? "1px solid var(--ac)"
+            : active
+              ? "1px solid var(--bdh)"
+              : "1px solid transparent",
+          background: armed
+            ? "color-mix(in srgb,var(--ac) 16%,transparent)"
+            : active
+              ? "var(--bg-el)"
+              : "transparent",
           cursor: "pointer",
           maxWidth: 200,
         }}
@@ -114,6 +131,9 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
       {/* All files — the whole project in the sorting views. */}
       <button
         onClick={() => onSelect(null)}
+        // Carries the attribute with an EMPTY value so a drag passing over it
+        // disarms rather than leaving the previous chip lit — see `boardChipAt`.
+        {...{ [BOARD_CHIP_ATTR]: "" }}
         style={{
           display: "flex",
           alignItems: "center",

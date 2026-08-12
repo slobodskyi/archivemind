@@ -19,6 +19,7 @@ import type {
   TrashedAsset,
   TopicSummary,
 } from "@archivemind/shared";
+import { boardChipAt } from "@/lib/board-drop";
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
@@ -583,6 +584,13 @@ function canPreviewLocally(file: File): boolean {
  * with their filename placeholder and reconcile to the server preview normally. */
 const MAX_LOCAL_UPLOAD_PREVIEWS_PER_BATCH = 50;
 
+/** What a drop onto a Workspace chip carries. Photos come as a list because a
+ *  drag can move a whole selection; a note or a folder is always one object. */
+export type BoardDrop =
+  | { kind: "photos"; ids: string[] }
+  | { kind: "note"; id: string }
+  | { kind: "folder"; id: string };
+
 export interface Workspace {
   scale: number;
   tx: number;
@@ -764,6 +772,9 @@ export interface Workspace {
   /** Explicit semantic drop target armed after the pointer dwells over a
    * different Topic cloud. Null keeps ordinary free-position drag semantics. */
   topicDropTargetKey: string | null;
+  /** The Workspace chip a drag is currently over (ADR 0044) — drives the chip's
+   *  armed highlight. Null when the pointer is anywhere else. */
+  boardDropTargetId: string | null;
   addToNewArtboard: () => void;
   addToExistingArtboard: (frameId: string) => void;
 
@@ -782,6 +793,11 @@ export interface Workspace {
   setStickyFontSize: (id: string, fontSize: NoteFontSize) => void;
   /** Tick/untick one `[ ]` line from the rendered body, no editor involved. */
   toggleStickyCheck: (id: string, lineIndex: number) => void;
+  /** Re-file a note or a folder under a Workspace after a drop on its chip
+   *  (ADR 0044). Local only — the caller has already PATCHed the row; this keeps
+   *  the canvas from waiting a round trip to agree with the header. */
+  setObjectBoard: (kind: "note" | "folder", id: string, boardId: string | null) => void;
+
   /** Replace a note's freehand drawing (ADR 0041 as amended — ink lives ON the
    *  note now). Persists the whole `body` (text + strokes together) so a text
    *  save can't wipe the drawing or vice versa; pushes history so Cmd+Z reaches
@@ -1011,6 +1027,11 @@ export function useWorkspace(
    *  time, so unlike the previous client-side lists there is no second id to
    *  adopt when the insert returns. */
   activeBoardId: string | null = null,
+  /** A photo, note or folder was dropped onto a Workspace chip (ADR 0044). The
+   *  hook only reports it — what "add" means differs per kind (a photo joins a
+   *  many-to-many, a note changes its single owner), and that belongs to the
+   *  caller that owns both halves. */
+  onDropOnBoard?: (boardId: string, drop: BoardDrop) => void,
 ): Workspace {
   // A ref so the create callbacks don't rebuild every time a workspace opens.
   const boardIdRef = useRef(activeBoardId);
@@ -1107,6 +1128,29 @@ export function useWorkspace(
     setTopicMutationBusyState(busy);
   }, []);
   const [topicDropTargetKey, setTopicDropTargetKey] = useState<string | null>(null);
+  // The armed Workspace chip. State, because the header re-renders on it; the
+  // hit test itself runs in the pointermove handler and writes only on change,
+  // so a drag across empty header space is not a render per frame.
+  const [boardDropTargetId, setBoardDropTargetId] = useState<string | null>(null);
+  const boardDropRef = useRef<string | null>(null);
+  const armBoardDrop = useCallback((id: string | null) => {
+    if (boardDropRef.current === id) return;
+    boardDropRef.current = id;
+    setBoardDropTargetId(id);
+  }, []);
+  const boardDropCallback = useRef(onDropOnBoard);
+  useEffect(() => {
+    boardDropCallback.current = onDropOnBoard;
+  }, [onDropOnBoard]);
+  /** Consume the armed chip: reports the drop and disarms. Returns true when the
+   *  caller should skip its normal commit, because the drag was a drop. */
+  const commitBoardDrop = useCallback((drop: BoardDrop): boolean => {
+    const boardId = boardDropRef.current;
+    armBoardDrop(null);
+    if (!boardId) return false;
+    boardDropCallback.current?.(boardId, drop);
+    return true;
+  }, [armBoardDrop]);
 
   // Mirror of committed state, kept current for window-level event handlers.
   const stateRef = useRef(state);
@@ -2159,6 +2203,23 @@ export function useWorkspace(
    *  PATCH carries the whole body, so a note being typed and drawn on at once
    *  keeps both halves — text and strokes share one jsonb column, and a
    *  strokes-only patch would parse as `{ text: "", strokes }`. */
+  const setObjectBoard = useCallback(
+    (kind: "note" | "folder", id: string, boardId: string | null) => {
+      if (kind === "note") {
+        setState({
+          stickyNotes: stateRef.current.stickyNotes.map((n) =>
+            n.id === id ? { ...n, boardId } : n,
+          ),
+        });
+        return;
+      }
+      setState({
+        groups: stateRef.current.groups.map((g) => (g.id === id ? { ...g, boardId } : g)),
+      });
+    },
+    [setState],
+  );
+
   const setStickyStrokes = useCallback(
     (id: string, strokes: NoteStroke[]) => {
       const note = stateRef.current.stickyNotes.find((n) => n.id === id);
@@ -2304,6 +2365,8 @@ export function useWorkspace(
           }
         }
         if (!d.moved) return;
+        // A drag that has left the canvas may be heading for a Workspace chip.
+        armBoardDrop(boardChipAt(e.clientX, e.clientY));
         const dx = (e.clientX - d.sx) / s.scale,
           dy = (e.clientY - d.sy) / s.scale;
         const bucket = { ...s.galleryOverrides[d.kind] };
@@ -2364,6 +2427,7 @@ export function useWorkspace(
         setState({ galleryOverrides: { ...s.galleryOverrides, [d.bucket]: bucketOv } });
       } else if (d.mode === "sticky") {
         if (Math.abs(e.clientX - d.sx) > 2 || Math.abs(e.clientY - d.sy) > 2) d.moved = true;
+        armBoardDrop(boardChipAt(e.clientX, e.clientY));
         const dx = (e.clientX - d.sx) / s.scale,
           dy = (e.clientY - d.sy) / s.scale;
         setState({
@@ -2440,6 +2504,7 @@ export function useWorkspace(
       applyPinch,
       armTopicDropTarget,
       clearTopicDropTarget,
+      armBoardDrop,
     ],
   );
 
@@ -2531,6 +2596,16 @@ export function useWorkspace(
     if (d.mode === "pan") {
       setState({ panning: false });
     } else if (d.mode === "sticky") {
+      // Dropped on a Workspace chip: that is a change of owner, not of position,
+      // so the note snaps back to where it was picked up and no move is saved.
+      if (commitBoardDrop({ kind: "note", id: d.id })) {
+        setState({
+          stickyNotes: stateRef.current.stickyNotes.map((n) =>
+            n.id === d.id ? { ...n, x: d.orig.x, y: d.orig.y } : n,
+          ),
+        });
+        return;
+      }
       // Persist the drop, not the drag: move() already updated local state on
       // every pointermove, and PATCHing those would be a request per frame.
       if (d.moved) {
@@ -2587,6 +2662,32 @@ export function useWorkspace(
         setState({ tool: "select" });
       }
     } else if (d.mode === "gallery") {
+      // Dropped on a Workspace chip. Membership only — the tiles go back where
+      // they were picked up, because a drag that ends on the header was never a
+      // statement about position, and leaving them parked under the header is
+      // how a photo gets lost. Restoring from the drag's own history snapshot is
+      // exact (an override the tile already had is preserved) and the entry is
+      // consumed, so this is one action and not an undo step for a move nobody
+      // asked to keep — the same bargain the Topic drop makes.
+      //
+      // Only on a real pointerup: a cancelled pointer must not authorise a write.
+      if (e.type !== "pointercancel") {
+        const draggedIds = d.groupCenters ? Object.keys(d.groupCenters) : [d.key];
+        if (commitBoardDrop({ kind: "photos", ids: draggedIds })) {
+          const s = stateRef.current;
+          const snap = d.historyPushed ? s.history[s.history.length - 1] : undefined;
+          if (snap) {
+            setState({
+              galleryOverrides: snap.galleryOverrides,
+              history: s.history.slice(0, -1),
+              future: [],
+            });
+          }
+          return;
+        }
+      } else {
+        armBoardDrop(null);
+      }
       // A cancelled pointer never authorises a workspace-wide write. The tile
       // may keep the positional nudge already rendered by pointermove, but only
       // an actual pointerup can turn an armed highlight into membership.
@@ -2653,6 +2754,8 @@ export function useWorkspace(
     patchNote,
     clearTopicDropTarget,
     persistTopicAssignment,
+    armBoardDrop,
+    commitBoardDrop,
   ]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
@@ -5910,6 +6013,7 @@ export function useWorkspace(
     createTopicFromSelection,
     returnSelectionToAi,
     topicDropTargetKey,
+    boardDropTargetId,
     addToNewArtboard,
     addToExistingArtboard,
 
@@ -5925,6 +6029,7 @@ export function useWorkspace(
     setStickyFontSize,
     toggleStickyCheck,
     setStickyStrokes,
+    setObjectBoard,
     updateStickyText,
     deleteStickyNote,
 
