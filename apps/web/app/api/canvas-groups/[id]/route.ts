@@ -27,6 +27,24 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (parsed.data.sortIndex !== undefined) patch.sort_index = parsed.data.sortIndex;
   if (parsed.data.settings !== undefined) patch.settings = artboardSettingsSchema.parse(parsed.data.settings);
 
+  // A board id from a body is validated, never trusted: RLS checks the ROW's
+  // workspace, not what this column points at, so a caller could otherwise file
+  // this under someone else's Workspace. An unreadable one is dropped rather
+  // than 404ing the whole patch.
+  if (parsed.data.boardId !== undefined) {
+    if (parsed.data.boardId === null) {
+      patch.board_id = null;
+    } else {
+      const { data: board } = await supabase
+        .from("boards")
+        .select("id")
+        .eq("id", parsed.data.boardId)
+        .maybeSingle();
+      if (board) patch.board_id = parsed.data.boardId;
+    }
+  }
+
+
   const { data: row, error } = await supabase
     .from("canvas_groups")
     .update(patch)

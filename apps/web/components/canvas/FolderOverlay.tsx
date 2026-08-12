@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { boardChipAt } from "@/lib/board-drop";
 import { createPortal } from "react-dom";
 import { FOLDER_TILE_H, FOLDER_TILE_W, type FolderModel } from "@/hooks/useWorkspace";
 import { CloseIcon } from "@/components/icons/icons";
@@ -17,6 +18,12 @@ interface FolderOverlayProps {
   /** Drag a member out of the dropdown onto the Canvas at screen (x, y). */
   onDropMemberOut: (folderId: string, assetId: string, clientX: number, clientY: number) => void;
   onMove: (id: string, dx: number, dy: number) => void;
+  /** A folder was dropped onto a Workspace chip (ADR 0044). The folder drives
+   *  its own window listeners rather than the canvas drag session, so it does
+   *  its own chip hit-test — same helper, same rule. */
+  onDropOnBoard?: (boardId: string, folderId: string) => void;
+  /** Report the chip the drag is over so the header can arm it. */
+  onBoardHover?: (boardId: string | null) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
 }
@@ -48,13 +55,22 @@ export default function FolderOverlay({
   onOpenPhoto,
   onDropMemberOut,
   onMove,
+  onDropOnBoard,
+  onBoardHover,
   onRename,
   onDelete,
 }: FolderOverlayProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const drag = useRef<{ id: string; lastX: number; lastY: number; moved: boolean } | null>(null);
+  const drag = useRef<{
+    id: string;
+    lastX: number;
+    lastY: number;
+    moved: boolean;
+    totalX: number;
+    totalY: number;
+  } | null>(null);
 
   const commitRename = () => {
     if (editingId) {
@@ -67,7 +83,7 @@ export default function FolderOverlay({
   const startDrag = (e: React.PointerEvent, id: string) => {
     if (e.button !== 0) return;
     e.stopPropagation(); // don't start a canvas pan / marquee
-    drag.current = { id, lastX: e.clientX, lastY: e.clientY, moved: false };
+    drag.current = { id, lastX: e.clientX, lastY: e.clientY, moved: false, totalX: 0, totalY: 0 };
     const onMoveWin = (ev: PointerEvent) => {
       const d = drag.current;
       if (!d) return;
@@ -77,12 +93,26 @@ export default function FolderOverlay({
       d.moved = true;
       d.lastX = ev.clientX;
       d.lastY = ev.clientY;
+      // Totals, so a drop on a chip can put the folder back exactly where it
+      // was picked up: the moves are applied incrementally and there is no
+      // origin to fall back to otherwise.
+      d.totalX += dx;
+      d.totalY += dy;
+      onBoardHover?.(boardChipAt(ev.clientX, ev.clientY));
       onMove(id, dx / scale, dy / scale);
     };
-    const onUpWin = () => {
+    const onUpWin = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMoveWin);
       window.removeEventListener("pointerup", onUpWin);
+      const d = drag.current;
       drag.current = null;
+      onBoardHover?.(null);
+      const boardId = boardChipAt(ev.clientX, ev.clientY);
+      if (d && boardId && onDropOnBoard) {
+        // A change of owner, not of position — undo the whole drag.
+        onMove(id, -d.totalX / scale, -d.totalY / scale);
+        onDropOnBoard(boardId, id);
+      }
     };
     window.addEventListener("pointermove", onMoveWin);
     window.addEventListener("pointerup", onUpWin);

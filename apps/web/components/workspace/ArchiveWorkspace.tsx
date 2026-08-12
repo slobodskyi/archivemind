@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
-import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
+import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
 import { LABEL_COLORS } from "@/lib/labels";
 import BoardBrowser from "@/components/header/BoardBrowser";
@@ -90,6 +90,17 @@ export default function ArchiveWorkspace({
   const boardToast = useCallback((text: string) => toastRef.current(text), []);
   const bd = useBoards(currentProjectId, initialBoards, boardToast);
 
+  // Same knot as the toast: the handler below needs `ws`, which needs the drop
+  // callback. A stable forwarder goes in; the real implementation is attached
+  // once `ws` exists. Drops are pointer-driven, so it is always attached by the
+  // time one can happen.
+  const dropOnBoardRef = useRef<(boardId: string, drop: BoardDrop) => void>(() => {});
+  const dropOnBoard = useCallback(
+    (boardId: string, drop: BoardDrop) => dropOnBoardRef.current(boardId, drop),
+    [],
+  );
+
+
   const ws = useWorkspace(
     initialPhotos,
     workspaceId,
@@ -100,6 +111,7 @@ export default function ArchiveWorkspace({
     initialAnnotations,
     bd.scopeIds,
     bd.activeBoardId,
+    dropOnBoard,
   );
 
   // A Workspace owns the notes, folders and artboards MADE in it, and hides the
@@ -109,9 +121,59 @@ export default function ArchiveWorkspace({
   // Filtered here, at the render seam, and NOT in `canvasPhotos`: these three
   // carry their own geometry and have no layout to re-pack, so there is nothing
   // for a scope to change about where they sit. Hiding is the whole effect.
+  /** A photo, note or folder was dropped onto a Workspace chip (ADR 0044).
+   *  "Add" means different things per kind and that is the point of resolving it
+   *  here: a photo JOINS the workspace (many-to-many — it stays in the project
+   *  and in any other workspace), while a note or a folder CHANGES OWNER, since
+   *  each is made in one place. Neither removes anything from All files. */
+  const handleDropOnBoard = useCallback(
+    (boardId: string, drop: BoardDrop) => {
+      const name = bd.boards.find((b) => b.id === boardId)?.name ?? "the workspace";
+      if (drop.kind === "photos") {
+        bd.addToBoard(boardId, drop.ids);
+        toastRef.current(
+          drop.ids.length > 1 ? `Added ${drop.ids.length} files to ${name}` : `Added to ${name}`,
+        );
+        return;
+      }
+      const url = drop.kind === "note" ? `/api/annotations/${drop.id}` : `/api/canvas-groups/${drop.id}`;
+      void fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boardId }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(String(res.status));
+          ws.setObjectBoard(drop.kind, drop.id, boardId);
+          toastRef.current(`Moved to ${name}`);
+        })
+        .catch(() => toastRef.current("Couldn't move it to the workspace"));
+    },
+    [bd, ws],
+  );
+
   useEffect(() => {
     toastRef.current = ws.flashToast;
   }, [ws.flashToast]);
+  useEffect(() => {
+    dropOnBoardRef.current = handleDropOnBoard;
+  }, [handleDropOnBoard]);
+
+  // A folder runs its own drag (FolderOverlay), so its armed chip is tracked
+  // here rather than inside the canvas drag session.
+  const [folderDropTarget, setFolderDropTarget] = useState<string | null>(null);
+
+  /** Opening a Workspace puts you on its canvas. The sorting views browse the
+   *  whole project and belong to All files; leaving someone inside a workspace
+   *  on Timeline would show them a bar and a grid that answer a different
+   *  question, with no switcher to get back. */
+  const openBoard = useCallback(
+    (id: string | null) => {
+      bd.selectBoard(id);
+      if (id !== null) ws.setView("neural");
+    },
+    [bd, ws],
+  );
 
   // Exactly one bottom bar, always. The working bar belongs to a Workspace's
   // Canvas; everything else — the project canvas, the sorting views, all-files,
@@ -224,6 +286,10 @@ export default function ArchiveWorkspace({
               }}
               onDropMemberOut={ws.dropMemberOnCanvas}
               onMove={ws.moveGroup}
+              onDropOnBoard={(boardId, folderId) =>
+                dropOnBoardRef.current(boardId, { kind: "folder", id: folderId })
+              }
+              onBoardHover={setFolderDropTarget}
               onRename={ws.renameGroup}
               onDelete={ws.deleteGroup}
             />
@@ -470,8 +536,12 @@ export default function ArchiveWorkspace({
               boards={bd.boards}
               activeBoardId={bd.activeBoardId}
               counts={boardCounts}
-              onSelect={bd.selectBoard}
-              onCreate={() => bd.createBoard()}
+              dropTargetId={ws.boardDropTargetId ?? folderDropTarget}
+              onSelect={openBoard}
+              onCreate={() => {
+                bd.createBoard();
+                ws.setView("neural");
+              }}
               onRename={bd.renameBoard}
               onDelete={bd.deleteBoard}
             />
@@ -640,7 +710,9 @@ export default function ArchiveWorkspace({
 
       {/* The view switcher, bottom-centred. `SortingActionBar` above sits at 66
           so the two stack rather than overlap. */}
-      <ViewSwitcher show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />
+      {/* Sorting is an All-files activity: Canvas / Timeline / Topic / Map
+          re-arrange the WHOLE project, which is not what a Workspace is for. */}
+      <ViewSwitcher show={ws.showViewTabs && bd.activeBoardId === null} view={ws.view} onSelect={ws.setView} />
 
       {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
           show/pan the hidden neural grid and physically cover MapLibre's own
@@ -661,6 +733,7 @@ export default function ArchiveWorkspace({
         }}
         onCreateWorkspace={() => {
           bd.createBoard(undefined, [...ws.selectedIds]);
+          ws.setView("neural");
           ws.closeAddProj();
         }}
         artboards={scopedFrames.map((f) => ({ key: f.id, label: f.label }))}

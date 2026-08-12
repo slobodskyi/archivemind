@@ -743,10 +743,19 @@ export const patchCanvasGroupRequestSchema = z
     name: z.string().trim().min(1).max(80).optional(),
     sortIndex: z.number().int().optional(),
     settings: artboardSettingsSchema.optional(),
+    /** Move it into a Workspace, or back to the project canvas with null
+     *  (ADR 0044). `nullable` and not just optional: null is a real value here,
+     *  and "absent" has to keep meaning "leave it alone". */
+    boardId: uuidSchema.nullable().optional(),
   })
-  .refine((v) => v.name !== undefined || v.sortIndex !== undefined || v.settings !== undefined, {
-    message: "at least one of name, sortIndex, settings is required",
-  });
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.sortIndex !== undefined ||
+      v.settings !== undefined ||
+      v.boardId !== undefined,
+    { message: "at least one of name, sortIndex, settings, boardId is required" },
+  );
 export type PatchCanvasGroupRequest = z.infer<typeof patchCanvasGroupRequestSchema>;
 
 /** POST | DELETE /api/canvas-groups/[id]/assets — add / remove members. New
@@ -1037,6 +1046,8 @@ export const patchAnnotationRequestSchema = z
     // body falls through to the second member.
     body: z.union([inkBodySchema, noteBodySchema]).optional(),
     style: noteStyleSchema.optional(),
+    /** Move it into a Workspace, or back to the project canvas with null. */
+    boardId: uuidSchema.nullable().optional(),
   })
   .refine((v) => Object.values(v).some((field) => field !== undefined), {
     message: "at least one field is required",
