@@ -369,6 +369,11 @@ interface WorkspaceState {
   /** Folder whose Finder-style popup is open (double-click a folder), or null. */
   openFolderId: string | null;
   stickyNotes: StickyNote[];
+  /** The open Workspace's file ids, or null when none is open (ADR 0044). Held
+   *  in state rather than a ref because `activeTilePositions` reads it from the
+   *  same state object the render does — the geometry seam and the render seam
+   *  must never disagree about which photos exist. */
+  boardScope: ReadonlySet<string> | null;
   /** Content-space preview rect while the frame tool is actively drawing. */
   frameDraftRect: { x: number; y: number; w: number; h: number } | null;
   history: Snapshot[];
@@ -941,6 +946,20 @@ export interface Workspace {
  *  shape. Takes the narrowed type rather than the union: the discriminant is
  *  what guarantees `body.text` exists, and widening the parameter would put that
  *  guarantee back in the caller's hands. */
+/** The photos this canvas lays out. A Workspace (board) narrows the canvas to
+ *  its own files, and — unlike the colour-label filter, which HIDES tiles while
+ *  leaving every position intact — a board is a different canvas: its files pack
+ *  as if the others were not there.
+ *
+ *  That difference is why the scope is applied HERE, at the seam every layout
+ *  reads, instead of at the render seam `visibleTilePositions` where the filter
+ *  lives. `activeTilePositions` (geometry: drags, folder drops, artboard
+ *  membership, export order) and the rendered positions must be computed from
+ *  the same set, or a drag moves a tile to a coordinate nobody can see. */
+function canvasPhotos(photos: readonly Photo[], scope: ReadonlySet<string> | null): Photo[] {
+  return scope ? photos.filter((p) => scope.has(p.id)) : [...photos];
+}
+
 function annotationToNote(a: NoteAnnotation): StickyNote {
   return {
     id: a.id,
@@ -982,6 +1001,8 @@ export function useWorkspace(
   initialGroups: CanvasGroup[],
   initialLabelNames: LabelNames,
   initialAnnotations: CanvasAnnotation[],
+  /** The open Workspace's asset ids, or null for "no board open" (ADR 0044). */
+  boardScopeIds: readonly string[] | null = null,
 ): Workspace {
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
@@ -1045,6 +1066,7 @@ export function useWorkspace(
     stickyNotes: initialAnnotations
       .filter((a): a is NoteAnnotation => a.kind === "note")
       .map(annotationToNote),
+    boardScope: null,
     frameDraftRect: null,
     history: [],
     future: [],
@@ -1467,7 +1489,25 @@ export function useWorkspace(
 
   // Real data is already scoped by the route (getPhotos(projectId)), so the
   // canvas shows every photo the server returned — no client-side project filter.
-  const filteredPhotos = useCallback((photos: Photo[]) => photos, []);
+  /** Kept as the one place a "which photos are on this canvas" rule lives; the
+   *  route already scopes by project, so a Workspace (ADR 0044) is the only
+   *  narrowing left. Reads `state.boardScope`, not the prop, so it can never
+   *  disagree with `canvasPhotos` — see that helper for why one source matters. */
+  // The open Workspace, mirrored into state so `activeTilePositions` reads the
+  // same scope the render did. Keyed on the id list's contents, not its identity:
+  // `useBoards` rebuilds the array on every board edit.
+  const boardScopeKey = boardScopeIds ? boardScopeIds.join(",") : null;
+  useEffect(() => {
+    setState({ boardScope: boardScopeKey === null ? null : new Set(boardScopeKey.split(",").filter(Boolean)) });
+  }, [boardScopeKey, setState]);
+
+  const filteredPhotos = useCallback(
+    (photos: Photo[]) => {
+      const scope = state.boardScope;
+      return scope ? photos.filter((p) => scope.has(p.id)) : photos;
+    },
+    [state.boardScope],
+  );
 
   /** Fire-and-forget PATCH of one note (ADR 0041). A failure is reported once,
    *  in the toast, and the local state is deliberately NOT rolled back: yanking
@@ -1611,12 +1651,13 @@ export function useWorkspace(
    *  tile layout stay identical across Canvas / Timeline / Map / Topic. */
   const activeTilePositions = useCallback(
     (s: WorkspaceState): Record<string, TilePos> => {
+      const scoped = canvasPhotos(s.photos, s.boardScope);
       const all =
         s.view === "timeline"
-          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles
+          ? computeTimelineLayout(scoped, s.galleryOverrides.timeline).tiles
           : s.view === "sense"
-            ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles
-            : assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
+            ? computeTopicLayout(scoped, s.galleryOverrides.topic, s.frames).tiles
+            : assetGallery(projectCanvasItems(scoped, s.uploadPreviews), s.galleryOverrides.asset).pos;
       // Deliberately NOT filtered. This is the geometry seam — artboard
       // membership, folder drops, frame move/resize, Tidy up, the delete-time
       // position freeze and the export's reading order all read it, and every
@@ -3340,7 +3381,7 @@ export function useWorkspace(
 
   const doFit = useCallback(() => {
     const s = stateRef.current;
-    setState(computeFit(s.view, s.photos, s.galleryOverrides, s.uploadPreviews));
+    setState(computeFit(s.view, canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews));
   }, [setState, computeFit]);
 
   /** The Fit button: zoom so EVERY tile fits the viewport (fitBounds solves for a
@@ -3352,16 +3393,16 @@ export function useWorkspace(
     if (s.view === "map") return;
     const r = rect();
     const neural = () => {
-      const gallery = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews);
+      const gallery = neuralGalleryFor(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews);
       return { tiles: gallery.pos, bounds: gallery.bounds };
     };
     const layout =
       s.view === "sense"
-        ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames)
+        ? computeTopicLayout(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides.topic, s.frames)
         : s.view === "timeline"
-          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline)
+          ? computeTimelineLayout(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides.timeline)
           : neural();
-    setState({ ...fitBounds(visibleBounds(layout, s.photos, s.labelFilter), r), tilesAnimating: true });
+    setState({ ...fitBounds(visibleBounds(layout, canvasPhotos(s.photos, s.boardScope), s.labelFilter), r), tilesAnimating: true });
     if (animTimer.current) clearTimeout(animTimer.current);
     animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
   }, [rect, setState, neuralGalleryFor, visibleBounds]);
@@ -3401,7 +3442,7 @@ export function useWorkspace(
         sidebarSelectedIds: [],
         sidebarSearchText: "",
         sidebarAddOpen: false,
-        ...computeFit(v, s.photos, s.galleryOverrides, s.uploadPreviews),
+        ...computeFit(v, canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews),
       });
       if (animTimer.current) clearTimeout(animTimer.current);
       animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
@@ -4036,7 +4077,7 @@ export function useWorkspace(
     const r = rect();
     if (r.width > 0 && r.height > 0) {
       const s = stateRef.current;
-      const bounds = neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds;
+      const bounds = neuralGalleryFor(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews).bounds;
       setState(fitDefaultZoom(bounds, r));
       didFitRef.current = true;
       return true;
@@ -4534,7 +4575,7 @@ export function useWorkspace(
         const clientPoint = batch.clientPoint ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
         const anchor = droppedIntoSortedView
           ? appendClusterAnchor(
-            neuralGalleryFor(s.photos, s.galleryOverrides, s.uploadPreviews).bounds,
+            neuralGalleryFor(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews).bounds,
             newClientIds.length,
           )
           : toContent(clientPoint.x, clientPoint.y);
@@ -5348,8 +5389,13 @@ export function useWorkspace(
   // ── Derived values ────────────────────────────────────────────────────────
 
   const neuralGalleryPos = useMemo(
-    () => neuralGalleryFor(state.photos, state.galleryOverrides, state.uploadPreviews).pos,
-    [state.photos, state.galleryOverrides, state.uploadPreviews, neuralGalleryFor],
+    () =>
+      neuralGalleryFor(
+        canvasPhotos(state.photos, state.boardScope),
+        state.galleryOverrides,
+        state.uploadPreviews,
+      ).pos,
+    [state.photos, state.boardScope, state.galleryOverrides, state.uploadPreviews, neuralGalleryFor],
   );
 
   // Folders (ADR 0034) hide their members while collapsed — the folder tile
