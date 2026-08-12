@@ -3,6 +3,9 @@
 import type { AssetLabel, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
+import { useBoards } from "@/hooks/useBoards";
+import { LABEL_COLORS } from "@/lib/labels";
+import BoardBrowser from "@/components/header/BoardBrowser";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
 import FrameOverlay from "@/components/canvas/FrameOverlay";
@@ -69,6 +72,12 @@ export default function ArchiveWorkspace({
   initialAnnotations,
   account,
 }: ArchiveWorkspaceProps) {
+  // Workspaces (boards) — a named, colour-coded set of the project's files
+  // (ADR 0044). Additive on purpose: opening one narrows the canvas to its
+  // files and nothing else changes, so notes, folders, artboards, the sorting
+  // views and export all keep working exactly as they do with none open.
+  const bd = useBoards(currentProjectId);
+
   const ws = useWorkspace(
     initialPhotos,
     workspaceId,
@@ -77,7 +86,16 @@ export default function ArchiveWorkspace({
     initialGroups,
     initialLabelNames,
     initialAnnotations,
+    bd.scopeIds,
   );
+
+  // Counts come from the loaded photo set, not the board's raw id list: an id
+  // whose asset has since been trashed must not still be counted on a chip.
+  const boardCounts: Record<string, number> = {};
+  for (const b of bd.boards) {
+    const ids = new Set(b.assetIds);
+    boardCounts[b.id] = ws.photos.filter((p) => ids.has(p.id)).length;
+  }
 
   // The colour the label pickers should ring: what the whole target carries, or
   // "mixed" when it disagrees. Target = the selection, else the right-clicked
@@ -299,10 +317,55 @@ export default function ArchiveWorkspace({
         </div>
       )}
 
+      {/* An open workspace with nothing in it. Its own state, and gated BEFORE
+          the project-empty one below: a scoped canvas with no files is not an
+          empty project, and telling someone to import photos into a project that
+          already has hundreds is worse than saying nothing. */}
+      {bd.activeBoardId !== null && ws.projectPhotos.length === 0 && (
+        <div
+          style={{
+            position: "absolute",
+            inset: "var(--hdr) 0 0 0",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            zIndex: 20,
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t2)" }}>
+            This workspace is empty
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
+            Open All files, select what belongs here, then Add to workspace.
+          </div>
+          <button
+            onClick={() => bd.selectBoard(null)}
+            style={{
+              pointerEvents: "auto",
+              marginTop: 2,
+              height: 30,
+              padding: "0 14px",
+              background: "transparent",
+              color: "var(--t1)",
+              border: "1px solid var(--bdh)",
+              borderRadius: 2,
+              fontSize: 12,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            Show all files
+          </button>
+        </div>
+      )}
+
       {/* Empty state — a project emptied after creation used to render a bare
           grid with no affordance (the import modal auto-opens only for fresh
           projects). Sits under the header/toolbar chrome. */}
-      {ws.projectPhotos.length === 0 && ws.uploadPreviews.length === 0 && !ws.impOpen && (
+      {bd.activeBoardId === null && ws.projectPhotos.length === 0 && ws.uploadPreviews.length === 0 && !ws.impOpen && (
         <div
           style={{
             position: "absolute",
@@ -360,6 +423,19 @@ export default function ArchiveWorkspace({
         onOpenAcct={ws.openAcct}
         accountInitials={account.initials}
         accountName={account.name}
+        afterProject={
+          ws.projectMode ? (
+            <BoardBrowser
+              boards={bd.boards}
+              activeBoardId={bd.activeBoardId}
+              counts={boardCounts}
+              onSelect={bd.selectBoard}
+              onCreate={() => bd.createBoard()}
+              onRename={bd.renameBoard}
+              onDelete={bd.deleteBoard}
+            />
+          ) : undefined
+        }
       />
 
       {/* Persistent by design: this is archive-integrity information, not a
@@ -532,6 +608,16 @@ export default function ArchiveWorkspace({
         onClose={ws.closeAddProj}
         onSelect={ws.addToProject}
         onCreateNew={ws.createNewProject}
+        workspaces={bd.boards.map((b) => ({ key: b.id, label: b.name, color: LABEL_COLORS[b.color] }))}
+        onSelectWorkspace={(id) => {
+          bd.addToBoard(id, [...ws.selectedIds]);
+          ws.flashToast("Added to workspace");
+          ws.closeAddProj();
+        }}
+        onCreateWorkspace={() => {
+          bd.createBoard(undefined, [...ws.selectedIds]);
+          ws.closeAddProj();
+        }}
         artboards={ws.frames.map((f) => ({ key: f.id, label: f.label }))}
         onSelectArtboard={(id) => {
           ws.closeAddProj();

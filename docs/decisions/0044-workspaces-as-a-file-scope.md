@@ -1,0 +1,121 @@
+# 0044. Workspaces — a named file scope on a project's canvas
+
+Date: 2026-08-12
+
+Status: Proposed (the frontend ships here, in `localStorage`; the backend is this
+document's build list)
+
+Builds on [0034](0034-canvas-groups-folders-and-artboards.md) (canvas geometry is
+a per-user override) and reuses the seven-colour vocabulary of
+[0040](0040-colour-labels-as-a-human-curation-axis.md).
+
+> **Note for the next agent:** the frontend half below is built and backed by
+> `localStorage`. The **backend half is not** — this ADR is its spec. Migrations
+> belong to Oleksandr and land PR-only (CONTRIBUTING.md).
+
+## Context
+
+A project opens one canvas holding every file in it. That is the right default
+for finding things and the wrong one for working on a few: assembling six photos
+for a pitch means dragging them clear of four hundred others that stay on screen
+the whole time.
+
+The artboard (ADR 0034) was the existing answer — a rectangle you draw around
+tiles. It has two problems. It is a *region*, so which files are "in" it is
+derived from coordinates and changes when anything moves; and it is invisible
+until you scroll to it, so a project's working sets are not browsable.
+
+The redesign George proposed makes that set a first-class, named, browsable
+thing. This ADR takes that idea and lands it **additively** — nothing that works
+today stops working.
+
+## Decision
+
+A **Workspace** is a named, colour-coded set of a project's files. In the UI it
+is "workspace"; in code it is a **`board`** (`lib/boards.ts`, `hooks/useBoards.ts`)
+so it cannot be confused with the account-level tenant `workspace_id`.
+
+### What ships now (frontend, `localStorage`)
+
+- `Board = { id, name, color: AssetLabel, assetIds[] }`, persisted per project.
+  `loadBoards` drops malformed entries rather than throwing — a hand-edited or
+  older blob must not take the canvas down with it.
+- **Header browser** (`BoardBrowser`, in the breadcrumb slot the retired
+  `WorkspaceToggle` left free): `All files` plus a chip per workspace (colour dot
+  · name · count), a ＋ to create, an overflow, rename and delete.
+- **Opening one narrows the canvas to its files. That is all it does.** Sticky
+  notes, folders, artboards, the four views, export, the label filter and every
+  action bar behave exactly as they do with no workspace open. This is the
+  deliberate difference from the design that prompted it, which made a workspace
+  a *mode* — its own grid, its own bar, no sorting views, and notes and folders
+  visible only inside one. That version hides existing server-side notes and
+  folders from anyone who has not created a workspace yet, which is a data
+  regression dressed as a layout choice.
+- **Add to a workspace**: select files → the left rail's `ADD n` →
+  `AddToProjectPopover`'s "Add to workspace" section (an existing one, or a new
+  one seeded with the selection). It sits beside the artboard section rather than
+  replacing it, because artboards still work.
+
+### Where the scope is applied, and why it matters
+
+The scope is applied in `canvasPhotos()` — the set **every layout reads** — and
+mirrored into `WorkspaceState.boardScope` so `activeTilePositions` sees it too.
+
+This is the opposite of the colour-label filter, and the difference is the whole
+point:
+
+| | label filter | workspace scope |
+|---|---|---|
+| effect | hides tiles | changes which tiles exist |
+| geometry | untouched — every layout still runs over the full set | recomputed over the subset |
+| seam | `visibleTilePositions` (render) | `canvasPhotos` (layout) |
+
+A workspace has to re-pack, or six photos would sit at the coordinates they had
+among four hundred, scattered across empty canvas. Re-packing means the geometry
+seam and the render seam must be computed from the **same** photo set: they are
+two different functions (`activeTilePositions` for drags, folder drops, artboard
+membership and export order; `activePositions` for what is drawn and what a
+marquee can grab), and if only one of them knows about the scope, a drag moves a
+tile to a coordinate nobody can see. That is why `boardScope` lives in state
+rather than being read from the prop in one place and not the other.
+
+### What the backend must build
+
+- **`boards`**: `id`, `workspace_id` (tenant), `project_id`, `name`, `color`,
+  `sort_order`, timestamps. **`board_assets`** M:N. RLS by tenant like every other
+  table. The client owns ids and membership today; the table is the durable,
+  shareable home.
+- **`GET/POST/PATCH/DELETE /api/boards`** and
+  **`POST/DELETE /api/boards/[id]/assets`**, mirroring `app/api/canvas-groups/*`.
+  Read seam `lib/boards-server.ts`, awaited by the project page so boards are in
+  the first paint like `getCanvasGroups`.
+- **Per-workspace working state.** Folders (`canvas_groups`) and sticky notes
+  (`canvas_annotations`) are project-scoped, so they show in every workspace.
+  Giving each an optional `board_id` is the fix. Not done here, and the reason
+  this increment keeps them visible everywhere rather than hiding them: shared is
+  wrong, invisible is worse.
+- **Connected-project analysis** (optional, later): when membership changes,
+  enqueue a job that synthesises a summary + embedding for the set, powering a
+  future "create a new file from this workspace". New `jobTypeSchema` members and
+  credits per `packages/shared/src/usage.ts`.
+
+## Consequences
+
+- **Easier.** Working sets are named, browsable and stable — membership is a list,
+  not a rectangle you can move a tile out of by accident. The canvas gets small
+  without anything being deleted or moved out of the project.
+- **Harder / given up for now.** Boards do not sync across devices or teammates
+  until the table exists; notes and folders are shared across a project's
+  workspaces; the connected-project analysis is not built. All three are accepted
+  to validate the interaction first, and all three are additive to fix.
+- **Tile arrangements are shared with the full canvas.** A workspace re-packs
+  from the same `galleryOverrides.asset` bucket, so a tile dragged inside one is
+  dragged on the project canvas too. Per-board arrangements need the `board_id`
+  columns above; until then this is one canvas seen through a narrower window,
+  which is at least a rule that can be stated in one sentence.
+- **A deleted asset leaves a stale id in a board.** Harmless — membership is
+  intersected with the loaded photos everywhere it is read, including the chip
+  counts — but the table should clean up with a real foreign key.
+- **Artboards are untouched.** They may well be superseded by workspaces once
+  these have a server and per-board state; that is a later decision with a
+  migration path, not a side effect of this one.
