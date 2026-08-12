@@ -80,7 +80,7 @@ select lives_ok(
 select lives_ok(
   $$insert into public.canvas_annotations
       (id, workspace_id, project_id, kind, x, y, w, h, color, body, board_id, created_by)
-      values ('00000000-0000-0000-0000-0000000000n1',
+      values ('00000000-0000-0000-0000-0000000000d1',
               '00000000-0000-0000-0000-00000000aaaa',
               '00000000-0000-0000-0000-00000000dda1', 'note', 10, 10, 200, 180, 'yellow',
               '{"text":"hi","strokes":[]}'::jsonb,
@@ -96,14 +96,14 @@ select is((select count(*)::int from public.boards), 0,
 select is((select count(*)::int from public.board_assets), 0,
   'B sees no board membership from workspace A');
 -- An UPDATE blocked by RLS does not raise: the USING clause simply filters the
--- row out, so the statement succeeds having touched nothing. Counting the
--- affected rows is the only assertion that actually proves the block.
-select is(
-  (with u as (
-     update public.boards set name = 'Mine'
-       where id = '00000000-0000-0000-0000-0000000000e1' returning 1)
-   select count(*)::int from u),
-  0, 'B''s rename of A''s board touches no rows');
+-- row out, so the statement SUCCEEDS having touched nothing. That is why the
+-- proof is the pair — this runs, and the next assertion (back as A) shows the
+-- name never moved. Counting affected rows would need a data-modifying CTE,
+-- which Postgres only allows at the top level, not inside `select is(...)`.
+select lives_ok(
+  $$update public.boards set name = 'Mine'
+      where id = '00000000-0000-0000-0000-0000000000e1'$$,
+  'B''s rename of A''s board is not rejected — it matches nothing');
 
 -- ── back as A: the rename really did not land ────────────────────────────
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-0000000000a1","role":"authenticated"}';
@@ -123,7 +123,7 @@ select is(
   (select board_id from public.canvas_groups where id = '00000000-0000-0000-0000-0000000000c1'),
   null::uuid, 'a folder outlives its board with board_id nulled, not deleted');
 select is(
-  (select board_id from public.canvas_annotations where id = '00000000-0000-0000-0000-0000000000n1'),
+  (select board_id from public.canvas_annotations where id = '00000000-0000-0000-0000-0000000000d1'),
   null::uuid, 'a note outlives its board with board_id nulled, not deleted');
 
 select * from finish();
