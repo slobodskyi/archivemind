@@ -2,11 +2,14 @@ interface InfiniteGridProps {
   gridSize?: number;
   gridPos?: string;
   gridOpacity?: number;
-  /** `lines` on Canvas — the surface you arrange files on, where a ruled grid
-   *  reads as something to line tiles up against. `dots` on the sorting views
-   *  (Timeline / Topic), where the arrangement is computed and a ruled grid
-   *  would promise a snap that isn't there. Same cell size either way, so
-   *  switching views doesn't change the sense of scale. */
+  /** `lines` inside an open Workspace, `dots` over the whole project (ADR 0044).
+   *  The grid states the SCOPE, not the activity — a narrowed canvas is
+   *  otherwise indistinguishable from a full one. Same cell size either way, so
+   *  entering a Workspace doesn't change the sense of scale.
+   *
+   *  Note that neither pattern is a snap target: the background cell is 40 units
+   *  while tiles pack on 184×176 and are deliberately jittered off it
+   *  (`assetGallery`). This is signage, not alignment. */
   variant?: "dots" | "lines";
 }
 

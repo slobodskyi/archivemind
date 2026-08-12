@@ -325,8 +325,9 @@ kept or removed on purpose.
 1. **Chrome + navigation.** `AppHeader` pins to the viewport (`position: fixed`
    + safe-area, with the height in `--hdr` so the seven call sites that hardcoded
    `52` follow it). `ViewSwitcher`, a bottom segmented control, replaces the
-   header tabs *and* the separate Workspace toggle. `InfiniteGrid` gains ruled
-   lines on Canvas / dots on the sorting views. **The LABELS view is retired**
+   header tabs *and* the separate Workspace toggle. `InfiniteGrid` gains a
+   `variant` — ruled lines inside an open Workspace, dots over the whole
+   project, so the background states the scope you are in. **The LABELS view is retired**
    ([ADR 0040](decisions/0040-colour-labels-as-a-human-curation-axis.md)
    amended) — arrangements made in it are dropped from `localStorage`; nothing
    on the server moved.
