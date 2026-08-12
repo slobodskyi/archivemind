@@ -184,9 +184,6 @@ function WorkspaceActionBar({
       <Btn title="Copy" disabled={noSel} onClick={onCopy}>
         <CopyIcon width={16} height={16} />
       </Btn>
-      <Btn title="Export" disabled={noSel} onClick={onExport}>
-        <ExportGlyph />
-      </Btn>
       <Btn title={selCount >= 2 ? `Group ${selCount} (move & edit together)` : "Group"} disabled={noSel} onClick={onGroup}>
         <GroupGlyph />
       </Btn>
@@ -196,6 +193,11 @@ function WorkspaceActionBar({
 
       <Divider />
 
+      {/* Export and Delete are the two that send the selection somewhere else —
+          out of the app, or out of the archive — so they share the last group. */}
+      <Btn title="Export" disabled={noSel} onClick={onExport}>
+        <ExportGlyph />
+      </Btn>
       <Btn title="Delete" danger disabled={noSel} onClick={onDelete}>
         <TrashIcon width={16} height={16} />
       </Btn>
