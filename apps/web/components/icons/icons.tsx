@@ -201,16 +201,15 @@ export function SelectToolIcon({ width = 16, height = 16, ...props }: IconProps)
 }
 
 export function HandToolIcon({ width = 16, height = 16, ...props }: IconProps) {
-  // Pan → the standard 4-way move icon (crosshair of arrows), clearer than a
-  // grabbing hand and consistent with the other line tools.
+  // Pan → a pointing hand (index finger up, the others curled), per the design
+  // reference. The 4-way move crosshair it replaced read as "nudge the
+  // selection" rather than "grab the canvas".
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M12 4v16" />
-      <path d="M4 12h16" />
-      <path d="M9 7l3-3 3 3" />
-      <path d="M9 17l3 3 3-3" />
-      <path d="M7 9l-3 3 3 3" />
-      <path d="M17 9l3 3-3 3" />
+      <path d="M18 11V10a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
+      <path d="M14 10V9a2 2 0 0 0-2-2 2 2 0 0 0-2 2v1" />
+      <path d="M10 9.5V4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v10" />
+      <path d="M18 11a2 2 0 0 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
     </svg>
   );
 }
@@ -425,11 +424,12 @@ export function ViewSenseIcon({ width = 14, height = 14, ...props }: IconProps) 
    tag/price-tag glyph: TagIcon already means AI tags in this toolbar, and the
    whole point of colour labels is that they are not those. */
 export function LabelsIcon({ width = 14, height = 14, ...props }: IconProps) {
+  // ONE circle — a single colour label. The old cluster of three read as
+  // "grouped things", which is what ViewSenseIcon means; two icons saying
+  // "clusters" on the same bar is one too many.
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <circle cx={7} cy={8} r={3.1} />
-      <circle cx={16.5} cy={7} r={3.1} />
-      <circle cx={11.5} cy={16.5} r={3.1} />
+      <circle cx={12} cy={12} r={6.5} />
     </svg>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { AddIcon, CheckIcon, ChevronDownIcon, ViewSenseIcon } from "@/components/icons/icons";
+import { AddIcon, CheckIcon, ViewSenseIcon } from "@/components/icons/icons";
 
 /** One persisted Topic cloud that can accept a manual membership assignment.
  *
@@ -134,13 +134,16 @@ export default function TopicMembershipMenu({
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
         className="am-tb"
+        // Icon-only, a 34px square like every other control on these bars. It
+        // used to be the one labelled button among icons, which made a menu that
+        // is only reachable WITH a selection the loudest thing on an empty bar.
+        title={selectionCount > 0 ? "Move to / create a topic" : "Select files to change topic"}
         style={{
           display: "flex",
+          width: 34,
           height: 34,
           alignItems: "center",
           justifyContent: "center",
-          gap: 6,
-          padding: "0 9px",
           border: 0,
           borderRadius: 2,
           cursor: selectionCount === 0 || busy ? "default" : "pointer",
@@ -148,14 +151,9 @@ export default function TopicMembershipMenu({
           color: open ? "var(--ac)" : "var(--t2)",
           opacity: selectionCount === 0 || busy ? 0.4 : 1,
           fontFamily: "inherit",
-          fontSize: 11,
-          fontWeight: 650,
-          letterSpacing: ".02em",
         }}
       >
         <ViewSenseIcon width={15} height={15} />
-        <span>Topic…</span>
-        <ChevronDownIcon width={9} height={9} stroke="currentColor" />
       </button>
 
       {open && selectionCount > 0 && (
