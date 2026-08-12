@@ -15,6 +15,12 @@ interface LabelSwatchRowProps {
    *  click on the current swatch is inert rather than a hidden way to break the
    *  invariant. */
   clearable?: boolean;
+  /** Filter mode only: an extra swatch for "the photos carrying no colour at
+   *  all" — the untriaged pile. It is deliberately NOT the ✕: the ✕ clears the
+   *  filter and shows everything, this one narrows to the unmarked. Both are
+   *  reachable because both are things you ask for, and collapsing them is how
+   *  the untriaged pile becomes impossible to look at. */
+  none?: { active: boolean; onPick: () => void };
   size?: number;
 }
 
@@ -26,8 +32,12 @@ export default function LabelSwatchRow({
   current,
   onPick,
   clearable = true,
+  none,
   size = 16,
 }: LabelSwatchRowProps) {
+  // "Nothing to clear" is no colour ringed AND, in filter mode, the untriaged
+  // filter off too.
+  const nothingToClear = current === null && !none?.active;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px" }}>
       {ASSET_LABELS.map((label) => {
@@ -72,15 +82,51 @@ export default function LabelSwatchRow({
           </button>
         );
       })}
+      {none && (
+        <button
+          type="button"
+          onClick={none.onPick}
+          title="No label"
+          aria-label="Show only photos with no label"
+          aria-pressed={none.active}
+          style={{
+            display: "flex",
+            width: size,
+            height: size,
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
+            border: `1px solid ${none.active ? "var(--t1)" : "transparent"}`,
+            borderRadius: "50%",
+            background: "transparent",
+            cursor: "pointer",
+          }}
+        >
+          {/* A hollow ring, not a grey dot: grey is the `gray` label, a real
+              choice someone made, and absence must not look like it. */}
+          <span
+            aria-hidden="true"
+            style={{
+              width: size - 6,
+              height: size - 6,
+              borderRadius: "50%",
+              border: "1px dashed var(--t3)",
+            }}
+          />
+        </button>
+      )}
       {clearable && (
         <>
           <span style={{ width: 1, height: size - 4, background: "var(--bd)" }} />
           <button
             type="button"
-            onClick={() => onPick(null)}
-            title="No label"
-            aria-label="Remove label"
-            disabled={current === null}
+            onClick={() => (none?.active ? none.onPick() : onPick(null))}
+            title={none ? "Show everything" : "No label"}
+            aria-label={none ? "Clear the colour filter" : "Remove label"}
+            // In filter mode there IS something to clear while `none` is on,
+            // even though no colour swatch is ringed — keying this on `current`
+            // alone would grey out the only way back to the full canvas.
+            disabled={nothingToClear}
             style={{
               display: "flex",
               width: size,
@@ -92,8 +138,8 @@ export default function LabelSwatchRow({
               borderRadius: "50%",
               background: "transparent",
               color: "var(--t2)",
-              cursor: current === null ? "default" : "pointer",
-              opacity: current === null ? 0.35 : 1,
+              cursor: nothingToClear ? "default" : "pointer",
+              opacity: nothingToClear ? 0.35 : 1,
             }}
           >
             <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round">

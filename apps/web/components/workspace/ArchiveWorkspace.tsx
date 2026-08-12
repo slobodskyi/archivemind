@@ -27,7 +27,6 @@ import Minimap from "@/components/toolbar/Minimap";
 import TrashPanel from "@/components/trash/TrashPanel";
 import AddToProjectPopover from "@/components/toolbar/AddToProjectPopover";
 import CanvasContextMenu from "@/components/canvas/CanvasContextMenu";
-import LabelFilterPanel from "@/components/labels/LabelFilterPanel";
 import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
@@ -446,40 +445,19 @@ export default function ArchiveWorkspace({
         tool={ws.tool}
         allFilesMode={ws.allFilesMode}
         isMapView={ws.isMapView}
-        isCanvasView={ws.view === "neural"}
         showAddToProject={ws.showAddToProject}
         selCount={ws.selectedIds.size}
         zoomPct={ws.zoomPct}
         searchOpen={ws.chatOpen}
-        bulkPanelOpen={ws.bulkPanelOpen}
         onSelectTool={ws.toolSelect}
         onHandTool={ws.toolHand}
         onOpenSearch={ws.toggleChat}
-        onToggleBulkPanel={ws.toggleBulkPanel}
-        onExtractExif={ws.extractExif}
         onAdd={ws.addToolbar}
-        onAddStickyNote={ws.addStickyNote}
-        onInkTool={ws.toolInk}
-        onEraserTool={ws.toolEraser}
         onToggleTrash={ws.toggleTrash}
         trashOpen={ws.trashOpen}
-        onToggleLabels={ws.toggleLabelFilterPanel}
-        labelsOpen={ws.labelFilterOpen}
-        labelFilterActive={ws.labelFilter !== null}
         onFit={ws.onFit}
         onZoomReset={ws.onZoomReset}
         onAddToProject={ws.toggleAddProj}
-      />
-
-      <LabelFilterPanel
-        open={ws.labelFilterOpen}
-        names={ws.labelNames}
-        counts={ws.labelCounts}
-        active={ws.labelFilter}
-        total={ws.projectPhotos.length}
-        onSelect={ws.setLabelFilter}
-        onRename={ws.renameLabel}
-        onClose={ws.closeLabelFilterPanel}
       />
 
       <TrashPanel
@@ -498,6 +476,7 @@ export default function ArchiveWorkspace({
           selCount={ws.selectedIds.size}
           aiOpen={ws.bulkPanelOpen}
           onArtboard={ws.toolFrame}
+          onAddStickyNote={ws.addStickyNote}
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
           onCopy={ws.copyFiles}
@@ -508,25 +487,38 @@ export default function ArchiveWorkspace({
           labelNames={ws.labelNames}
           labelMenuOpen={ws.labelMenuOpen}
           selectionLabel={currentLabel}
+          labelFilter={ws.labelFilter}
           onToggleLabelMenu={ws.toggleLabelMenu}
           onPickLabel={(label) => ws.labelSelection(label)}
+          onSetFilter={ws.setLabelFilter}
         />
       )}
 
-      {/* The sorting views get their own, much narrower bar (ADR 0038): the
-          Workspace one above acts on the `asset` bucket and a selection these
-          views don't frame, so widening its gate would have Tidy up silently
-          rearranging Canvas from inside Topic. Gated on isSenseView/
-          isTimelineView, not on `view` — both also require a real project, and
-          `view` can still read "sense" in all-files mode where no cloud exists. */}
-      {(ws.isSenseView || ws.isTimelineView) && (
+      {/* Everywhere the Workspace bar is NOT. That bar acts on the `asset`
+          bucket and a selection the sorting views don't frame — its "Tidy up"
+          would silently rearrange Canvas from inside Topic (ADR 0038) — so the
+          two are mutually exclusive rather than one widened gate.
+          The all-files grid is in here too, and only for the colour control:
+          the untriaged pile is usually exactly what you open all-files to find,
+          so that is the one place a filter must not be missing. It gets no
+          Regroup (nothing there has an override bucket) and no Re-cluster. */}
+      {(ws.isSenseView || ws.isTimelineView || ws.isMapView || ws.allFilesMode) && (
         <SortingActionBar
           showRecluster={ws.isSenseView}
+          showRegroup={ws.isSenseView || ws.isTimelineView}
+          aboveSwitcher={ws.showViewTabs}
           canRegroup={ws.canRegroup}
           busy={ws.proc.active}
           selCount={ws.selectedIds.size}
           onRegroup={ws.regroupClouds}
           onRecluster={ws.recluster}
+          labelNames={ws.labelNames}
+          labelMenuOpen={ws.labelMenuOpen}
+          selectionLabel={currentLabel}
+          labelFilter={ws.labelFilter}
+          onToggleLabelMenu={ws.toggleLabelMenu}
+          onPickLabel={(label) => ws.labelSelection(label)}
+          onSetFilter={ws.setLabelFilter}
           topicMembership={
             ws.isSenseView
               ? {

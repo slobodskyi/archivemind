@@ -21,7 +21,7 @@ import type {
   TopicSummary,
 } from "@archivemind/shared";
 import { getCaptionRow } from "@/lib/format";
-import { filterByLabel, labelCounts as countLabels, type LabelFilter } from "@/lib/labels";
+import { filterByLabel, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
 import {
   bandOf,
@@ -423,7 +423,6 @@ interface WorkspaceState {
   /** The workspace's seven colour names, defaults with renames applied. */
   labelNames: LabelNames;
   /** Left-toolbar filter popover. */
-  labelFilterOpen: boolean;
   /** Action-bar "apply a colour to the selection" popover. */
   labelMenuOpen: boolean;
 }
@@ -941,16 +940,13 @@ export interface Workspace {
   onCloudLabelDown: (e: React.PointerEvent, cloudKey: string) => void;
 
   // Colour labels (migration 20260808000001) — assign from the context menu /
-  // action bar / drawer, filter from the left toolbar, group in the LABELS view.
+  // action bar / drawer / right-click menu; the same control filters when there
+  // is no selection to mark (ADR 0040, amended).
   labelNames: LabelNames;
   labelFilter: LabelFilter;
-  labelCounts: Record<AssetLabel | "none", number>;
-  labelFilterOpen: boolean;
   labelMenuOpen: boolean;
   setLabelFilter: (filter: LabelFilter) => void;
   clearLabelFilter: () => void;
-  toggleLabelFilterPanel: () => void;
-  closeLabelFilterPanel: () => void;
   toggleLabelMenu: () => void;
   closeLabelMenu: () => void;
   /** Apply/clear a colour on the selection, or on `fallbackId` when nothing is
@@ -1128,7 +1124,6 @@ export function useWorkspace(
     exportIds: [],
     labelFilter: null,
     labelNames: initialLabelNames,
-    labelFilterOpen: false,
     labelMenuOpen: false,
   });
 
@@ -3212,21 +3207,14 @@ export function useWorkspace(
   );
 
   const clearLabelFilter = useCallback(() => setLabelFilter(null), [setLabelFilter]);
-  const toggleLabelFilterPanel = useCallback(
-    () => setState((prev) => ({ labelFilterOpen: !prev.labelFilterOpen })),
+  // Always opens now (ADR 0040, amended). It used to refuse with an empty
+  // selection — correct back when the row only ever marked photos, and wrong
+  // once the same row filters the canvas when there is nothing to mark: an
+  // empty selection is precisely when the filter is the useful half.
+  const toggleLabelMenu = useCallback(
+    () => setState((prev) => ({ labelMenuOpen: !prev.labelMenuOpen })),
     [setState],
   );
-  const closeLabelFilterPanel = useCallback(() => setState({ labelFilterOpen: false }), [setState]);
-  const toggleLabelMenu = useCallback(() => {
-    // The action bar's buttons are only visually disabled (the bar has always
-    // worked that way), so say what is missing rather than opening a picker
-    // with nothing to apply it to — same as "Select files to put in a folder".
-    if (stateRef.current.selectedIds.length === 0) {
-      flashToast("Select files to label");
-      return;
-    }
-    setState((prev) => ({ labelMenuOpen: !prev.labelMenuOpen }));
-  }, [flashToast, setState]);
   const closeLabelMenu = useCallback(() => setState({ labelMenuOpen: false }), [setState]);
 
   /** Rename a colour for the whole workspace — "Red" is a colour, "Rejected" is
@@ -5624,7 +5612,6 @@ export function useWorkspace(
       // The label pickers are the shallowest thing on screen — Esc closes them
       // before it reaches the drawer or a panel underneath.
       if (s.labelMenuOpen) closeLabelMenu();
-      else if (s.labelFilterOpen) closeLabelFilterPanel();
       else if (s.drawerId) closeDrawer();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
@@ -5644,7 +5631,6 @@ export function useWorkspace(
     pasteFiles,
     applyLabel,
     closeLabelMenu,
-    closeLabelFilterPanel,
   ]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
@@ -5848,7 +5834,6 @@ export function useWorkspace(
   }, [state.uploadPreviews, state.labelFilter, visiblePhotos, projectPhotos]);
 
   /** Per-colour tallies for the filter strip, over the photos on this canvas. */
-  const labelCounts = useMemo(() => countLabels(projectPhotos), [projectPhotos]);
 
   const projectList: ProjectListItem[] = useMemo(
     () =>
@@ -6316,13 +6301,9 @@ export function useWorkspace(
 
     labelNames: state.labelNames,
     labelFilter: state.labelFilter,
-    labelCounts,
-    labelFilterOpen: state.labelFilterOpen,
     labelMenuOpen: state.labelMenuOpen,
     setLabelFilter,
     clearLabelFilter,
-    toggleLabelFilterPanel,
-    closeLabelFilterPanel,
     toggleLabelMenu,
     closeLabelMenu,
     labelSelection,
