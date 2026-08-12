@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Board } from "@/lib/boards";
-import { loadBoards, saveBoards, nextBoardColor } from "@/lib/boards";
+import type { Board, BoardObjectKind } from "@/lib/boards";
+import { loadBoards, saveBoards, nextBoardColor, ownedKey } from "@/lib/boards";
 
 /** Local ids for a board — a real uuid where available, a timestamp fallback on
  *  non-secure origins where `crypto.randomUUID` is undefined (same guard as
@@ -11,6 +11,15 @@ function boardId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `board-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 }
+
+/** What `useWorkspace` reports when a canvas object is made, saved or removed,
+ *  so the open workspace can record what belongs to it. `adopt` exists for the
+ *  one object with two ids in its life: a sticky note is drawn under a `tmp-`
+ *  id and gets its row's uuid when the insert returns. */
+export type BoardObjectEvent =
+  | { type: "create"; kind: BoardObjectKind; id: string }
+  | { type: "adopt"; kind: BoardObjectKind; from: string; to: string }
+  | { type: "delete"; kind: BoardObjectKind; id: string };
 
 export interface BoardsApi {
   boards: Board[];
@@ -24,6 +33,12 @@ export interface BoardsApi {
   recolorBoard: (id: string, color: Board["color"]) => void;
   selectBoard: (id: string | null) => void;
   addToBoard: (boardId: string, assetIds: string[]) => void;
+  /** Record a canvas object against the OPEN workspace (a no-op when none is).
+   *  Deletes and adopts run over every board, not just the open one: an object
+   *  can be removed while you are looking somewhere else. */
+  onCanvasObject: (event: BoardObjectEvent) => void;
+  /** The ids the open workspace owns, or null when none is open (show all). */
+  ownedIds: Record<BoardObjectKind, ReadonlySet<string>> | null;
 }
 
 /** Workspaces (boards) for a project — the entity that replaced artboards
@@ -59,7 +74,15 @@ export function useBoards(projectId: string): BoardsApi {
       const id = boardId();
       setBoards((prev) => [
         ...prev,
-        { id, name: name?.trim() || `Workspace ${prev.length + 1}`, color: nextBoardColor(prev), assetIds: [...new Set(assetIds)] },
+        {
+          id,
+          name: name?.trim() || `Workspace ${prev.length + 1}`,
+          color: nextBoardColor(prev),
+          assetIds: [...new Set(assetIds)],
+          noteIds: [],
+          groupIds: [],
+          frameIds: [],
+        },
       ]);
       setActiveBoardId(id);
       return id;
@@ -90,7 +113,45 @@ export function useBoards(projectId: string): BoardsApi {
     );
   }, []);
 
+  const onCanvasObject = useCallback((event: BoardObjectEvent) => {
+    const key = ownedKey(event.kind);
+    setBoards((prev) => {
+      if (event.type === "create") {
+        // Only the open workspace claims new objects; with none open the object
+        // belongs to the project and shows everywhere.
+        if (activeBoardId === null) return prev;
+        return prev.map((b) =>
+          b.id === activeBoardId && !b[key].includes(event.id)
+            ? { ...b, [key]: [...b[key], event.id] }
+            : b,
+        );
+      }
+      if (event.type === "adopt") {
+        return prev.map((b) =>
+          b[key].includes(event.from)
+            ? { ...b, [key]: b[key].map((id) => (id === event.from ? event.to : id)) }
+            : b,
+        );
+      }
+      return prev.map((b) =>
+        b[key].includes(event.id) ? { ...b, [key]: b[key].filter((id) => id !== event.id) } : b,
+      );
+    });
+  }, [activeBoardId]);
+
   const activeBoard = useMemo(() => boards.find((b) => b.id === activeBoardId) ?? null, [boards, activeBoardId]);
+
+  const ownedIds = useMemo(
+    () =>
+      activeBoard
+        ? {
+            note: new Set(activeBoard.noteIds),
+            group: new Set(activeBoard.groupIds),
+            frame: new Set(activeBoard.frameIds),
+          }
+        : null,
+    [activeBoard],
+  );
   const scopeIds = activeBoard ? activeBoard.assetIds : null;
 
   return {
@@ -104,5 +165,7 @@ export function useBoards(projectId: string): BoardsApi {
     recolorBoard,
     selectBoard,
     addToBoard,
+    onCanvasObject,
+    ownedIds,
   };
 }
