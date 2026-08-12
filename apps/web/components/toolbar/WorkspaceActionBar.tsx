@@ -119,7 +119,8 @@ function WorkspaceActionBar({
       style={{
         position: "absolute",
         left: "50%",
-        bottom: 20,
+        // Stacks above ViewSwitcher, which owns bottom:20.
+        bottom: 66,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",

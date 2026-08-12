@@ -61,8 +61,6 @@ import {
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
-  labelAnchorOf,
-  labelCloudLayout as computeLabelLayout,
   nudgeOffOverlap,
   packGrid,
   positionsBounds,
@@ -447,7 +445,7 @@ type DragSession =
     }
   | {
       mode: "gallery";
-      kind: "source" | "asset" | "map" | "topic" | "timeline" | "label";
+      kind: "source" | "asset" | "map" | "topic" | "timeline";
       key: string;
       sx: number;
       sy: number;
@@ -469,7 +467,7 @@ type DragSession =
       // click (no move) focuses the cloud instead (ADR 0024).
       mode: "cloudDrag";
       cloudKey: string;
-      bucket: "map" | "topic" | "timeline" | "label";
+      bucket: "map" | "topic" | "timeline";
       sx: number;
       sy: number;
       origCenters: Record<string, { x: number; y: number }>;
@@ -650,7 +648,6 @@ export interface Workspace {
   isTimelineView: boolean;
   isMapView: boolean;
   isSenseView: boolean;
-  isLabelsView: boolean;
   showViewTabs: boolean;
   showAddToProject: boolean;
   /** Legacy workspace recovery grid; it is not part of primary navigation. */
@@ -1742,9 +1739,7 @@ export function useWorkspace(
           ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline).tiles
           : s.view === "sense"
             ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames).tiles
-            : s.view === "labels"
-              ? computeLabelLayout(s.photos, s.galleryOverrides.label, s.labelNames, s.frames).tiles
-              : assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
+            : assetGallery(projectCanvasItems(s.photos, s.uploadPreviews), s.galleryOverrides.asset).pos;
       // Deliberately NOT filtered. This is the geometry seam — artboard
       // membership, folder drops, frame move/resize, Tidy up, the delete-time
       // position freeze and the export's reading order all read it, and every
@@ -2097,25 +2092,12 @@ export function useWorkspace(
     return out;
   }, []);
 
-  /** The same stale-anchor stamp for LABELS, where the cloud is the colour: a
-   *  tile re-coloured after being dragged re-packs into its new cloud instead of
-   *  hanging in the middle of the one it left. */
-  const labelAnchorsFor = useCallback((s: WorkspaceState, ids: readonly string[]): Record<string, string> => {
-    const byId = new Map(s.photos.map((p) => [p.id, p]));
-    const out: Record<string, string> = {};
-    for (const id of ids) {
-      const photo = byId.get(id);
-      if (photo) out[id] = labelAnchorOf(photo);
-    }
-    return out;
-  }, []);
-
   /** Shared by Canvas asset tiles and Map/Topic cloud tiles — select-on-down
    *  (with the same additive/shift-click semantics), then a free-position
    *  drag session keyed to whichever override bucket `kind` names. */
   const onGalleryAssetDown = useCallback(
     (
-      kind: "asset" | "map" | "topic" | "timeline" | "label",
+      kind: "asset" | "map" | "topic" | "timeline",
       e: React.PointerEvent,
       id: string,
       origCenter: CanvasPoint,
@@ -2221,11 +2203,7 @@ export function useWorkspace(
         historyPushed: false,
         groupCenters,
         anchors:
-          kind === "topic"
-            ? topicAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id])
-            : kind === "label"
-              ? labelAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id])
-              : null,
+          kind === "topic" ? topicAnchorsFor(s, groupCenters ? Object.keys(groupCenters) : [id]) : null,
       };
     },
     [
@@ -2233,7 +2211,6 @@ export function useWorkspace(
       activeTilePositions,
       startPan,
       topicAnchorsFor,
-      labelAnchorsFor,
       gestureClaimed,
       openDrawer,
       inkIntent,
@@ -2250,15 +2227,7 @@ export function useWorkspace(
     (e: React.PointerEvent, id: string, origCenter: CanvasPoint) => {
       const v = stateRef.current.view;
       const kind =
-        v === "timeline"
-          ? "timeline"
-          : v === "map"
-            ? "map"
-            : v === "sense"
-              ? "topic"
-              : v === "labels"
-                ? "label"
-                : "asset";
+        v === "timeline" ? "timeline" : v === "map" ? "map" : v === "sense" ? "topic" : "asset";
       onGalleryAssetDown(kind, e, id, origCenter);
     },
     [onGalleryAssetDown],
@@ -2281,7 +2250,7 @@ export function useWorkspace(
         return;
       }
       const bucket =
-        s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "labels" ? "label" : null;
+        s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
       const layout = cloudDecorRef.current;
       if (!bucket || !layout) return;
       const origCenters: Record<string, { x: number; y: number }> = {};
@@ -2297,15 +2266,10 @@ export function useWorkspace(
         origCenters,
         moved: false,
         historyPushed: false,
-        anchors:
-          bucket === "topic"
-            ? topicAnchorsFor(s, Object.keys(origCenters))
-            : bucket === "label"
-              ? labelAnchorsFor(s, Object.keys(origCenters))
-              : null,
+        anchors: bucket === "topic" ? topicAnchorsFor(s, Object.keys(origCenters)) : null,
       };
     },
-    [startPan, topicAnchorsFor, labelAnchorsFor, gestureClaimed],
+    [startPan, topicAnchorsFor, gestureClaimed],
   );
 
   const onStickyDown = useCallback(
@@ -3717,7 +3681,6 @@ export function useWorkspace(
         return fit({ tiles: gallery.pos, bounds: gallery.bounds });
       }
       if (view === "sense") return fit(computeTopicLayout(allPhotos, overrides.topic, frames));
-      if (view === "labels") return fit(computeLabelLayout(allPhotos, overrides.label, s.labelNames, frames));
       return fit(computeTimelineLayout(allPhotos, overrides.timeline));
     },
     [rect, neuralGalleryFor, fitDefaultZoom, visibleBounds],
@@ -3743,11 +3706,9 @@ export function useWorkspace(
     const layout =
       s.view === "sense"
         ? computeTopicLayout(s.photos, s.galleryOverrides.topic, s.frames)
-        : s.view === "labels"
-          ? computeLabelLayout(s.photos, s.galleryOverrides.label, s.labelNames, s.frames)
-          : s.view === "timeline"
-            ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline)
-            : neural();
+        : s.view === "timeline"
+          ? computeTimelineLayout(s.photos, s.galleryOverrides.timeline)
+          : neural();
     setState({ ...fitBounds(visibleBounds(layout, s.photos, s.labelFilter), r), tilesAnimating: true });
     if (animTimer.current) clearTimeout(animTimer.current);
     animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
@@ -4378,7 +4339,7 @@ export function useWorkspace(
   const regroupClouds = useCallback(() => {
     const s = stateRef.current;
     const bucketKey =
-      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "labels" ? "label" : null;
+      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
     if (!bucketKey) return;
     const current = s.galleryOverrides[bucketKey];
     let next: Record<string, CanvasOverride>;
@@ -5822,7 +5783,6 @@ export function useWorkspace(
   const isTimelineView = state.view === "timeline" && state.projCurrent !== "all";
   const isMapView = state.view === "map" && state.projCurrent !== "all";
   const isSenseView = state.view === "sense" && state.projCurrent !== "all";
-  const isLabelsView = state.view === "labels" && state.projCurrent !== "all";
   const showViewTabs = state.projCurrent !== "all";
   const allFilesMode = state.projCurrent === "all";
   const projectMode = !allFilesMode;
@@ -5922,14 +5882,6 @@ export function useWorkspace(
     [isSenseView, projectPhotos, state.galleryOverrides.topic, state.frames],
   );
 
-  const labelLayoutResult = useMemo(
-    () =>
-      isLabelsView
-        ? computeLabelLayout(projectPhotos, state.galleryOverrides.label, state.labelNames, state.frames)
-        : null,
-    [isLabelsView, projectPhotos, state.galleryOverrides.label, state.labelNames, state.frames],
-  );
-
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
   // panel is the progress indicator even without a canvas selection.
   // Canvas selection when present; otherwise the source-browser selection —
@@ -5953,9 +5905,7 @@ export function useWorkspace(
     ? timelineLayoutResult
     : isSenseView
       ? topicLayoutResult
-      : isLabelsView
-        ? labelLayoutResult
-        : null;
+      : null;
   // Filter applied here and nowhere else on the render path: the layouts above
   // keep every tile's real coordinate, and what is hidden simply loses its
   // entry, so clearing the filter puts everything back exactly where it was.
@@ -6244,8 +6194,7 @@ export function useWorkspace(
     regroupClouds,
     canRegroup:
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
-      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
-      (isLabelsView && Object.keys(state.galleryOverrides.label).length > 0),
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
     recluster,
     renameCloud,
     topicOptions,
@@ -6379,7 +6328,6 @@ export function useWorkspace(
     labelSelection,
     labelOne,
     renameLabel,
-    isLabelsView,
     visiblePhotos,
     visiblePreviews,
 

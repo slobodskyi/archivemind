@@ -1,6 +1,5 @@
-import type { AssetLabel, LabelNames, NoteFontSize } from "@archivemind/shared";
+import type { AssetLabel, NoteFontSize } from "@archivemind/shared";
 import type { CanvasPoint, Photo, PhotoGroup, PhotoSource } from "@/types";
-import { LABEL_COLORS, NO_LABEL_CLOUD_KEY, NO_LABEL_COLOR } from "./labels";
 import { GROUPS, SOURCES } from "./mock-data";
 import { heuristicTopicKey, UNSORTED_CLOUD_KEY } from "./topics";
 
@@ -115,12 +114,6 @@ export interface GalleryOverrides {
   map: Record<string, CanvasOverride>;
   topic: Record<string, CanvasOverride>;
   timeline: Record<string, CanvasOverride>;
-  /** LABELS view (migration 20260808000001). Its own bucket for the same reason
-   *  every other view has one: an arrangement made under one grouping means
-   *  nothing under another. Additive to the persisted blob — a save from before
-   *  this view merges over EMPTY_GALLERY_OVERRIDES and simply starts empty, so
-   *  no store-version bump and nobody loses an existing arrangement. */
-  label: Record<string, CanvasOverride>;
 }
 
 export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = {
@@ -129,7 +122,6 @@ export const EMPTY_GALLERY_OVERRIDES: GalleryOverrides = {
   map: {},
   topic: {},
   timeline: {},
-  label: {},
 };
 
 export interface GalleryTile {
@@ -1031,38 +1023,6 @@ export function topicCloudLayout(
     topicAnchorOf,
     (photo) => photo.topicId ?? null,
     true,
-  );
-}
-
-/** The identity a LABELS override is anchored to — the colour itself (ADR 0038's
- *  mechanic, reused). Re-colour a photo and the position it was dropped at in
- *  the old cloud goes stale, so it re-packs into the new one instead of sitting
- *  in the middle of a cloud it no longer belongs to. */
-export function labelAnchorOf(photo: Pick<Photo, "label">): string {
-  return photo.label ?? NO_LABEL_CLOUD_KEY;
-}
-
-/** LABELS: one cloud per colour label the user has assigned, plus a "No label"
- *  cloud for the rest. The seventh view of the same tiles — Canvas sorts by
- *  nothing, Timeline by capture date, Map by place, Topic by what the AI thinks
- *  it is, and this one by what the *user* said about it. No connecting lines:
- *  membership here is a human statement, not an inferred relation. */
-export function labelCloudLayout(
-  photos: readonly Photo[],
-  labelOverrides: Record<string, CanvasOverride>,
-  names: LabelNames,
-  frames: readonly Frame[] = [],
-): CloudLayout {
-  return buildCloudLayout(
-    photos,
-    labelAnchorOf,
-    (key) => LABEL_COLORS[key as AssetLabel] ?? NO_LABEL_COLOR,
-    (key) => names[key as AssetLabel] ?? key,
-    labelOverrides,
-    frames,
-    labelAnchorOf,
-    null,
-    false,
   );
 }
 

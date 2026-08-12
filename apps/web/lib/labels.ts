@@ -34,13 +34,9 @@ export function noteSurface(label: AssetLabel): string {
   return `rgb(${mix((n >> 16) & 255)},${mix((n >> 8) & 255)},${mix(n & 255)})`;
 }
 
-/** The LABELS view's cloud for everything unmarked. A string, not null, because
- *  buildCloudLayout groups by a string key — and it is capitalised like every
- *  other cloud key (Unsorted / Other) so the three read as siblings. */
-export const NO_LABEL_CLOUD_KEY = "No label";
-
-/** Neutral grey for the "No label" cloud — deliberately dimmer than the `gray`
- *  swatch, which is a real choice a user made and must not look like absence. */
+/** Neutral grey for the "no label" row in the filter — deliberately dimmer than
+ *  the `gray` swatch, which is a real choice a user made and must not look like
+ *  absence. */
 export const NO_LABEL_COLOR = "#4a4a4a";
 
 /** Overrides merged onto the defaults. Pure and total: every colour always has

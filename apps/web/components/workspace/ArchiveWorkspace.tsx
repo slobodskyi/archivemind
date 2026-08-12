@@ -3,7 +3,7 @@
 import type { AssetLabel, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useMemo } from "react";
-import { LABEL_COLORS, NO_LABEL_CLOUD_KEY } from "@/lib/labels";
+import { LABEL_COLORS } from "@/lib/labels";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
@@ -15,8 +15,7 @@ import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
 import GeoMapPane from "@/components/map/GeoMapPane";
 import AppHeader from "@/components/header/AppHeader";
-import ViewTabs from "@/components/header/ViewTabs";
-import WorkspaceToggle from "@/components/header/WorkspaceToggle";
+import ViewSwitcher from "@/components/toolbar/ViewSwitcher";
 import ProjectDropdown from "@/components/header/ProjectDropdown";
 import ZoomDropdown from "@/components/header/ZoomDropdown";
 import AccountDropdown from "@/components/header/AccountDropdown";
@@ -117,7 +116,15 @@ export default function ArchiveWorkspace({
         background: "var(--bg)",
       }}
     >
-      <InfiniteGrid gridSize={ws.gridSize} gridPos={ws.gridPos} gridOpacity={ws.gridOpacity} />
+      {/* Canvas gets ruled lines — it is the surface you arrange files on. The
+          sorting views get dots: their arrangement is computed, and a ruled grid
+          there would promise a snap that isn't on offer. */}
+      <InfiniteGrid
+        gridSize={ws.gridSize}
+        gridPos={ws.gridPos}
+        gridOpacity={ws.gridOpacity}
+        variant={ws.view === "neural" ? "lines" : "dots"}
+      />
 
       <PanZoomCanvas
         setCanvasRef={ws.setCanvasRef}
@@ -233,16 +240,13 @@ export default function ArchiveWorkspace({
             layout={ws.cloudDecor}
             focusedCloudKey={ws.focusedCloudKey}
             onCloudLabelDown={ws.onCloudLabelDown}
-            // Two views can rename a cloud, and a rename means a different thing
-            // in each: on Topic it pins a cluster's name (ADR 0038), on LABELS it
-            // renames the colour for the whole workspace. Timeline's labels are
-            // dates and rename nothing.
+            // Topic is the only view whose cloud names mean anything a user can
+            // set — a rename there pins a cluster's label (ADR 0038). Timeline's
+            // labels are dates and rename nothing.
             onRenameCloud={
               ws.isSenseView
                 ? (cloud, name) => cloud.clusterId && ws.renameCloud(cloud.clusterId, name)
-                : ws.isLabelsView
-                  ? (cloud, name) => ws.renameLabel(cloud.key as AssetLabel, name)
-                  : undefined
+                : undefined
             }
             canRenameCloud={
               ws.isSenseView
@@ -250,11 +254,7 @@ export default function ArchiveWorkspace({
                   // clusters sharing a label draw as one cloud, and renaming
                   // "it" would silently rename half of it.
                   (cloud) => !!cloud.clusterId
-                : ws.isLabelsView
-                  ? // Every cloud but "No label", which is the absence of a
-                    // colour and so has no name to set.
-                    (cloud) => cloud.key !== NO_LABEL_CLOUD_KEY
-                  : undefined
+                : undefined
             }
             dropTargetKey={ws.isSenseView ? ws.topicDropTargetKey : null}
             dropCount={ws.selectedIds.size}
@@ -282,7 +282,7 @@ export default function ArchiveWorkspace({
         <div
           style={{
             position: "absolute",
-            inset: "52px 0 0 0",
+            inset: "var(--hdr) 0 0 0",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -325,7 +325,7 @@ export default function ArchiveWorkspace({
         <div
           style={{
             position: "absolute",
-            inset: "52px 0 0 0",
+            inset: "var(--hdr) 0 0 0",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -379,12 +379,6 @@ export default function ArchiveWorkspace({
         onOpenAcct={ws.openAcct}
         accountInitials={account.initials}
         accountName={account.name}
-        viewTabs={<ViewTabs show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />}
-        afterProject={
-          ws.projectMode ? (
-            <WorkspaceToggle active={ws.view === "neural"} onSelect={() => ws.setView("neural")} />
-          ) : undefined
-        }
       />
 
       {/* Persistent by design: this is archive-integrity information, not a
@@ -525,7 +519,7 @@ export default function ArchiveWorkspace({
           rearranging Canvas from inside Topic. Gated on isSenseView/
           isTimelineView, not on `view` — both also require a real project, and
           `view` can still read "sense" in all-files mode where no cloud exists. */}
-      {(ws.isSenseView || ws.isTimelineView || ws.isLabelsView) && (
+      {(ws.isSenseView || ws.isTimelineView) && (
         <SortingActionBar
           showRecluster={ws.isSenseView}
           canRegroup={ws.canRegroup}
@@ -548,6 +542,10 @@ export default function ArchiveWorkspace({
           }
         />
       )}
+
+      {/* The view switcher, bottom-centred. `SortingActionBar` above sits at 66
+          so the two stack rather than overlap. */}
+      <ViewSwitcher show={ws.showViewTabs} view={ws.view} onSelect={ws.setView} />
 
       {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
           show/pan the hidden neural grid and physically cover MapLibre's own

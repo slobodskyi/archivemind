@@ -106,3 +106,36 @@ answer.
   support ticket, not a feature.
 - Applying a filter narrows the current selection to what survives it. Without
   that, "Move 40 to Trash" would act on photos nobody could see.
+
+## Amendment (2026-08-12) — the LABELS view is retired
+
+The colour-label *sorting view* is gone. `ViewMode` drops `"labels"`, and with it
+`labelCloudLayout`, `labelAnchorOf`, the `label` override bucket, `labelAnchorsFor`
+and `isLabelsView`. The label itself, the filter, and the swatch pickers are
+untouched — this retires one way of *looking* at the axis, not the axis.
+
+Why: a view is the most expensive surface in this UI. The other three each answer
+a question the tiles cannot answer on their own — when was this taken, where, what
+is in it. A colour label answers none of those, because the colour is already
+drawn on every tile in every view. Grouping by it bought a count and a spatial
+sense of the pile, and cost a permanent tab, a layout, an override bucket and a
+staleness rule.
+
+Consequences worth stating plainly:
+
+- **Arrangements made in LABELS are dropped.** They lived in
+  `galleryOverrides.label` in `localStorage`; removing the field means the next
+  save no longer writes it. No store-version bump — the stale key is simply
+  ignored, exactly as an unknown key always was. Nothing on the server moved.
+- **`CloudLabels`' rename callbacks stay pair-shaped** (`onRenameCloud(cloud, name)`
+  + `canRenameCloud(cloud)`) even though Topic is now their only caller. The pair
+  is the honest signature — a cloud key is not a cluster id — and reverting it to
+  a cluster-id callback would have to be undone by the next view that names clouds.
+- **Renaming a colour has no entry point any more.** It had two: the filter
+  panel's name, and a LABELS cloud's name. This is deliberate, not an oversight:
+  the seven defaults are colours, and a workspace that wants "Rejected" instead of
+  "Red" is a real want but not one worth a surface of its own right now.
+  `workspace_labels`, `PATCH /api/labels`, `renameLabelRequestSchema` and
+  `resolveLabelNames` are all kept and still work — `LabelNames` is threaded to
+  every swatch row for tooltips regardless, so the reader cost is zero and the
+  route is one component away from being reachable again.

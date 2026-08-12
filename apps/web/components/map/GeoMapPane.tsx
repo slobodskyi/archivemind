@@ -28,7 +28,7 @@ export default function GeoMapPane({ photos, selectedIds, onOpenAsset, onSelectA
   const missing = missingLocationLabel(photos.length, points.length);
 
   return (
-    <div style={{ position: "absolute", inset: "52px 0 0 0", zIndex: 5, background: "var(--bg)" }}>
+    <div style={{ position: "absolute", inset: "var(--hdr) 0 0 0", zIndex: 5, background: "var(--bg)" }}>
       {points.length === 0 ? (
         <div style={empty}>
           <div style={emptyTitle}>Nothing to place on the map</div>

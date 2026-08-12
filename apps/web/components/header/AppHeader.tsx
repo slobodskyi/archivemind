@@ -23,8 +23,7 @@ interface AppHeaderProps {
   /** Real account initials/name for the avatar (replaces the old hardcoded "AM"). */
   accountInitials?: string;
   accountName?: string;
-  viewTabs?: ReactNode;
-  /** Rendered in the breadcrumb, right of the project name (e.g. the Workspace toggle). */
+  /** Rendered in the breadcrumb, right of the project name. */
   afterProject?: ReactNode;
 }
 
@@ -43,23 +42,28 @@ export default function AppHeader({
   onOpenAcct,
   accountInitials = "",
   accountName,
-  viewTabs,
   afterProject,
 }: AppHeaderProps) {
   return (
     <div
       style={{
-        position: "absolute",
+        // `fixed`, not `absolute`: absolute resolves against the 100dvh workspace
+        // root, which the mobile keyboard resizes out from under the bar when a
+        // sticky-note textarea is focused. Fixed anchors to the viewport top on
+        // every device regardless of that. The safe-area inset keeps the 52px row
+        // clear of a notch — `--hdr` carries the same total to everything that
+        // sits beneath the header.
+        position: "fixed",
         top: 0,
         left: 0,
         right: 0,
-        height: 52,
+        height: "var(--hdr)",
         background: "var(--bg-nb)",
         borderBottom: "1px solid var(--bd)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "0 14px",
+        padding: "env(safe-area-inset-top, 0px) 14px 0",
         zIndex: 40,
       }}
     >
@@ -122,8 +126,6 @@ export default function AppHeader({
           </>
         )}
       </div>
-
-      {viewTabs}
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button

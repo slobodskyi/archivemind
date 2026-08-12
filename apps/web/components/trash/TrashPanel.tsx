@@ -43,7 +43,7 @@ export default function TrashPanel({ open, assets, onClose, onRestore, onPurge }
     <div
       style={{
         position: "absolute",
-        top: 52,
+        top: "var(--hdr)",
         right: 0,
         bottom: 0,
         width: 360,

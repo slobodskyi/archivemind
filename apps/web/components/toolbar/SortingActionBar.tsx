@@ -21,8 +21,8 @@ export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "select
  *  silently rearrange the Canvas instead.
  *
  *  Deliberately narrow: layout controls plus Topic's explicit membership menu,
- *  all ≤ 46 px tall at bottom:20 so `BulkAiPanel` (hardcoded to bottom:78)
- *  still clears it. z-index 35 matches every other canvas bar — `lib/ui.ts`
+ *  all ≤ 46 px tall at bottom:66 — it sits ABOVE `ViewSwitcher` (bottom:20), and
+ *  `BulkAiPanel` (bottom:124) clears both. z-index 35 matches every other canvas bar — `lib/ui.ts`
  *  reserves 0–35 for canvas internals, and anything higher would paint over
  *  the chat and trash panels. */
 export interface SortingActionBarProps {
@@ -126,7 +126,8 @@ function SortingActionBar({
       style={{
         position: "absolute",
         left: "50%",
-        bottom: 20,
+        // Stacks above ViewSwitcher, which owns bottom:20.
+        bottom: 66,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",
