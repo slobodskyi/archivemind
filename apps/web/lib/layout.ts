@@ -16,6 +16,10 @@ export { UNSORTED_CLOUD_KEY } from "./topics";
 
 export interface Frame {
   id: string;
+  /** The Workspace this artboard was made in (ADR 0044); null = project canvas.
+   *  Artboards are still client-only, so unlike a note this is stamped by the
+   *  client rather than written by an insert. */
+  boardId: string | null;
   x: number;
   y: number;
   w: number;
@@ -39,6 +43,8 @@ export interface StickyNote {
    *  paper tone the card is actually filled with. */
   color: AssetLabel;
   fontSize: NoteFontSize;
+  /** The Workspace this note was made in (ADR 0044); null = project canvas. */
+  boardId: string | null;
   /** The note's own freehand drawing (ADR 0041 as amended — ink lives on the
    *  note now). Points are in the note's fixed 0..1000 virtual space, so the
    *  drawing moves and scales with the card. */

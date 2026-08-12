@@ -3,6 +3,7 @@ import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotoWindow } from "@/lib/api";
 import { ensureWorkspace } from "@/lib/bootstrap";
 import { getCanvasAnnotations } from "@/lib/annotations";
+import { getBoards } from "@/lib/boards-server";
 import { getCanvasGroups } from "@/lib/canvas-groups";
 import { getLabelNames } from "@/lib/labels";
 import { getProjectCards } from "@/lib/projects";
@@ -22,7 +23,7 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   // Parallel: ensureWorkspace is idempotent bootstrap, and getPhotoWindow
   // reuses this page's client (skipping its internal re-auth) — the canvas load
   // drops from four sequential round trips to two.
-  const [workspaceId, photoWindow, projectCards, groups, labelNames, annotations, { data: profile }] =
+  const [workspaceId, photoWindow, projectCards, groups, labelNames, annotations, boards, { data: profile }] =
     await Promise.all([
       ensureWorkspace(supabase, user),
       getPhotoWindow(id, supabase),
@@ -30,6 +31,8 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
       getCanvasGroups(supabase, id),
       getLabelNames(supabase),
       getCanvasAnnotations(supabase, id),
+      // A Workspace is a subset of one project, so the 'all' grid has none.
+      id === "all" ? Promise.resolve([]) : getBoards(supabase, id),
       supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
     ]);
   const projects = projectCards.map((p) => ({ id: p.id, name: p.name, count: p.count }));
@@ -53,6 +56,7 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
       initialGroups={groups}
       initialLabelNames={labelNames}
       initialAnnotations={annotations}
+      initialBoards={boards}
       account={account}
     />
   );

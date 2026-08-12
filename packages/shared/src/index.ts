@@ -730,6 +730,7 @@ export const createCanvasGroupRequestSchema = z.object({
   kind: canvasGroupKindSchema,
   name: z.string().trim().min(1).max(80),
   projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
+  boardId: uuidSchema.nullish(), // null/absent = the project canvas (ADR 0044)
   assetIds: z.array(uuidSchema).max(500).default([]),
   settings: artboardSettingsSchema.optional(),
 });
@@ -764,6 +765,8 @@ export const canvasGroupSchema = z.object({
   kind: canvasGroupKindSchema,
   name: z.string(),
   projectId: uuidSchema.nullable(),
+  /** The Workspace this folder/artboard was made in (ADR 0044); null = project. */
+  boardId: uuidSchema.nullable(),
   sortIndex: z.number().int(),
   settings: artboardSettingsSchema.nullable(),
   members: z.array(uuidSchema),
@@ -774,6 +777,60 @@ export const canvasGroupsResponseSchema = z.object({
   groups: z.array(canvasGroupSchema),
 });
 export type CanvasGroupsResponse = z.infer<typeof canvasGroupsResponseSchema>;
+
+// ── Boards, a.k.a. Workspaces (migration 20260812000001, ADR 0044) ───────────
+//
+// "Workspace" is the UI word; `board` is the code word, because `workspace_id`
+// already means the tenant. A board is a named, colour-coded subset of ONE
+// project's files that narrows the canvas to them.
+//
+// Membership of PHOTOS is many-to-many (board_assets) — a photo lives in the
+// project and can sit in several boards. Notes, folders and artboards are made
+// in one place and belong there, so they carry a `board_id` on their own row
+// instead.
+
+export const boardSchema = z.object({
+  id: uuidSchema,
+  projectId: uuidSchema,
+  name: z.string(),
+  /** One of the ADR 0040 seven, reused so the chip and the photo dot can't fork. */
+  color: assetLabelSchema,
+  sortOrder: z.number().int(),
+  /** Asset ids, in `position` order. */
+  assetIds: z.array(uuidSchema),
+});
+export type Board = z.infer<typeof boardSchema>;
+
+export const boardsResponseSchema = z.object({ boards: z.array(boardSchema) });
+export type BoardsResponse = z.infer<typeof boardsResponseSchema>;
+
+/** POST /api/boards. `assetIds` seeds membership so "new workspace from this
+ *  selection" is one request rather than a create followed by an add. */
+export const createBoardRequestSchema = z.object({
+  projectId: uuidSchema,
+  name: z.string().trim().min(1).max(80),
+  color: assetLabelSchema.optional(),
+  assetIds: z.array(uuidSchema).max(500).default([]),
+});
+export type CreateBoardRequest = z.infer<typeof createBoardRequestSchema>;
+
+/** PATCH /api/boards/[id] — rename / recolour / reorder. At least one field. */
+export const patchBoardRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    color: assetLabelSchema.optional(),
+    sortOrder: z.number().int().optional(),
+  })
+  .refine((v) => v.name !== undefined || v.color !== undefined || v.sortOrder !== undefined, {
+    message: "at least one of name, color, sortOrder is required",
+  });
+export type PatchBoardRequest = z.infer<typeof patchBoardRequestSchema>;
+
+/** POST | DELETE /api/boards/[id]/assets — add / remove members. */
+export const boardAssetsRequestSchema = z.object({
+  assetIds: z.array(uuidSchema).min(1).max(500),
+});
+export type BoardAssetsRequest = z.infer<typeof boardAssetsRequestSchema>;
 
 // ── Canvas annotations (migration 20260808000002, ADR 0041) ──────────────────
 //
@@ -867,6 +924,11 @@ export type InkBody = z.infer<typeof inkBodySchema>;
 const annotationBaseShape = {
   id: uuidSchema,
   projectId: uuidSchema.nullable(),
+  /** The Workspace this was MADE in (ADR 0044); null = the project canvas.
+   *  Ownership is a column on the object rather than a list on the board
+   *  because a note is made in one place and belongs there — unlike a photo,
+   *  which lives in the project and can sit in several workspaces. */
+  boardId: uuidSchema.nullable(),
   x: z.number(),
   y: z.number(),
   w: z.number(),
@@ -937,6 +999,7 @@ export const createAnnotationRequestSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("note"),
     projectId: uuidSchema.nullish(), // null/absent = the 'all' canvas
+    boardId: uuidSchema.nullish(), // null/absent = the project canvas (ADR 0044)
     ...noteGeometrySchema,
     color: assetLabelSchema.default("yellow"),
     body: noteBodySchema.default({ text: "", strokes: [] }),
@@ -945,6 +1008,7 @@ export const createAnnotationRequestSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("ink"),
     projectId: uuidSchema.nullish(),
+    boardId: uuidSchema.nullish(),
     ...inkGeometrySchema,
     color: assetLabelSchema.default("gray"),
     body: inkBodySchema,

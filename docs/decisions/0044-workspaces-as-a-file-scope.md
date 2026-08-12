@@ -2,8 +2,8 @@
 
 Date: 2026-08-12
 
-Status: Proposed (the frontend ships here, in `localStorage`; the backend is this
-document's build list)
+Status: Accepted — frontend 2026-08-12, backend (migration `20260812000001`)
+the same day. The `localStorage` stage below is history; see the second amendment.
 
 Builds on [0034](0034-canvas-groups-folders-and-artboards.md) (canvas geometry is
 a per-user override) and reuses the seven-colour vocabulary of
@@ -171,3 +171,54 @@ reachable for new objects.
 - Objects made before this shipped belong to no Workspace, so they show on the
   project canvas and in none of the Workspaces. That is the correct reading of
   "made outside one", not a migration gap.
+
+
+## Amendment (2026-08-12, second) — the backend landed
+
+`boards` + `board_assets` exist, and the build list above is done apart from the
+connected-project analysis. What changed from the plan:
+
+- **`boards.project_id` is NOT NULL**, unlike `canvas_groups.project_id`. A
+  workspace is a working subset of one project; the `all` canvas is the
+  read-only recovery grid and has no browser to open one from, so a null there
+  would be a row nothing could reach.
+- **Ownership is `board_id` on the object, not a list on the board.** A photo is
+  many-to-many — it lives in the project and can sit in several workspaces, so it
+  gets `board_assets`. A note, folder or artboard is made in one place and
+  belongs there. This replaces the client-side `noteIds`/`groupIds`/`frameIds`
+  the first increment used, and with it the whole `create`/`adopt`/`delete`
+  callback: the id is written by the server at insert time, so there is no
+  second id to adopt when the response comes back.
+- **`on delete set null`, deliberately.** Deleting a workspace must not delete
+  the notes and folders made in it. They fall back to `board_id is null`, which
+  already means "belongs to the project canvas" — a defined state, not a
+  tombstone. The pgTAP suite asserts exactly this, because it is the difference
+  between a delete that tidies and a delete that loses work.
+- **A `board_id` in a request body is validated, not trusted.** RLS on
+  `canvas_annotations` and `canvas_groups` checks the ROW's workspace, not what
+  this column points at, so without the check a caller could file a note under
+  another workspace's board. An unreadable id degrades to null rather than
+  404ing a note the user has already drawn.
+- **Membership inserts pre-filter to what the caller can see.** An RLS
+  `with check` violation raises on the whole INSERT rather than dropping the
+  offending row, so one stale id from a client would otherwise reject the entire
+  add — the same pre-filter `POST /api/canvas-groups` already does.
+- **Artboards keep a client-side `Frame.boardId`.** They are still
+  `localStorage` (ADR 0034), so there is no row to carry the column; the meaning
+  and the null are identical.
+- **`getBoards` degrades to `[]` on 42P01/42703**, like `getCanvasGroups`: a web
+  deploy is not transactional with a migration push, and a missing table should
+  cost the chip row, not the project page.
+
+### The workspaces that existed in `localStorage`
+`readLegacyBoards` adopts them once — name, colour and photo membership become a
+real row, then the blob is cleared, and only after every create succeeds so a
+failure retries on the next load. The old note/folder/artboard ownership lists
+are **not** adopted: re-pointing them would mean a PATCH per object for data that
+lived in one browser for a matter of hours, and those objects simply fall back to
+the project canvas.
+
+### Still not built
+The connected-project analysis (a job that synthesises a summary + embedding when
+membership changes) remains unbuilt, and per-workspace tile *arrangements* still
+share the project's one `galleryOverrides.asset` bucket.

@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BOARD_COLORS, loadBoards, nextBoardColor, ownedKey, saveBoards, type Board } from "./boards";
+import type { Board } from "@archivemind/shared";
+import { BOARD_COLORS, clearLegacyBoards, nextBoardColor, readLegacyBoards } from "./boards";
 
 /** The suite runs in vitest's default `node` environment (this package ships no
- *  vitest config), where `window` is undefined and `loadBoards` short-circuits to
- *  `[]` — so every assertion below would pass vacuously. A five-line in-memory
- *  store is enough to exercise the real branches, and costs no jsdom dependency
- *  for one module's worth of `localStorage`. */
+ *  vitest config), where `window` is undefined and the legacy reader
+ *  short-circuits to `[]` — so every assertion would pass vacuously. A five-line
+ *  in-memory store exercises the real branches without a jsdom dependency. */
 const store = new Map<string, string>();
 (globalThis as { window?: unknown }).window = {
   localStorage: {
@@ -18,77 +18,86 @@ const store = new Map<string, string>();
 
 const board = (over: Partial<Board> = {}): Board => ({
   id: "b1",
+  projectId: "p1",
   name: "Pitch",
   color: "blue",
-  assetIds: ["a", "b"],
-  noteIds: [],
-  groupIds: [],
-  frameIds: [],
+  sortOrder: 0,
+  assetIds: [],
   ...over,
 });
 
-/** `lib/boards` is storage + one colour rule, and the storage half is the part
- *  that has to survive a blob it did not write: a hand-edited entry, a shape
- *  from an older build, or private mode refusing to persist at all. A board
- *  that throws takes the whole canvas with it. */
-describe("loadBoards", () => {
+/** Workspaces live in the `boards` table now. What is left client-side is the
+ *  colour rule and the one-time adoption of the blobs the pre-table build wrote
+ *  — and the adoption half has to survive a blob it did not write, because a
+ *  throw there takes the whole canvas down with it. */
+describe("readLegacyBoards", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("round-trips through saveBoards", () => {
-    const boards = [board(), board({ id: "b2", name: "Edit", color: "green", assetIds: [] })];
-    saveBoards("p1", boards);
-    expect(loadBoards("p1")).toEqual(boards);
+  it("reads the shape the pre-table client saved", () => {
+    window.localStorage.setItem(
+      "archivemind:boards:p1",
+      JSON.stringify([{ id: "x", name: "Pitch", color: "green", assetIds: ["a", "b"] }]),
+    );
+    expect(readLegacyBoards("p1")).toEqual([{ name: "Pitch", color: "green", assetIds: ["a", "b"] }]);
   });
 
-  it("keys by project, so two projects never see each other's boards", () => {
-    saveBoards("p1", [board()]);
-    expect(loadBoards("p2")).toEqual([]);
+  it("drops the client-side ownership lists — board_id on the row replaced them", () => {
+    window.localStorage.setItem(
+      "archivemind:boards:p1",
+      JSON.stringify([{ id: "x", name: "P", color: "blue", assetIds: [], noteIds: ["n1"], frameIds: ["f1"] }]),
+    );
+    expect(readLegacyBoards("p1")[0]).toEqual({ name: "P", color: "blue", assetIds: [] });
+  });
+
+  it("keys by project", () => {
+    window.localStorage.setItem("archivemind:boards:p1", JSON.stringify([{ name: "P", color: "blue", assetIds: [] }]));
+    expect(readLegacyBoards("p2")).toEqual([]);
   });
 
   it("returns [] for an unknown project", () => {
-    expect(loadBoards("nope")).toEqual([]);
+    expect(readLegacyBoards("nope")).toEqual([]);
   });
 
   it("returns [] rather than throwing on unparseable JSON", () => {
     window.localStorage.setItem("archivemind:boards:p1", "{not json");
-    expect(loadBoards("p1")).toEqual([]);
+    expect(readLegacyBoards("p1")).toEqual([]);
   });
 
   it("returns [] when the stored value is not an array", () => {
     window.localStorage.setItem("archivemind:boards:p1", JSON.stringify({ id: "b1" }));
-    expect(loadBoards("p1")).toEqual([]);
+    expect(readLegacyBoards("p1")).toEqual([]);
   });
 
   it("drops malformed entries and keeps the well-formed ones", () => {
     window.localStorage.setItem(
       "archivemind:boards:p1",
-      JSON.stringify([board(), { id: "b2" }, null, { id: "b3", name: "x", color: "red", assetIds: "nope" }]),
+      JSON.stringify([{ name: "P", color: "blue", assetIds: ["a"] }, { name: "Q" }, null]),
     );
-    expect(loadBoards("p1")).toEqual([board()]);
+    expect(readLegacyBoards("p1")).toEqual([{ name: "P", color: "blue", assetIds: ["a"] }]);
   });
-  it("fills the owned-object lists on a blob saved before they existed", () => {
+
+  it("falls back to blue for a colour outside the seven", () => {
     window.localStorage.setItem(
       "archivemind:boards:p1",
-      JSON.stringify([{ id: "b1", name: "Pitch", color: "blue", assetIds: ["a"] }]),
+      JSON.stringify([{ name: "P", color: "chartreuse", assetIds: [] }]),
     );
-    const [loaded] = loadBoards("p1");
-    expect(loaded.noteIds).toEqual([]);
-    expect(loaded.groupIds).toEqual([]);
-    expect(loaded.frameIds).toEqual([]);
+    expect(readLegacyBoards("p1")[0].color).toBe("blue");
   });
 
-  it("keeps owned ids through a round-trip", () => {
-    const b = board({ noteIds: ["n1"], groupIds: ["g1"], frameIds: ["f1"] });
-    saveBoards("p1", [b]);
-    expect(loadBoards("p1")).toEqual([b]);
+  it("keeps only string asset ids", () => {
+    window.localStorage.setItem(
+      "archivemind:boards:p1",
+      JSON.stringify([{ name: "P", color: "blue", assetIds: ["a", 7, null, "b"] }]),
+    );
+    expect(readLegacyBoards("p1")[0].assetIds).toEqual(["a", "b"]);
   });
-});
 
-describe("ownedKey", () => {
-  it("maps each kind to its own list, so a note can never land in frames", () => {
-    expect(ownedKey("note")).toBe("noteIds");
-    expect(ownedKey("group")).toBe("groupIds");
-    expect(ownedKey("frame")).toBe("frameIds");
+  it("clearLegacyBoards forgets only that project", () => {
+    window.localStorage.setItem("archivemind:boards:p1", JSON.stringify([{ name: "P", color: "blue", assetIds: [] }]));
+    window.localStorage.setItem("archivemind:boards:p2", JSON.stringify([{ name: "Q", color: "red", assetIds: [] }]));
+    clearLegacyBoards("p1");
+    expect(readLegacyBoards("p1")).toEqual([]);
+    expect(readLegacyBoards("p2")).toHaveLength(1);
   });
 });
 

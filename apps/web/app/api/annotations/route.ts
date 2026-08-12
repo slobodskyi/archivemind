@@ -47,11 +47,24 @@ export async function POST(request: Request) {
     if (!project) return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
 
+  // The Workspace this note was made in (ADR 0044). Validated the same way and
+  // for the same reason as the project: RLS on `canvas_annotations` checks the
+  // row's workspace, not what this column points at, so a caller could otherwise
+  // file a note under someone else's board id. An unreadable one degrades to
+  // null — the note belongs to the project canvas — rather than 404ing a note
+  // the user has already drawn on screen.
+  let boardId: string | null = parsed.data.boardId ?? null;
+  if (boardId) {
+    const { data: board } = await supabase.from("boards").select("id").eq("id", boardId).maybeSingle();
+    if (!board) boardId = null;
+  }
+
   const { data: row, error } = await supabase
     .from("canvas_annotations")
     .insert({
       workspace_id: workspaceId,
       project_id: projectId,
+      board_id: boardId,
       kind,
       x,
       y,
@@ -62,7 +75,7 @@ export async function POST(request: Request) {
       style,
       created_by: user.id,
     })
-    .select("id, kind, project_id, x, y, w, h, color, body, style")
+    .select("id, kind, project_id, board_id, x, y, w, h, color, body, style")
     .single();
 
   // 42P01 = undefined_table — migration 20260808000002 not pushed yet. The

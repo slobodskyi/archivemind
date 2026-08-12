@@ -1,171 +1,185 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Board, BoardObjectKind } from "@/lib/boards";
-import { loadBoards, saveBoards, nextBoardColor, ownedKey } from "@/lib/boards";
-
-/** Local ids for a board — a real uuid where available, a timestamp fallback on
- *  non-secure origins where `crypto.randomUUID` is undefined (same guard as
- *  `lib/upload-client.ts`). Boards are client-only until ADR 0044's table lands. */
-function boardId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `board-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
-}
-
-/** What `useWorkspace` reports when a canvas object is made, saved or removed,
- *  so the open workspace can record what belongs to it. `adopt` exists for the
- *  one object with two ids in its life: a sticky note is drawn under a `tmp-`
- *  id and gets its row's uuid when the insert returns. */
-export type BoardObjectEvent =
-  | { type: "create"; kind: BoardObjectKind; id: string }
-  | { type: "adopt"; kind: BoardObjectKind; from: string; to: string }
-  | { type: "delete"; kind: BoardObjectKind; id: string };
+import type { AssetLabel, Board } from "@archivemind/shared";
+import { clearLegacyBoards, nextBoardColor, readLegacyBoards } from "@/lib/boards";
 
 export interface BoardsApi {
   boards: Board[];
   activeBoardId: string | null;
   activeBoard: Board | null;
-  /** The active board's ids, or null when none is open (sorting mode). */
+  /** The active workspace's asset ids, or null when none is open. */
   scopeIds: string[] | null;
-  createBoard: (name?: string, assetIds?: string[]) => string;
+  createBoard: (name?: string, assetIds?: string[]) => void;
   renameBoard: (id: string, name: string) => void;
   deleteBoard: (id: string) => void;
-  recolorBoard: (id: string, color: Board["color"]) => void;
+  recolorBoard: (id: string, color: AssetLabel) => void;
   selectBoard: (id: string | null) => void;
   addToBoard: (boardId: string, assetIds: string[]) => void;
-  /** Record a canvas object against the OPEN workspace (a no-op when none is).
-   *  Deletes and adopts run over every board, not just the open one: an object
-   *  can be removed while you are looking somewhere else. */
-  onCanvasObject: (event: BoardObjectEvent) => void;
-  /** The ids the open workspace owns, or null when none is open (show all). */
-  ownedIds: Record<BoardObjectKind, ReadonlySet<string>> | null;
 }
 
-/** Workspaces (boards) for a project — the entity that replaced artboards
- *  (ADR 0044). CRUD + `localStorage` persistence, deliberately separate from the
- *  6k-line `useWorkspace`: a board is just a named colour-coded file set, and its
- *  only tie into the canvas is the `scopeIds` it hands back. */
-export function useBoards(projectId: string): BoardsApi {
-  const [boards, setBoards] = useState<Board[]>([]);
+/** Workspaces for a project (ADR 0044). Server-backed since migration
+ *  `20260812000001`: seeded from the project page's own read so they are in the
+ *  first paint, then every change is a request.
+ *
+ *  Writes are optimistic and reported through `onError` rather than rolled back
+ *  — the same call `useWorkspace` makes for notes. Yanking a chip out from under
+ *  a click is worse than a stale one that a reload corrects. */
+export function useBoards(
+  projectId: string,
+  initialBoards: Board[],
+  onError?: (message: string) => void,
+): BoardsApi {
+  const [boards, setBoards] = useState<Board[]>(initialBoards);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
-  // Skip the first save (the load effect sets state); only persist real edits.
-  const hydrated = useRef(false);
-
+  const fail = useRef(onError);
   useEffect(() => {
-    // Hydrate from localStorage after mount (server render starts empty so the
-    // first client render matches), and reset the open board when the project
-    // changes. Same post-mount setState the canvas store does.
-    hydrated.current = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBoards(loadBoards(projectId));
+    fail.current = onError;
+  }, [onError]);
+
+  // Re-seed when the PROJECT changes — React's "adjust state during render"
+  // pattern rather than an effect. Keyed on the project id, not on
+  // `initialBoards`, because the server component hands down a fresh array on
+  // every render and syncing to that would wipe an optimistic rename a beat
+  // after it was typed.
+  const [seededFor, setSeededFor] = useState(projectId);
+  if (seededFor !== projectId) {
+    setSeededFor(projectId);
+    setBoards(initialBoards);
     setActiveBoardId(null);
-  }, [projectId]);
+  }
 
+  /** One-time adoption of the workspaces this browser saved before the table
+   *  existed. Cleared only after every create succeeds, so a failure retries on
+   *  the next load instead of losing them. */
   useEffect(() => {
-    if (!hydrated.current) {
-      hydrated.current = true;
-      return;
-    }
-    saveBoards(projectId, boards);
-  }, [projectId, boards]);
+    if (projectId === "all") return;
+    const legacy = readLegacyBoards(projectId);
+    if (legacy.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const adopted: Board[] = [];
+      for (const b of legacy) {
+        try {
+          const res = await fetch("/api/boards", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectId, name: b.name, color: b.color, assetIds: b.assetIds }),
+          });
+          if (!res.ok) return; // keep the blob; try again next load
+          adopted.push((await res.json()) as Board);
+        } catch {
+          return;
+        }
+      }
+      clearLegacyBoards(projectId);
+      if (!cancelled && adopted.length > 0) setBoards((prev) => [...prev, ...adopted]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const createBoard = useCallback(
     (name?: string, assetIds: string[] = []) => {
-      const id = boardId();
-      setBoards((prev) => [
-        ...prev,
-        {
-          id,
-          name: name?.trim() || `Workspace ${prev.length + 1}`,
-          color: nextBoardColor(prev),
-          assetIds: [...new Set(assetIds)],
-          noteIds: [],
-          groupIds: [],
-          frameIds: [],
-        },
-      ]);
-      setActiveBoardId(id);
-      return id;
+      if (projectId === "all") return;
+      const body = {
+        projectId,
+        name: name?.trim() || `Workspace ${boards.length + 1}`,
+        color: nextBoardColor(boards),
+        assetIds: [...new Set(assetIds)],
+      };
+      void fetch("/api/boards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(String(res.status));
+          const saved = (await res.json()) as Board;
+          setBoards((prev) => [...prev, saved]);
+          // Opened only once it exists: a chip you can click before the row is
+          // there would scope the canvas to an id the server has never seen.
+          setActiveBoardId(saved.id);
+        })
+        .catch(() => fail.current?.("Couldn't create the workspace"));
     },
-    [],
+    [projectId, boards],
   );
 
-  const renameBoard = useCallback((id: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, name: trimmed } : b)));
+  const patch = useCallback((id: string, body: Record<string, unknown>, message: string) => {
+    void fetch(`/api/boards/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => fail.current?.(message));
   }, []);
 
-  const recolorBoard = useCallback((id: string, color: Board["color"]) => {
-    setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, color } : b)));
-  }, []);
+  const renameBoard = useCallback(
+    (id: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, name: trimmed } : b)));
+      patch(id, { name: trimmed }, "Workspace not renamed");
+    },
+    [patch],
+  );
+
+  const recolorBoard = useCallback(
+    (id: string, color: AssetLabel) => {
+      setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, color } : b)));
+      patch(id, { color }, "Workspace colour not saved");
+    },
+    [patch],
+  );
 
   const deleteBoard = useCallback((id: string) => {
     setBoards((prev) => prev.filter((b) => b.id !== id));
     setActiveBoardId((cur) => (cur === id ? null : cur));
+    void fetch(`/api/boards/${id}`, { method: "DELETE" })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => fail.current?.("Workspace not deleted"));
   }, []);
 
   const selectBoard = useCallback((id: string | null) => setActiveBoardId(id), []);
 
   const addToBoard = useCallback((id: string, assetIds: string[]) => {
+    if (assetIds.length === 0) return;
     setBoards((prev) =>
       prev.map((b) => (b.id === id ? { ...b, assetIds: [...new Set([...b.assetIds, ...assetIds])] } : b)),
     );
+    void fetch(`/api/boards/${id}/assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assetIds }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => fail.current?.("Files not added to the workspace"));
   }, []);
 
-  const onCanvasObject = useCallback((event: BoardObjectEvent) => {
-    const key = ownedKey(event.kind);
-    setBoards((prev) => {
-      if (event.type === "create") {
-        // Only the open workspace claims new objects; with none open the object
-        // belongs to the project and shows everywhere.
-        if (activeBoardId === null) return prev;
-        return prev.map((b) =>
-          b.id === activeBoardId && !b[key].includes(event.id)
-            ? { ...b, [key]: [...b[key], event.id] }
-            : b,
-        );
-      }
-      if (event.type === "adopt") {
-        return prev.map((b) =>
-          b[key].includes(event.from)
-            ? { ...b, [key]: b[key].map((id) => (id === event.from ? event.to : id)) }
-            : b,
-        );
-      }
-      return prev.map((b) =>
-        b[key].includes(event.id) ? { ...b, [key]: b[key].filter((id) => id !== event.id) } : b,
-      );
-    });
-  }, [activeBoardId]);
-
-  const activeBoard = useMemo(() => boards.find((b) => b.id === activeBoardId) ?? null, [boards, activeBoardId]);
-
-  const ownedIds = useMemo(
-    () =>
-      activeBoard
-        ? {
-            note: new Set(activeBoard.noteIds),
-            group: new Set(activeBoard.groupIds),
-            frame: new Set(activeBoard.frameIds),
-          }
-        : null,
-    [activeBoard],
+  const activeBoard = useMemo(
+    () => boards.find((b) => b.id === activeBoardId) ?? null,
+    [boards, activeBoardId],
   );
-  const scopeIds = activeBoard ? activeBoard.assetIds : null;
 
   return {
     boards,
     activeBoardId,
     activeBoard,
-    scopeIds,
+    scopeIds: activeBoard ? activeBoard.assetIds : null,
     createBoard,
     renameBoard,
     deleteBoard,
     recolorBoard,
     selectBoard,
     addToBoard,
-    onCanvasObject,
-    ownedIds,
   };
 }
