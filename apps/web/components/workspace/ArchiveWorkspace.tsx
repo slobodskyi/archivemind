@@ -1,6 +1,7 @@
 "use client";
 
-import type { AssetLabel, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
+import { useCallback, useEffect, useRef } from "react";
+import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
@@ -58,6 +59,10 @@ interface ArchiveWorkspaceProps {
   /** Sticky notes (and later ink) for this scope — ADR 0041. Server-read so the
    *  first paint already has them, like initialGroups. */
   initialAnnotations: CanvasAnnotation[];
+  /** The project's Workspaces (ADR 0044) — server-read for the same reason as
+   *  the groups and annotations above: a chip row that pops in after mount
+   *  reads as a glitch. */
+  initialBoards: Board[];
   account: Account;
 }
 
@@ -70,13 +75,20 @@ export default function ArchiveWorkspace({
   initialGroups,
   initialLabelNames,
   initialAnnotations,
+  initialBoards,
   account,
 }: ArchiveWorkspaceProps) {
   // Workspaces (boards) — a named, colour-coded set of the project's files
   // (ADR 0044). Additive on purpose: opening one narrows the canvas to its
   // files and nothing else changes, so notes, folders, artboards, the sorting
   // views and export all keep working exactly as they do with none open.
-  const bd = useBoards(currentProjectId);
+  // `useBoards` reports failures through the canvas toast, but the toast lives
+  // on `ws`, which needs the board scope to exist first. A ref breaks the knot
+  // without either hook importing the other: board writes are async, so the ref
+  // is always filled by the time one can fail.
+  const toastRef = useRef<(text: string) => void>(() => {});
+  const boardToast = useCallback((text: string) => toastRef.current(text), []);
+  const bd = useBoards(currentProjectId, initialBoards, boardToast);
 
   const ws = useWorkspace(
     initialPhotos,
@@ -87,7 +99,7 @@ export default function ArchiveWorkspace({
     initialLabelNames,
     initialAnnotations,
     bd.scopeIds,
-    bd.onCanvasObject,
+    bd.activeBoardId,
   );
 
   // A Workspace owns the notes, folders and artboards MADE in it, and hides the
@@ -97,16 +109,23 @@ export default function ArchiveWorkspace({
   // Filtered here, at the render seam, and NOT in `canvasPhotos`: these three
   // carry their own geometry and have no layout to re-pack, so there is nothing
   // for a scope to change about where they sit. Hiding is the whole effect.
+  useEffect(() => {
+    toastRef.current = ws.flashToast;
+  }, [ws.flashToast]);
+
   // Exactly one bottom bar, always. The working bar belongs to a Workspace's
   // Canvas; everything else — the project canvas, the sorting views, all-files,
   // and a Workspace's own sorting views — gets the narrow one. Derived once so
   // the two gates cannot drift into showing both or neither.
   const workingBar = bd.activeBoardId !== null && ws.view === "neural";
 
-  const owned = bd.ownedIds;
-  const scopedNotes = owned ? ws.stickyNotes.filter((n) => owned.note.has(n.id)) : ws.stickyNotes;
-  const scopedFolders = owned ? ws.folders.filter((f) => owned.group.has(f.id)) : ws.folders;
-  const scopedFrames = owned ? ws.frames.filter((f) => owned.frame.has(f.id)) : ws.frames;
+  // Ownership is a `board_id` on the object now (ADR 0044), not a list on the
+  // board, so this is a plain equality — and it means a workspace's notes are
+  // the same on every device, which the localStorage lists could never be.
+  const board = bd.activeBoardId;
+  const scopedNotes = board ? ws.stickyNotes.filter((n) => n.boardId === board) : ws.stickyNotes;
+  const scopedFolders = board ? ws.folders.filter((f) => f.boardId === board) : ws.folders;
+  const scopedFrames = board ? ws.frames.filter((f) => f.boardId === board) : ws.frames;
 
   // Counts come from the loaded photo set, not the board's raw id list: an id
   // whose asset has since been trashed must not still be counted on a chip.

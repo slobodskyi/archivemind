@@ -451,7 +451,7 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
   it("detaches a file dropped onto an artboard from the web", () => {
     const base = topicCloudLayout([photo("a", { tags: ["x"] }), photo("b", { tags: ["x"] })], {});
     const tile = base.tiles.a;
-    const frame: Frame = { id: "f1", x: tile.cx - 10, y: tile.cy - 10, w: 20, h: 20, label: "Board" };
+    const frame: Frame = { id: "f1", x: tile.cx - 10, y: tile.cy - 10, w: 20, h: 20, label: "Board", boardId: null };
 
     const layout = topicCloudLayout([photo("a", { tags: ["x"] }), photo("b", { tags: ["x"] })], {}, [frame]);
     expect(layout.edges).toHaveLength(0);

@@ -19,12 +19,13 @@ interface GroupRow {
   kind: "folder" | "artboard";
   name: string;
   project_id: string | null;
+  board_id: string | null;
   sort_index: number;
   settings: unknown;
   canvas_group_assets: GroupAssetRow[];
 }
 
-const GROUP_SELECT = `id, kind, name, project_id, sort_index, settings,
+const GROUP_SELECT = `id, kind, name, project_id, board_id, sort_index, settings,
      canvas_group_assets ( asset_id, position )`;
 
 export async function getCanvasGroups(
@@ -61,6 +62,7 @@ export async function getCanvasGroups(
       kind: g.kind,
       name: g.name,
       projectId: g.project_id,
+      boardId: g.board_id ?? null,
       sortIndex: g.sort_index,
       settings,
       members,

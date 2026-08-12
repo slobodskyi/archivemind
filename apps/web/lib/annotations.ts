@@ -23,6 +23,7 @@ interface AnnotationRow {
   id: string;
   kind: string;
   project_id: string | null;
+  board_id: string | null;
   x: number;
   y: number;
   w: number;
@@ -32,7 +33,7 @@ interface AnnotationRow {
   style: unknown;
 }
 
-const ANNOTATION_SELECT = "id, kind, project_id, x, y, w, h, color, body, style";
+const ANNOTATION_SELECT = "id, kind, project_id, board_id, x, y, w, h, color, body, style";
 
 export async function getCanvasAnnotations(
   supabase: SupabaseClient,
@@ -70,6 +71,7 @@ export function rowToAnnotation(row: AnnotationRow): CanvasAnnotation | null {
   const base = {
     id: row.id,
     projectId: row.project_id,
+    boardId: row.board_id ?? null,
     x: row.x,
     y: row.y,
     w: row.w,

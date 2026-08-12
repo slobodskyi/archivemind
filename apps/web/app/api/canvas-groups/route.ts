@@ -46,6 +46,14 @@ export async function POST(request: Request) {
     if (!project) return NextResponse.json({ error: "project not found" }, { status: 404 });
   }
 
+  // A board id from the body must belong to a board the caller can see; RLS on
+  // `canvas_groups` would happily accept a foreign one in this column.
+  let boardId: string | null = parsed.data.boardId ?? null;
+  if (boardId) {
+    const { data: board } = await supabase.from("boards").select("id").eq("id", boardId).maybeSingle();
+    if (!board) boardId = null;
+  }
+
   const sortIndex = await nextGroupSortIndex(supabase, { projectId, kind });
   const rowSettings = kind === "artboard" ? artboardSettingsSchema.parse(parsed.data.settings ?? {}) : {};
 
@@ -56,11 +64,15 @@ export async function POST(request: Request) {
       project_id: projectId,
       kind,
       name,
+      // The Workspace this was made in (ADR 0044). RLS on `boards` is not what
+      // guards this — a caller could name another workspace's board id here, so
+      // it is validated below before the insert.
+      board_id: boardId,
       sort_index: sortIndex,
       settings: rowSettings,
       created_by: user.id,
     })
-    .select("id, kind, name, project_id, sort_index, settings")
+    .select("id, kind, name, project_id, board_id, sort_index, settings")
     .single();
   if (insErr || !group) {
     return NextResponse.json({ error: insErr?.message ?? "insert failed" }, { status: 500 });
@@ -100,6 +112,7 @@ export async function POST(request: Request) {
     kind: group.kind as CanvasGroup["kind"],
     name: group.name as string,
     projectId: group.project_id as string | null,
+    boardId: group.board_id as string | null,
     sortIndex: group.sort_index as number,
     settings: kind === "artboard" ? artboardSettingsSchema.parse(group.settings ?? {}) : null,
     members,

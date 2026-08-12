@@ -43,7 +43,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     .from("canvas_annotations")
     .update(patch)
     .eq("id", id)
-    .select("id, kind, project_id, x, y, w, h, color, body, style")
+    .select("id, kind, project_id, board_id, x, y, w, h, color, body, style")
     .maybeSingle();
   if (error?.code === "42P01") {
     return NextResponse.json({ error: "annotations are not available yet" }, { status: 503 });

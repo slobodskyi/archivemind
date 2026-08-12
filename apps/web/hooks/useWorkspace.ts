@@ -19,7 +19,6 @@ import type {
   TrashedAsset,
   TopicSummary,
 } from "@archivemind/shared";
-import type { BoardObjectEvent } from "@/hooks/useBoards";
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
@@ -140,6 +139,8 @@ export function defaultFolderGeom(id: string): GroupGeom {
 export interface FolderModel {
   id: string;
   name: string;
+  /** The Workspace this folder was made in (ADR 0044); null = project canvas. */
+  boardId: string | null;
   count: number;
   /** Up to 3 presigned member thumbs peeking out of the collapsed folder tile. */
   previews: string[];
@@ -970,6 +971,7 @@ function annotationToNote(a: NoteAnnotation): StickyNote {
     h: a.h,
     text: a.body.text,
     strokes: a.body.strokes,
+    boardId: a.boardId,
     color: a.color,
     fontSize: a.style.fontSize,
   };
@@ -1004,19 +1006,17 @@ export function useWorkspace(
   initialAnnotations: CanvasAnnotation[],
   /** The open Workspace's asset ids, or null for "no board open" (ADR 0044). */
   boardScopeIds: readonly string[] | null = null,
-  /** Reports a canvas object being made, saved or removed so the open Workspace
-   *  can own it. Optional: with no board browser mounted, nothing listens. */
-  onCanvasObject?: (event: BoardObjectEvent) => void,
+  /** The open Workspace, or null. A note, folder or artboard MADE while one is
+   *  open belongs to it (ADR 0044) — the id is written by the server at create
+   *  time, so unlike the previous client-side lists there is no second id to
+   *  adopt when the insert returns. */
+  activeBoardId: string | null = null,
 ): Workspace {
-  // A ref so the callbacks below don't all take it as a dependency and rebuild
-  // on every board edit — the canvas rebinds a lot of handlers as it is.
-  const canvasObjectRef = useRef(onCanvasObject);
+  // A ref so the create callbacks don't rebuild every time a workspace opens.
+  const boardIdRef = useRef(activeBoardId);
   useEffect(() => {
-    canvasObjectRef.current = onCanvasObject;
-  }, [onCanvasObject]);
-  const reportObject = useCallback((event: BoardObjectEvent) => {
-    canvasObjectRef.current?.(event);
-  }, []);
+    boardIdRef.current = activeBoardId;
+  }, [activeBoardId]);
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
     // Start at the 75% default so the first paint matches every view's fit,
@@ -2071,12 +2071,12 @@ export function useWorkspace(
       h,
       text: "",
       strokes: [],
+      boardId: boardIdRef.current,
       color: STICKY_NOTE_COLORS[s.stickyNotes.length % STICKY_NOTE_COLORS.length],
       fontSize: "m",
     };
     pushHistory();
     setState({ stickyNotes: [...s.stickyNotes, note] });
-    reportObject({ type: "create", kind: "note", id: tmpId });
 
     void fetch("/api/annotations", {
       method: "POST",
@@ -2084,6 +2084,7 @@ export function useWorkspace(
       body: JSON.stringify({
         kind: "note",
         projectId: currentProjectId === "all" ? null : currentProjectId,
+        boardId: boardIdRef.current,
         x: note.x,
         y: note.y,
         w: note.w,
@@ -2109,7 +2110,6 @@ export function useWorkspace(
         setState({
           stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === tmpId ? merged : n)),
         });
-        reportObject({ type: "adopt", kind: "note", from: tmpId, to: saved.id });
         // A pending debounce was keyed to the temp id and can never fire now.
         const pending = noteTextTimers.current.get(tmpId);
         if (pending) {
@@ -2132,7 +2132,7 @@ export function useWorkspace(
         setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== tmpId) });
         flashToast("Could not create the note");
       });
-  }, [rect, pushHistory, setState, currentProjectId, patchNote, flashToast, reportObject]);
+  }, [rect, pushHistory, setState, currentProjectId, patchNote, flashToast]);
 
   const updateStickyText = useCallback(
     (id: string, text: string) => {
@@ -2227,7 +2227,6 @@ export function useWorkspace(
         noteTextTimers.current.delete(id);
       }
       setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== id) });
-      reportObject({ type: "delete", kind: "note", id });
       // A temp id has no row yet; the in-flight create sees the note is gone
       // from state and deletes what it just inserted.
       if (isTmpNote(id)) return;
@@ -2237,7 +2236,7 @@ export function useWorkspace(
         })
         .catch(() => flashToast("Note not deleted"));
     },
-    [pushHistory, setState, flashToast, reportObject],
+    [pushHistory, setState, flashToast],
   );
 
   /** Two-finger pinch: zoom AND pan in one pass. The content point that sat
@@ -2579,6 +2578,7 @@ export function useWorkspace(
               w: Math.max(40, xr - xl),
               h: Math.max(40, yb - yt),
               label: "Frame " + n,
+              boardId: boardIdRef.current,
             },
           ],
           tool: "select",
@@ -2671,9 +2671,8 @@ export function useWorkspace(
     (id: string) => {
       pushHistory();
       setState({ frames: stateRef.current.frames.filter((f) => f.id !== id) });
-      reportObject({ type: "delete", kind: "frame", id });
     },
-    [pushHistory, setState, reportObject],
+    [pushHistory, setState],
   );
   const renameFrame = useCallback(
     (id: string, label: string) => {
@@ -3696,7 +3695,13 @@ export function useWorkspace(
     void fetch("/api/canvas-groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "folder", name: "Folder " + n, projectId, assetIds: ids }),
+      body: JSON.stringify({
+        kind: "folder",
+        name: "Folder " + n,
+        projectId,
+        boardId: boardIdRef.current,
+        assetIds: ids,
+      }),
     })
       .then((r) => (r.ok ? (r.json() as Promise<CanvasGroup>) : Promise.reject(new Error("create failed"))))
       .then((group) => {
@@ -3712,11 +3717,10 @@ export function useWorkspace(
           groupGeom: { ...prev.groupGeom, [group.id]: geom },
           selectedIds: [],
         }));
-        reportObject({ type: "create", kind: "group", id: group.id });
         flashToast(`Grouped ${ids.length} ${ids.length === 1 ? "file" : "files"} into "${group.name}"`);
       })
       .catch(() => flashToast("Couldn't create the folder"));
-  }, [activeTilePositions, flashToast, setState, reportObject]);
+  }, [activeTilePositions, flashToast, setState]);
 
   /** Double-clicking a folder opens its Finder-style popup (the folder's members
    *  are hidden from the canvas while it stands in for them, ADR 0034); the popup
@@ -3748,10 +3752,9 @@ export function useWorkspace(
         groupGeom: geom,
         openFolderId: s.openFolderId === id ? null : s.openFolderId,
       });
-      reportObject({ type: "delete", kind: "group", id });
       void fetch(`/api/canvas-groups/${id}`, { method: "DELETE" }).catch(() => {});
     },
-    [setState, reportObject],
+    [setState],
   );
 
   /** Drag a member out of a folder's dropdown and drop it onto the Canvas: it
@@ -3831,13 +3834,15 @@ export function useWorkspace(
       w: Math.max(40, maxX - minX + pad * 2),
       h: Math.max(40, maxY - minY + pad * 2),
       label: "Frame " + n,
+      // Artboards are still client-only, so this one is stamped here rather
+      // than by a server insert — same meaning, same null for "project canvas".
+      boardId: boardIdRef.current,
     };
     if (s.view !== "neural") setView("neural");
     setState((prev) => ({ frames: [...prev.frames, frame] }));
-    reportObject({ type: "create", kind: "frame", id: frame.id });
     setContextMenu(null);
     flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to a new artboard`);
-  }, [activeTilePositions, pushHistory, setView, setState, flashToast, reportObject]);
+  }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
 
   /** New function: pack the current selection into an existing artboard by
    *  overriding each tile's Workspace center to a grid inside the frame bounds. */
@@ -3918,11 +3923,10 @@ export function useWorkspace(
       const ids = frameContentIds(frame);
       pushHistory();
       setState({ frames: s.frames.filter((f) => f.id !== frameId) });
-      reportObject({ type: "delete", kind: "frame", id: frameId });
       if (ids.length > 0) requestDeletePhotos(ids);
       else flashToast("Removed empty artboard");
     },
-    [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast, reportObject],
+    [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast],
   );
 
   // Move / resize an artboard while its content rides along (the user's ask:
@@ -5446,6 +5450,7 @@ export function useWorkspace(
         return {
           id: g.id,
           name: g.name,
+          boardId: g.boardId,
           count: g.members.length,
           previews: items.map((i) => i.src).filter((s): s is string => Boolean(s)).slice(0, 3),
           items,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Board } from "@/lib/boards";
+import type { Board } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
 import { AddIcon, ChevronDownIcon } from "@/components/icons/icons";
 
