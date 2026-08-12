@@ -119,3 +119,55 @@ rather than being read from the prop in one place and not the other.
 - **Artboards are untouched.** They may well be superseded by workspaces once
   these have a server and per-board state; that is a later decision with a
   migration path, not a side effect of this one.
+
+## Amendment (2026-08-12) — a Workspace owns its canvas objects, and the tools
+
+The first increment scoped only photos: notes, folders and artboards showed in
+every Workspace and on the project canvas alike, and the working action bar was
+on Canvas whether or not a Workspace was open. Both are fixed here.
+
+### Ownership
+
+A sticky note, a folder and an artboard now belong to the Workspace they were
+**made in**, and hide everywhere else — the same rule photos follow. With no
+Workspace open everything shows, again like photos: the un-scoped canvas is the
+project.
+
+- Membership lives on the board (`Board.noteIds` / `groupIds` / `frameIds`), in
+  its own `localStorage` blob. A note could carry a `boardId` in its `style`
+  jsonb with no migration, and that was rejected: it would **sync a pointer to a
+  Workspace that exists in one browser**, leaving the note claiming membership in
+  something no other device can resolve. Keeping the whole feature honestly local
+  is the coherent half-step. The real home is still the `board_id` column in the
+  build list above.
+- A photo is many-to-many (it lives in the project and can be in several
+  Workspaces); these three are made in one place and belong there, so they are
+  plain owned lists rather than a join.
+- `useWorkspace` reports `create` / `adopt` / `delete` through one callback. The
+  `adopt` case exists for the one object with two ids in its life: a sticky note
+  is drawn under a `tmp-` id and takes its row's uuid when the insert returns.
+- The filter is applied at the **render** seam, not in `canvasPhotos`. These
+  three carry their own geometry and have no layout to re-pack, so a scope has
+  nothing to change about where they sit — hiding is the whole effect. That is
+  the opposite of photos, and the reason is the same one that put the photo scope
+  in the layout seam.
+
+### The tools follow the objects
+
+`WorkspaceActionBar` now renders only on a Workspace's Canvas; everywhere else
+gets the narrow `SortingActionBar`. One derived `workingBar` flag drives both, so
+there is always exactly one bar and the gates cannot drift.
+
+This is what makes ownership airtight: if the sticky-note button, the folder
+button and the artboard tool exist only inside a Workspace, then every object of
+those kinds is made inside one and the "belongs to nobody" case stops being
+reachable for new objects.
+
+- **Folder** and **Export** are mirrored into the right-click menu. They were
+  reachable only from that bar, and a selection outside a Workspace still has to
+  reach them.
+- **Tidy up** and the **artboard tool** are deliberately not mirrored: both
+  arrange a working surface, and that is precisely what a Workspace is.
+- Objects made before this shipped belong to no Workspace, so they show on the
+  project canvas and in none of the Workspaces. That is the correct reading of
+  "made outside one", not a migration gap.

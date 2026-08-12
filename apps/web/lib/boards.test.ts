@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BOARD_COLORS, loadBoards, nextBoardColor, saveBoards, type Board } from "./boards";
+import { BOARD_COLORS, loadBoards, nextBoardColor, ownedKey, saveBoards, type Board } from "./boards";
 
 /** The suite runs in vitest's default `node` environment (this package ships no
  *  vitest config), where `window` is undefined and `loadBoards` short-circuits to
@@ -21,6 +21,9 @@ const board = (over: Partial<Board> = {}): Board => ({
   name: "Pitch",
   color: "blue",
   assetIds: ["a", "b"],
+  noteIds: [],
+  groupIds: [],
+  frameIds: [],
   ...over,
 });
 
@@ -62,6 +65,30 @@ describe("loadBoards", () => {
       JSON.stringify([board(), { id: "b2" }, null, { id: "b3", name: "x", color: "red", assetIds: "nope" }]),
     );
     expect(loadBoards("p1")).toEqual([board()]);
+  });
+  it("fills the owned-object lists on a blob saved before they existed", () => {
+    window.localStorage.setItem(
+      "archivemind:boards:p1",
+      JSON.stringify([{ id: "b1", name: "Pitch", color: "blue", assetIds: ["a"] }]),
+    );
+    const [loaded] = loadBoards("p1");
+    expect(loaded.noteIds).toEqual([]);
+    expect(loaded.groupIds).toEqual([]);
+    expect(loaded.frameIds).toEqual([]);
+  });
+
+  it("keeps owned ids through a round-trip", () => {
+    const b = board({ noteIds: ["n1"], groupIds: ["g1"], frameIds: ["f1"] });
+    saveBoards("p1", [b]);
+    expect(loadBoards("p1")).toEqual([b]);
+  });
+});
+
+describe("ownedKey", () => {
+  it("maps each kind to its own list, so a note can never land in frames", () => {
+    expect(ownedKey("note")).toBe("noteIds");
+    expect(ownedKey("group")).toBe("groupIds");
+    expect(ownedKey("frame")).toBe("frameIds");
   });
 });
 

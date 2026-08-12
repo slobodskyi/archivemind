@@ -19,6 +19,7 @@ import type {
   TrashedAsset,
   TopicSummary,
 } from "@archivemind/shared";
+import type { BoardObjectEvent } from "@/hooks/useBoards";
 import { getCaptionRow } from "@/lib/format";
 import { filterByLabel, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
@@ -1003,7 +1004,19 @@ export function useWorkspace(
   initialAnnotations: CanvasAnnotation[],
   /** The open Workspace's asset ids, or null for "no board open" (ADR 0044). */
   boardScopeIds: readonly string[] | null = null,
+  /** Reports a canvas object being made, saved or removed so the open Workspace
+   *  can own it. Optional: with no board browser mounted, nothing listens. */
+  onCanvasObject?: (event: BoardObjectEvent) => void,
 ): Workspace {
+  // A ref so the callbacks below don't all take it as a dependency and rebuild
+  // on every board edit — the canvas rebinds a lot of handlers as it is.
+  const canvasObjectRef = useRef(onCanvasObject);
+  useEffect(() => {
+    canvasObjectRef.current = onCanvasObject;
+  }, [onCanvasObject]);
+  const reportObject = useCallback((event: BoardObjectEvent) => {
+    canvasObjectRef.current?.(event);
+  }, []);
   const router = useRouter();
   const [state, setStateRaw] = useState<WorkspaceState>({
     // Start at the 75% default so the first paint matches every view's fit,
@@ -2063,6 +2076,7 @@ export function useWorkspace(
     };
     pushHistory();
     setState({ stickyNotes: [...s.stickyNotes, note] });
+    reportObject({ type: "create", kind: "note", id: tmpId });
 
     void fetch("/api/annotations", {
       method: "POST",
@@ -2095,6 +2109,7 @@ export function useWorkspace(
         setState({
           stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === tmpId ? merged : n)),
         });
+        reportObject({ type: "adopt", kind: "note", from: tmpId, to: saved.id });
         // A pending debounce was keyed to the temp id and can never fire now.
         const pending = noteTextTimers.current.get(tmpId);
         if (pending) {
@@ -2117,7 +2132,7 @@ export function useWorkspace(
         setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== tmpId) });
         flashToast("Could not create the note");
       });
-  }, [rect, pushHistory, setState, currentProjectId, patchNote, flashToast]);
+  }, [rect, pushHistory, setState, currentProjectId, patchNote, flashToast, reportObject]);
 
   const updateStickyText = useCallback(
     (id: string, text: string) => {
@@ -2212,6 +2227,7 @@ export function useWorkspace(
         noteTextTimers.current.delete(id);
       }
       setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== id) });
+      reportObject({ type: "delete", kind: "note", id });
       // A temp id has no row yet; the in-flight create sees the note is gone
       // from state and deletes what it just inserted.
       if (isTmpNote(id)) return;
@@ -2221,7 +2237,7 @@ export function useWorkspace(
         })
         .catch(() => flashToast("Note not deleted"));
     },
-    [pushHistory, setState, flashToast],
+    [pushHistory, setState, flashToast, reportObject],
   );
 
   /** Two-finger pinch: zoom AND pan in one pass. The content point that sat
@@ -2655,8 +2671,9 @@ export function useWorkspace(
     (id: string) => {
       pushHistory();
       setState({ frames: stateRef.current.frames.filter((f) => f.id !== id) });
+      reportObject({ type: "delete", kind: "frame", id });
     },
-    [pushHistory, setState],
+    [pushHistory, setState, reportObject],
   );
   const renameFrame = useCallback(
     (id: string, label: string) => {
@@ -3695,10 +3712,11 @@ export function useWorkspace(
           groupGeom: { ...prev.groupGeom, [group.id]: geom },
           selectedIds: [],
         }));
+        reportObject({ type: "create", kind: "group", id: group.id });
         flashToast(`Grouped ${ids.length} ${ids.length === 1 ? "file" : "files"} into "${group.name}"`);
       })
       .catch(() => flashToast("Couldn't create the folder"));
-  }, [activeTilePositions, flashToast, setState]);
+  }, [activeTilePositions, flashToast, setState, reportObject]);
 
   /** Double-clicking a folder opens its Finder-style popup (the folder's members
    *  are hidden from the canvas while it stands in for them, ADR 0034); the popup
@@ -3730,9 +3748,10 @@ export function useWorkspace(
         groupGeom: geom,
         openFolderId: s.openFolderId === id ? null : s.openFolderId,
       });
+      reportObject({ type: "delete", kind: "group", id });
       void fetch(`/api/canvas-groups/${id}`, { method: "DELETE" }).catch(() => {});
     },
-    [setState],
+    [setState, reportObject],
   );
 
   /** Drag a member out of a folder's dropdown and drop it onto the Canvas: it
@@ -3815,9 +3834,10 @@ export function useWorkspace(
     };
     if (s.view !== "neural") setView("neural");
     setState((prev) => ({ frames: [...prev.frames, frame] }));
+    reportObject({ type: "create", kind: "frame", id: frame.id });
     setContextMenu(null);
     flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to a new artboard`);
-  }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
+  }, [activeTilePositions, pushHistory, setView, setState, flashToast, reportObject]);
 
   /** New function: pack the current selection into an existing artboard by
    *  overriding each tile's Workspace center to a grid inside the frame bounds. */
@@ -3898,10 +3918,11 @@ export function useWorkspace(
       const ids = frameContentIds(frame);
       pushHistory();
       setState({ frames: s.frames.filter((f) => f.id !== frameId) });
+      reportObject({ type: "delete", kind: "frame", id: frameId });
       if (ids.length > 0) requestDeletePhotos(ids);
       else flashToast("Removed empty artboard");
     },
-    [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast],
+    [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast, reportObject],
   );
 
   // Move / resize an artboard while its content rides along (the user's ask:

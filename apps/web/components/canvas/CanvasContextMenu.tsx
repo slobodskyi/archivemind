@@ -29,6 +29,12 @@ interface CanvasContextMenuProps {
   clipboardCount: number;
   /** Bind the selection into a move-/edit-together group (needs ≥ 2 selected). */
   onGroup: () => void;
+  /** Folder and Export moved onto the Workspace bar, which only exists inside an
+   *  open Workspace now — so a selection outside one reaches them here or not at
+   *  all. Tidy up and the artboard tool are deliberately NOT mirrored: both
+   *  arrange a working surface, which is the thing a Workspace is. */
+  onFolder: () => void;
+  onExport: () => void;
   /** Dissolve the bound group(s) the selection touches. */
   onUngroup: () => void;
   /** The selection overlaps a bound group — show Ungroup instead of Group. */
@@ -69,6 +75,8 @@ export default function CanvasContextMenu({
   onPaste,
   clipboardCount,
   onGroup,
+  onFolder,
+  onExport,
   onUngroup,
   hasGroup,
   onBringToFront,
@@ -183,6 +191,8 @@ export default function CanvasContextMenu({
             ) : (
               <Item label={`Group ${selCount}`} onClick={run(onGroup)} />
             )}
+            <Item label="Put in folder" onClick={run(onFolder)} />
+            <Item label={selCount > 1 ? `Export ${selCount}` : "Export"} onClick={run(onExport)} />
           </>
         )}
         {deletable && (

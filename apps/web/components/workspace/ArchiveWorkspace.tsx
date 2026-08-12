@@ -87,7 +87,26 @@ export default function ArchiveWorkspace({
     initialLabelNames,
     initialAnnotations,
     bd.scopeIds,
+    bd.onCanvasObject,
   );
+
+  // A Workspace owns the notes, folders and artboards MADE in it, and hides the
+  // rest — the same rule the photos follow (ADR 0044). With no Workspace open
+  // everything shows, again like photos: the un-scoped canvas is the project.
+  //
+  // Filtered here, at the render seam, and NOT in `canvasPhotos`: these three
+  // carry their own geometry and have no layout to re-pack, so there is nothing
+  // for a scope to change about where they sit. Hiding is the whole effect.
+  // Exactly one bottom bar, always. The working bar belongs to a Workspace's
+  // Canvas; everything else — the project canvas, the sorting views, all-files,
+  // and a Workspace's own sorting views — gets the narrow one. Derived once so
+  // the two gates cannot drift into showing both or neither.
+  const workingBar = bd.activeBoardId !== null && ws.view === "neural";
+
+  const owned = bd.ownedIds;
+  const scopedNotes = owned ? ws.stickyNotes.filter((n) => owned.note.has(n.id)) : ws.stickyNotes;
+  const scopedFolders = owned ? ws.folders.filter((f) => owned.group.has(f.id)) : ws.folders;
+  const scopedFrames = owned ? ws.frames.filter((f) => owned.frame.has(f.id)) : ws.frames;
 
   // Counts come from the loaded photo set, not the board's raw id list: an id
   // whose asset has since been trashed must not still be counted on a chip.
@@ -161,7 +180,7 @@ export default function ArchiveWorkspace({
         {ws.view === "neural" && (
           <>
             <FrameOverlay
-              frames={ws.frames}
+              frames={scopedFrames}
               counts={ws.frameCounts}
               draft={ws.frameDraft}
               scale={ws.scale}
@@ -175,7 +194,7 @@ export default function ArchiveWorkspace({
               onEndGesture={ws.endFrameGesture}
             />
             <FolderOverlay
-              folders={ws.folders}
+              folders={scopedFolders}
               scale={ws.scale}
               openFolderId={ws.openFolderId}
               onOpen={ws.openFolder}
@@ -190,7 +209,7 @@ export default function ArchiveWorkspace({
               onDelete={ws.deleteGroup}
             />
             <StickyNoteOverlay
-              notes={ws.stickyNotes}
+              notes={scopedNotes}
               labelNames={ws.labelNames}
               onDragStart={ws.onStickyDown}
               onResizeStart={ws.onStickyResizeDown}
@@ -529,9 +548,13 @@ export default function ArchiveWorkspace({
         onPurge={ws.purgeFromTrash}
       />
 
-      {/* Workspace-only bottom action bar — hosts the artboard tool (moved off
-          the left toolbar) plus selection actions. Absent on the sorting views. */}
-      {ws.view === "neural" && ws.projectMode && (
+      {/* The working bar belongs to a Workspace. Outside one you are browsing —
+          the project canvas and the sorting views get the narrow bar below.
+          Folder and Export are mirrored into the right-click menu so nothing
+          here is the ONLY way to reach them; Tidy up and the artboard tool are
+          not, because both arrange a working surface and that is what a
+          Workspace is. */}
+      {workingBar && (
         <WorkspaceActionBar
           tool={ws.tool}
           selCount={ws.selectedIds.size}
@@ -563,7 +586,7 @@ export default function ArchiveWorkspace({
           the untriaged pile is usually exactly what you open all-files to find,
           so that is the one place a filter must not be missing. It gets no
           Regroup (nothing there has an override bucket) and no Re-cluster. */}
-      {(ws.isSenseView || ws.isTimelineView || ws.isMapView || ws.allFilesMode) && (
+      {!workingBar && (
         <SortingActionBar
           showRecluster={ws.isSenseView}
           showRegroup={ws.isSenseView || ws.isTimelineView}
@@ -621,7 +644,7 @@ export default function ArchiveWorkspace({
           bd.createBoard(undefined, [...ws.selectedIds]);
           ws.closeAddProj();
         }}
-        artboards={ws.frames.map((f) => ({ key: f.id, label: f.label }))}
+        artboards={scopedFrames.map((f) => ({ key: f.id, label: f.label }))}
         onSelectArtboard={(id) => {
           ws.closeAddProj();
           ws.addToExistingArtboard(id);
@@ -720,6 +743,8 @@ export default function ArchiveWorkspace({
         onPaste={ws.pasteFiles}
         clipboardCount={ws.clipboardCount}
         onGroup={ws.groupFiles}
+        onFolder={ws.folderFiles}
+        onExport={ws.exportFiles}
         onUngroup={ws.ungroupSelection}
         hasGroup={ws.selectionHasGroup}
         onBringToFront={ws.bringToFront}
