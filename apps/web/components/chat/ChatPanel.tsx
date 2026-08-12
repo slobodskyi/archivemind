@@ -125,7 +125,7 @@ export default function ChatPanel({ open, msgs, input, onClose, onInput, onKey, 
     <div
       style={{
         position: "absolute",
-        top: 52,
+        top: "var(--hdr)",
         right: 0,
         bottom: 0,
         width: "min(320px, 100vw)",

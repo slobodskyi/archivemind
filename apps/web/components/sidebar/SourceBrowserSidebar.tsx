@@ -411,7 +411,7 @@ function SourceBrowserSidebar({
     <div
       style={{
         position: "absolute",
-        top: 52,
+        top: "var(--hdr)",
         right,
         bottom: 0,
         width: 380,

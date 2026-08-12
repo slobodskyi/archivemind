@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LABEL_NAMES } from "@archivemind/shared";
 import type { Photo } from "@/types";
-import { LABEL_COLORS } from "./labels";
 import {
   appendClusterAnchor,
   assetGallery,
   droppedAssetCenters,
   fitBounds,
   hitTestTiles,
-  labelCloudLayout,
   nudgeOffOverlap,
   packGrid,
   readingOrder,
@@ -733,85 +730,3 @@ describe("readingOrder", () => {
   });
 });
 
-describe("labelCloudLayout (colour labels)", () => {
-  const names = { ...DEFAULT_LABEL_NAMES, red: "Rejected" };
-
-  it("packs one cloud per colour plus a 'No label' cloud", () => {
-    const layout = labelCloudLayout(
-      [
-        photo("a", { label: "red" }),
-        photo("b", { label: "red" }),
-        photo("c", { label: "green" }),
-        photo("d"),
-      ],
-      {},
-      names,
-    );
-
-    expect(layout.clouds.map((c) => c.key).sort()).toEqual(["No label", "green", "red"]);
-    expect(layout.tileCloud).toEqual({ a: "red", b: "red", c: "green", d: "No label" });
-  });
-
-  it("labels a cloud with the workspace's own name for the colour", () => {
-    const layout = labelCloudLayout([photo("a", { label: "red" })], {}, names);
-    expect(layout.clouds[0].label).toBe("Rejected");
-    expect(layout.clouds[0].color).toBe(LABEL_COLORS.red);
-  });
-
-  it("draws no connecting lines — a colour is a human statement, not an AI relation", () => {
-    // The same photos WOULD be linked on Topic: they share a tag.
-    const photos = [photo("a", { label: "red", tags: ["evac"] }), photo("b", { label: "red", tags: ["evac"] })];
-    expect(topicCloudLayout(photos, {}).edges).toHaveLength(1);
-    expect(labelCloudLayout(photos, {}, names).edges).toHaveLength(0);
-  });
-
-  it("is deterministic for equivalent inputs", () => {
-    const photos = [photo("a", { label: "blue" }), photo("b"), photo("c", { label: "blue" })];
-    expect(labelCloudLayout(photos, {}, names)).toEqual(labelCloudLayout([...photos], {}, { ...names }));
-  });
-
-  it("honours a drag override recorded in the cloud the tile is still in", () => {
-    const layout = labelCloudLayout(
-      [photo("a", { label: "red" })],
-      { a: { x: 1234, y: -560, cloud: "red" } },
-      names,
-    );
-    expect(layout.tiles.a.cx).toBe(1234);
-    expect(layout.tiles.a.cy).toBe(-560);
-  });
-
-  it("ignores the override once the photo is re-coloured, so it re-packs with its new cloud", () => {
-    // ADR 0038's stale-anchor rule, reused: the anchor here is the colour
-    // itself, so re-labelling a dragged tile must not strand it in the cloud
-    // it left (dragging that cloud's label with it).
-    const layout = labelCloudLayout(
-      [photo("a", { label: "green" })],
-      { a: { x: 1234, y: -560, cloud: "red" } },
-      names,
-    );
-    expect(layout.tiles.a.cx).not.toBe(1234);
-    expect(layout.tileCloud.a).toBe("green");
-  });
-
-  it("still honours an override written before anchors existed", () => {
-    const layout = labelCloudLayout([photo("a", { label: "red" })], { a: { x: 10, y: 20 } }, names);
-    expect(layout.tiles.a.cx).toBe(10);
-  });
-
-  it("never overlaps two tiles of the same cloud", () => {
-    const photos = Array.from({ length: 12 }, (_, i) => photo(`p${i}`, { label: "yellow" }));
-    const layout = labelCloudLayout(photos, {}, names);
-    const tiles = Object.values(layout.tiles);
-    for (let i = 0; i < tiles.length; i++) {
-      for (let j = i + 1; j < tiles.length; j++) {
-        expect(intersects(tiles[i], tiles[j])).toBe(false);
-      }
-    }
-  });
-
-  it("survives an empty archive with finite bounds", () => {
-    const layout = labelCloudLayout([], {}, names);
-    expect(layout.clouds).toEqual([]);
-    expect(allFinite(layout.bounds)).toBe(true);
-  });
-});

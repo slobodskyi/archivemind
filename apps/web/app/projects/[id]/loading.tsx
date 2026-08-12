@@ -10,16 +10,17 @@ function Sk({ w, h, style }: { w: number | string; h: number; style?: React.CSSP
 export default function ProjectLoading() {
   return (
     <div style={{ width: "100vw", height: "100dvh", overflow: "hidden", background: "var(--bg)", position: "relative" }}>
-      {/* header shell (real AppHeader is 52px, bottom-bordered) */}
+      {/* header shell — same `--hdr` height the real AppHeader uses, so the
+          skeleton doesn't jump by the notch inset when the page swaps in. */}
       <div
         style={{
-          height: 52,
+          height: "var(--hdr)",
           borderBottom: "1px solid var(--bd)",
           background: "var(--bg-nb)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "0 16px",
+          padding: "env(safe-area-inset-top, 0px) 16px 0",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -55,7 +56,7 @@ export default function ProjectLoading() {
       <div
         style={{
           position: "absolute",
-          inset: "52px 0 0 0",
+          inset: "var(--hdr) 0 0 0",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

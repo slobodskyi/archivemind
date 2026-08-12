@@ -238,7 +238,7 @@ export default function PhotoDrawer({
     <div
       style={{
         position: "absolute",
-        top: 52,
+        top: "var(--hdr)",
         right,
         bottom: 0,
         // Fixed 410 overflowed any viewport narrower than itself; the slide-out

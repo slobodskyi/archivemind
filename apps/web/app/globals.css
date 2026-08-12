@@ -21,6 +21,12 @@
   --ac: #39ff6a;
   --ac2: #22dd52;
   --red: #ff4444;
+  /* The app header's full height. A variable rather than a literal 52 because
+     the bar grows by the notch inset on devices that have one, and everything
+     that sits directly beneath it (canvas, drawer, chat, trash, map) has to grow
+     with it — seven call sites used to hardcode 52 and would slide under the
+     header on those devices. */
+  --hdr: calc(52px + env(safe-area-inset-top, 0px));
 }
 
 * {
