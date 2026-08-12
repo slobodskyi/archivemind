@@ -207,7 +207,9 @@ Phases 1–2). What actually remains:
   ledger and a clean post-push dry-run. Docker on the owner's machine still
   returns 500 while provisioning `db diff`'s shadow database, so that optional
   drift check could not run; the asset read keeps its migration-gap fallback.
-- **Colour labels + the LABELS view — ✅ DONE 2026-08-08, on prod** — the
+- **Colour labels + the LABELS view — ✅ DONE 2026-08-08, on prod** (the LABELS
+  *view* was later retired — see the canvas redesign entry below; the label, the
+  filter and the migration all stand) — the
   archive had four ways to group photos and all four were derived
   from the file (date, GPS, the model's reading, none). This adds the first one
   that records a *decision*
@@ -313,6 +315,46 @@ promised was half-built.
   exist; a link to a 404 is worse), no usage CSV export, no deep link from the
   storage card into Trash. **Never verified visually** — the page has not been
   looked at in a browser by anyone but the owner.
+
+### Canvas redesign — taken from `feat/workspace-tools-edits` (2026-08-12)
+
+George's design branch, landed as a four-PR stack rather than merged as-is: the
+branch carried real functional losses beside the visual work, and each was either
+kept or removed on purpose.
+
+1. **Chrome + navigation.** `AppHeader` pins to the viewport (`position: fixed`
+   + safe-area, with the height in `--hdr` so the seven call sites that hardcoded
+   `52` follow it). `ViewSwitcher`, a bottom segmented control, replaces the
+   header tabs *and* the separate Workspace toggle. `InfiniteGrid` gains ruled
+   lines on Canvas / dots on the sorting views. **The LABELS view is retired**
+   ([ADR 0040](decisions/0040-colour-labels-as-a-human-curation-axis.md)
+   amended) — arrangements made in it are dropped from `localStorage`; nothing
+   on the server moved.
+2. **Tool rail + colour control.** The rail is identical in every view. The
+   colour swatch is context-sensitive on both bottom bars: it marks a selection,
+   or filters when there is none. `LabelFilterPanel` is gone, and with it the
+   per-colour counts and the only entry point for renaming a colour (kept in the
+   data, deliberately unreachable). The filter is reachable in **all-files**
+   again, which George's version had dropped.
+3. **Drawing moves onto the sticky note**
+   ([ADR 0041](decisions/0041-annotations-carry-their-own-geometry.md) amended —
+   the branch claimed this amendment twice and never wrote it). Rich text is
+   syntax in the same plain string as the checklist. Two regressions in the
+   branch were fixed rather than shipped: palm rejection (a stroke is now bound
+   to the pointer that started it) and the note's font-size control (threaded to
+   the card and never called). ⚠️ **Canvas ink already drawn on prod is now
+   invisible** — `kind='ink'` rows are kept and still parse, nothing renders
+   them, and whether they are deleted is an open, reversible decision.
+4. **Workspaces** ([ADR 0044](decisions/0044-workspaces-as-a-file-scope.md)) — a
+   named, colour-coded file scope, `localStorage` for now, taken **additively**:
+   opening one narrows the canvas and nothing else changes. The branch made it a
+   mode that hid existing notes and folders behind "create a workspace first".
+   **Backend not built** — the ADR is its spec (`boards` + `board_assets`, the
+   routes, and `board_id` on notes/folders for per-workspace state).
+
+**No migrations in any of the four.** Nothing here has been verified on a real
+device or against prod data; every check is `lint`/`typecheck`/`test`/`build`
+plus static-render screenshots of the changed surfaces.
 
 ---
 

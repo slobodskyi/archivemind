@@ -66,13 +66,18 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   Topic heuristic, the connecting-line web and search's explicit tier, so a tag
   named `red` would grow a "red" cloud and answer a text search for the colour.
   One swatch row assigns it from four places (right-click menu, action bar,
-  drawer, keys `1`–`7`, `0` clears) through `POST /api/assets/label`; the seven
-  names are renameable per workspace (`workspace_labels`, `PATCH /api/labels`);
-  the left toolbar's filter **hides tiles without ever moving them** — every
-  layout still runs over the full set and the filter is applied at one seam
-  (`visibleTilePositions`), so artboards, folders and exports keep seeing the
-  real geometry; and **LABELS** is the fifth view, one cloud per colour plus
-  `No label`, via the same `buildCloudLayout` with the tag web off. Zero credits.
+  drawer, keys `1`–`7`, `0` clears) through `POST /api/assets/label`. The same
+  row **filters** when nothing is selected (`LabelBarControl` on both bottom
+  bars — ADR 0040 as amended): the two jobs never overlap, and an empty
+  selection is exactly when "mark the selection" has nothing to do. The filter
+  **hides tiles without ever moving them** — every layout still runs over the
+  full set and the filter is applied at one seam (`visibleTilePositions`), so
+  artboards, folders and exports keep seeing the real geometry. **The LABELS
+  sorting view is retired** and so is `LabelFilterPanel`; a colour is a marker
+  you read on every tile in every view, not a fourth way to sort. The seven
+  names stay renameable in the data (`workspace_labels`, `PATCH /api/labels`)
+  but have **no UI entry point** — deliberate, recorded in the ADR, don't
+  "restore" it as a bug. Zero credits.
   **Sticky notes are server rows now, geometry included (ADR 0041, migration
   `20260808000002`):** `canvas_annotations` — a note (and, next, freehand ink)
   scoped to a project or the `all` canvas. This is the ONE documented exception
@@ -80,20 +85,33 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   the canvas so its tile position is a per-user preference, but an annotation
   exists nowhere else, so its x/y *is* its content. Nothing else moved — tiles,
   frames and folder boxes are still `localStorage`. Notes render and can be
-  created **only on the Workspace (`neural`) view**, behind the same gate
+  created **only on the Canvas (`neural`) view**, behind the same gate
   `FrameOverlay`/`FolderOverlay` already used; that single-view rule is what
   lets an annotation have **no anchor** at all, since there is exactly one
   arrangement it is positioned against. Colour is the ADR 0040 seven (reused,
   not re-picked, so the two swatch rows can't fork); `style` is jsonb parsed by
-  zod, so the next knob is a field and not a migration. A note is configurable —
-  colour + font size through `NoteOptionsPopover`, a corner handle to resize —
-  and **checklists are syntax, not structure**: a leading `[ ]`/`[x]` renders as
-  a checkbox (`lib/notes.ts`) while the body stays one plain string, which is
-  what keeps undo and the autosave debounce out of a block model. **Freehand ink
-  is the same table's second `kind`** — one row per stroke (so erasing is a
-  DELETE), `lib/ink.ts` for the pure geometry, marker + eraser in the left
-  toolbar, and the rule that matters: **a pen draws whatever tool is selected, a
-  finger never does.** Zero credits.
+  zod, so the next knob is a field and not a migration. **Everything a note can
+  carry is syntax, not structure** (`lib/notes.ts`): `[ ]`/`[x]` checkboxes, `#`
+  titles, `-` bullets, `1.` numbers, `**bold**`, `~~strike~~` — all markdown-ish
+  marks the renderer recognises, while the body stays one plain string, which is
+  what keeps undo, the autosave debounce and a half-typed line out of a block
+  model. **Drawing lives ON the note** (ADR 0041 as amended, 2026-08-12): the
+  standalone canvas marker is gone, a note has a pencil mode in its own
+  `NoteToolsPanel`, and its strokes sit in `body.strokes` in a fixed 0..1000
+  virtual space so the drawing scales with the card. `inkBodySchema` and the
+  `kind='ink'` parse in `lib/annotations.ts` are **kept but dormant** — deleting
+  them would make an old stroke row parse as a blank sticky note. Nothing writes
+  `kind='ink'` any more, and canvas ink drawn before the change is invisible.
+  Zero credits.
+  **Workspaces are a named file scope (ADR 0044):** a `board` in code
+  (`lib/boards.ts`, `hooks/useBoards.ts`, `BoardBrowser` in the header) — a
+  named, colour-coded set of a project's files, in `localStorage` until the
+  table lands. Opening one narrows the canvas and does nothing else: notes,
+  folders, artboards, all four views and export keep working. The scope is
+  applied at `canvasPhotos()` and mirrored into `WorkspaceState.boardScope`,
+  which is the opposite of the label filter on purpose — a workspace RE-PACKS,
+  so the geometry seam (`activeTilePositions`) and the render seam must run over
+  the same set or a drag lands where nothing is drawn.
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
@@ -159,11 +177,14 @@ design from this file:**
   offline reverse geocoding that labels it) and **0038** (Topic legibility —
   cluster-anchored overrides, core-anchored labels, Regroup / Re-cluster /
   rename; it amends the label ranking and the label-stability rule in 0028 and
-  the "Other" fold in 0023) for what ships today. **0040** adds the fifth view
-  (LABELS) beside them — colour labels as a human curation axis, and the rule
-  that a label filter hides tiles without moving them. **0041** puts sticky
-  notes (and the ink to come) on the server *with their coordinates* — read it
-  before "correcting" that back to ADR 0022, which it deliberately excepts.
+  the "Other" fold in 0023) for what ships today. **0040** is colour labels as a
+  human curation axis, and the rule that a label filter hides tiles without
+  moving them — **read its amendments**: the LABELS view is retired and the
+  filter moved onto the bottom bars. **0041** puts sticky notes on the server
+  *with their coordinates* — read it before "correcting" that back to ADR 0022,
+  which it deliberately excepts — and **its amendment** moves drawing off the
+  canvas and onto the note. **0044** adds Workspaces, a named file scope, and is
+  the one ADR here whose backend is still a build list.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.
