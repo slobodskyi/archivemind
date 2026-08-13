@@ -163,6 +163,25 @@ export default function ArchiveWorkspace({
   // here rather than inside the canvas drag session.
   const [folderDropTarget, setFolderDropTarget] = useState<string | null>(null);
 
+  // Deleting a Workspace asks first (ADR 0044 as amended). The × sits on the
+  // chip you click to OPEN one, so an unconfirmed click there was the cheapest
+  // way in the whole header to lose an arrangement. Two questions share the
+  // modal because they are the same question at different stakes: `trash` is
+  // reversible and says so, `purge` is not.
+  const [boardConfirm, setBoardConfirm] = useState<{ id: string; mode: "trash" | "purge" } | null>(null);
+  const confirmBoard = boardConfirm
+    ? ([...bd.boards, ...bd.trashedBoards].find((b) => b.id === boardConfirm.id) ?? null)
+    : null;
+
+  const restoreBoard = useCallback(
+    (id: string) => {
+      const name = bd.trashedBoards.find((b) => b.id === id)?.name;
+      bd.restoreBoard(id);
+      ws.flashToast(name ? `${name} restored` : "Workspace restored");
+    },
+    [bd, ws],
+  );
+
   /** Opening a Workspace puts you on its canvas. The sorting views browse the
    *  whole project and belong to All files; leaving someone inside a workspace
    *  on Timeline would show them a bar and a grid that answer a different
@@ -534,6 +553,7 @@ export default function ArchiveWorkspace({
           ws.projectMode ? (
             <BoardBrowser
               boards={bd.boards}
+              trashedBoards={bd.trashedBoards}
               activeBoardId={bd.activeBoardId}
               counts={boardCounts}
               dropTargetId={ws.boardDropTargetId ?? folderDropTarget}
@@ -543,7 +563,8 @@ export default function ArchiveWorkspace({
                 ws.setView("neural");
               }}
               onRename={bd.renameBoard}
-              onDelete={bd.deleteBoard}
+              onDelete={(id) => setBoardConfirm({ id, mode: "trash" })}
+              onRestore={restoreBoard}
             />
           ) : undefined
         }
@@ -632,9 +653,15 @@ export default function ArchiveWorkspace({
       <TrashPanel
         open={ws.trashOpen}
         assets={ws.trashAssets}
+        // Project-scoped, unlike the photos beside them: a workspace belongs to
+        // one project, so all-files (which has no workspaces to begin with)
+        // shows none.
+        boards={bd.trashedBoards}
         onClose={ws.closeTrash}
         onRestore={ws.restoreFromTrash}
         onPurge={ws.purgeFromTrash}
+        onRestoreBoard={restoreBoard}
+        onPurgeBoard={(id) => setBoardConfirm({ id, mode: "purge" })}
       />
 
       {/* The working bar belongs to a Workspace. Outside one you are browsing —
@@ -897,6 +924,37 @@ export default function ArchiveWorkspace({
         danger
         onConfirm={ws.confirmDeleteNow}
         onClose={ws.cancelConfirmDelete}
+      />
+
+      {/* Deleting a Workspace, both stakes. The reversible one names what
+          survives, because "delete" over a set of files reads as deleting the
+          files — the whole reason to spell it out is that it does not. */}
+      <ConfirmModal
+        open={confirmBoard !== null}
+        title={
+          boardConfirm?.mode === "purge"
+            ? `Delete “${confirmBoard?.name ?? ""}” permanently?`
+            : `Move “${confirmBoard?.name ?? ""}” to Trash?`
+        }
+        body={
+          boardConfirm?.mode === "purge"
+            ? `The workspace is removed for good. Its ${confirmBoard?.assetIds.length ?? 0} files stay in the project, and the notes and folders made in it move back to the project canvas. This cannot be undone.`
+            : `The workspace stops showing in the header. Its ${confirmBoard?.assetIds.length ?? 0} files, notes and folders are kept, and you can restore all of it from Trash for 30 days.`
+        }
+        confirmLabel={boardConfirm?.mode === "purge" ? "Delete permanently" : "Move to Trash"}
+        danger
+        onConfirm={() => {
+          if (!boardConfirm) return;
+          if (boardConfirm.mode === "purge") {
+            bd.purgeBoard(boardConfirm.id);
+            ws.flashToast("Workspace deleted permanently");
+          } else {
+            bd.deleteBoard(boardConfirm.id);
+            ws.flashToast(`${confirmBoard?.name ?? "Workspace"} moved to Trash`);
+          }
+          setBoardConfirm(null);
+        }}
+        onClose={() => setBoardConfirm(null)}
       />
 
       {/* Action toasts (delete → Undo) render as the quiet bottom-left chip —

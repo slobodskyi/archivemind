@@ -264,3 +264,48 @@ is not the question a Workspace answers — and leaving someone inside one on
 Timeline showed them a bar and a grid for a different scope with no switcher to
 get back. Done in the open/create handlers rather than an effect, because
 opening a Workspace *is* the action that puts you on its canvas.
+
+## Amendment (2026-08-13) — deleting a Workspace asks, and is undoable
+
+Deleting was an immediate hard `DELETE`: the row went, `board_assets` cascaded,
+and every note, folder and artboard made inside had its `board_id` nulled. It was
+one unconfirmed click on a `×` that sits **on the chip you click to open the
+workspace** — the cheapest way in the entire header to lose an arrangement, with
+nothing to undo it.
+
+### Decision
+Three changes, one behaviour:
+
+1. **It asks first.** The chip's `×` opens a `ConfirmModal` naming the workspace
+   and what survives — "its N files, notes and folders are kept". "Delete" over a
+   set of files reads as deleting the files; the only reason to spell it out is
+   that it does not.
+2. **It is a soft delete.** `boards.deleted_at` (migration `20260813000001`),
+   the same column and the same `PATCH { deleted: false }` restore the project
+   trash already uses, so "in the Trash" means one thing across projects, photos
+   and workspaces. The `DELETE` verb stays what it was — the permanent one,
+   reachable only from the Trash panel. **This is what makes the restore whole:**
+   a stamped row keeps its membership *and* keeps owning its notes and folders,
+   so the workspace comes back as it was rather than as a name over an empty
+   canvas. The FK side-effects only ever run at the hard delete.
+3. **The undo is in the header, not in a toast.** A restore button appears beside
+   the `＋` for exactly as long as something is recoverable — its presence *is*
+   the notice, where a toast would have expired by the time you looked up. One
+   click restores the most recent (the dot says which); clicking again walks back
+   through the rest. The Trash panel is for picking a specific one, or ending it
+   for good.
+
+### Consequences
+- **One read, split client-side.** `getBoards` returns live and trashed rows
+  together, each carrying `deletedAt`, and `splitBoards` separates them. The
+  header has to know on first paint whether there is anything to undo, so a
+  second fetch after mount would make the button pop in a beat after the delete
+  it belongs to.
+- **Trashed workspaces live in the canvas Trash panel, not the homepage Trash
+  view.** A workspace is a subset of ONE project; a trashed photo is
+  workspace-global. The homepage has no project scope to list them under.
+- **`sweep_trashed_boards()`** joins the worker's 6-hourly sweep with the same
+  30-day default as the project one, in its own failure domain. Nothing here
+  touches R2 — a workspace never held bytes.
+- A trashed workspace does not reserve its colour or its number: the next
+  `＋` counts the live ones.

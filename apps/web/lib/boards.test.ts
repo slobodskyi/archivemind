@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Board } from "@archivemind/shared";
-import { BOARD_COLORS, clearLegacyBoards, nextBoardColor, readLegacyBoards } from "./boards";
+import { BOARD_COLORS, clearLegacyBoards, nextBoardColor, readLegacyBoards, splitBoards } from "./boards";
 
 /** The suite runs in vitest's default `node` environment (this package ships no
  *  vitest config), where `window` is undefined and the legacy reader
@@ -23,6 +23,7 @@ const board = (over: Partial<Board> = {}): Board => ({
   color: "blue",
   sortOrder: 0,
   assetIds: [],
+  deletedAt: null,
   ...over,
 });
 
@@ -98,6 +99,50 @@ describe("readLegacyBoards", () => {
     clearLegacyBoards("p1");
     expect(readLegacyBoards("p1")).toEqual([]);
     expect(readLegacyBoards("p2")).toHaveLength(1);
+  });
+});
+
+/** The header and the Trash panel read one array (ADR 0044 as amended): the
+ *  reader returns live and trashed rows together so the restore affordance is
+ *  in the first paint. What that costs is exactly this split. */
+describe("splitBoards", () => {
+  it("keeps a live board out of the trash and vice versa", () => {
+    const { live, trashed } = splitBoards([
+      board({ id: "a" }),
+      board({ id: "b", deletedAt: "2026-08-13T10:00:00Z" }),
+    ]);
+    expect(live.map((b) => b.id)).toEqual(["a"]);
+    expect(trashed.map((b) => b.id)).toEqual(["b"]);
+  });
+
+  it("puts the newest deletion first — [0] is what one click restores", () => {
+    const { trashed } = splitBoards([
+      board({ id: "old", deletedAt: "2026-08-01T10:00:00Z" }),
+      board({ id: "new", deletedAt: "2026-08-13T10:00:00Z" }),
+      board({ id: "mid", deletedAt: "2026-08-07T10:00:00Z" }),
+    ]);
+    expect(trashed.map((b) => b.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("treats a board with no timestamp as live — a chip can never vanish over a missing column", () => {
+    const { live, trashed } = splitBoards([board({ id: "a", deletedAt: null })]);
+    expect(live).toHaveLength(1);
+    expect(trashed).toHaveLength(0);
+  });
+
+  it("preserves the reader's order among the live ones", () => {
+    const { live } = splitBoards([
+      board({ id: "a", sortOrder: 0 }),
+      board({ id: "x", deletedAt: "2026-08-13T10:00:00Z" }),
+      board({ id: "b", sortOrder: 1 }),
+    ]);
+    expect(live.map((b) => b.id)).toEqual(["a", "b"]);
+  });
+
+  it("does not mutate its input", () => {
+    const input = [board({ id: "a" }), board({ id: "b", deletedAt: "2026-08-13T10:00:00Z" })];
+    splitBoards(input);
+    expect(input.map((b) => b.id)).toEqual(["a", "b"]);
   });
 });
 

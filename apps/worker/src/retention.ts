@@ -16,6 +16,19 @@ export async function sweepTrashedProjects(pool: pg.Pool): Promise<number> {
   return rows[0]?.removed ?? 0;
 }
 
+/** Hard-delete trashed WORKSPACES past their grace period (migration
+ *  20260813000001, ADR 0044). Same shape and same 30-day default as the project
+ *  sweep, and like it this never touches R2: a workspace is a curated subset of
+ *  a project's files. Only here do the FK side-effects run — membership rows
+ *  cascade and the notes and folders made inside fall back to the project canvas
+ *  with board_id null. Returns the number of workspaces removed. */
+export async function sweepTrashedBoards(pool: pg.Pool): Promise<number> {
+  const { rows } = await pool.query<{ removed: number }>(
+    "select sweep_trashed_boards() as removed",
+  );
+  return rows[0]?.removed ?? 0;
+}
+
 /** Enqueue 'purge' jobs for trashed ASSETS past their grace period (migration
  *  20260723000001, ADR 0033). Same shape as the project sweep — the 30-day
  *  window lives in the SQL default — but this one only enqueues: the purge

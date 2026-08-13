@@ -8,7 +8,9 @@ import { getBoards, nextBoardSortOrder } from "@/lib/boards-server";
  *  `workspace_id` already means the tenant. RLS scopes every query to the
  *  caller's workspace; nothing here trusts a workspace id from the body.
  *
- *  GET  ?project=<id> — the project's workspaces with their ordered members.
+ *  GET  ?project=<id> — the project's workspaces with their ordered members,
+ *       trashed ones included and marked by `deletedAt` (the client splits them
+ *       — the header needs to know there is something to restore).
  *  POST — create one; `assetIds` seeds membership, so "new workspace from this
  *         selection" is a single request. */
 export async function GET(request: Request) {
@@ -103,6 +105,7 @@ export async function POST(request: Request) {
     color: row.color,
     sortOrder: row.sort_order,
     assetIds: seeded,
+    deletedAt: null,
   };
   return NextResponse.json(board, { status: 201 });
 }

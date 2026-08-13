@@ -288,7 +288,9 @@ function NoteCard({
             ref={textarea}
             className="am-sticky-note"
             value={note.text}
-            placeholder="Type a note…"
+            // No hint over a drawing: the note is already saying something, and
+            // the placeholder would print itself across the middle of it.
+            placeholder={note.strokes.length > 0 ? undefined : "Type a note…"}
             onChange={(e) => onTextChange(note.id, e.target.value)}
             onPointerDown={(e) => e.stopPropagation()}
             style={{
@@ -316,7 +318,10 @@ function NoteCard({
             fontSize={fontSize}
             // In pencil mode the body is just a backdrop for the drawing — the
             // "Type a note…" hint would sit under the pen, so it's suppressed.
-            showPlaceholder={!(active && mode === "draw")}
+            // Once there ARE strokes it stays suppressed in every mode: an empty
+            // `text` no longer means an empty note, and "Type a note…" printed
+            // through a drawing reads as a rendering fault.
+            showPlaceholder={!(active && mode === "draw") && note.strokes.length === 0}
             onEdit={onActivate}
             onToggleCheck={onToggleCheck}
           />

@@ -105,13 +105,23 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   Zero credits.
   **Workspaces are a named file scope (ADR 0044):** a `board` in code
   (`lib/boards.ts`, `hooks/useBoards.ts`, `BoardBrowser` in the header) — a
-  named, colour-coded set of a project's files, in `localStorage` until the
-  table lands. Opening one narrows the canvas and does nothing else: notes,
-  folders, artboards, all four views and export keep working. The scope is
-  applied at `canvasPhotos()` and mirrored into `WorkspaceState.boardScope`,
-  which is the opposite of the label filter on purpose — a workspace RE-PACKS,
-  so the geometry seam (`activeTilePositions`) and the render seam must run over
-  the same set or a drag lands where nothing is drawn.
+  named, colour-coded set of a project's files, in the `boards` table since
+  migration `20260812000001`. Opening one narrows the canvas and does nothing
+  else: notes, folders, artboards, all four views and export keep working. The
+  scope is applied at `canvasPhotos()` and mirrored into
+  `WorkspaceState.boardScope`, which is the opposite of the label filter on
+  purpose — a workspace RE-PACKS, so the geometry seam (`activeTilePositions`)
+  and the render seam must run over the same set or a drag lands where nothing
+  is drawn. **Deleting one is confirmed, reversible and swept** (ADR 0044's
+  2026-08-13 amendment, migration `20260813000001`): the chip's `×` asks, then
+  stamps `boards.deleted_at` — `PATCH { deleted: true|false }`, the project
+  trash's own idiom — so membership and the notes and folders it owns survive
+  and a restore is whole. `DELETE` is now the permanent path, from the Trash
+  panel only, and `sweep_trashed_boards()` hard-deletes past 30 days. The undo
+  is a restore button beside the header's `＋`, present exactly while something
+  is recoverable; trashed workspaces list in the canvas Trash panel (not the
+  homepage Trash view — a workspace is scoped to one project, a trashed photo
+  is not).
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
