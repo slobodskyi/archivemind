@@ -361,3 +361,24 @@ ref, and the default name is the lowest free `Workspace N` rather than
 `count + 1` — which also stops a delete from making the next create a duplicate
 of a survivor. Both rules are pure functions (`nextBoardName`, `nextBoardColor`)
 so they are tested rather than argued about.
+
+### The breadcrumb takes the room it has, and a chip's colour is editable
+Two corrections to the header above.
+
+**No fixed cap.** The breadcrumb stopped at 520px, so on a wide window four
+workspaces read as `W… W… W… W…` with half the header empty beside them. A cap is
+a guess about how much room there is and the browser already knows: the
+breadcrumb now takes what the right-hand tools leave (`flex: 1 1 auto`, the tools
+`flex: 0 0 auto`), and the graceful-squeeze machinery only engages when the room
+genuinely runs out — chips ellipsize first, the row clips last.
+
+**Colour is editable, from the same swatch row as everything else.** `recolorBoard`
+existed from the first increment with no way to call it. The dot on a chip opens
+the seven-colour `LabelSwatchRow` — the same object a photo's label and a note's
+paper use (ADR 0040), so the gesture is learned once — and right-click on the chip
+opens it too, matching where a photo's colours live. `clearable={false}`, like the
+note: a workspace with no colour is not a state, since the chip has a dot to draw.
+
+The popover is `position: fixed`, positioned from the chip's rect at open time,
+because the breadcrumb clips its overflow now and an absolutely positioned
+popover inside a chip would be clipped with it.

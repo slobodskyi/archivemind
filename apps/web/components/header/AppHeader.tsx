@@ -73,15 +73,19 @@ export default function AppHeader({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
+        gap: 12,
         padding: "env(safe-area-inset-top, 0px) 14px 0",
         zIndex: 40,
       }}
     >
-      {/* `overflow: hidden` so a long chip row clips at the cap instead of
-          running under SHARE and the zoom control on a narrow window. The chips
-          themselves shrink and ellipsize first (each carries `minWidth: 0`), so
-          clipping is the last resort rather than the first thing you see. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 520, minWidth: 0, overflow: "hidden" }}>
+      {/* Takes whatever the right-hand tools leave, instead of a fixed cap. It
+          used to stop at 520px, which on a wide window truncated workspace names
+          to "W…" with half the header empty beside them — a cap is a guess about
+          how much room there is, and the browser already knows. `minWidth: 0` +
+          `overflow: hidden` keep the squeeze graceful when the room really does
+          run out: the chips ellipsize first (each carries its own `minWidth: 0`)
+          and the row clips last, rather than running under SHARE. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
         <button
           onClick={onHome}
           aria-label="Home"
@@ -196,7 +200,9 @@ export default function AppHeader({
         )}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {/* Never shrinks: undo/redo, zoom, SHARE and the avatar are fixed chrome,
+          so the breadcrumb on the left is what gives way when space is tight. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
         <button
           onClick={onUndo}
           title="Undo"

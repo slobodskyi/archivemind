@@ -563,6 +563,8 @@ export default function ArchiveWorkspace({
               boards={bd.boards}
               activeBoardId={bd.activeBoardId}
               counts={boardCounts}
+              labelNames={ws.labelNames}
+              onRecolor={bd.recolorBoard}
               dropTargetId={ws.boardDropTargetId ?? folderDropTarget}
               onSelect={openBoard}
               onCreate={() => {
