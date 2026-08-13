@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AssetLabel, Board, LabelNames } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
 import { POPOVER_SURFACE } from "@/lib/ui";
@@ -27,8 +27,15 @@ interface BoardBrowserProps {
   dropTargetId?: string | null;
 }
 
-/** How many board chips show inline before the rest fold into a "+N ▾" menu. */
-const VISIBLE_CAP = 4;
+/** Fallback shown before the first width measurement lands (avoids a flash of
+ *  either every chip or none while the layout effect hasn't run yet). */
+const INITIAL_VISIBLE_CAP = 4;
+/** The ＋ button (30px) plus its gap to the last chip/overflow button. */
+const CREATE_BTN_W = 34;
+/** Conservative estimate for the "+N ▾" button — the count is at most two
+ *  digits in practice, so this over-reserves slightly rather than clipping. */
+const OVERFLOW_BTN_W = 58;
+const CHIP_GAP = 4;
 
 /** The Workspace browser in the header (ADR 0044): "All files" (the sorting
  *  views over the whole project) then a chip per workspace — colour dot · name ·
@@ -56,6 +63,18 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
    *  a containing block for it. */
   const [colorFor, setColorFor] = useState<{ id: string; x: number; y: number } | null>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
+
+  // Width-aware overflow: how many chips actually fit is a function of the
+  // room the header has left (which now flexes all the way to undo/redo,
+  // not a fixed cap), not a hardcoded count. `rowRef` is the flex item that
+  // fills that remaining room; `measureContainerRef` holds an offscreen copy
+  // of every chip so trimming doesn't depend on the visible row's own
+  // (still-settling) size. Widths come from a DOM query in the effect below
+  // rather than per-chip refs, since a ref written from inside the render
+  // tree (even indirectly) trips the ref-during-render lint rule.
+  const rowRef = useRef<HTMLDivElement>(null);
+  const measureContainerRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_CAP);
 
   const openColorPicker = (target: HTMLElement, id: string) => {
     const rect = (target.closest(`[${BOARD_CHIP_ATTR}]`) ?? target).getBoundingClientRect();
@@ -90,8 +109,38 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
     };
   }, [colorFor]);
 
-  const visible = boards.slice(0, VISIBLE_CAP);
-  const overflow = boards.slice(VISIBLE_CAP);
+  useLayoutEffect(() => {
+    const recompute = () => {
+      const available = rowRef.current?.clientWidth;
+      if (available == null) return;
+      const chips = measureContainerRef.current?.querySelectorAll<HTMLDivElement>(`[${BOARD_CHIP_ATTR}]`);
+      const widths = boards.map((_, i) => chips?.[i]?.offsetWidth ?? 0);
+      const totalWidth = widths.reduce((sum, w, i) => sum + w + (i > 0 ? CHIP_GAP : 0), 0);
+      // Everything fits with no overflow button needed at all.
+      if (totalWidth + CHIP_GAP + CREATE_BTN_W <= available) {
+        setVisibleCount(boards.length);
+        return;
+      }
+      // Otherwise trim from the end, reserving room for the "+N ▾" button
+      // that will now definitely be shown.
+      let used = CREATE_BTN_W + CHIP_GAP + OVERFLOW_BTN_W;
+      let count = 0;
+      for (const w of widths) {
+        const next = used + (count > 0 ? CHIP_GAP : 0) + w;
+        if (count > 0 && next > available) break;
+        used = next;
+        count++;
+      }
+      setVisibleCount(count);
+    };
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    if (rowRef.current) ro.observe(rowRef.current);
+    return () => ro.disconnect();
+  }, [boards, labelNames]);
+
+  const visible = boards.slice(0, visibleCount);
+  const overflow = boards.slice(visibleCount);
 
   const commitRename = () => {
     if (editingId && draft.trim()) onRename(editingId, draft.trim());
@@ -211,11 +260,19 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+    <div ref={rowRef} style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, flex: "1 1 auto", overflow: "hidden" }}>
       {/* No "All files" chip: the project name to the left of this row says the
           same thing, and clicking it is what leaves a Workspace now (ADR 0044
           amended). Two controls for one scope is one control too many. */}
       {visible.map(chip)}
+
+      {/* Offscreen copy of every chip, unclamped by `visible` — its rendered
+          widths are what `recompute` above trims against. Not `display: none`
+          (which reports 0 for offsetWidth); `visibility: hidden` still lays
+          out. */}
+      <div ref={measureContainerRef} aria-hidden="true" style={{ position: "absolute", top: -9999, left: -9999, visibility: "hidden", pointerEvents: "none", display: "flex", gap: CHIP_GAP }}>
+        {boards.map(chip)}
+      </div>
 
       {overflow.length > 0 && (
         <div ref={overflowRef} style={{ position: "relative" }}>

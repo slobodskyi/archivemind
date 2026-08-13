@@ -155,7 +155,9 @@ export default function PhotoTile({
           width: "100%",
           height: pos.h,
           overflow: "hidden",
-          border: `1px solid ${stage === "error" ? "var(--red)" : selected ? "var(--ac2)" : "var(--bd)"}`,
+          // Selection is carried by the floating ring above alone — this
+          // border staying `--ac2` too used to draw two concentric outlines.
+          border: `1px solid ${stage === "error" ? "var(--red)" : "var(--bd)"}`,
           borderRadius: 3,
           background: "var(--bg-in)",
           backgroundImage: src ? `url(${src})` : undefined,

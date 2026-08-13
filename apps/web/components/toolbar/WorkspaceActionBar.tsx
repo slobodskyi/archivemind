@@ -42,10 +42,11 @@ const ExportGlyph = () => (<svg {...gp}><path d="M12 3v12" /><path d="m8 7 4-4 4
 /* Group: two overlapping tiles bound by a corner-bracket frame — a set that
    moves and edits as one, not a container. */
 const GroupGlyph = () => (<svg {...gp}><path d="M3 8V4a1 1 0 0 1 1-1h4" /><path d="M21 8V4a1 1 0 0 0-1-1h-4" /><path d="M3 16v4a1 1 0 0 0 1 1h4" /><path d="M21 16v4a1 1 0 0 1-1 1h-4" /><rect x="8.5" y="8.5" width="7" height="7" rx="1" /></svg>);
-/* Analyze with AI: a magic wand throwing sparkles — the universal "let the AI
-   work on these" glyph, and unlike a bare sparkle it won't read as decoration
-   or collide with Search's magnifier. */
-const AnalyzeGlyph = () => (<svg {...gp}><path d="M15 6 6 15l-2.5 5.5L9 18l9-9z" /><path d="m14 7 3 3" /><path d="M18 3v3M16.5 4.5h3" /><path d="M20 11v2M19 12h2" /></svg>);
+/* Analyze with AI: a magic wand ringed with sparkles — the universal "let the
+   AI work on these" glyph, and unlike a bare sparkle it won't read as
+   decoration or collide with Search's magnifier. Redrawn as a literal wand
+   (handle + capsule tip) surrounded by three bursts, per the reference. */
+const AnalyzeGlyph = () => (<svg {...gp}><path d="M4.5 19.5 12.3 11.7" /><rect x="11.8" y="7.9" width="3" height="4.4" rx="1.2" transform="rotate(45 13.3 10.1)" /><path d="M18.3 3v3.6M16.5 4.8h3.6" /><path d="M21 10v2.6M19.7 11.3h2.6" /><path d="M8.2 3v2.2M7.1 4.1h2.2" /></svg>);
 /* Tidy up: four photo-tile-shaped cells snapping into an even grid. */
 const TidyGlyph = () => (<svg {...gp}><rect x="3" y="4" width="8" height="6" rx="1" /><rect x="13" y="4" width="8" height="6" rx="1" /><rect x="3" y="14" width="8" height="6" rx="1" /><rect x="13" y="14" width="8" height="6" rx="1" /></svg>);
 

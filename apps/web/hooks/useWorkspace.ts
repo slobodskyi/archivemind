@@ -4187,8 +4187,8 @@ export function useWorkspace(
   const regroupClouds = useCallback(() => {
     const s = stateRef.current;
     const bucketKey =
-      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
-    if (!bucketKey) return;
+      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "neural" ? "asset" : null;
+    if (!bucketKey || (bucketKey === "asset" && s.projCurrent === "all")) return;
     const current = s.galleryOverrides[bucketKey];
     let next: Record<string, CanvasOverride>;
     if (s.selectedIds.length >= 2) {
@@ -5929,7 +5929,13 @@ export function useWorkspace(
     toast: state.toast,
     canvasWidth,
     galleryOverrides: state.galleryOverrides,
-    gridSize: Math.max(4, 40 * state.scale),
+    // Each dot's own radius is a fixed CSS length (InfiniteGrid's DOTS
+    // constant) and never scales — only this spacing does. But once spacing
+    // shrinks below a few dot-diameters, neighbouring dots visually fuse
+    // into a denser haze that reads as "bigger dots" even though no dot
+    // actually grew, so the floor stays well clear of that (was 4, which
+    // packs a ~3px-wide dot into a 4px cell).
+    gridSize: Math.max(16, 40 * state.scale),
     gridPos: `${state.tx}px ${state.ty}px`,
     gridOpacity: 1,
     zoomPct,
@@ -6029,7 +6035,8 @@ export function useWorkspace(
     regroupClouds,
     canRegroup:
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
-      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
+      (isNeural && !allFilesMode && Object.keys(state.galleryOverrides.asset).length > 0),
     recluster,
     renameCloud,
     topicOptions,
