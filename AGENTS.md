@@ -118,10 +118,13 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   trash's own idiom — so membership and the notes and folders it owns survive
   and a restore is whole. `DELETE` is now the permanent path, from the Trash
   panel only, and `sweep_trashed_boards()` hard-deletes past 30 days. The undo
-  is a restore button beside the header's `＋`, present exactly while something
-  is recoverable; trashed workspaces list in the canvas Trash panel (not the
-  homepage Trash view — a workspace is scoped to one project, a trashed photo
-  is not).
+  rides on the delete's own toast (the shape every reversible delete uses) —
+  **not** a second `↺` in the header, which duplicated the canvas undo's icon a
+  few hundred pixels away; trashed workspaces list in the canvas Trash panel
+  (not the homepage Trash view — a workspace is scoped to one project, a
+  trashed photo is not). **Switching workspace re-frames the canvas** (`Fit`,
+  from `useWorkspace`'s `boardScope` effect): a workspace re-packs, so without
+  it the camera still points where the previous set was.
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI

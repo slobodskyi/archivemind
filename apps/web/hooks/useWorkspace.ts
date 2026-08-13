@@ -3526,6 +3526,33 @@ export function useWorkspace(
     animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
   }, [rect, setState, neuralGalleryFor, visibleBounds]);
 
+  // Opening a Workspace (or leaving one) frames its files, the way the Fit
+  // button does (ADR 0044). A workspace RE-PACKS rather than filters, so after a
+  // switch the camera is pointing at coordinates that belonged to the previous
+  // set — six photos out of four hundred land in a corner of the viewport you
+  // were not looking at, and the canvas reads as empty.
+  //
+  // Keyed on the committed `state.boardScope` and NOT on the prop, which is the
+  // whole trick: `activeBoardId` changes one render before the scope catches up,
+  // so an effect watching the prop would fit to the set you just left. By the
+  // time the scope lands, `boardIdRef` is already the new board.
+  //
+  // The ref is what keeps this to real SWITCHES: `boardScope` also changes when
+  // a file is dropped onto the open workspace's chip, and yanking the camera
+  // mid-drop would be its own bug. Seeded with the mount-time board so the first
+  // paint's own framing is left alone. (Two workspaces holding exactly the same
+  // files in the same order share a scope key and so do not re-fit — there is
+  // nothing to re-frame between them.)
+  const fittedBoardRef = useRef(activeBoardId);
+  useEffect(() => {
+    if (fittedBoardRef.current === boardIdRef.current) return;
+    fittedBoardRef.current = boardIdRef.current;
+    // An empty workspace has no content to frame; fitting it would snap the
+    // zoom to the cap for a canvas showing its own empty state.
+    if (canvasPhotos(stateRef.current.photos, stateRef.current.boardScope).length === 0) return;
+    doFitContent();
+  }, [state.boardScope, doFitContent]);
+
   const setZoomPct = useCallback(
     (pct: number) => {
       const s = stateRef.current;

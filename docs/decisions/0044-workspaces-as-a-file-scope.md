@@ -288,12 +288,18 @@ Three changes, one behaviour:
    a stamped row keeps its membership *and* keeps owning its notes and folders,
    so the workspace comes back as it was rather than as a name over an empty
    canvas. The FK side-effects only ever run at the hard delete.
-3. **The undo is in the header, not in a toast.** A restore button appears beside
-   the `＋` for exactly as long as something is recoverable — its presence *is*
-   the notice, where a toast would have expired by the time you looked up. One
-   click restores the most recent (the dot says which); clicking again walks back
-   through the rest. The Trash panel is for picking a specific one, or ending it
-   for good.
+3. **The undo rides on the delete's own toast** — `Undo` beside "*Name* moved to
+   Trash", the same shape every other reversible delete in the app uses (ADR
+   0033). The Trash panel is for picking a specific one later, or ending it for
+   good.
+
+   *(This shipped first as a restore button beside the `＋`, on the argument that
+   a toast expires before you look up. It was wrong for a reason the mockup could
+   not show: the header already carries the canvas undo `↺` a few hundred pixels
+   to the right, so a second identical arrow read as one duplicated broken
+   control rather than two different jobs. Two arrows that mean different things
+   must not be the same arrow. The toast is unambiguous because it is attached to
+   the sentence describing what it undoes.)*
 
 ### Consequences
 - **One read, split client-side.** `getBoards` returns live and trashed rows
@@ -309,3 +315,20 @@ Three changes, one behaviour:
   touches R2 — a workspace never held bytes.
 - A trashed workspace does not reserve its colour or its number: the next
   `＋` counts the live ones.
+
+### Switching a Workspace re-frames the canvas
+Opening a workspace (or leaving one for All files) runs the same fit the `Fit`
+button does. A workspace **re-packs** rather than filters — that is the ADR's own
+central rule — so after a switch the camera is still pointing at coordinates that
+belonged to the previous set: six photos out of four hundred land in a corner of
+the viewport nobody is looking at, and a narrowed canvas reads as an empty one.
+
+Two details, both load-bearing:
+- The effect keys on the **committed `state.boardScope`**, never on the
+  `activeBoardId` prop. The prop changes one render before the scope catches up,
+  so an effect watching it fits to the set you just left.
+- A ref holds the board last fitted, so this fires on real **switches** only.
+  `boardScope` also changes when a file is dropped onto the open workspace's
+  chip, and yanking the camera mid-drop would be its own bug. An empty workspace
+  is skipped too — there is nothing to frame, and fitting an empty box would snap
+  the zoom to the cap.
