@@ -10,6 +10,10 @@ create extension if not exists pgtap with schema extensions;
 select plan(68);
 
 -- ── fixtures (superuser) ────────────────────────────────────────────────
+-- R2 keys here use the REAL §6 layout, `{workspace_id}/originals/…`, not a
+-- readable stand-in: creation refuses an `original` download key that does not
+-- sit under the calling workspace's own originals prefix, so a prettier fixture
+-- key would make every publication in this file fail validation.
 insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000a1', 'owner-a@test.dev'),
   ('00000000-0000-0000-0000-0000000000e2', 'editor-a@test.dev'),
@@ -62,19 +66,19 @@ insert into public.board_assets (board_id, asset_id, position) values
   ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000f2', 1),
   ('00000000-0000-0000-0000-0000000000eb', '00000000-0000-0000-0000-0000000000fb', 0);
 insert into public.asset_previews (asset_id, size, r2_key, width, height) values
-  ('00000000-0000-0000-0000-0000000000f1', 'medium', 'ws-a/previews/f1/medium.webp', 1200, 800),
-  ('00000000-0000-0000-0000-0000000000f2', 'medium', 'ws-a/previews/f2/medium.webp', 800, 1200),
-  ('00000000-0000-0000-0000-0000000000f3', 'medium', 'ws-a/previews/f3/medium.webp', 1000, 1000),
-  ('00000000-0000-0000-0000-0000000000fb', 'medium', 'ws-b/previews/fb/medium.webp', 1000, 1000);
+  ('00000000-0000-0000-0000-0000000000f1', 'medium', '00000000-0000-0000-0000-00000000aaaa/previews/f1/medium.webp', 1200, 800),
+  ('00000000-0000-0000-0000-0000000000f2', 'medium', '00000000-0000-0000-0000-00000000aaaa/previews/f2/medium.webp', 800, 1200),
+  ('00000000-0000-0000-0000-0000000000f3', 'medium', '00000000-0000-0000-0000-00000000aaaa/previews/f3/medium.webp', 1000, 1000),
+  ('00000000-0000-0000-0000-0000000000fb', 'medium', '00000000-0000-0000-0000-00000000bbbb/previews/fb/medium.webp', 1000, 1000);
 insert into public.asset_edits (asset_id, recipe, edited_medium_key) values
-  ('00000000-0000-0000-0000-0000000000f2', '{}'::jsonb, 'ws-a/edits/f2/medium.webp');
+  ('00000000-0000-0000-0000-0000000000f2', '{}'::jsonb, '00000000-0000-0000-0000-00000000aaaa/edits/f2/medium.webp');
 insert into public.files (id, asset_id, workspace_id, origin, r2_key, mime_type) values
   ('20000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000f1',
-   '00000000-0000-0000-0000-00000000aaaa', 'upload', 'ws-a/originals/f1/original.jpg', 'image/jpeg'),
+   '00000000-0000-0000-0000-00000000aaaa', 'upload', '00000000-0000-0000-0000-00000000aaaa/originals/f1/original.jpg', 'image/jpeg'),
   ('20000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000f2',
    '00000000-0000-0000-0000-00000000aaaa', 'gdrive', null, 'image/jpeg'),
   ('20000000-0000-0000-0000-0000000000fb', '00000000-0000-0000-0000-0000000000fb',
-   '00000000-0000-0000-0000-00000000bbbb', 'upload', 'ws-b/originals/fb/foreign.jpg', 'image/jpeg');
+   '00000000-0000-0000-0000-00000000bbbb', 'upload', '00000000-0000-0000-0000-00000000bbbb/originals/fb/foreign.jpg', 'image/jpeg');
 
 -- Capture generated share ids/copy plans across SET ROLE boundaries. Create
 -- these as the test superuser and grant only the access each simulated API role
@@ -178,7 +182,7 @@ select throws_ok(
       'assetId','00000000-0000-0000-0000-0000000000f3',
       'publicId','10000000-0000-0000-0000-000000000003',
       'position',0,'filename','not-on-board.jpg','width',1000,'height',1000,
-      'previewR2Key','ws-a/previews/f3/medium.webp','downloadR2Key',null,
+      'previewR2Key','00000000-0000-0000-0000-00000000aaaa/previews/f3/medium.webp','downloadR2Key',null,
       'downloadFilename','not-on-board.webp','downloadMimeType','image/webp',
       'downloadQuality','web_1024')))$$,
   'P0002', 'publication_assets_not_found', 'an active project asset outside the board is refused');
@@ -195,15 +199,15 @@ select lives_ok(
           'assetId','00000000-0000-0000-0000-0000000000f1',
           'publicId','10000000-0000-0000-0000-000000000001',
           'position',0,'filename','original.jpg','width',1200,'height',800,
-          'previewR2Key','ws-a/previews/f1/medium.webp',
-          'downloadR2Key','ws-a/originals/f1/original.jpg',
+          'previewR2Key','00000000-0000-0000-0000-00000000aaaa/previews/f1/medium.webp',
+          'downloadR2Key','00000000-0000-0000-0000-00000000aaaa/originals/f1/original.jpg',
           'downloadFilename','original.jpg','downloadMimeType','image/jpeg',
           'downloadQuality','original'),
         jsonb_build_object(
           'assetId','00000000-0000-0000-0000-0000000000f2',
           'publicId','10000000-0000-0000-0000-000000000002',
           'position',1,'filename','drive.jpg','width',800,'height',1200,
-          'previewR2Key','ws-a/edits/f2/medium.webp','downloadR2Key',null,
+          'previewR2Key','00000000-0000-0000-0000-00000000aaaa/edits/f2/medium.webp','downloadR2Key',null,
           'downloadFilename','drive.webp','downloadMimeType','image/webp',
           'downloadQuality','web_1024')))$$,
   'an editor atomically reserves a valid publication and media map');
@@ -211,7 +215,7 @@ select lives_ok(
 select is((select jsonb_array_length(copy_plan) from created_publication), 2,
   'copy plan contains one immutable preview copy per public asset');
 select is((select copy_plan->1->>'sourceR2Key' from created_publication),
-  'ws-a/edits/f2/medium.webp', 'copy plan freezes the edited medium visible at publish time');
+  '00000000-0000-0000-0000-00000000aaaa/edits/f2/medium.webp', 'copy plan freezes the edited medium visible at publish time');
 select ok((select copy_plan->0->>'destinationR2Key'
              = '00000000-0000-0000-0000-00000000aaaa/shares/' || id::text ||
                '/previews/10000000-0000-0000-0000-000000000001.webp'
@@ -263,7 +267,7 @@ select is_empty(
   'malformed and unknown token hashes fail closed as no row');
 select is((select download_r2_key from public.resolve_publication_share_asset(
             repeat('a',64), '10000000-0000-0000-0000-000000000001')),
-  'ws-a/originals/f1/original.jpg', 'stored originals resolve only through the download capability');
+  '00000000-0000-0000-0000-00000000aaaa/originals/f1/original.jpg', 'stored originals resolve only through the download capability');
 select ok((select download_r2_key
               = '00000000-0000-0000-0000-00000000aaaa/shares/' ||
                 (select id::text from created_publication) ||
@@ -289,8 +293,8 @@ select lives_ok(
         'assetId','00000000-0000-0000-0000-0000000000f1',
         'publicId','10000000-0000-0000-0000-000000000021',
         'position',0,'filename','original.jpg','width',1200,'height',800,
-        'previewR2Key','ws-a/previews/f1/medium.webp',
-        'downloadR2Key','ws-a/originals/f1/original.jpg',
+        'previewR2Key','00000000-0000-0000-0000-00000000aaaa/previews/f1/medium.webp',
+        'downloadR2Key','00000000-0000-0000-0000-00000000aaaa/originals/f1/original.jpg',
         'downloadFilename','original.jpg','downloadMimeType','image/jpeg',
         'downloadQuality','original')))$$,
   'a download-disabled publication is reserved');
@@ -423,8 +427,8 @@ select lives_ok(
         'assetId','00000000-0000-0000-0000-0000000000f1',
         'publicId','10000000-0000-0000-0000-000000000011',
         'position',0,'filename','original.jpg','width',1200,'height',800,
-        'previewR2Key','ws-a/previews/f1/medium.webp',
-        'downloadR2Key','ws-a/originals/f1/original.jpg',
+        'previewR2Key','00000000-0000-0000-0000-00000000aaaa/previews/f1/medium.webp',
+        'downloadR2Key','00000000-0000-0000-0000-00000000aaaa/originals/f1/original.jpg',
         'downloadFilename','original.jpg','downloadMimeType','image/jpeg',
         'downloadQuality','original')))$$,
   'a second asset publication is reserved for invalidation testing');
