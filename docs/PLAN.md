@@ -358,6 +358,19 @@ kept or removed on purpose.
    migration); generation is authenticated, board-membership checked and logged
    as `content_generated`. A server `content_drafts` domain and combined rendered
    packages remain a migration-owned follow-up.
+6. **Public preview links** ([ADR 0046](decisions/0046-publication-share-links.md)) —
+   a reviewed Article/Carousel draft can cross an explicit immutable Share
+   boundary and open at `/p/{token}` for a recipient with no account. The public
+   version contains sanitized editorial content and opaque media ids, freezes
+   the visible 1024px previews under a share-owned R2 prefix, exposes stored
+   originals only when permitted (Drive stays honestly labelled web-size), and
+   lets the recipient copy/download text and individual files. Migration
+   `20260813000002` adds hash-only bearer tokens, `preparing → ready → revoked`,
+   frozen rights, no direct browser table/resolver access, three authenticated
+   mutation RPCs plus two service-role-only resolvers behind the fenced Next
+   integration, expiry and asset-trash invalidation (pgTAP `017`). **Repository
+   implementation is done; production migration apply remains the owner's
+   PR-gated runbook.**
 
 The original four-PR stack had no migrations; the dated ADR 0044 amendments and
 the paragraph above describe the backend that landed after it. Device/prod visual

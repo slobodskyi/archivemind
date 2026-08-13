@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /** R2 S3 client (server-only). Our buckets carry the EU jurisdiction, whose
@@ -74,6 +74,39 @@ export async function presignGet(key: string, filename?: string): Promise<string
     ? undefined
     : new Date(Math.floor(Date.now() / SIGNING_BUCKET_MS) * SIGNING_BUCKET_MS);
   return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_GET_TTL_SECONDS, signingDate });
+}
+
+export interface R2ObjectStream {
+  body: ReadableStream;
+  contentLength: number | null;
+}
+
+/** Read a private object without ever minting a browser-visible R2 URL.
+ * Publication media uses this path so the same-origin route remains the only
+ * bearer boundary and revocation is checked on every request. */
+export async function streamObject(key: string): Promise<R2ObjectStream> {
+  const object = await r2Client().send(new GetObjectCommand({
+    Bucket: r2Bucket(),
+    Key: key,
+  }));
+  if (!object.Body) throw new Error("R2 object has no body");
+  return {
+    body: object.Body.transformToWebStream(),
+    contentLength: object.ContentLength ?? null,
+  };
+}
+
+/** Freeze the currently resolved medium under a share-owned key. The copy
+ * makes an already-published preview independent of later non-destructive
+ * photo edits; the destination is computed by the trusted creation RPC. */
+export async function copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+  const bucket = r2Bucket();
+  const encodedSource = `${encodeURIComponent(bucket)}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`;
+  await r2Client().send(new CopyObjectCommand({
+    Bucket: bucket,
+    CopySource: encodedSource,
+    Key: destinationKey,
+  }));
 }
 
 /** RFC 6266 / 5987 attachment header. A Cyrillic filename cannot go in the plain
