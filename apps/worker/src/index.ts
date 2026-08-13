@@ -12,7 +12,12 @@ import {
   type Job,
 } from "./queue";
 import { backfillGeoLabels } from "./geo-backfill";
-import { sweepDeletedAssets, sweepExpiredExports, sweepTrashedProjects } from "./retention";
+import {
+  sweepDeletedAssets,
+  sweepExpiredExports,
+  sweepTrashedBoards,
+  sweepTrashedProjects,
+} from "./retention";
 import { checkExifToolAvailable } from "./services/exif";
 
 /** Poll loop + graceful shutdown (TECH_SPEC §7).
@@ -77,12 +82,15 @@ async function main(): Promise<void> {
       .catch((e: unknown) => log(`reaper failed: ${String(e)}`));
   }, REAPER_EVERY_MS);
 
-  // Two sweeps, one cadence, independent failure domains — a broken project
+  // Four sweeps, one cadence, independent failure domains — a broken project
   // sweep must not silently stall asset purging or vice versa.
   const runSweep = () => {
     sweepTrashedProjects(pool)
       .then((n) => n > 0 && log(`sweeper removed ${n} expired trashed project(s)`))
       .catch((e: unknown) => log(`sweeper failed: ${String(e)}`));
+    sweepTrashedBoards(pool)
+      .then((n) => n > 0 && log(`sweeper removed ${n} expired trashed workspace(s)`))
+      .catch((e: unknown) => log(`workspace sweeper failed: ${String(e)}`));
     sweepDeletedAssets(pool)
       .then((n) => n > 0 && log(`sweeper enqueued purge for ${n} expired trashed asset(s)`))
       .catch((e: unknown) => log(`asset sweeper failed: ${String(e)}`));

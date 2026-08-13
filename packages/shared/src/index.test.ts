@@ -8,6 +8,8 @@ import {
   EXPORT_ARTIFACTS,
   artboardSettingsSchema,
   assetKindFromMime,
+  boardSchema,
+  patchBoardRequestSchema,
   exportFilename,
   exportFormatSchema,
   canvasGroupKindSchema,
@@ -668,6 +670,51 @@ describe("canvas groups: folders + artboards (ADR 0034)", () => {
         assetIds: ["00000000-0000-0000-0000-0000000000f1"],
       }).success,
     ).toBe(true);
+  });
+});
+
+/** Workspaces are trashed, not deleted (ADR 0044 as amended): the chip's × is a
+ *  PATCH that stamps `deleted_at`, and DELETE stays the permanent one. These two
+ *  must not blur into each other at the contract level. */
+describe("board trash contract (ADR 0044)", () => {
+  it("a board reads as live unless it carries a deletion timestamp", () => {
+    const parsed = boardSchema.parse({
+      id: "00000000-0000-0000-0000-0000000000e1",
+      projectId: "00000000-0000-0000-0000-00000000dda1",
+      name: "Pitch",
+      color: "blue",
+      sortOrder: 0,
+      assetIds: [],
+    });
+    expect(parsed.deletedAt).toBeNull();
+  });
+
+  it("carries the timestamp when there is one", () => {
+    const parsed = boardSchema.parse({
+      id: "00000000-0000-0000-0000-0000000000e1",
+      projectId: "00000000-0000-0000-0000-00000000dda1",
+      name: "Pitch",
+      color: "blue",
+      sortOrder: 0,
+      assetIds: [],
+      deletedAt: "2026-08-13T10:00:00.000Z",
+    });
+    expect(parsed.deletedAt).toBe("2026-08-13T10:00:00.000Z");
+  });
+
+  it("patchBoardRequest takes the trash pair in both directions", () => {
+    expect(patchBoardRequestSchema.safeParse({ deleted: true }).success).toBe(true);
+    expect(patchBoardRequestSchema.safeParse({ deleted: false }).success).toBe(true);
+  });
+
+  it("still needs at least one field", () => {
+    expect(patchBoardRequestSchema.safeParse({}).success).toBe(false);
+    expect(patchBoardRequestSchema.safeParse({ name: "Renamed" }).success).toBe(true);
+  });
+
+  it("does not take a client-supplied deletion time — the server stamps it", () => {
+    const parsed = patchBoardRequestSchema.safeParse({ deletedAt: "2026-08-13T10:00:00.000Z" });
+    expect(parsed.success).toBe(false);
   });
 });
 

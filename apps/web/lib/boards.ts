@@ -20,6 +20,25 @@ export function nextBoardColor(existing: readonly Board[]): AssetLabel {
   return free ?? BOARD_COLORS[existing.length % BOARD_COLORS.length];
 }
 
+/** Split what the reader returns into the two places a workspace can be (ADR
+ *  0044 as amended). One query brings back live and trashed rows together —
+ *  the header needs both in the first paint, because the undo affordance IS the
+ *  presence of a trashed one — so the split is here rather than in the query.
+ *
+ *  Trashed rows come back newest-deleted first: that order is what the header's
+ *  one-click restore means by "the one you just deleted", and clicking it
+ *  repeatedly walks back through the deletions in reverse. A row with no
+ *  timestamp (an older database, before the column existed) sorts last and is
+ *  treated as live by the `deletedAt` test above it, so it can never disappear
+ *  from the chip row. */
+export function splitBoards(all: readonly Board[]): { live: Board[]; trashed: Board[] } {
+  const live: Board[] = [];
+  const trashed: Board[] = [];
+  for (const b of all) (b.deletedAt ? trashed : live).push(b);
+  trashed.sort((a, z) => (z.deletedAt ?? "").localeCompare(a.deletedAt ?? ""));
+  return { live, trashed };
+}
+
 /** One workspace as the pre-table client stored it. Only `name`, `color` and
  *  `assetIds` are adopted — the note/folder/artboard lists are deliberately
  *  dropped, because ownership is a `board_id` column on those rows now and

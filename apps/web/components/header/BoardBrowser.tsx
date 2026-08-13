@@ -3,17 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import type { Board } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
-import { AddIcon, ChevronDownIcon } from "@/components/icons/icons";
+import { AddIcon, ChevronDownIcon, UndoIcon } from "@/components/icons/icons";
 import { BOARD_CHIP_ATTR } from "@/lib/board-drop";
 
 interface BoardBrowserProps {
   boards: Board[];
+  /** Trashed workspaces, newest deletion first — [0] is what the restore button
+   *  brings back. Empty means no button: the affordance IS the evidence that
+   *  something is recoverable. */
+  trashedBoards: Board[];
   activeBoardId: string | null;
   counts: Record<string, number>;
   onSelect: (id: string | null) => void;
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
+  /** Asks first — the caller opens the confirmation, this only requests it. */
   onDelete: (id: string) => void;
+  onRestore: (id: string) => void;
   /** The chip a canvas drag is currently over, if any (ADR 0044). The drag is
    *  the canvas's own pointer drag, not HTML5 DnD, so the header is told which
    *  chip is armed rather than receiving a `dragover`. */
@@ -26,8 +32,13 @@ const VISIBLE_CAP = 4;
 /** The Workspace browser in the header (ADR 0044): "All files" (the sorting
  *  views over the whole project) then a chip per workspace — colour dot · name ·
  *  count — a ＋ to create one, and a "+N ▾" overflow. Selecting a chip opens that
- *  workspace's working canvas; "All files" returns to browsing the whole project. */
-export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, onCreate, onRename, onDelete, dropTargetId = null }: BoardBrowserProps) {
+ *  workspace's working canvas; "All files" returns to browsing the whole project.
+ *
+ *  Deleting is a two-step affair here, and deliberately: the × sits on the chip
+ *  you click to OPEN a workspace, so it asks (the caller owns the confirmation),
+ *  it moves the workspace to Trash rather than removing it, and a restore button
+ *  appears beside the ＋ for as long as anything is recoverable. */
+export default function BoardBrowser({ boards, trashedBoards, activeBoardId, counts, onSelect, onCreate, onRename, onDelete, onRestore, dropTargetId = null }: BoardBrowserProps) {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -115,8 +126,8 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
               e.stopPropagation();
               onDelete(b.id);
             }}
-            aria-label="Delete workspace"
-            title="Delete workspace"
+            aria-label="Move workspace to Trash"
+            title="Move workspace to Trash"
             style={{ display: "flex", alignItems: "center", width: 14, height: 14, border: 0, borderRadius: 2, background: "transparent", color: "var(--t3)", cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1 }}
           >
             ×
@@ -196,6 +207,46 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
       >
         <AddIcon width={13} height={13} />
       </button>
+
+      {/* Undo the delete, in the place the deleted chip just left. It exists
+          only while something is recoverable, so its presence is the notice
+          that a workspace is in the Trash — a toast would have expired by the
+          time you looked up. One click restores the most recent; the dot says
+          which one, and clicking again walks back through the rest. The Trash
+          panel is where you pick a specific one or end it for good. */}
+      {trashedBoards.length > 0 && (
+        <button
+          onClick={() => onRestore(trashedBoards[0].id)}
+          aria-label={`Restore workspace ${trashedBoards[0].name}`}
+          title={
+            trashedBoards.length > 1
+              ? `Restore “${trashedBoards[0].name}” — ${trashedBoards.length} workspaces in Trash`
+              : `Restore “${trashedBoards[0].name}”`
+          }
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 30,
+            padding: "0 9px",
+            border: "1px dashed var(--bd)",
+            borderRadius: 2,
+            background: "transparent",
+            color: "var(--t3)",
+            fontFamily: "inherit",
+            fontSize: 11,
+            cursor: "pointer",
+            flex: "0 0 auto",
+          }}
+        >
+          <UndoIcon width={12} height={12} />
+          <span
+            aria-hidden="true"
+            style={{ width: 8, height: 8, borderRadius: "50%", background: LABEL_COLORS[trashedBoards[0].color], opacity: 0.75 }}
+          />
+          {trashedBoards.length > 1 && <span>{trashedBoards.length}</span>}
+        </button>
+      )}
     </div>
   );
 }

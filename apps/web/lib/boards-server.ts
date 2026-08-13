@@ -19,12 +19,20 @@ interface BoardRow {
   name: string;
   color: string;
   sort_order: number;
+  deleted_at: string | null;
   board_assets: BoardAssetRow[];
 }
 
-const BOARD_SELECT = `id, project_id, name, color, sort_order,
+const BOARD_SELECT = `id, project_id, name, color, sort_order, deleted_at,
      board_assets ( asset_id, position )`;
 
+/** A project's workspaces — LIVE AND TRASHED in one array, each carrying its own
+ *  `deletedAt` (`splitBoards` in lib/boards.ts does the separating). One query,
+ *  because the header has to know on first paint whether there is anything to
+ *  undo: the restore affordance appears only when a trashed workspace exists, so
+ *  fetching that second list after mount would make the button pop in a beat
+ *  after the delete it belongs to. A trashed board is at most a handful of rows
+ *  and its membership is exactly what a restore needs back. */
 export async function getBoards(supabase: SupabaseClient, projectId: string): Promise<Board[]> {
   const { data, error } = (await supabase
     .from("boards")
@@ -50,6 +58,12 @@ export async function getBoards(supabase: SupabaseClient, projectId: string): Pr
     // throw on a page that only wants to draw a dot.
     color: assetLabelSchema.catch("blue").parse(b.color),
     sortOrder: b.sort_order,
+    // `?? null`, never `undefined`: a live workspace must read as live even if
+    // the field arrives missing. (A database without migration 20260813000001
+    // does not get here at all — selecting the column raises 42703 and the
+    // fallback above degrades the page to "no workspaces", the same trade the
+    // reader already makes for the table itself.)
+    deletedAt: b.deleted_at ?? null,
     assetIds: [...b.board_assets]
       .sort((a, z) => a.position - z.position || a.asset_id.localeCompare(z.asset_id))
       .map((m) => m.asset_id),

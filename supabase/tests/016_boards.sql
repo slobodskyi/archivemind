@@ -1,12 +1,14 @@
 -- boards / board_assets RLS + ownership (pgTAP) — run: `supabase test db`.
 -- A Workspace is a named subset of one project's files (ADR 0044). Verifies
 -- workspace isolation on both tables, the cross-workspace asset leak the
--- board_assets insert policy exists to stop, and the two invariants that decide
--- whether deleting a workspace loses work: membership cascades, but the notes
--- and folders MADE in it survive with board_id nulled.
+-- board_assets insert policy exists to stop, the trash pair that makes a delete
+-- reversible (20260813000001: a stamped row keeps EVERYTHING, so a restore is
+-- whole) and the two invariants that decide whether the eventual hard delete
+-- loses work: membership cascades, but the notes and folders MADE in it survive
+-- with board_id nulled.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(15);
+select plan(24);
 
 -- ── fixtures (as superuser) ─────────────────────────────────────────────
 insert into auth.users (id, email) values
@@ -111,7 +113,42 @@ select is(
   (select name from public.boards where id = '00000000-0000-0000-0000-0000000000e1'),
   'Pitch', 'A''s board keeps its name');
 
--- ── deleting a board keeps the work ──────────────────────────────────────
+-- ── the trash pair: a soft delete keeps everything ───────────────────────
+-- This is the whole reason the × in the header is reversible. A stamped board
+-- must still own its membership, its folder and its note — otherwise "Restore"
+-- would bring back a name over an empty canvas.
+select lives_ok(
+  $$update public.boards set deleted_at = now()
+      where id = '00000000-0000-0000-0000-0000000000e1'$$,
+  'an editor moves a board to Trash by stamping deleted_at');
+
+select is((select count(*)::int from public.board_assets
+             where board_id = '00000000-0000-0000-0000-0000000000e1'),
+  1, 'a trashed board keeps its membership rows');
+select is(
+  (select board_id from public.canvas_groups where id = '00000000-0000-0000-0000-0000000000c1'),
+  '00000000-0000-0000-0000-0000000000e1'::uuid,
+  'a trashed board still owns the folder made in it');
+select is(
+  (select board_id from public.canvas_annotations where id = '00000000-0000-0000-0000-0000000000d1'),
+  '00000000-0000-0000-0000-0000000000e1'::uuid,
+  'a trashed board still owns the note made in it');
+
+-- The sweep hard-deletes only what is PAST the window; a workspace trashed a
+-- moment ago is exactly what the header's restore button expects to find.
+select is(sweep_trashed_boards(interval '30 days'), 0,
+  'the sweep leaves a freshly trashed workspace alone');
+select is(
+  (select deleted_at is null from public.boards where id = '00000000-0000-0000-0000-0000000000e1'),
+  false, 'and it is still there to restore');
+
+-- Restore is the exact inverse — one column, nothing else to put back.
+select lives_ok(
+  $$update public.boards set deleted_at = null
+      where id = '00000000-0000-0000-0000-0000000000e1'$$,
+  'restoring clears deleted_at');
+
+-- ── the eventual hard delete keeps the work too ──────────────────────────
 delete from public.boards where id = '00000000-0000-0000-0000-0000000000e1';
 
 select is((select count(*)::int from public.board_assets), 0,
@@ -125,6 +162,19 @@ select is(
 select is(
   (select board_id from public.canvas_annotations where id = '00000000-0000-0000-0000-0000000000d1'),
   null::uuid, 'a note outlives its board with board_id nulled, not deleted');
+
+-- ── and the sweep is what performs that hard delete, on time ─────────────
+insert into public.boards (id, workspace_id, project_id, name, created_by, deleted_at)
+  values ('00000000-0000-0000-0000-0000000000e2',
+          '00000000-0000-0000-0000-00000000aaaa',
+          '00000000-0000-0000-0000-00000000dda1', 'Expired',
+          '00000000-0000-0000-0000-0000000000a1', now() - interval '31 days');
+
+select is(sweep_trashed_boards(interval '30 days'), 1,
+  'the sweep hard-deletes a workspace past the 30-day window');
+select is((select count(*)::int from public.boards
+             where id = '00000000-0000-0000-0000-0000000000e2'),
+  0, 'and it is gone');
 
 select * from finish();
 rollback;

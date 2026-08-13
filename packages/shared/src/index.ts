@@ -807,6 +807,13 @@ export const boardSchema = z.object({
   sortOrder: z.number().int(),
   /** Asset ids, in `position` order. */
   assetIds: z.array(uuidSchema),
+  /** When it was moved to Trash (migration 20260813000001), null while live.
+   *  A trashed workspace keeps its membership and its notes and folders, so a
+   *  restore brings back the arrangement and not just the name — the FK
+   *  side-effects only run when the sweep hard-deletes it 30 days later. The
+   *  reader returns live and trashed rows together and the client splits them:
+   *  the chip row is the live ones, the Trash panel the rest. */
+  deletedAt: z.string().nullable().default(null),
 });
 export type Board = z.infer<typeof boardSchema>;
 
@@ -823,16 +830,29 @@ export const createBoardRequestSchema = z.object({
 });
 export type CreateBoardRequest = z.infer<typeof createBoardRequestSchema>;
 
-/** PATCH /api/boards/[id] — rename / recolour / reorder. At least one field. */
+/** PATCH /api/boards/[id] — rename / recolour / reorder / trash / restore. At
+ *  least one field.
+ *
+ *  `deleted` is the trash pair, named and shaped exactly like the project one
+ *  (`patchProjectRequestSchema`): true stamps `deleted_at`, false clears it. The
+ *  DELETE verb on the same route stays what it always was — the permanent one,
+ *  reachable only from the Trash panel — so the reversible action and the
+ *  irreversible one can never be confused for each other at the call site. */
 export const patchBoardRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
     color: assetLabelSchema.optional(),
     sortOrder: z.number().int().optional(),
+    deleted: z.boolean().optional(),
   })
-  .refine((v) => v.name !== undefined || v.color !== undefined || v.sortOrder !== undefined, {
-    message: "at least one of name, color, sortOrder is required",
-  });
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.color !== undefined ||
+      v.sortOrder !== undefined ||
+      v.deleted !== undefined,
+    { message: "at least one of name, color, sortOrder, deleted is required" },
+  );
 export type PatchBoardRequest = z.infer<typeof patchBoardRequestSchema>;
 
 /** POST | DELETE /api/boards/[id]/assets — add / remove members. */

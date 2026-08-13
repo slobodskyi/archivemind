@@ -2,17 +2,25 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssetLabel, Board } from "@archivemind/shared";
-import { clearLegacyBoards, nextBoardColor, readLegacyBoards } from "@/lib/boards";
+import { clearLegacyBoards, nextBoardColor, readLegacyBoards, splitBoards } from "@/lib/boards";
 
 export interface BoardsApi {
+  /** The live ones — the chip row. */
   boards: Board[];
+  /** The trashed ones, newest deletion first: [0] is what one click of the
+   *  header's restore button brings back. */
+  trashedBoards: Board[];
   activeBoardId: string | null;
   activeBoard: Board | null;
   /** The active workspace's asset ids, or null when none is open. */
   scopeIds: string[] | null;
   createBoard: (name?: string, assetIds?: string[]) => void;
   renameBoard: (id: string, name: string) => void;
+  /** Move to Trash — reversible, and always confirmed by the caller first. */
   deleteBoard: (id: string) => void;
+  restoreBoard: (id: string) => void;
+  /** Permanent, from the Trash panel only. */
+  purgeBoard: (id: string) => void;
   recolorBoard: (id: string, color: AssetLabel) => void;
   selectBoard: (id: string | null) => void;
   addToBoard: (boardId: string, assetIds: string[]) => void;
@@ -30,6 +38,9 @@ export function useBoards(
   initialBoards: Board[],
   onError?: (message: string) => void,
 ): BoardsApi {
+  // One list, live and trashed together — the reader returns them that way and a
+  // delete is a stamp on a row rather than a move between two arrays, so undo
+  // cannot lose one in the gap. `splitBoards` derives the two views below.
   const [boards, setBoards] = useState<Board[]>(initialBoards);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const fail = useRef(onError);
@@ -80,13 +91,18 @@ export function useBoards(
     };
   }, [projectId]);
 
+  const { live, trashed } = useMemo(() => splitBoards(boards), [boards]);
+
   const createBoard = useCallback(
     (name?: string, assetIds: string[] = []) => {
       if (projectId === "all") return;
       const body = {
         projectId,
-        name: name?.trim() || `Workspace ${boards.length + 1}`,
-        color: nextBoardColor(boards),
+        // Numbered and coloured against the LIVE ones: a workspace in the Trash
+        // should not reserve a colour, and counting it would number the next one
+        // as if it were still on screen.
+        name: name?.trim() || `Workspace ${live.length + 1}`,
+        color: nextBoardColor(live),
         assetIds: [...new Set(assetIds)],
       };
       void fetch("/api/boards", {
@@ -104,7 +120,7 @@ export function useBoards(
         })
         .catch(() => fail.current?.("Couldn't create the workspace"));
     },
-    [projectId, boards],
+    [projectId, live],
   );
 
   const patch = useCallback((id: string, body: Record<string, unknown>, message: string) => {
@@ -137,7 +153,48 @@ export function useBoards(
     [patch],
   );
 
+  /** Move a workspace to Trash (ADR 0044 as amended). Reversible on purpose —
+   *  the × that starts this sits on the chip you click to open the thing — so
+   *  the row is only stamped, never removed: membership, notes and folders all
+   *  stay, and `restoreBoard` is the exact inverse.
+   *
+   *  The stamp is optimistic and local, so the chip leaves the header and
+   *  appears in the Trash on the same frame the confirmation closes; the
+   *  server's own timestamp lands with the next read and is the one the sweep
+   *  counts from. */
   const deleteBoard = useCallback((id: string) => {
+    setBoards((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, deletedAt: b.deletedAt ?? new Date().toISOString() } : b)),
+    );
+    setActiveBoardId((cur) => (cur === id ? null : cur));
+    void fetch(`/api/boards/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted: true }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => fail.current?.("Workspace not deleted"));
+  }, []);
+
+  const restoreBoard = useCallback((id: string) => {
+    setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, deletedAt: null } : b)));
+    void fetch(`/api/boards/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted: false }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => fail.current?.("Workspace not restored"));
+  }, []);
+
+  /** The irreversible one — DELETE, and only from the Trash panel. Drops the row
+   *  outright rather than stamping it: membership cascades and the notes and
+   *  folders made inside fall back to the project canvas (board_id null). */
+  const purgeBoard = useCallback((id: string) => {
     setBoards((prev) => prev.filter((b) => b.id !== id));
     setActiveBoardId((cur) => (cur === id ? null : cur));
     void fetch(`/api/boards/${id}`, { method: "DELETE" })
@@ -165,19 +222,26 @@ export function useBoards(
       .catch(() => fail.current?.("Files not added to the workspace"));
   }, []);
 
+  // Live only: a trashed workspace is not one you can be inside. `deleteBoard`
+  // already clears the selection, and this is the second lock — a board that
+  // arrives trashed from another tab's delete closes here too, rather than
+  // leaving the canvas scoped to something that no longer has a chip.
   const activeBoard = useMemo(
-    () => boards.find((b) => b.id === activeBoardId) ?? null,
-    [boards, activeBoardId],
+    () => live.find((b) => b.id === activeBoardId) ?? null,
+    [live, activeBoardId],
   );
 
   return {
-    boards,
-    activeBoardId,
+    boards: live,
+    trashedBoards: trashed,
+    activeBoardId: activeBoard ? activeBoardId : null,
     activeBoard,
     scopeIds: activeBoard ? activeBoard.assetIds : null,
     createBoard,
     renameBoard,
     deleteBoard,
+    restoreBoard,
+    purgeBoard,
     recolorBoard,
     selectBoard,
     addToBoard,
