@@ -23,3 +23,16 @@ export const Z = {
  *  blur (2/6), radius (2/4) and z (58/65/100). */
 export const MODAL_BACKDROP = "rgba(0,0,0,.62)";
 export const MODAL_BLUR = "blur(2px)";
+
+/** The floating surface every dropdown and popover is drawn on — the dark
+ *  translucent card with the blur and the long shadow. It was copy-pasted at
+ *  each call site, which is how two menus in the same header end up a shade
+ *  apart. Spread it, then add position/size. */
+export const POPOVER_SURFACE = {
+  background: "rgba(18,18,18,.97)",
+  border: "1px solid var(--bdh)",
+  borderRadius: 2,
+  backdropFilter: "blur(20px)",
+  boxShadow: "0 20px 60px rgba(0,0,0,.7)",
+  zIndex: Z.menu,
+} as const;
