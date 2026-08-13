@@ -24,6 +24,9 @@ export interface BoardsApi {
   recolorBoard: (id: string, color: AssetLabel) => void;
   selectBoard: (id: string | null) => void;
   addToBoard: (boardId: string, assetIds: string[]) => void;
+  /** Remove membership only. The assets remain in the project and any other
+   *  Workspace that also contains them. */
+  removeFromBoard: (boardId: string, assetIds: string[]) => void;
 }
 
 /** Workspaces for a project (ADR 0044). Server-backed since migration
@@ -235,6 +238,33 @@ export function useBoards(
       .catch(() => fail.current?.("Files not added to the workspace"));
   }, []);
 
+  const removeFromBoard = useCallback((id: string, assetIds: string[]) => {
+    if (assetIds.length === 0) return;
+    const removing = new Set(assetIds);
+    let previousAssetIds: string[] | null = null;
+    setBoards((prev) =>
+      prev.map((b) => {
+        if (b.id !== id) return b;
+        previousAssetIds = b.assetIds;
+        return { ...b, assetIds: b.assetIds.filter((assetId) => !removing.has(assetId)) };
+      }),
+    );
+    void fetch(`/api/boards/${id}/assets`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assetIds }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+      })
+      .catch(() => {
+        if (previousAssetIds) {
+          setBoards((prev) => prev.map((b) => (b.id === id ? { ...b, assetIds: previousAssetIds ?? b.assetIds } : b)));
+        }
+        fail.current?.("Files not removed from the workspace");
+      });
+  }, []);
+
   // Live only: a trashed workspace is not one you can be inside. `deleteBoard`
   // already clears the selection, and this is the second lock — a board that
   // arrives trashed from another tab's delete closes here too, rather than
@@ -258,5 +288,6 @@ export function useBoards(
     recolorBoard,
     selectBoard,
     addToBoard,
+    removeFromBoard,
   };
 }

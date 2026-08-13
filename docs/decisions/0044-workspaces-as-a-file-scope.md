@@ -382,3 +382,28 @@ note: a workspace with no colour is not a state, since the chip has a dot to dra
 The popover is `position: fixed`, positioned from the chip's rect at open time,
 because the breadcrumb clips its overflow now and an absolutely positioned
 popover inside a chip would be clipped with it.
+
+## Amendment (2026-08-13) — Workspaces retire artboards
+
+The additive transition above is complete: a Workspace is now the explicit,
+browsable set an artboard's coordinate-based membership was trying to represent.
+The artboard surface is retired rather than promoted to another server object.
+
+- The frame tool, `FrameOverlay`, add-to-artboard choices and artboard-specific
+  select/export/delete actions have no UI entry point.
+- A legacy frame is **inert**. Its rectangle does not detach Topic relations,
+  protect tile overrides from **Tidy up**, choose a selection, or influence an
+  export's reading order. Export receives an explicit selection or Workspace
+  asset set; position inside an invisible rectangle is never membership.
+- Existing `frames` in the versioned per-project `localStorage` blob are still
+  parsed and written back unchanged. We do not bump the store version, clear the
+  key or migrate those rectangles into Workspaces: retirement must not turn one
+  browser's old view state into server data, and a rollback/older build must not
+  discover that a newer build silently erased it.
+- The `Frame` shape and the server `canvas_groups.kind='artboard'` contracts stay
+  parseable for compatibility. Nothing creates or consumes them in the current
+  frontend; removing historical API/schema vocabulary is a separate migration,
+  not part of hiding the feature.
+
+The general PDF/CSV/ZIP export pipeline from ADR 0035 remains live. What retired
+is the positional artboard as an export source, not the formats or worker job.

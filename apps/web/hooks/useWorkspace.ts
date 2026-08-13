@@ -53,9 +53,9 @@ import {
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
   nudgeOffOverlap,
-  packGrid,
   positionsBounds,
   readingOrder,
+  tidyCanvasOverrides,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
   timelineAxisLayout as computeTimelineLayout,
@@ -84,9 +84,11 @@ const EMPTY_TILE_CLOUD: Record<string, string> = {};
  * crossing another cloud during free-position dragging. */
 const TOPIC_DROP_DWELL_MS = 240;
 
-/** Per-project canvas arrangement (tile drags, frames, sticky notes) is kept in
+/** Per-project canvas arrangement (tile drags, legacy frames, sticky notes) is kept in
  *  localStorage so it survives leaving and re-opening the project (ADR 0022).
- *  Positions are UI-only, so the browser is the right home — no backend/schema. */
+ *  Positions are UI-only, so the browser is the right home — no backend/schema.
+ *  Frames are read and written only for backward compatibility; the retired
+ *  artboard UI never renders or acts on them. */
 const CANVAS_STORE_PREFIX = "archivemind:canvas:";
 const canvasStoreKey = (projectId: string) => `${CANVAS_STORE_PREFIX}${projectId}`;
 /** Copy/Paste clipboard — asset ids waiting to be linked into another project.
@@ -292,8 +294,8 @@ interface ProcState {
   pct: number;
 }
 
-/** Undo/redo checkpoint — everything the frame tool, node drags, and
- * gallery/timeline/map/topic tile drags can mutate. */
+/** Undo/redo checkpoint for the client-side canvas arrangement. Legacy frames
+ * stay in the shape so undo/save cycles never erase an older browser's data. */
 interface Snapshot {
   frames: Frame[];
   stickyNotes: StickyNote[];
@@ -354,8 +356,10 @@ interface WorkspaceState {
   /** True while Space is held: a transient pan mode layered over the hand tool,
    *  so the selected tool is never mutated and resumes on release. Not persisted. */
   spacePan: boolean;
+  /** Retired artboards loaded and saved verbatim for backward compatibility.
+   *  No renderer or runtime behavior reads them. */
   frames: Frame[];
-  /** Canvas groups — folders + artboards (ADR 0034). Server owns membership +
+  /** Canvas groups. Server owns membership +
    *  name + order + settings; the on-canvas geometry lives in the localStorage
    *  groupGeom bucket (ADR 0022 holds — positions stay client-side). */
   groups: CanvasGroup[];
@@ -377,8 +381,6 @@ interface WorkspaceState {
    *  same state object the render does — the geometry seam and the render seam
    *  must never disagree about which photos exist. */
   boardScope: ReadonlySet<string> | null;
-  /** Content-space preview rect while the frame tool is actively drawing. */
-  frameDraftRect: { x: number; y: number; w: number; h: number } | null;
   history: Snapshot[];
   future: Snapshot[];
   zoomMenuOpen: boolean;
@@ -394,15 +396,13 @@ interface WorkspaceState {
   /** In-workspace Trash panel (ADR 0033). trashAssets null = not yet loaded. */
   trashOpen: boolean;
   trashAssets: TrashedAsset[] | null;
-  /** Export-to-PDF dialog (ADR 0035). exportIds = the assets it will export
-   *  (a frame's content, or the current selection). */
+  /** Export dialog (ADR 0035). exportIds = the explicit assets it will export. */
   exportOpen: boolean;
   exportIds: string[];
   /** Colour labels (migration 20260808000001). The filter HIDES tiles, it never
    *  moves them: every layout still runs over the full photo set, so filtering
-   *  cannot reflow an arrangement, change what an artboard contains, or alter
-   *  what an export picks up. Only what is drawn (and what a marquee can grab)
-   *  narrows. */
+   *  cannot reflow an arrangement or alter what an export picks up. Only what
+   *  is drawn (and what a marquee can grab) narrows. */
   labelFilter: LabelFilter;
   /** The workspace's seven colour names, defaults with renames applied. */
   labelNames: LabelNames;
@@ -478,16 +478,6 @@ type DragSession =
       moved: boolean;
     }
   | {
-      mode: "frameDraw";
-      startContent: { x: number; y: number };
-      endContent: { x: number; y: number };
-      dx0: number;
-      dy0: number;
-      x1: number;
-      y1: number;
-      moved: boolean;
-    }
-  | {
       // Dragging inside the minimap pans the viewport continuously. The
       // content↔minimap mapping (origin/off/mscale) and the minimap element's
       // screen rect are snapshotted at pointer-down (they don't change while the
@@ -538,7 +528,7 @@ export interface ProjectListItem {
  *  lose their entry, everything else keeps the exact coordinate it already had.
  *  Positions are never recomputed for a filter — that is the whole contract
  *  (see WorkspaceState.labelFilter), and it is why filtering cannot disturb an
- *  arrangement, an artboard's contents or an export. */
+ *  arrangement or alter what an export picks up. */
 function visibleTilePositions(
   positions: Record<string, TilePos>,
   photos: readonly Photo[],
@@ -683,25 +673,9 @@ export interface Workspace {
   genSingle: (id: string) => void;
   toolSelect: () => void;
   toolHand: () => void;
-  toolFrame: () => void;
   onFit: () => void;
   onZoomReset: () => void;
   setView: (v: ViewMode) => void;
-
-  // Frames (Figma-style canvas regions). A frame + its content acts as one unit:
-  // select all inside, export it to PDF, or delete it (rect + content).
-  frames: Frame[];
-  frameDraft: { x: number; y: number; w: number; h: number } | null;
-  frameCounts: Record<string, number>;
-  deleteFrame: (id: string) => void;
-  deleteFrameWithContent: (id: string) => void;
-  renameFrame: (id: string, label: string) => void;
-  selectFrame: (id: string) => void;
-  exportFrame: (id: string) => void;
-  beginFrameMove: (id: string) => void;
-  beginFrameResize: (id: string, handle: "nw" | "ne" | "sw" | "se") => void;
-  frameGestureMove: (dx: number, dy: number) => void;
-  endFrameGesture: () => void;
 
   // Folders (ADR 0034) — server-backed grouping, client-side geometry
   folders: FolderModel[];
@@ -775,9 +749,6 @@ export interface Workspace {
   /** The Workspace chip a drag is currently over (ADR 0044) — drives the chip's
    *  armed highlight. Null when the pointer is anywhere else. */
   boardDropTargetId: string | null;
-  addToNewArtboard: () => void;
-  addToExistingArtboard: (frameId: string) => void;
-
   // Right-click grid menu
   contextMenu: { x: number; y: number; targetId: string | null } | null;
   openContextMenu: (x: number, y: number, targetId: string | null) => void;
@@ -971,8 +942,8 @@ export interface Workspace {
  *
  *  That difference is why the scope is applied HERE, at the seam every layout
  *  reads, instead of at the render seam `visibleTilePositions` where the filter
- *  lives. `activeTilePositions` (geometry: drags, folder drops, artboard
- *  membership, export order) and the rendered positions must be computed from
+ *  lives. `activeTilePositions` (geometry: drags, folder drops, export order)
+ *  and the rendered positions must be computed from
  *  the same set, or a drag moves a tile to a coordinate nobody can see. */
 function canvasPhotos(photos: readonly Photo[], scope: ReadonlySet<string> | null): Photo[] {
   return scope ? photos.filter((p) => scope.has(p.id)) : [...photos];
@@ -1022,7 +993,7 @@ export function useWorkspace(
   initialAnnotations: CanvasAnnotation[],
   /** The open Workspace's asset ids, or null for "no board open" (ADR 0044). */
   boardScopeIds: readonly string[] | null = null,
-  /** The open Workspace, or null. A note, folder or artboard MADE while one is
+  /** The open Workspace, or null. A note or folder MADE while one is
    *  open belongs to it (ADR 0044) — the id is written by the server at create
    *  time, so unlike the previous client-side lists there is no second id to
    *  adopt when the insert returns. */
@@ -1101,7 +1072,6 @@ export function useWorkspace(
       .filter((a): a is NoteAnnotation => a.kind === "note")
       .map(annotationToNote),
     boardScope: null,
-    frameDraftRect: null,
     history: [],
     future: [],
     zoomMenuOpen: false,
@@ -1713,15 +1683,14 @@ export function useWorkspace(
         s.view === "timeline"
           ? computeTimelineLayout(scoped, s.galleryOverrides.timeline).tiles
           : s.view === "sense"
-            ? computeTopicLayout(scoped, s.galleryOverrides.topic, s.frames).tiles
+            ? computeTopicLayout(scoped, s.galleryOverrides.topic).tiles
             : assetGallery(projectCanvasItems(scoped, s.uploadPreviews), s.galleryOverrides.asset).pos;
-      // Deliberately NOT filtered. This is the geometry seam — artboard
-      // membership, folder drops, frame move/resize, Tidy up, the delete-time
-      // position freeze and the export's reading order all read it, and every
-      // one of them is about where tiles ARE, not about what is currently drawn.
-      // A label filter that reached in here would quietly drop hidden tiles out
-      // of an artboard's export and let a delete reflow the tiles nobody could
-      // see. The filter is applied only where it belongs: what is rendered
+      // Deliberately NOT filtered. This is the geometry seam — folder drops,
+      // Tidy up, the delete-time position freeze and export reading order all
+      // read it, and every one is about where tiles ARE, not about what is
+      // currently drawn. A label filter that reached in here would let a delete
+      // reflow tiles nobody could see and alter export order. It is applied only
+      // where it belongs: what is rendered
       // (`activePositions`), what a marquee can grab, and what Fit frames.
       return all;
     },
@@ -1795,31 +1764,10 @@ export function useWorkspace(
       if (s.focusedCloudKey) patch.focusedCloudKey = null; // click empty canvas clears cloud focus
       if (Object.keys(patch).length) setState(patch);
       const r = rect();
-      // Every view behaves like Canvas now (ADR 0022): the frame and select
-      // (marquee) tools work in all four, and only the hand tool pans on a
-      // background drag. Marquee hit-tests against the active view's own tile
-      // positions so it selects whatever is on screen, sorted or not.
-      // Space-hold pans over anything, so it takes precedence over the frame and
-      // select tools; the hand tool pans too.
-      if (s.tool === "frame" && !s.spacePan) {
-        const c = toContent(e.clientX, e.clientY);
-        const dx0 = e.clientX - r.left,
-          dy0 = e.clientY - r.top;
-        dragRef.current = {
-          mode: "frameDraw",
-          startContent: c,
-          endContent: c,
-          dx0,
-          dy0,
-          x1: dx0,
-          y1: dy0,
-          moved: false,
-        };
-        setState({
-          marquee: { x0: dx0, y0: dy0, x1: dx0, y1: dy0 },
-          frameDraftRect: { x: c.x, y: c.y, w: 0, h: 0 },
-        });
-      } else if (s.tool === "hand" || s.spacePan) {
+      // Every tile view behaves like Canvas now: background drag marquee-selects
+      // with the Select tool, while Hand or Space pans. Marquee hit-tests the
+      // active view's own tile positions so it selects what is on screen.
+      if (s.tool === "hand" || s.spacePan) {
         startPan(e);
       } else {
         const c = toContent(e.clientX, e.clientY);
@@ -2471,20 +2419,6 @@ export function useWorkspace(
           // A group half-inside the marquee is grabbed whole — it's one unit.
           selectedIds: expandBoundGroups(selection, boundGroupsOf(s.groups)),
         });
-      } else if (d.mode === "frameDraw") {
-        const r = rect();
-        d.x1 = e.clientX - r.left;
-        d.y1 = e.clientY - r.top;
-        if (Math.abs(d.x1 - d.dx0) > 4 || Math.abs(d.y1 - d.dy0) > 4) d.moved = true;
-        d.endContent = toContent(e.clientX, e.clientY);
-        const xl = Math.min(d.startContent.x, d.endContent.x),
-          yt = Math.min(d.startContent.y, d.endContent.y);
-        const w = Math.abs(d.endContent.x - d.startContent.x),
-          h = Math.abs(d.endContent.y - d.startContent.y);
-        setState({
-          marquee: { x0: d.dx0, y0: d.dy0, x1: d.x1, y1: d.y1 },
-          frameDraftRect: { x: xl, y: yt, w, h },
-        });
       } else if (d.mode === "minimap") {
         const mx = e.clientX - d.rectLeft,
           my = e.clientY - d.rectTop;
@@ -2631,36 +2565,6 @@ export function useWorkspace(
         });
       }
       setState({ marquee: null });
-    } else if (d.mode === "frameDraw") {
-      setState({ marquee: null, frameDraftRect: null });
-      if (d.moved) {
-        const s = stateRef.current;
-        const startC = d.startContent;
-        const endC = d.endContent ?? startC;
-        const xl = Math.min(startC.x, endC.x),
-          xr = Math.max(startC.x, endC.x);
-        const yt = Math.min(startC.y, endC.y),
-          yb = Math.max(startC.y, endC.y);
-        pushHistory();
-        const n = s.frames.length + 1;
-        setState({
-          frames: [
-            ...s.frames,
-            {
-              id: "frame" + Date.now(),
-              x: xl,
-              y: yt,
-              w: Math.max(40, xr - xl),
-              h: Math.max(40, yb - yt),
-              label: "Frame " + n,
-              boardId: boardIdRef.current,
-            },
-          ],
-          tool: "select",
-        });
-      } else {
-        setState({ tool: "select" });
-      }
     } else if (d.mode === "gallery") {
       // Dropped on a Workspace chip. Membership only — the tiles go back where
       // they were picked up, because a drag that ends on the header was never a
@@ -2748,7 +2652,6 @@ export function useWorkspace(
     }
   }, [
     setState,
-    pushHistory,
     activeTilePositions,
     syncFolderMembership,
     patchNote,
@@ -2766,23 +2669,6 @@ export function useWorkspace(
   const setStyle = useCallback((st: CaptionStyle) => setState({ drawerStyle: st }), [setState]);
   const toolSelect = useCallback(() => setState({ tool: "select" }), [setState]);
   const toolHand = useCallback(() => setState({ tool: "hand" }), [setState]);
-  const toolFrame = useCallback(
-    () => setState({ tool: stateRef.current.tool === "frame" ? "select" : "frame" }),
-    [setState],
-  );
-  const deleteFrame = useCallback(
-    (id: string) => {
-      pushHistory();
-      setState({ frames: stateRef.current.frames.filter((f) => f.id !== id) });
-    },
-    [pushHistory, setState],
-  );
-  const renameFrame = useCallback(
-    (id: string, label: string) => {
-      setState({ frames: stateRef.current.frames.map((f) => (f.id === id ? { ...f, label } : f)) });
-    },
-    [setState],
-  );
   const clearSelection = useCallback(() => setState({ selectedIds: [] }), [setState]);
 
   const navDrawer = useCallback(
@@ -3485,14 +3371,13 @@ export function useWorkspace(
     ) => {
       const r = rect();
       const s = stateRef.current;
-      const frames = s.frames;
       const fit = (layout: { tiles: Record<string, TilePos>; bounds: Bounds }) =>
         fitDefaultZoom(visibleBounds(layout, allPhotos, s.labelFilter), r);
       if (view === "neural") {
         const gallery = neuralGalleryFor(allPhotos, overrides, previews);
         return fit({ tiles: gallery.pos, bounds: gallery.bounds });
       }
-      if (view === "sense") return fit(computeTopicLayout(allPhotos, overrides.topic, frames));
+      if (view === "sense") return fit(computeTopicLayout(allPhotos, overrides.topic));
       return fit(computeTimelineLayout(allPhotos, overrides.timeline));
     },
     [rect, neuralGalleryFor, fitDefaultZoom, visibleBounds],
@@ -3517,7 +3402,7 @@ export function useWorkspace(
     };
     const layout =
       s.view === "sense"
-        ? computeTopicLayout(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides.topic, s.frames)
+        ? computeTopicLayout(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides.topic)
         : s.view === "timeline"
           ? computeTimelineLayout(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides.timeline)
           : neural();
@@ -3774,8 +3659,8 @@ export function useWorkspace(
   const sendToBack = useCallback(() => applyTileZ("back"), [applyTileZ]);
   const bringForward = useCallback(() => applyTileZ("forward"), [applyTileZ]);
   const sendBackward = useCallback(() => applyTileZ("backward"), [applyTileZ]);
-  /** Open the Export-to-PDF dialog for an explicit set of assets (ADR 0035) — a
-   *  frame's content, a folder, or the current selection. The dialog itself does
+  /** Open the export dialog for an explicit set of assets (ADR 0035) — a folder
+   *  or the current selection. The dialog itself does
    *  the POST /api/exports + poll + download.
    *
    *  Page order is decided HERE, once, so all four entry points agree: the ids
@@ -3935,234 +3820,21 @@ export function useWorkspace(
     [setState],
   );
 
-  /** New function: wrap the current selection in an artboard (frame). Artboards
-   *  live on the Workspace, so the bounding box is computed in neural (grid)
-   *  coordinates and — if invoked from a sorting view — we switch back first so
-   *  the frame lands where the tiles rest. */
-  const addToNewArtboard = useCallback(() => {
-    const s = stateRef.current;
-    const ids = s.selectedIds;
-    if (ids.length === 0) return flashToast("Select files to add to an artboard");
-    const pos = activeTilePositions({ ...s, view: "neural" });
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const id of ids) {
-      const p = pos[id];
-      if (!p) continue;
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + p.w);
-      maxY = Math.max(maxY, p.y + p.h);
-    }
-    if (!Number.isFinite(minX)) return flashToast("Select files to add to an artboard");
-    const pad = 28;
-    pushHistory();
-    const n = s.frames.length + 1;
-    const frame = {
-      id: "frame" + Date.now(),
-      x: minX - pad,
-      y: minY - pad,
-      w: Math.max(40, maxX - minX + pad * 2),
-      h: Math.max(40, maxY - minY + pad * 2),
-      label: "Frame " + n,
-      // Artboards are still client-only, so this one is stamped here rather
-      // than by a server insert — same meaning, same null for "project canvas".
-      boardId: boardIdRef.current,
-    };
-    if (s.view !== "neural") setView("neural");
-    setState((prev) => ({ frames: [...prev.frames, frame] }));
-    setContextMenu(null);
-    flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to a new artboard`);
-  }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
-
-  /** New function: pack the current selection into an existing artboard by
-   *  overriding each tile's Workspace center to a grid inside the frame bounds. */
-  const addToExistingArtboard = useCallback((frameId: string) => {
-    const s = stateRef.current;
-    const ids = s.selectedIds;
-    if (ids.length === 0) return flashToast("Select files to add to an artboard");
-    const frame = s.frames.find((f) => f.id === frameId);
-    if (!frame) return;
-    const pos = activeTilePositions({ ...s, view: "neural" });
-    const pad = 24, gap = 16, cell = 120;
-    const cols = Math.max(1, Math.floor((frame.w - pad * 2 + gap) / (cell + gap)));
-    pushHistory();
-    const asset = { ...s.galleryOverrides.asset };
-    ids.forEach((id, i) => {
-      const p = pos[id];
-      const w = p?.w ?? cell, h = p?.h ?? cell;
-      const col = i % cols, row = Math.floor(i / cols);
-      asset[id] = {
-        x: frame.x + pad + col * (cell + gap) + w / 2,
-        y: frame.y + pad + row * (cell + gap) + h / 2,
-      };
-    });
-    if (s.view !== "neural") setView("neural");
-    setState((prev) => ({ galleryOverrides: { ...prev.galleryOverrides, asset } }));
-    setContextMenu(null);
-    flashToast(`Added ${ids.length} ${ids.length === 1 ? "file" : "files"} to "${frame.label}"`);
-  }, [activeTilePositions, pushHistory, setView, setState, flashToast]);
-
-  // ── Frame (artboard) actions: treat the frame + its content as one unit ────
-
-  /** The asset ids whose tiles currently sit inside a frame (positional — a
-   *  frame has no stored membership; ADR 0034). */
-  const frameContentIds = useCallback(
-    (frame: Frame): string[] => {
-      const s = stateRef.current;
-      const pos = activeTilePositions({ ...s, view: "neural" });
-      return s.photos
-        .filter((p) => {
-          const t = pos[p.id];
-          return t && t.cx >= frame.x && t.cx <= frame.x + frame.w && t.cy >= frame.y && t.cy <= frame.y + frame.h;
-        })
-        .map((p) => p.id);
-    },
-    [activeTilePositions],
-  );
-
-  /** Select everything inside a frame — the normal action bar then operates on
-   *  the whole artboard. */
-  const selectFrame = useCallback(
-    (frameId: string) => {
-      const s = stateRef.current;
-      const frame = s.frames.find((f) => f.id === frameId);
-      if (!frame) return;
-      if (s.view !== "neural") setView("neural");
-      setState({ selectedIds: frameContentIds(frame) });
-    },
-    [frameContentIds, setView, setState],
-  );
-
-  /** Export a whole artboard's content to PDF (ADR 0035). */
-  const exportFrame = useCallback(
-    (frameId: string) => {
-      const frame = stateRef.current.frames.find((f) => f.id === frameId);
-      if (frame) openExportFor(frameContentIds(frame));
-    },
-    [frameContentIds, openExportFor],
-  );
-
-  /** Delete a frame AND its content — the photos go to Trash through the normal
-   *  soft-delete flow (undo toast + bulk-confirm ≥8, ADR 0033); the rect is
-   *  removed either way. */
-  const deleteFrameWithContent = useCallback(
-    (frameId: string) => {
-      const s = stateRef.current;
-      const frame = s.frames.find((f) => f.id === frameId);
-      if (!frame) return;
-      const ids = frameContentIds(frame);
-      pushHistory();
-      setState({ frames: s.frames.filter((f) => f.id !== frameId) });
-      if (ids.length > 0) requestDeletePhotos(ids);
-      else flashToast("Removed empty artboard");
-    },
-    [frameContentIds, pushHistory, setState, requestDeletePhotos, flashToast],
-  );
-
-  // Move / resize an artboard while its content rides along (the user's ask:
-  // "не втрачалось те що всередині"). Content is captured positionally at gesture
-  // start, then translated (move) or scaled about the fixed corner (resize), so
-  // nothing inside is left behind. Cumulative deltas arrive in content space.
-  const frameGesture = useRef<{
-    id: string;
-    mode: "move" | "resize";
-    handle: "nw" | "ne" | "sw" | "se";
-    orig: Frame;
-    content: { id: string; cx: number; cy: number }[];
-  } | null>(null);
-
-  const beginFrameMove = useCallback(
-    (id: string) => {
-      const s = stateRef.current;
-      const frame = s.frames.find((f) => f.id === id);
-      if (!frame) return;
-      const pos = activeTilePositions({ ...s, view: "neural" });
-      const content = frameContentIds(frame).map((cid) => ({ id: cid, cx: pos[cid]?.cx ?? 0, cy: pos[cid]?.cy ?? 0 }));
-      pushHistory();
-      frameGesture.current = { id, mode: "move", handle: "se", orig: { ...frame }, content };
-    },
-    [activeTilePositions, frameContentIds, pushHistory],
-  );
-
-  const beginFrameResize = useCallback(
-    (id: string, handle: "nw" | "ne" | "sw" | "se") => {
-      const s = stateRef.current;
-      const frame = s.frames.find((f) => f.id === id);
-      if (!frame) return;
-      const pos = activeTilePositions({ ...s, view: "neural" });
-      const content = frameContentIds(frame).map((cid) => ({ id: cid, cx: pos[cid]?.cx ?? 0, cy: pos[cid]?.cy ?? 0 }));
-      pushHistory();
-      frameGesture.current = { id, mode: "resize", handle, orig: { ...frame }, content };
-    },
-    [activeTilePositions, frameContentIds, pushHistory],
-  );
-
-  const frameGestureMove = useCallback(
-    (dx: number, dy: number) => {
-      const g = frameGesture.current;
-      if (!g) return;
-      const s = stateRef.current;
-      const asset = { ...s.galleryOverrides.asset };
-      let nf: Frame;
-      if (g.mode === "move") {
-        nf = { ...g.orig, x: g.orig.x + dx, y: g.orig.y + dy };
-        for (const c of g.content) asset[c.id] = { x: c.cx + dx, y: c.cy + dy };
-      } else {
-        const MIN = 80;
-        const west = g.handle === "nw" || g.handle === "sw";
-        const north = g.handle === "nw" || g.handle === "ne";
-        const w = Math.max(MIN, west ? g.orig.w - dx : g.orig.w + dx);
-        const h = Math.max(MIN, north ? g.orig.h - dy : g.orig.h + dy);
-        const x = west ? g.orig.x + (g.orig.w - w) : g.orig.x;
-        const y = north ? g.orig.y + (g.orig.h - h) : g.orig.y;
-        nf = { ...g.orig, x, y, w, h };
-        // Scale content about the corner that stays put, so it keeps its
-        // relative place inside the resized frame (never falls out).
-        const anchorX = west ? g.orig.x + g.orig.w : g.orig.x;
-        const anchorY = north ? g.orig.y + g.orig.h : g.orig.y;
-        const sxr = w / g.orig.w;
-        const syr = h / g.orig.h;
-        for (const c of g.content) {
-          asset[c.id] = { x: anchorX + (c.cx - anchorX) * sxr, y: anchorY + (c.cy - anchorY) * syr };
-        }
-      }
-      setState({
-        frames: s.frames.map((f) => (f.id === g.id ? nf : f)),
-        galleryOverrides: { ...s.galleryOverrides, asset },
-      });
-    },
-    [setState],
-  );
-
-  const endFrameGesture = useCallback(() => {
-    frameGesture.current = null;
-  }, []);
-
   /** "Tidy up" (issue #3): snap the Canvas grid back to order, with the same
    *  glide a view switch uses. Selection ≥ 2 packs just those tiles into an even
    *  grid where they already sit (Figma-style, selection-first); selection ≤ 1
-   *  resets the whole asset bucket to assetGallery's deterministic default grid —
-   *  except tiles that live inside an artboard (their override is what holds them
-   *  there), so a tidy-all never ejects framed work. Undoable via pushHistory;
-   *  neural-view only (the bottom action bar that hosts it is neural-only). */
+   *  resets the active Workspace's asset overrides to the deterministic default
+   *  grid. Overrides outside that Workspace are preserved. Undoable via
+   *  pushHistory; neural-view only (the bottom action bar that hosts it is
+   *  neural-only). */
   const tidyUp = useCallback(() => {
     const s = stateRef.current;
     const pos = activeTilePositions({ ...s, view: "neural" });
-    let nextAsset: Record<string, CanvasPoint>;
-    if (s.selectedIds.length >= 2) {
-      nextAsset = { ...s.galleryOverrides.asset, ...packGrid(s.selectedIds, pos) };
-    } else {
-      if (Object.keys(s.galleryOverrides.asset).length === 0) return; // already the default grid
-      const keep: Record<string, CanvasPoint> = {};
-      for (const [id, center] of Object.entries(s.galleryOverrides.asset)) {
-        const t = pos[id];
-        const inFrame = t
-          ? s.frames.some((f) => t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h)
-          : true; // not in the current layout — keep its override defensively
-        if (inFrame) keep[id] = center;
-      }
-      nextAsset = keep;
-    }
+    const nextAsset = tidyCanvasOverrides(s.galleryOverrides.asset, s.selectedIds, pos);
+    if (
+      Object.keys(nextAsset).length === Object.keys(s.galleryOverrides.asset).length &&
+      Object.entries(nextAsset).every(([id, point]) => s.galleryOverrides.asset[id] === point)
+    ) return;
     pushHistory();
     setState({ galleryOverrides: { ...s.galleryOverrides, asset: nextAsset }, tilesAnimating: true });
     if (animTimer.current) clearTimeout(animTimer.current);
@@ -5189,7 +4861,7 @@ export function useWorkspace(
             c.suppress = true;
             dragRef.current = null;
             clearTopicDropTarget();
-            setState({ marquee: null, frameDraftRect: null, panning: false });
+            setState({ marquee: null, panning: false });
             // targetId null: the menu acts on the selection, and the press that
             // started this hold has already selected whatever it landed on.
             openContextMenu(c.longPressAt.x, c.longPressAt.y, null);
@@ -5216,7 +4888,7 @@ export function useWorkspace(
           tx: s.tx,
           ty: s.ty,
         };
-        setState({ marquee: null, frameDraftRect: null, panning: false });
+        setState({ marquee: null, panning: false });
       }
     };
     if (el) el.addEventListener("pointerdown", onCaptureDown, true);
@@ -5304,9 +4976,10 @@ export function useWorkspace(
   );
 
   // ── Persist canvas arrangement per project (ADR 0022) ──────────────────────
-  // Load once on mount (before the rAF fit reads bounds), so tile drags, frames
-  // and folder boxes are exactly where they were left. localStorage only — this
-  // is UI state, never a backend concern.
+  // Load once on mount (before the rAF fit reads bounds), so tile drags and
+  // folder boxes are exactly where they were left. Legacy frames are preserved
+  // verbatim but never rendered or consulted. localStorage only — this is UI
+  // state, never a backend concern.
   //
   // Sticky notes USED to ride along here and no longer do (ADR 0041): a note's
   // position is its content, not a view preference, so the whole note lives in
@@ -5589,22 +5262,6 @@ export function useWorkspace(
       });
   }, [state.groups, state.groupGeom, state.photos]);
 
-  // How many tiles currently sit inside each frame (positional) — the header
-  // badge + a guard for the "export/delete this artboard" actions. Frames are
-  // few and photos ≤500, so the O(frames×photos) scan is cheap.
-  const frameCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const f of state.frames) {
-      let n = 0;
-      for (const p of state.photos) {
-        const t = neuralGalleryPos[p.id];
-        if (t && t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h) n++;
-      }
-      counts[f.id] = n;
-    }
-    return counts;
-  }, [state.frames, state.photos, neuralGalleryPos]);
-
   const selectedIds = useMemo(() => new Set(state.selectedIds), [state.selectedIds]);
   const aiBusyIds = useMemo(() => new Set(state.aiBusyIds), [state.aiBusyIds]);
 
@@ -5716,7 +5373,7 @@ export function useWorkspace(
 
   // Each grouping layout is computed only while its view is active — the cloud
   // pack + tag-edge pass is the expensive part of a render, and running all
-  // three on every photos/overrides/frames change tripled that cost for
+  // three on every photos/overrides change tripled that cost for
   // nothing (only one decor layer can be on screen).
   const timelineLayoutResult = useMemo(
     () => (isTimelineView ? computeTimelineLayout(projectPhotos, state.galleryOverrides.timeline) : null),
@@ -5724,8 +5381,8 @@ export function useWorkspace(
   );
 
   const topicLayoutResult = useMemo(
-    () => (isSenseView ? computeTopicLayout(projectPhotos, state.galleryOverrides.topic, state.frames) : null),
-    [isSenseView, projectPhotos, state.galleryOverrides.topic, state.frames],
+    () => (isSenseView ? computeTopicLayout(projectPhotos, state.galleryOverrides.topic) : null),
+    [isSenseView, projectPhotos, state.galleryOverrides.topic],
   );
 
   // Also surfaces while a job runs — with sidebar-triggered analyzes the
@@ -5739,8 +5396,6 @@ export function useWorkspace(
     const sel = state.photos.filter((p) => set.has(p.id)).slice(0, 4);
     return sel.map((p, i) => ({ src: photoSrc(p, 60, 60), ml: i === 0 ? 0 : -9 }));
   }, [state.photos, selectedIds]);
-
-  const frameDraft = state.frameDraftRect;
 
   // The active view's canonical-photo positions (Canvas grid or a cloud sort),
   // plus the cloud backdrop/edges/labels for the grouping views. Both drive one
@@ -5980,23 +5635,9 @@ export function useWorkspace(
     genSingle,
     toolSelect,
     toolHand,
-    toolFrame,
     onFit: doFitContent,
     onZoomReset: doFit,
     setView,
-
-    frames: state.frames,
-    frameDraft,
-    frameCounts,
-    deleteFrame,
-    deleteFrameWithContent,
-    renameFrame,
-    selectFrame,
-    exportFrame,
-    beginFrameMove,
-    beginFrameResize,
-    frameGestureMove,
-    endFrameGesture,
 
     folders: folderModels,
     openFolder,
@@ -6041,8 +5682,6 @@ export function useWorkspace(
     returnSelectionToAi,
     topicDropTargetKey,
     boardDropTargetId,
-    addToNewArtboard,
-    addToExistingArtboard,
 
     contextMenu,
     openContextMenu,

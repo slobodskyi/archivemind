@@ -50,7 +50,7 @@ const STALL_MS = 5 * 60 * 1000;
 const ENQUEUE_ERROR_COPY: Record<string, string> = {
   too_many_assets: `An export covers up to ${EXPORT_MAX_ASSETS} photos at a time. Deselect some and try again.`,
   no_matching_assets: "Those photos aren't available any more — they may be in Trash.",
-  group_not_found: "That artboard no longer exists.",
+  group_not_found: "That export source no longer exists.",
   unauthorized: "Your session expired. Reload the page and sign in again.",
   no_workspace: "No workspace found for your account.",
   export_backlog: "You already have exports rendering. Wait for those to finish and try again.",
@@ -130,7 +130,7 @@ const SR_ONLY: React.CSSProperties = {
   border: 0,
 };
 
-/** Artboard / selection → export dialog (ADR 0035). Configures the deliverable,
+/** Selection / saved group → export dialog (ADR 0035). Configures the deliverable,
  *  POSTs /api/exports, follows the job's real progress, then offers the file.
  *
  *  It reports what the run will actually contain before the user commits: which

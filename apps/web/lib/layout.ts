@@ -16,9 +16,8 @@ export { UNSORTED_CLOUD_KEY } from "./topics";
 
 export interface Frame {
   id: string;
-  /** The Workspace this artboard was made in (ADR 0044); null = project canvas.
-   *  Artboards are still client-only, so unlike a note this is stamped by the
-   *  client rather than written by an insert. */
+  /** Legacy artboard ownership retained only so old localStorage rows remain
+   *  parseable and can round-trip without data loss (ADR 0044 amendment). */
   boardId: string | null;
   x: number;
   y: number;
@@ -113,7 +112,7 @@ export function mkBez(sx: number, sy: number, ex: number, ey: number, seed: numb
  *  Optional, and shared by every bucket, on purpose: the drag path writes all
  *  five through one computed key, and a persisted override from before this
  *  field existed simply has no anchor and is honoured as-is (localStorage
- *  `v` gate untouched — bumping it would also throw away artboards and notes). */
+ *  `v` gate untouched — bumping it would also throw away legacy frames). */
 export interface CanvasOverride extends CanvasPoint {
   cloud?: string;
 }
@@ -382,6 +381,34 @@ export function packGrid(
   return out;
 }
 
+/** Build the Canvas override bucket produced by "Tidy up".
+ *
+ * With a multi-selection, only those tiles are packed and every other override
+ * stays in place. Without one, every tile in the active Canvas returns to its
+ * deterministic grid position. Overrides whose ids are absent from `positions`
+ * belong to another Workspace scope (or are otherwise not laid out here), so
+ * they are preserved rather than letting a narrow Workspace rearrange the rest
+ * of the project.
+ *
+ * Legacy artboard frames are deliberately not an input. Workspaces own explicit
+ * membership now; an invisible rectangle must not protect an override from a
+ * tidy or otherwise keep affecting the canvas after the artboard UI is retired. */
+export function tidyCanvasOverrides(
+  current: Readonly<Record<string, CanvasPoint>>,
+  selectedIds: readonly string[],
+  positions: Readonly<Record<string, TilePos>>,
+): Record<string, CanvasPoint> {
+  if (selectedIds.length >= 2) {
+    return { ...current, ...packGrid(selectedIds, positions) };
+  }
+
+  const outsideScope: Record<string, CanvasPoint> = {};
+  for (const [id, center] of Object.entries(current)) {
+    if (!positions[id]) outsideScope[id] = center;
+  }
+  return outsideScope;
+}
+
 /** Minimum gap (px, content space) kept between a just-dropped tile and any other
  *  tile center. Free overlap is allowed everywhere on the canvas — this only stops
  *  a tile from landing near-exactly on top of another and hiding it 100%. Larger
@@ -545,10 +572,9 @@ function dayLabel(key: string): string {
 // gradient blending both clouds' colors, one strongest representative link per
 // pair of clouds so the canvas never becomes a tangle. Unanalyzed (untagged)
 // files simply have no lines — the web itself shows what AI has processed. A
-// tile dropped onto an artboard (frame) is detached from the web — its lines
-// are removed (ADR 0022). Tiles are freely draggable — a drag override simply
-// wins over the packed position, and those overrides persist per project
-// (ADR 0022).
+// tile's position has no bearing on those semantic relations. Tiles are freely
+// draggable — a drag override simply wins over the packed position, and those
+// overrides persist per project (ADR 0022).
 
 export interface CloudNode {
   key: string;
@@ -733,9 +759,6 @@ function buildCloudLayout(
   colorOf: (key: string) => string,
   labelOf: (key: string) => string,
   overrides: Record<string, CanvasOverride>,
-  /** Frames (artboards) on the canvas — any tile whose center lands inside one
-   *  is detached from the connecting-line web (ADR 0022). */
-  frames: readonly Frame[],
   /** The identity a tile's override is anchored to (ADR 0038). An override
    *  whose recorded `cloud` no longer equals this is STALE — the photo changed
    *  cloud under it — and is ignored, so the tile re-packs with its new cloud
@@ -853,31 +876,19 @@ function buildCloudLayout(
     return { clouds, tiles, edges, tileCloud: tileCluster, bounds: positionsBounds(tiles) };
   }
 
-  // A file dropped onto an artboard (frame) is detached from the web — its
-  // connecting lines are removed so it reads as pulled out of the cluster.
-  const detached = new Set<string>();
-  if (frames.length) {
-    for (const id of Object.keys(tiles)) {
-      const t = tiles[id];
-      if (frames.some((f) => t.cx >= f.x && t.cx <= f.x + f.w && t.cy >= f.y && t.cy <= f.y + f.h)) {
-        detached.add(id);
-      }
-    }
-  }
-
   // Edges are real relations (ADR 0022): a pair of files is linked when it
   // shares a *discriminative* AI tag. An inverted index (tag → linkable photo
   // ids) turns that into candidate pairs; counting how many tags each pair
-  // shares drives the line's weight. Untagged (unanalyzed) and artboard-
-  // detached files never enter the index, so they have no lines — by design,
-  // not by omission. Two caps keep the web O(n) instead of O(n²) — real data
+  // shares drives the line's weight. Untagged (unanalyzed) files never enter
+  // the index, so they have no lines — by design, not by omission. Two caps
+  // keep the web O(n) instead of O(n²) — real data
   // routinely concentrates in one big cloud (Map's inert country, ADR 0018; a
   // dominant Topic when one theme covers most of a project), so without them a
   // common tag at the 500-asset read limit means ~125k SVG paths and a frozen
   // tab:
   const byTag: Record<string, string[]> = {};
   photos.forEach((p) => {
-    if (detached.has(p.id) || !p.tags) return;
+    if (!p.tags) return;
     // De-dupe per photo: the same tag NAME can be two DB rows (unique key is
     // name+category, and re-analyze can drift the category), and a duplicate
     // here would fabricate self-pairs and double-count pair weights.
@@ -1002,7 +1013,6 @@ export function topicAnchorOf(photo: Pick<Photo, "topicId" | "group">): string {
 export function topicCloudLayout(
   photos: readonly Photo[],
   topicOverrides: Record<string, CanvasOverride>,
-  frames: readonly Frame[] = [],
 ): CloudLayout {
   // A healthy stored cluster has one label for every member. Resolve the rare
   // inconsistent optimistic/intermediate state deterministically so reversing
@@ -1029,7 +1039,6 @@ export function topicCloudLayout(
       return GROUPS[label as PhotoGroup]?.label ?? label;
     },
     topicOverrides,
-    frames,
     topicAnchorOf,
     (photo) => photo.topicId ?? null,
     true,

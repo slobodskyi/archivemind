@@ -99,7 +99,7 @@ Two lanes after Phase 0: **Lane W (web)** and **Lane K (worker/pipeline)** — o
   O(n) — ambient tags and per-file link budgets), replacing the branch's demo complete
   graph; the branch's `DEMO_CLOUDS` scaffold was removed before landing.
 - **Part of #22 shipped as an interim:** per-project canvas arrangement (tile drags,
-  frames, sticky notes) persists client-side in versioned `localStorage`; undo/redo for
+  retired legacy frames, sticky notes) persists client-side in versioned `localStorage`; undo/redo for
   drags already existed (ADR 0012's `Snapshot` history). Still open from #22: the
   server-side `PUT /api/canvas/layout`. Still open for #18: virtualization — and the
   known drag-relayout cost on large single clouds is deferred to that work (ADR 0022
@@ -145,8 +145,8 @@ Phases 1–2). What actually remains:
   in/out, rename, ungroup). New `canvas_groups` + `canvas_group_assets` tables
   (membership on the server, geometry in the `localStorage` groupGeom bucket —
   ADR 0022 still holds); routes under `app/api/canvas-groups/*`; the "Group"
-  action-bar button is now real. Artboards still draw client `Frame`s;
-  promoting them to `kind='artboard'` server groups is the follow-up.
+  action-bar button is now real. Artboards were later retired by ADR 0044's
+  2026-08-13 amendment; legacy `Frame`s remain parseable but inert.
 - **Remaining #17:** per-project `caption_prompt`, project members.
 - **Topic embedding clustering — ✅ DONE 2026-07-22 (#122), LIVE on prod** — the
   stable replacement for the read-time tag heuristic (ADR 0023): a deterministic
@@ -227,8 +227,8 @@ Phases 1–2). What actually remains:
   a row, so every existing workspace is already correct with zero rows) by the
   same double-click gesture ADR 0038 gave Topic clouds. The left toolbar's
   filter **hides tiles without moving them** — layouts still run over the full
-  set, the filter is applied at one seam (`visibleTilePositions`), so artboards,
-  folder contents, frame counts and exports keep seeing the real geometry — and
+  set and the filter is applied at one seam (`visibleTilePositions`), so folder
+  contents and exports keep seeing the real geometry — and
   **LABELS** is the fifth view, one cloud per colour plus `No label`, reusing
   `buildCloudLayout` with the colour as both cloud key and staleness anchor (so
   re-colouring a dragged tile re-packs it) and the tag web switched off. Zero
@@ -347,15 +347,22 @@ kept or removed on purpose.
    invisible** — `kind='ink'` rows are kept and still parse, nothing renders
    them, and whether they are deleted is an open, reversible decision.
 4. **Workspaces** ([ADR 0044](decisions/0044-workspaces-as-a-file-scope.md)) — a
-   named, colour-coded file scope, `localStorage` for now, taken **additively**:
-   opening one narrows the canvas and nothing else changes. The branch made it a
-   mode that hid existing notes and folders behind "create a workspace first".
-   **Backend not built** — the ADR is its spec (`boards` + `board_assets`, the
-   routes, and `board_id` on notes/folders for per-workspace state).
+   named, colour-coded server-backed file scope. Migration `20260812000001`
+   landed `boards` + `board_assets`; `20260813000001` added reversible Trash and
+   ownership for notes/folders. Opening one narrows and re-packs the canvas.
+   Artboards are now retired/inert while their old local data remains parseable.
+5. **Content drafts** ([ADR 0045](decisions/0045-workspace-content-drafts.md)) —
+   an open Workspace can generate an editable article or Instagram carousel from
+   an explicit ordered snapshot. Create/Drafts are distinct from PDF/CSV/ZIP
+   Download. The first slice persists drafts in versioned browser storage (no
+   migration); generation is authenticated, board-membership checked and logged
+   as `content_generated`. A server `content_drafts` domain and combined rendered
+   packages remain a migration-owned follow-up.
 
-**No migrations in any of the four.** Nothing here has been verified on a real
-device or against prod data; every check is `lint`/`typecheck`/`test`/`build`
-plus static-render screenshots of the changed surfaces.
+The original four-PR stack had no migrations; the dated ADR 0044 amendments and
+the paragraph above describe the backend that landed after it. Device/prod visual
+verification remains separate from the automated `lint`/`typecheck`/`test`/`build`
+checks.
 
 ---
 

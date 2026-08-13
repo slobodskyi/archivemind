@@ -30,7 +30,7 @@ const STEPS = [
   {
     tag: "Compile",
     title: "Compile a project, create new materials.",
-    body: "Build a project from your selection and make new files from your originals — lay them onto an artboard, arrange them, and produce something new from your own work.",
+    body: "Build a focused workspace from your selection, then turn those source files into a reusable draft for the job at hand.",
   },
   {
     tag: "Export",

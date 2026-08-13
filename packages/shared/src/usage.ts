@@ -20,6 +20,10 @@
  *    (charging for it would tax the thing the product is for), and export and
  *    ingest spend R2 and CPU, which the storage limit already bounds. Keeping
  *    them at 0 is what lets the sentence above stay true with no footnotes.
+ *  - `content_generated` is one multi-photo synthesis, not one action per photo.
+ *    Its pricing unit is recorded but deliberately 0 until a set-level credit
+ *    conversion is approved (ADR 0045); silently multiplying by source count
+ *    would violate the predictable per-photo definition above.
  *
  *  Nothing here is enforced. `plans.enforced` is false for every shipped plan
  *  and no code path refuses work for lack of credits — this is metering, and
@@ -34,6 +38,7 @@ export type UsageEventType =
   | "embedding"
   | "caption_generated"
   | "search_query"
+  | "content_generated"
   | "export"
   | "asset_ingested";
 
@@ -44,6 +49,7 @@ export const CREDIT_COST: Record<UsageEventType, number> = {
   caption_generated: 1,
   embedding: 0,
   search_query: 0,
+  content_generated: 0,
   export: 0,
   asset_ingested: 0,
 };
@@ -85,6 +91,8 @@ export const USD_PER_UNIT: Record<UsageEventType, number> = {
   embedding: 0.00012,
   caption_generated: 0.0003,
   search_query: 0.0002,
+  // Token-dependent multi-photo composition has not been benchmarked/priced.
+  content_generated: 0,
   export: 0,
   asset_ingested: 0,
 };

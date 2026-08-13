@@ -4,12 +4,12 @@ import { Z } from "@/lib/ui";
 
 interface CanvasContextMenuProps {
   menu: { x: number; y: number; targetId: string | null } | null;
-  /** Hide the project-editing tools (frame/AI/import) that don't apply to the
+  /** Hide project-editing tools (AI/import) that don't apply to the
    *  read-only all-files grid — matches the left toolbar's own gating. */
   allFilesMode: boolean;
   /** The Workspace (neural) view is showing. A sticky note's position is in
    *  Workspace coordinates, so it is only offered there — same rule the left
-   *  toolbar and the artboard/folder overlays follow. */
+   *  toolbar and folder overlay follow. */
   isCanvasView: boolean;
   /** Current selection size — with a selection, "Move to Trash" acts on it;
    *  without one it acts on the right-clicked tile (menu.targetId). */
@@ -31,8 +31,8 @@ interface CanvasContextMenuProps {
   onGroup: () => void;
   /** Folder and Export moved onto the Workspace bar, which only exists inside an
    *  open Workspace now — so a selection outside one reaches them here or not at
-   *  all. Tidy up and the artboard tool are deliberately NOT mirrored: both
-   *  arrange a working surface, which is the thing a Workspace is. */
+   *  all. Tidy up is deliberately not mirrored: it arranges the working surface,
+   *  which is the thing a Workspace is. */
   onFolder: () => void;
   onExport: () => void;
   /** Dissolve the bound group(s) the selection touches. */

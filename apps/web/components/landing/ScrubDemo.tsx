@@ -28,7 +28,7 @@ const STEPS = [
     key: "canvas",
     label: "Canvas",
     title: "Everything on one infinite canvas.",
-    caption: "drag · zoom · group into folders and artboards",
+    caption: "drag · zoom · collect files into focused workspaces",
   },
   {
     key: "timeline",

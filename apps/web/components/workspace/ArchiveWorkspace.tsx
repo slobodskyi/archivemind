@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
@@ -9,7 +9,6 @@ import { LABEL_COLORS } from "@/lib/labels";
 import BoardBrowser from "@/components/header/BoardBrowser";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
-import FrameOverlay from "@/components/canvas/FrameOverlay";
 import FolderOverlay from "@/components/canvas/FolderOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
@@ -38,6 +37,24 @@ import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
 // SearchModal retired — the magnifier now opens the real Smart Search panel (ChatPanel).
 import ConfirmModal from "@/components/modals/ConfirmModal";
+import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions";
+import CreateOutputDialog from "@/components/content/CreateOutputDialog";
+import DraftLibraryDialog from "@/components/content/DraftLibraryDialog";
+import ContentDraftStudio from "@/components/content/ContentDraftStudio";
+import {
+  contentGenerationResultSchema,
+  draftFromGeneration,
+  generationRequestBody,
+  type CreateOutputInput,
+} from "@/lib/content-generation-client";
+import {
+  deleteContentDraft,
+  listContentDrafts,
+  loadContentDraft,
+  saveContentDraft,
+  type ContentDraft,
+} from "@/lib/content-drafts";
+import { downloadContentDraft } from "@/lib/content-package";
 
 interface Account {
   initials: string;
@@ -80,7 +97,7 @@ export default function ArchiveWorkspace({
 }: ArchiveWorkspaceProps) {
   // Workspaces (boards) — a named, colour-coded set of the project's files
   // (ADR 0044). Additive on purpose: opening one narrows the canvas to its
-  // files and nothing else changes, so notes, folders, artboards, the sorting
+  // files and nothing else changes, so notes, folders, the sorting
   // views and export all keep working exactly as they do with none open.
   // `useBoards` reports failures through the canvas toast, but the toast lives
   // on `ws`, which needs the board scope to exist first. A ref breaks the knot
@@ -114,11 +131,11 @@ export default function ArchiveWorkspace({
     dropOnBoard,
   );
 
-  // A Workspace owns the notes, folders and artboards MADE in it, and hides the
+  // A Workspace owns the notes and folders MADE in it, and hides the
   // rest — the same rule the photos follow (ADR 0044). With no Workspace open
   // everything shows, again like photos: the un-scoped canvas is the project.
   //
-  // Filtered here, at the render seam, and NOT in `canvasPhotos`: these three
+  // Filtered here, at the render seam, and NOT in `canvasPhotos`: these objects
   // carry their own geometry and have no layout to re-pack, so there is nothing
   // for a scope to change about where they sit. Hiding is the whole effect.
   /** A photo, note or folder was dropped onto a Workspace chip (ADR 0044).
@@ -184,23 +201,162 @@ export default function ArchiveWorkspace({
     [bd, ws],
   );
 
-  /** Opening a Workspace puts you on its canvas. The sorting views browse the
-   *  whole project and belong to All files; leaving someone inside a workspace
-   *  on Timeline would show them a bar and a grid that answer a different
-   *  question, with no switcher to get back. */
-  const openBoard = useCallback(
-    (id: string | null) => {
-      bd.selectBoard(id);
-      if (id !== null) ws.setView("neural");
-    },
-    [bd, ws],
-  );
-
   // Exactly one bottom bar, always. The working bar belongs to a Workspace's
   // Canvas; everything else — the project canvas, the sorting views, all-files,
   // and a Workspace's own sorting views — gets the narrow one. Derived once so
   // the two gates cannot drift into showing both or neither.
   const workingBar = bd.activeBoardId !== null && ws.view === "neural";
+
+  // Workspace → Draft → Export is a separate state machine from the canvas.
+  // Drafts snapshot their source ids, so membership changes only raise a
+  // warning; they never rewrite a publication the user may have edited.
+  const [outputUi, setOutputUi] = useState<"closed" | "library" | "create" | "studio">("closed");
+  const [draftsByBoard, setDraftsByBoard] = useState<Record<string, ContentDraft[]>>({});
+  const [activeDraft, setActiveDraft] = useState<ContentDraft | null>(null);
+  const [generationBusy, setGenerationBusy] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [createSeed, setCreateSeed] = useState<Partial<CreateOutputInput> | null>(null);
+  const [draftSaveState, setDraftSaveState] = useState<"saved" | "saving" | "error">("saved");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refreshDrafts = useCallback((boardId: string | null) => {
+    if (!boardId) return;
+    setDraftsByBoard((current) => ({ ...current, [boardId]: listContentDrafts(boardId) }));
+  }, []);
+
+  /** Opening a Workspace puts you on its canvas. Draft UI is scoped to that
+   * Workspace too, so a switch closes it and loads the target's local index. */
+  const openBoard = useCallback(
+    (id: string | null) => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (activeDraft && draftSaveState !== "saved") {
+        const saved = saveContentDraft(activeDraft.boardId, activeDraft, { mode: "manual" });
+        if (saved.ok) refreshDrafts(activeDraft.boardId);
+      }
+      setActiveDraft(null);
+      setOutputUi("closed");
+      setGenerationError(null);
+      setCreateSeed(null);
+      if (id) refreshDrafts(id);
+      bd.selectBoard(id);
+      if (id !== null) ws.setView("neural");
+    },
+    [activeDraft, bd, draftSaveState, refreshDrafts, ws],
+  );
+
+  const drafts = useMemo(
+    () => bd.activeBoardId
+      ? (draftsByBoard[bd.activeBoardId] ?? listContentDrafts(bd.activeBoardId))
+      : [],
+    [bd.activeBoardId, draftsByBoard],
+  );
+
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+  }, []);
+
+  const orderedBoardAssetIds = useMemo(() => {
+    const ids = bd.activeBoard?.assetIds ?? [];
+    const position = ws.projectAssetPositions;
+    const incomingIndex = new Map(ids.map((id, index) => [id, index]));
+    // Capture the visible canvas's reading order once. Unloaded/off-window ids
+    // keep their durable board position and follow the placed rows.
+    return [...ids].sort((left, right) => {
+      const a = position[left];
+      const b = position[right];
+      if (!a && !b) return (incomingIndex.get(left) ?? 0) - (incomingIndex.get(right) ?? 0);
+      if (!a) return 1;
+      if (!b) return -1;
+      const rowA = Math.floor(a.cy / 140);
+      const rowB = Math.floor(b.cy / 140);
+      return rowA - rowB || a.cx - b.cx || (incomingIndex.get(left) ?? 0) - (incomingIndex.get(right) ?? 0);
+    });
+  }, [bd.activeBoard?.assetIds, ws.projectAssetPositions]);
+
+  const orderedSelectedIds = useMemo(() => {
+    const selected = [...ws.selectedIds];
+    const selectedSet = new Set(selected);
+    return orderedBoardAssetIds.filter((id) => selectedSet.has(id));
+  }, [orderedBoardAssetIds, ws.selectedIds]);
+
+  const openDraft = useCallback((draft: ContentDraft) => {
+    const current = loadContentDraft(draft.boardId, draft.id) ?? draft;
+    setActiveDraft(current);
+    setOutputUi("studio");
+    setDraftSaveState("saved");
+  }, []);
+
+  const closeStudio = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (activeDraft && draftSaveState !== "saved") {
+      const saved = saveContentDraft(activeDraft.boardId, activeDraft, { mode: "manual" });
+      if (saved.ok) refreshDrafts(activeDraft.boardId);
+    }
+    setActiveDraft(null);
+    setOutputUi("library");
+  }, [activeDraft, draftSaveState, refreshDrafts]);
+
+  const editDraft = useCallback((next: ContentDraft) => {
+    setActiveDraft(next);
+    setDraftSaveState("saving");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const saved = saveContentDraft(next.boardId, next, { mode: "manual" });
+      if (!saved.ok) {
+        setDraftSaveState("error");
+        return;
+      }
+      setActiveDraft(saved.draft);
+      setDraftSaveState("saved");
+      refreshDrafts(next.boardId);
+    }, 450);
+  }, [refreshDrafts]);
+
+  const generateOutput = useCallback(async (input: CreateOutputInput) => {
+    const board = bd.activeBoard;
+    if (!board) return;
+    setGenerationBusy(true);
+    setGenerationError(null);
+    try {
+      const response = await fetch("/api/content-drafts/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(generationRequestBody(board.id, input)),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const code = typeof payload === "object" && payload !== null && "error" in payload ? String(payload.error) : "generation_failed";
+        throw new Error(code);
+      }
+      const result = contentGenerationResultSchema.parse(payload);
+      const candidate = draftFromGeneration(board.id, board.name, input, result);
+      const saved = saveContentDraft(board.id, candidate, { mode: "generated" });
+      if (!saved.ok) throw new Error(saved.reason);
+      refreshDrafts(board.id);
+      setActiveDraft(saved.draft);
+      setOutputUi("studio");
+      setDraftSaveState("saved");
+      setCreateSeed(null);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "generation_failed";
+      const message = code === "editor_required"
+        ? "Editor access is required to generate content."
+        : code === "source_assets_not_found"
+          ? "Some source photos are no longer in this Workspace."
+          : code === "generation_failed"
+            ? "The draft could not be generated. Try again."
+            : "The draft could not be created. Try again.";
+      setGenerationError(message);
+    } finally {
+      setGenerationBusy(false);
+    }
+  }, [bd.activeBoard, refreshDrafts]);
 
   // Ownership is a `board_id` on the object now (ADR 0044), not a list on the
   // board, so this is a plain equality — and it means a workspace's notes are
@@ -208,7 +364,6 @@ export default function ArchiveWorkspace({
   const board = bd.activeBoardId;
   const scopedNotes = board ? ws.stickyNotes.filter((n) => n.boardId === board) : ws.stickyNotes;
   const scopedFolders = board ? ws.folders.filter((f) => f.boardId === board) : ws.folders;
-  const scopedFrames = board ? ws.frames.filter((f) => f.boardId === board) : ws.frames;
 
   // Counts come from the loaded photo set, not the board's raw id list: an id
   // whose asset has since been trashed must not still be counted on a chip.
@@ -272,7 +427,7 @@ export default function ArchiveWorkspace({
         animating={ws.tilesAnimating}
         marquee={ws.marquee}
       >
-        {/* Artboards, folders and sticky notes are a Workspace (neural) concept
+        {/* Folders and sticky notes are a Workspace (neural) concept
             only — their geometry is in neural coordinates, so they'd render
             misplaced on Timeline/Topic/Labels (and Map covers the canvas
             entirely). A note pinned over one arrangement means nothing over
@@ -281,20 +436,6 @@ export default function ArchiveWorkspace({
             carried to that would still say what it said. */}
         {ws.view === "neural" && (
           <>
-            <FrameOverlay
-              frames={scopedFrames}
-              counts={ws.frameCounts}
-              draft={ws.frameDraft}
-              scale={ws.scale}
-              onSelectFrame={ws.selectFrame}
-              onExportFrame={ws.exportFrame}
-              onDeleteFrame={ws.deleteFrameWithContent}
-              onRenameFrame={ws.renameFrame}
-              onBeginMove={ws.beginFrameMove}
-              onBeginResize={ws.beginFrameResize}
-              onGestureMove={ws.frameGestureMove}
-              onEndGesture={ws.endFrameGesture}
-            />
             <FolderOverlay
               folders={scopedFolders}
               scale={ws.scale}
@@ -576,6 +717,22 @@ export default function ArchiveWorkspace({
             />
           ) : undefined
         }
+        workspaceActions={
+          bd.activeBoard ? (
+            <WorkspaceOutputActions
+              draftCount={drafts.length}
+              photoCount={bd.activeBoard.assetIds.length}
+              selectedCount={orderedSelectedIds.length}
+              onOpenDrafts={() => setOutputUi("library")}
+              onDownload={() => ws.openExportFor(orderedSelectedIds.length ? orderedSelectedIds : orderedBoardAssetIds)}
+              onCreate={() => {
+                setGenerationError(null);
+                setCreateSeed(null);
+                setOutputUi("create");
+              }}
+            />
+          ) : undefined
+        }
       />
 
       {/* Persistent by design: this is archive-integrity information, not a
@@ -675,15 +832,12 @@ export default function ArchiveWorkspace({
       {/* The working bar belongs to a Workspace. Outside one you are browsing —
           the project canvas and the sorting views get the narrow bar below.
           Folder and Export are mirrored into the right-click menu so nothing
-          here is the ONLY way to reach them; Tidy up and the artboard tool are
-          not, because both arrange a working surface and that is what a
-          Workspace is. */}
+          here is the ONLY way to reach them; Tidy up is not, because it arranges
+          a working surface and that is what a Workspace is. */}
       {workingBar && (
         <WorkspaceActionBar
-          tool={ws.tool}
           selCount={ws.selectedIds.size}
           aiOpen={ws.bulkPanelOpen}
-          onArtboard={ws.toolFrame}
           onAddStickyNote={ws.addStickyNote}
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
@@ -691,6 +845,12 @@ export default function ArchiveWorkspace({
           onExport={ws.exportFiles}
           onGroup={ws.groupFiles}
           onFolder={ws.folderFiles}
+          onRemoveFromWorkspace={() => {
+            if (!bd.activeBoardId || orderedSelectedIds.length === 0) return;
+            bd.removeFromBoard(bd.activeBoardId, orderedSelectedIds);
+            ws.clearSelection();
+            ws.flashToast(orderedSelectedIds.length > 1 ? `Removed ${orderedSelectedIds.length} files from workspace` : "Removed from workspace");
+          }}
           onDelete={ws.deleteSelected}
           labelNames={ws.labelNames}
           labelMenuOpen={ws.labelMenuOpen}
@@ -771,15 +931,6 @@ export default function ArchiveWorkspace({
           ws.setView("neural");
           ws.closeAddProj();
         }}
-        artboards={scopedFrames.map((f) => ({ key: f.id, label: f.label }))}
-        onSelectArtboard={(id) => {
-          ws.closeAddProj();
-          ws.addToExistingArtboard(id);
-        }}
-        onCreateArtboard={() => {
-          ws.closeAddProj();
-          ws.addToNewArtboard();
-        }}
       />
 
       <SourceBrowserSidebar
@@ -848,11 +999,90 @@ export default function ArchiveWorkspace({
         <ExportDialog
           assetIds={ws.exportIds}
           photos={ws.photos}
-          defaultTitle={ws.projLabel === "Projects" ? "" : ws.projLabel}
+          defaultTitle={bd.activeBoard?.name ?? (ws.projLabel === "Projects" ? "" : ws.projLabel)}
           workspaceId={workspaceId}
           onClose={ws.closeExport}
         />
       )}
+
+      <DraftLibraryDialog
+        open={outputUi === "library" && Boolean(bd.activeBoard)}
+        boardName={bd.activeBoard?.name ?? "Workspace"}
+        drafts={drafts}
+        currentAssetIds={orderedBoardAssetIds}
+        onClose={() => setOutputUi("closed")}
+        onCreate={() => {
+          setGenerationError(null);
+          setCreateSeed(null);
+          setOutputUi("create");
+        }}
+        onOpenDraft={openDraft}
+      />
+
+      <CreateOutputDialog
+        key={`${bd.activeBoardId ?? "none"}:${createSeed ? activeDraft?.id ?? "seed" : "new"}`}
+        open={outputUi === "create" && Boolean(bd.activeBoard)}
+        boardName={bd.activeBoard?.name ?? "Workspace"}
+        allAssetIds={orderedBoardAssetIds}
+        selectedAssetIds={orderedSelectedIds}
+        busy={generationBusy}
+        error={generationError}
+        initial={createSeed}
+        onClose={() => setOutputUi(drafts.length ? "library" : "closed")}
+        onGenerate={(input) => void generateOutput(input)}
+      />
+
+      <ContentDraftStudio
+        draft={outputUi === "studio" ? activeDraft : null}
+        photos={ws.photos}
+        currentAssetIds={orderedBoardAssetIds}
+        saveState={draftSaveState}
+        onChange={editDraft}
+        onClose={closeStudio}
+        onDelete={() => {
+          if (!activeDraft) return;
+          deleteContentDraft(activeDraft.boardId, activeDraft.id);
+          refreshDrafts(activeDraft.boardId);
+          setActiveDraft(null);
+          setOutputUi("library");
+        }}
+        onRegenerate={(draft) => {
+          if (draft.hasManualEdits && !window.confirm("Regenerate this draft as a new version? Your current edited version stays saved.")) return;
+          setCreateSeed(
+            draft.kind === "article"
+              ? {
+                  kind: draft.kind,
+                  sourceAssetIds: draft.sourceSnapshot.assetIds,
+                  prompt: draft.brief.prompt,
+                  audience: draft.brief.audience,
+                  additionalInstructions: draft.brief.additionalInstructions,
+                  language: draft.brief.language,
+                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
+                  length: draft.settings.length,
+                  imageCount: draft.settings.imageCount,
+                }
+              : {
+                  kind: draft.kind,
+                  sourceAssetIds: draft.sourceSnapshot.assetIds,
+                  prompt: draft.brief.prompt,
+                  audience: draft.brief.audience,
+                  additionalInstructions: draft.brief.additionalInstructions,
+                  language: draft.brief.language,
+                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
+                  aspectRatio: draft.settings.aspectRatio,
+                  slideCount: draft.settings.slideCount,
+                },
+          );
+          setGenerationError(null);
+          setOutputUi("create");
+        }}
+        onDownloadCopy={() => activeDraft && downloadContentDraft(activeDraft, ws.photos)}
+        onDownloadPhotos={(assetIds) => {
+          setOutputUi("closed");
+          setActiveDraft(null);
+          ws.openExportFor(assetIds);
+        }}
+      />
 
       <CanvasContextMenu
         menu={ws.contextMenu}

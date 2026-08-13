@@ -530,7 +530,9 @@ Log `search_query` usage_event. Latency budget: 1 analyze-model call + 1 embed +
 
 ### 8.5 Export (`type='export'`)
 **Shipped shape (ADR 0035 + its Amendments) — this paragraph is the current contract.**
-Payload: `{group_id | asset_ids, options}` where `options` is `artboardSettingsSchema`
+Payload: `{group_id | asset_ids, options}` where `options` is the legacy-named
+`artboardSettingsSchema`; current UI sends explicit `asset_ids`, while the
+`group_id` branch remains parseable for compatibility
 (`format`, page layout/size/orientation, caption lang×style, `include`, `cover`, `zipContents`). Three formats:
 
 - `format: 'pdf'` — a laid-out document, one photo per page or a 2-up contact sheet,
@@ -551,6 +553,31 @@ that **key** in `ai_jobs.payload.result_key`. `GET /api/exports` presigns it per
 request; no bearer URL is stored or broadcast (the old `result_url` was readable by
 every workspace member through `ai_jobs` RLS and pushed to all of them on update).
 Artifacts are deleted by `sweepExpiredExports` after `EXPORT_RETENTION_DAYS`.
+
+### 8.6 Workspace content drafts (browser-local MVP)
+
+An open Workspace (`board`) is a source scope, not a finished page model. The
+content flow is `Workspace → editable draft → delivery` (ADR 0045): Article and
+Instagram-carousel generation capture an explicitly ordered asset-id snapshot,
+then own structured sections/slides independent of canvas coordinates. Existing
+PDF/captions-CSV/ZIP export remains the separate raw-file **Download** flow.
+
+`POST /api/content-drafts/generate` accepts `{boardId, sourceAssetIds, kind,
+brief, language, tone, options}` with at most 20 ids. It requires an authenticated
+owner/editor; validates the live board, project, active files and exact board
+membership before Gemini; preserves request order; and returns `{content,
+model}` using a request-specific structured response schema. Specific claims may
+use EXIF time/place and confirmed facts only; tags/image description are visual
+hints and human-edited captions are writing references.
+
+The first slice stores versioned, discriminated drafts in browser storage per
+`boardId`, including `sourceSnapshot`, brief/settings, manual-edit tokens and
+timestamps. This is deliberately not an `ai_jobs` artifact: drafts are editable
+and persistent while export artifacts expire. A server-backed `content_drafts`
+table/version domain requires a migration-owner follow-up. Successful calls log
+`usage_events.event_type='content_generated'`, one unit per multi-photo synthesis;
+credits are temporarily 0 until set-level pricing and `workspace_usage()` are
+updated by an explicit product/schema decision.
 
 - `format: 'zip'` — the bundle: `zipContents: 'originals'` ships the stored file for
   every source that has one in R2 (upload, Dropbox) and falls back to the web-size
@@ -610,7 +637,8 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `PATCH /api/captions/:id` | edit text (`is_edited=true`) |
 | `POST /api/assets/:id/tags` · `DELETE` | manual tags (`source='manual'`) |
 | `PATCH /api/facts/:id` | confirm / set status |
-| `POST /api/exports` · `GET /api/exports?jobId=` | **shipped (ADR 0035 + Amendments)** — enqueue an `export` job for a selection (or a saved artboard) with `options.format`; 400 `too_many_assets` over `EXPORT_MAX_ASSETS`, 429 `export_backlog` over `EXPORT_MAX_IN_FLIGHT`. GET presigns `payload.result_key` **per request** and returns the job's real progress + `attempts` |
+| `POST /api/exports` · `GET /api/exports?jobId=` | **shipped (ADR 0035 + Amendments; artboard UI retired by ADR 0044 amendment)** — enqueue an `export` job for an explicit asset set with `options.format`; 400 `too_many_assets` over `EXPORT_MAX_ASSETS`, 429 `export_backlog` over `EXPORT_MAX_IN_FLIGHT`. GET presigns `payload.result_key` **per request** and returns the job's real progress + `attempts`; the legacy `groupId` contract remains parseable for compatibility |
+| `POST /api/content-drafts/generate` | **browser-local MVP (ADR 0045)** — owner/editor-only structured Article or Instagram-carousel generation from 1–20 ordered, active members of one live Workspace; returns `{content, model}`, records one `content_generated` audit event, and does not persist the draft server-side |
 | `GET  /api/workspace` · `PATCH /api/workspace` | **shipped** — the credit/rights block (creator · credit · copyright · usage terms, migration 20260727000001). No settings page exists, so the export dialog is its only editor; RLS is the gate (read = member, write = owner) |
 
 Contracts as zod schemas in `packages/shared` (single source for web + worker). `docs/openapi.yaml` generated later — not an MVP gate.

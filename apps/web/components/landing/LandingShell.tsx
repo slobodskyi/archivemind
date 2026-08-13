@@ -22,7 +22,7 @@ const ACCENT_WORD = 4;
 const FEATURES = [
   {
     title: "An infinite canvas, not a folder tree",
-    body: "Pan, zoom, drag. Folders and artboards live on the canvas itself, and any artboard exports straight to a PDF — or as the original files, separately or bundled in a ZIP.",
+    body: "Pan, zoom, drag. Curate focused workspaces from a large archive, then export the selected files as a PDF, captions CSV or ZIP.",
   },
   {
     title: "Search the way you'd describe it",
@@ -118,7 +118,7 @@ const MARQUEE = [
   "EXIF GPS on a real map",
   "Multilingual captions",
   "Semantic clusters",
-  "Artboard → PDF",
+  "Workspace exports",
   "Checksum dedupe",
   "Realtime job progress",
   "Google Drive import",

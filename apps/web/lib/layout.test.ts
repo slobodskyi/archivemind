@@ -12,10 +12,10 @@ import {
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
   timelineAxisLayout,
+  tidyCanvasOverrides,
   topicCloudLayout,
   topicKeyOf,
   type Bounds,
-  type Frame,
   type TilePos,
 } from "./layout";
 import { heuristicTopicKey } from "./topics";
@@ -269,6 +269,14 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(layout.edges.map((e) => e.id).sort()).toEqual(["tag-a-b", "tag-c-d"]);
   });
 
+  it("keeps semantic relations when a tile is moved elsewhere on the canvas", () => {
+    const photos = [photo("a", { tags: ["kyiv"] }), photo("b", { tags: ["kyiv"] })];
+    const layout = topicCloudLayout(photos, { a: { x: 9000, y: 7000 } });
+
+    expect(layout.tiles.a.cx).toBe(9000);
+    expect(layout.edges.map((edge) => edge.id)).toEqual(["tag-a-b"]);
+  });
+
   it("weights a same-cloud link by how many tags the pair shares (capped)", () => {
     const one = topicCloudLayout([photo("a", { tags: ["t1"] }), photo("b", { tags: ["t1"] })], {}).edges[0];
     const many = topicCloudLayout(
@@ -446,15 +454,6 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
       photo("c", { exif: at("2026-06-02 10:00") }),
     ];
     expect(timelineAxisLayout(photos, {})).toEqual(timelineAxisLayout([...photos].reverse(), {}));
-  });
-
-  it("detaches a file dropped onto an artboard from the web", () => {
-    const base = topicCloudLayout([photo("a", { tags: ["x"] }), photo("b", { tags: ["x"] })], {});
-    const tile = base.tiles.a;
-    const frame: Frame = { id: "f1", x: tile.cx - 10, y: tile.cy - 10, w: 20, h: 20, label: "Board", boardId: null };
-
-    const layout = topicCloudLayout([photo("a", { tags: ["x"] }), photo("b", { tags: ["x"] })], {}, [frame]);
-    expect(layout.edges).toHaveLength(0);
   });
 
   it("is deterministic for equivalent inputs", () => {
@@ -668,6 +667,38 @@ describe("packGrid", () => {
   });
 });
 
+describe("tidyCanvasOverrides", () => {
+  const tile = (cx: number, cy: number): TilePos => ({ x: cx - 50, y: cy - 50, w: 100, h: 100, cx, cy });
+
+  it("clears every override in the active Workspace and preserves overrides outside its scope", () => {
+    const current = {
+      activeA: { x: 900, y: 900 },
+      activeB: { x: 1000, y: 1000 },
+      anotherWorkspace: { x: 4200, y: 2400 },
+    };
+    const positions = { activeA: tile(900, 900), activeB: tile(1000, 1000) };
+
+    expect(tidyCanvasOverrides(current, [], positions)).toEqual({
+      anotherWorkspace: current.anotherWorkspace,
+    });
+  });
+
+  it("packs only a multi-selection and leaves every other override untouched", () => {
+    const current = {
+      a: { x: 0, y: 0 },
+      b: { x: 400, y: 400 },
+      untouched: { x: 700, y: 700 },
+    };
+    const positions = { a: tile(0, 0), b: tile(400, 400), untouched: tile(700, 700) };
+
+    expect(tidyCanvasOverrides(current, ["a", "b"], positions)).toEqual({
+      a: { x: 200, y: 112 },
+      b: { x: 200, y: 288 },
+      untouched: current.untouched,
+    });
+  });
+});
+
 describe("readingOrder", () => {
   /** Tile centred at (cx, cy) — readingOrder only reads the centre. */
   const at = (cx: number, cy: number): TilePos => ({ x: cx - 56, y: cy - 42, w: 112, h: 84, cx, cy });
@@ -729,4 +760,3 @@ describe("readingOrder", () => {
     expect(readingOrder(["a", "b"], pos)).toEqual(["a", "b"]);
   });
 });
-

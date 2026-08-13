@@ -15,6 +15,7 @@ describe("creditsFor", () => {
 
   it("leaves search, export and ingest free", () => {
     expect(creditsFor("search_query", 50)).toBe(0);
+    expect(creditsFor("content_generated", 4)).toBe(0);
     expect(creditsFor("export", 18)).toBe(0);
     expect(creditsFor("asset_ingested", 412)).toBe(0);
   });

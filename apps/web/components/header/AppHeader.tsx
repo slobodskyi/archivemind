@@ -33,6 +33,9 @@ interface AppHeaderProps {
   accountName?: string;
   /** Rendered in the breadcrumb, right of the project name. */
   afterProject?: ReactNode;
+  /** Workspace-level outcome actions (Drafts / Download / Create). They live
+   *  before the global canvas tools so their scope is visually unambiguous. */
+  workspaceActions?: ReactNode;
 }
 
 export default function AppHeader({
@@ -53,6 +56,7 @@ export default function AppHeader({
   accountInitials = "",
   accountName,
   afterProject,
+  workspaceActions,
 }: AppHeaderProps) {
   return (
     <div
@@ -203,6 +207,8 @@ export default function AppHeader({
       {/* Never shrinks: undo/redo, zoom, SHARE and the avatar are fixed chrome,
           so the breadcrumb on the left is what gives way when space is tight. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
+        {workspaceActions}
+        {workspaceActions && <span style={{ width: 1, height: 20, background: "var(--bd)" }} />}
         <button
           onClick={onUndo}
           title="Undo"
