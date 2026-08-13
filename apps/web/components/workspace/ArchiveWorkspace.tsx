@@ -217,6 +217,7 @@ export default function ArchiveWorkspace({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [createSeed, setCreateSeed] = useState<Partial<CreateOutputInput> | null>(null);
   const [draftSaveState, setDraftSaveState] = useState<"saved" | "saving" | "error">("saved");
+  const [draftConfirm, setDraftConfirm] = useState<"delete" | "regenerate" | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshDrafts = useCallback((boardId: string | null) => {
@@ -290,17 +291,44 @@ export default function ArchiveWorkspace({
   }, []);
 
   const closeStudio = useCallback(() => {
+    if (draftSaveState === "error") {
+      ws.flashToast("Draft is not saved. Keep the editor open and try again.");
+      return;
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
     if (activeDraft && draftSaveState !== "saved") {
       const saved = saveContentDraft(activeDraft.boardId, activeDraft, { mode: "manual" });
-      if (saved.ok) refreshDrafts(activeDraft.boardId);
+      if (!saved.ok) {
+        setDraftSaveState("error");
+        ws.flashToast("Draft could not be saved. The editor stays open.");
+        return;
+      }
+      refreshDrafts(activeDraft.boardId);
     }
     setActiveDraft(null);
     setOutputUi("library");
-  }, [activeDraft, draftSaveState, refreshDrafts]);
+  }, [activeDraft, draftSaveState, refreshDrafts, ws]);
+
+  const deleteActiveDraft = useCallback(() => {
+    if (!activeDraft) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (!deleteContentDraft(activeDraft.boardId, activeDraft.id)) {
+      setDraftConfirm(null);
+      ws.flashToast("Draft could not be deleted from this browser.");
+      return;
+    }
+    refreshDrafts(activeDraft.boardId);
+    setDraftConfirm(null);
+    setActiveDraft(null);
+    setDraftSaveState("saved");
+    setOutputUi("library");
+  }, [activeDraft, refreshDrafts, ws]);
 
   const editDraft = useCallback((next: ContentDraft) => {
     setActiveDraft(next);
@@ -1033,21 +1061,20 @@ export default function ArchiveWorkspace({
       />
 
       <ContentDraftStudio
+        key={activeDraft?.id ?? "closed-draft"}
         draft={outputUi === "studio" ? activeDraft : null}
+        suspended={draftConfirm !== null}
         photos={ws.photos}
         currentAssetIds={orderedBoardAssetIds}
         saveState={draftSaveState}
         onChange={editDraft}
         onClose={closeStudio}
-        onDelete={() => {
-          if (!activeDraft) return;
-          deleteContentDraft(activeDraft.boardId, activeDraft.id);
-          refreshDrafts(activeDraft.boardId);
-          setActiveDraft(null);
-          setOutputUi("library");
-        }}
+        onDelete={() => setDraftConfirm("delete")}
         onRegenerate={(draft) => {
-          if (draft.hasManualEdits && !window.confirm("Regenerate this draft as a new version? Your current edited version stays saved.")) return;
+          if (draft.hasManualEdits) {
+            setDraftConfirm("regenerate");
+            return;
+          }
           setCreateSeed(
             draft.kind === "article"
               ? {
@@ -1082,6 +1109,56 @@ export default function ArchiveWorkspace({
           setActiveDraft(null);
           ws.openExportFor(assetIds);
         }}
+      />
+
+      <ConfirmModal
+        open={draftConfirm === "delete" && activeDraft !== null}
+        title={`Delete “${activeDraft?.name ?? "draft"}”?`}
+        body="This permanently removes the draft and its edits from this browser. The Workspace and its photos are not affected. This cannot be undone."
+        confirmLabel="Delete draft"
+        danger
+        onConfirm={deleteActiveDraft}
+        onClose={() => setDraftConfirm(null)}
+      />
+
+      <ConfirmModal
+        open={draftConfirm === "regenerate" && activeDraft !== null}
+        title="Generate a new version?"
+        body="Your edited draft stays saved. ArchiveMind will create a separate version from the same source snapshot."
+        confirmLabel="Continue"
+        onConfirm={() => {
+          const draft = activeDraft;
+          if (!draft) return;
+          setDraftConfirm(null);
+          setCreateSeed(
+            draft.kind === "article"
+              ? {
+                  kind: draft.kind,
+                  sourceAssetIds: draft.sourceSnapshot.assetIds,
+                  prompt: draft.brief.prompt,
+                  audience: draft.brief.audience,
+                  additionalInstructions: draft.brief.additionalInstructions,
+                  language: draft.brief.language,
+                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
+                  length: draft.settings.length,
+                  imageCount: draft.settings.imageCount,
+                }
+              : {
+                  kind: draft.kind,
+                  sourceAssetIds: draft.sourceSnapshot.assetIds,
+                  prompt: draft.brief.prompt,
+                  audience: draft.brief.audience,
+                  additionalInstructions: draft.brief.additionalInstructions,
+                  language: draft.brief.language,
+                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
+                  aspectRatio: draft.settings.aspectRatio,
+                  slideCount: draft.settings.slideCount,
+                },
+          );
+          setGenerationError(null);
+          setOutputUi("create");
+        }}
+        onClose={() => setDraftConfirm(null)}
       />
 
       <CanvasContextMenu

@@ -29,6 +29,44 @@ describe("content packages", () => {
     expect(usedAssetIds(draft)).toEqual(ids);
   });
 
+  it("keeps article presentation, accessible text, and captions in portable Markdown", () => {
+    const draft = createArticleDraft({
+      id: "draft-presented",
+      boardId: "board-1",
+      sourceAssetIds: ids,
+      now: "2026-08-13T10:00:00.000Z",
+      content: {
+        sections: [
+          {
+            id: "section-1",
+            assetIds: [ids[0]],
+            media: [
+              {
+                assetId: ids[0],
+                presentation: {
+                  width: "small",
+                  alignment: "right",
+                  aspect: "square",
+                  fit: "contain",
+                  focalPoint: { x: 0.2, y: 0.8 },
+                },
+                altText: "Garment ] detail",
+                caption: "A closer look.",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const text = serializeContentDraft(draft, photos);
+    expect(text).toContain(
+      '<!-- archivemind:media {"width":"small","alignment":"right","aspect":"square","fit":"contain","focalPoint":{"x":0.2,"y":0.8}} -->',
+    );
+    expect(text).toContain("![Garment \\] detail](images/cover.jpg)");
+    expect(text).toContain("_A closer look._");
+  });
+
   it("serializes an ordered carousel and deduplicates its photo manifest", () => {
     const draft = createInstagramCarouselDraft({
       id: "draft-2",
@@ -50,5 +88,20 @@ describe("content packages", () => {
     expect(text.indexOf("SLIDE 1 · detail.jpg")).toBeLessThan(text.indexOf("SLIDE 2 · cover.jpg"));
     expect(text).toContain("HASHTAGS\n#archive");
     expect(usedAssetIds(draft)).toEqual([ids[1], ids[0]]);
+  });
+
+  it("gives duplicate source filenames unique Markdown package paths", () => {
+    const draft = createArticleDraft({
+      id: "duplicate-names",
+      boardId: "board-1",
+      sourceAssetIds: ids,
+      now: "2026-08-13T10:00:00.000Z",
+      content: { sections: [{ id: "one", assetIds: ids }] },
+    });
+    const duplicateNames = photos.map((photo) => ({ ...photo, filename: "DSC_0001.NEF" })) as Photo[];
+    const text = serializeContentDraft(draft, duplicateNames);
+
+    expect(text).toContain("images/DSC_0001.NEF");
+    expect(text).toContain("images/DSC_0001 (2).NEF");
   });
 });

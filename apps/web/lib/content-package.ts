@@ -1,4 +1,8 @@
-import type { ContentDraft } from "./content-drafts";
+import {
+  DEFAULT_ARTICLE_MEDIA_PRESENTATION,
+  type ArticleDraftMedia,
+  type ContentDraft,
+} from "./content-drafts";
 import type { Photo } from "../types";
 
 function cleanFilename(value: string): string {
@@ -14,6 +18,56 @@ function assetLabel(assetId: string, photos: readonly Photo[]): string {
   return photos.find((photo) => photo.id === assetId)?.filename ?? assetId;
 }
 
+function uniquePackageNames(assetIds: readonly string[], photos: readonly Photo[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const assetId of assetIds) {
+    if (names.has(assetId)) continue;
+    const base = assetLabel(assetId, photos);
+    const dot = base.lastIndexOf(".");
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const extension = dot > 0 ? base.slice(dot) : "";
+    let candidate = base;
+    let number = 2;
+    while (taken.has(candidate.toLocaleLowerCase())) {
+      candidate = `${stem} (${number})${extension}`;
+      number += 1;
+    }
+    taken.add(candidate.toLocaleLowerCase());
+    names.set(assetId, candidate);
+  }
+  return names;
+}
+
+function markdownAlt(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+}
+
+function hasCustomPresentation(media: ArticleDraftMedia): boolean {
+  const { presentation } = media;
+  return (
+    presentation.width !== DEFAULT_ARTICLE_MEDIA_PRESENTATION.width ||
+    presentation.alignment !== DEFAULT_ARTICLE_MEDIA_PRESENTATION.alignment ||
+    presentation.aspect !== DEFAULT_ARTICLE_MEDIA_PRESENTATION.aspect ||
+    presentation.fit !== DEFAULT_ARTICLE_MEDIA_PRESENTATION.fit ||
+    presentation.focalPoint.x !== DEFAULT_ARTICLE_MEDIA_PRESENTATION.focalPoint.x ||
+    presentation.focalPoint.y !== DEFAULT_ARTICLE_MEDIA_PRESENTATION.focalPoint.y
+  );
+}
+
+function serializeArticleMedia(media: ArticleDraftMedia, filename: string): string[] {
+  const lines: string[] = [];
+  if (hasCustomPresentation(media)) {
+    // Markdown has no portable crop/alignment vocabulary. The inert comment
+    // keeps editor choices available to a future renderer without making the
+    // copy unreadable in ordinary Markdown tools.
+    lines.push(`<!-- archivemind:media ${JSON.stringify(media.presentation)} -->`);
+  }
+  lines.push(`![${markdownAlt(media.altText || filename)}](images/${filename})`);
+  if (media.caption.trim()) lines.push(`_${media.caption.trim()}_`);
+  return lines;
+}
+
 export function contentDraftFilename(draft: ContentDraft): string {
   return `${cleanFilename(draft.name)}.${draft.kind === "article" ? "md" : "txt"}`;
 }
@@ -23,14 +77,15 @@ export function contentDraftFilename(draft: ContentDraft): string {
  * sequence explicit instead of baking temporary preview URLs into the copy. */
 export function serializeContentDraft(draft: ContentDraft, photos: readonly Photo[]): string {
   if (draft.kind === "article") {
+    const packageNames = uniquePackageNames(usedAssetIds(draft), photos);
     const lines = [`# ${draft.content.title || draft.name}`];
     if (draft.content.dek) lines.push("", `> ${draft.content.dek}`);
     if (draft.content.intro) lines.push("", draft.content.intro);
     for (const section of draft.content.sections) {
       if (section.heading) lines.push("", `## ${section.heading}`);
       if (section.body) lines.push("", section.body);
-      for (const assetId of section.assetIds) {
-        lines.push("", `![${assetLabel(assetId, photos)}](images/${assetLabel(assetId, photos)})`);
+      for (const media of section.media) {
+        lines.push("", ...serializeArticleMedia(media, packageNames.get(media.assetId) ?? media.assetId));
       }
     }
     if (draft.content.socialExcerpt) {

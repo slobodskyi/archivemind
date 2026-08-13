@@ -141,6 +141,134 @@ textarea {
   letter-spacing: inherit;
 }
 
+/* Content drafts are modal publication editors, not another full-screen app.
+   Desktop keeps the canvas visible around the shell; narrower viewports spend
+   the space on the document and turn Sources into an overlay rail. */
+@media (max-width: 1120px) {
+  .content-draft-carousel {
+    grid-template-columns: 120px minmax(240px, 1fr) !important;
+  }
+
+  .content-draft-carousel > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .content-draft-header-actions > [role="status"] {
+    display: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .content-draft-backdrop {
+    padding: 0 !important;
+  }
+
+  .content-draft-shell {
+    width: 100vw !important;
+    height: 100dvh !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .content-draft-shell > header {
+    padding-top: calc(8px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  .content-draft-shell > footer {
+    padding-bottom: calc(7px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .content-draft-rail {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 2;
+    width: min(280px, calc(100vw - 54px)) !important;
+    box-shadow: -20px 0 60px rgba(0, 0, 0, 0.55);
+  }
+
+  .content-draft-document {
+    --draft-rail: 0px !important;
+    --draft-full-max: calc(100vw - 48px);
+    padding-inline: clamp(24px, 7vw, 52px) !important;
+  }
+
+  .content-draft-figure {
+    max-width: calc(100vw - 48px) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .content-draft-header-actions > [role="status"],
+  .content-draft-footer-note {
+    display: none;
+  }
+
+  .content-draft-header-actions button {
+    padding-inline: 7px !important;
+  }
+
+  .content-draft-document {
+    --draft-full-max: calc(100vw - 40px);
+    padding: 34px 20px 80px !important;
+  }
+
+  .content-draft-figure {
+    max-width: calc(100vw - 40px) !important;
+  }
+
+  .content-draft-toolbar-row {
+    justify-content: flex-start !important;
+    overflow-x: auto;
+  }
+
+  .content-draft-carousel {
+    display: flex !important;
+    flex-direction: column;
+    padding: 18px !important;
+  }
+
+  .content-draft-carousel > :nth-child(2) {
+    position: static !important;
+  }
+
+  .content-draft-slide-strip {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: min(72vw, 220px);
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .content-draft-slide-strip > button {
+    margin-bottom: 0 !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .content-draft-shell > header {
+    align-content: center;
+    flex-wrap: wrap;
+  }
+
+  .content-draft-header-title {
+    flex: 1 1 100%;
+  }
+
+  .content-draft-header-title input {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .content-draft-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

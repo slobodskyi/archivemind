@@ -79,6 +79,62 @@ describe("draft shapes", () => {
       createdAt: CREATED_AT,
       updatedAt: CREATED_AT,
     });
+    expect(draft.content.sections[0].media).toEqual([
+      {
+        assetId: "asset-2",
+        presentation: {
+          width: "wide",
+          alignment: "center",
+          aspect: "original",
+          fit: "cover",
+          focalPoint: { x: 0.5, y: 0.5 },
+        },
+        caption: "",
+        altText: "",
+      },
+    ]);
+  });
+
+  it("hydrates missing media in asset order while preserving explicit presentation", () => {
+    const draft = createArticleDraft({
+      boardId: BOARD,
+      sourceAssetIds: ["asset-1", "asset-2"],
+      content: {
+        sections: [
+          {
+            id: "section-1",
+            assetIds: ["asset-1", "asset-2"],
+            media: [
+              {
+                assetId: "asset-2",
+                presentation: { width: "small", focalPoint: { x: 0.2 } },
+                caption: "A detail",
+              },
+            ],
+          },
+        ],
+      },
+      now: CREATED_AT,
+    });
+
+    expect(draft.content.sections[0].media.map((item) => item.assetId)).toEqual(["asset-1", "asset-2"]);
+    expect(draft.content.sections[0].media[0].presentation).toMatchObject({
+      width: "wide",
+      alignment: "center",
+      focalPoint: { x: 0.5, y: 0.5 },
+    });
+    expect(draft.content.sections[0].media[1]).toMatchObject({
+      assetId: "asset-2",
+      presentation: {
+        width: "small",
+        alignment: "center",
+        aspect: "original",
+        fit: "cover",
+        focalPoint: { x: 0.2, y: 0.5 },
+      },
+      caption: "A detail",
+      altText: "",
+    });
   });
 
   it("creates a structured Instagram carousel independently of article fields", () => {
@@ -102,6 +158,60 @@ describe("draft shapes", () => {
     expect(draft.name).toBe("Untitled carousel");
     expect(draft.settings).toEqual({ aspectRatio: "1:1", slideCount: 3, includeCallToAction: true });
     expect(draft.content.slides[1].assetId).toBe("asset-3");
+    expect(draft.content.slides[1].presentation).toEqual({
+      fit: "cover",
+      focalPoint: { x: 0.5, y: 0.5 },
+    });
+  });
+
+  it("hydrates partial carousel image presentation and preserves explicit crop state", () => {
+    const draft = createInstagramCarouselDraft({
+      boardId: BOARD,
+      sourceAssetIds: ["asset-3"],
+      content: {
+        slides: [
+          {
+            id: "photo",
+            assetId: "asset-3",
+            headline: "Moment one",
+            body: "Story",
+            presentation: { fit: "contain", focalPoint: { x: 0.2 } },
+          },
+        ],
+      },
+      now: CREATED_AT,
+    });
+
+    expect(draft.content.slides[0].presentation).toEqual({
+      fit: "contain",
+      focalPoint: { x: 0.2, y: 0.5 },
+    });
+  });
+
+  it("rejects invalid carousel focal coordinates", () => {
+    const valid = createInstagramCarouselDraft({
+      boardId: BOARD,
+      sourceAssetIds: ["asset-3"],
+      content: {
+        slides: [{ id: "photo", assetId: "asset-3", headline: "", body: "" }],
+      },
+      now: CREATED_AT,
+    });
+
+    expect(
+      parseContentDraft({
+        ...valid,
+        content: {
+          ...valid.content,
+          slides: [
+            {
+              ...valid.content.slides[0],
+              presentation: { fit: "cover", focalPoint: { x: 0.5, y: 1.01 } },
+            },
+          ],
+        },
+      }),
+    ).toBeNull();
   });
 
   it("rejects content that points outside its captured source set", () => {
@@ -126,6 +236,60 @@ describe("draft shapes", () => {
         now: CREATED_AT,
       }),
     ).toThrow();
+  });
+
+  it("rejects duplicate article placements across sections", () => {
+    const valid = article();
+    expect(
+      parseContentDraft({
+        ...valid,
+        content: {
+          ...valid.content,
+          sections: [
+            { id: "one", heading: "", body: "", assetIds: ["asset-2"] },
+            { id: "two", heading: "", body: "", assetIds: ["asset-2"] },
+          ],
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects media that is foreign, duplicated, or has an invalid focal point", () => {
+    const valid = article();
+    const section = valid.content.sections[0];
+
+    expect(
+      parseContentDraft({
+        ...valid,
+        content: {
+          ...valid.content,
+          sections: [{ ...section, media: [{ assetId: "asset-1" }, { assetId: "foreign-asset" }] }],
+        },
+      }),
+    ).toBeNull();
+    expect(
+      parseContentDraft({
+        ...valid,
+        content: {
+          ...valid.content,
+          sections: [{ ...section, assetIds: ["asset-2"], media: [{ assetId: "asset-2" }, { assetId: "asset-2" }] }],
+        },
+      }),
+    ).toBeNull();
+    expect(
+      parseContentDraft({
+        ...valid,
+        content: {
+          ...valid.content,
+          sections: [
+            {
+              ...section,
+              media: [{ assetId: "asset-2", presentation: { focalPoint: { x: -0.01, y: 0.5 } } }],
+            },
+          ],
+        },
+      }),
+    ).toBeNull();
   });
 });
 
@@ -177,6 +341,74 @@ describe("browser-local CRUD", () => {
 
     memory.values.set(key, JSON.stringify({ schemaVersion: 1, drafts: [{ kind: "article" }, article()] }));
     expect(listContentDrafts(BOARD).map((draft) => draft.id)).toEqual(["draft-article"]);
+  });
+
+  it("upgrades a legacy article without media metadata while keeping the v1 key", () => {
+    const legacy = article();
+    const section = legacy.content.sections[0];
+    const legacySection = {
+      id: section.id,
+      heading: section.heading,
+      body: section.body,
+      assetIds: section.assetIds,
+    };
+    memory.values.set(
+      contentDraftStorageKey(BOARD),
+      JSON.stringify({
+        schemaVersion: 1,
+        drafts: [
+          {
+            ...legacy,
+            content: { ...legacy.content, sections: [legacySection] },
+          },
+        ],
+      }),
+    );
+
+    const loaded = loadContentDraft(BOARD, legacy.id);
+    expect(loaded?.kind).toBe("article");
+    if (!loaded || loaded.kind !== "article") return;
+    expect(loaded.content.sections[0].media).toEqual([
+      expect.objectContaining({ assetId: "asset-2", caption: "", altText: "" }),
+    ]);
+    expect(contentDraftStorageKey(BOARD)).toBe("archivemind:content-drafts:v1:board-a");
+  });
+
+  it("upgrades a legacy carousel without slide presentation and saves the hydrated shape", () => {
+    const legacy = createInstagramCarouselDraft({
+      id: "legacy-carousel",
+      boardId: BOARD,
+      sourceAssetIds: ["asset-3"],
+      content: {
+        slides: [{ id: "slide-1", assetId: "asset-3", headline: "Moment", body: "Story" }],
+      },
+      now: CREATED_AT,
+    });
+    const slide = legacy.content.slides[0];
+    const legacySlide = {
+      id: slide.id,
+      assetId: slide.assetId,
+      headline: slide.headline,
+      body: slide.body,
+    };
+    memory.values.set(
+      contentDraftStorageKey(BOARD),
+      JSON.stringify({
+        schemaVersion: 1,
+        drafts: [{ ...legacy, content: { ...legacy.content, slides: [legacySlide] } }],
+      }),
+    );
+
+    const loaded = loadContentDraft(BOARD, legacy.id);
+    expect(loaded?.kind).toBe("instagram_carousel");
+    if (!loaded || loaded.kind !== "instagram_carousel") return;
+    expect(loaded.content.slides[0].presentation).toEqual({ fit: "cover", focalPoint: { x: 0.5, y: 0.5 } });
+
+    const saved = saveContentDraft(BOARD, loaded, { mode: "manual", now: UPDATED_AT });
+    expect(saved.ok).toBe(true);
+    expect(loadContentDraft(BOARD, legacy.id)?.content).toMatchObject({
+      slides: [{ presentation: { fit: "cover", focalPoint: { x: 0.5, y: 0.5 } } }],
+    });
   });
 
   it("ignores a valid draft filed under a different board", () => {

@@ -50,20 +50,91 @@ export const articleDraftSettingsSchema = z.object({
 
 export type ArticleDraftSettings = z.infer<typeof articleDraftSettingsSchema>;
 
+export const articleMediaPresentationSchema = z.object({
+  /** Relative to the article measure. Alignment only changes non-full media. */
+  width: z.enum(["small", "medium", "wide", "full"]).default("wide"),
+  alignment: z.enum(["left", "center", "right"]).default("center"),
+  /** `original` never forces a crop; the other values define the media frame. */
+  aspect: z.enum(["original", "landscape", "portrait", "square"]).default("original"),
+  fit: z.enum(["cover", "contain"]).default("cover"),
+  /** Normalized coordinates survive preview-size and eventual renderer changes. */
+  focalPoint: z
+    .object({
+      x: z.number().min(0).max(1).default(0.5),
+      y: z.number().min(0).max(1).default(0.5),
+    })
+    .prefault({}),
+});
+
+export type ArticleMediaPresentation = z.infer<typeof articleMediaPresentationSchema>;
+
+export const DEFAULT_ARTICLE_MEDIA_PRESENTATION: Readonly<ArticleMediaPresentation> = {
+  width: "wide",
+  alignment: "center",
+  aspect: "original",
+  fit: "cover",
+  focalPoint: { x: 0.5, y: 0.5 },
+};
+
+export const articleDraftMediaSchema = z.object({
+  assetId: idSchema,
+  presentation: articleMediaPresentationSchema.prefault({}),
+  /** Editorial caption and accessible description are independent. */
+  caption: z.string().max(2_000).default(""),
+  altText: z.string().trim().max(1_000).default(""),
+});
+
+export type ArticleDraftMedia = z.infer<typeof articleDraftMediaSchema>;
+
+export function createDefaultArticleMedia(assetId: string): ArticleDraftMedia {
+  return articleDraftMediaSchema.parse({ assetId });
+}
+
+const articleDraftSectionSchema = z
+  .object({
+    id: idSchema,
+    heading: z.string().trim().max(300).default(""),
+    /** Markdown-ish plain text; the editor can stay block-model-free. */
+    body: longTextSchema.default(""),
+    /** Kept as the authoritative order and generation contract. */
+    assetIds: uniqueIdsSchema.default([]),
+    /** Presentation is local editorial state; Gemini need not invent layout. */
+    media: z
+      .array(articleDraftMediaSchema)
+      .max(500)
+      .refine((media) => new Set(media.map((item) => item.assetId)).size === media.length, {
+        message: "Media asset ids must be unique",
+      })
+      .default([]),
+  })
+  .superRefine((section, context) => {
+    const assetIds = new Set(section.assetIds);
+    section.media.forEach((item, index) => {
+      if (!assetIds.has(item.assetId)) {
+        context.addIssue({
+          code: "custom",
+          message: `Media asset ${item.assetId} is not in the section`,
+          path: ["media", index, "assetId"],
+        });
+      }
+    });
+  })
+  .transform((section) => {
+    const mediaByAssetId = new Map(section.media.map((item) => [item.assetId, item]));
+    return {
+      ...section,
+      // Legacy drafts and the stable generation response carry only assetIds.
+      // Hydrate their presentation here so every editor receives one shape.
+      media: section.assetIds.map((assetId) => mediaByAssetId.get(assetId) ?? createDefaultArticleMedia(assetId)),
+    };
+  });
+
 export const articleDraftContentSchema = z.object({
   title: z.string().trim().max(300).default(""),
   dek: z.string().trim().max(1_000).default(""),
   intro: longTextSchema.default(""),
   sections: z
-    .array(
-      z.object({
-        id: idSchema,
-        heading: z.string().trim().max(300).default(""),
-        /** Markdown-ish plain text; the editor can stay block-model-free. */
-        body: longTextSchema.default(""),
-        assetIds: uniqueIdsSchema.default([]),
-      }),
-    )
+    .array(articleDraftSectionSchema)
     .max(100)
     .refine((sections) => new Set(sections.map((section) => section.id)).size === sections.length, {
       message: "Section ids must be unique",
@@ -73,6 +144,7 @@ export const articleDraftContentSchema = z.object({
 });
 
 export type ArticleDraftContent = z.infer<typeof articleDraftContentSchema>;
+export type ArticleDraftContentInput = z.input<typeof articleDraftContentSchema>;
 
 export const instagramCarouselDraftSettingsSchema = z.object({
   aspectRatio: z.enum(["4:5", "1:1"]).default("4:5"),
@@ -81,6 +153,24 @@ export const instagramCarouselDraftSettingsSchema = z.object({
 });
 
 export type InstagramCarouselDraftSettings = z.infer<typeof instagramCarouselDraftSettingsSchema>;
+
+export const instagramCarouselSlidePresentationSchema = z.object({
+  fit: z.enum(["cover", "contain"]).default("cover"),
+  /** Normalized coordinates keep a crop stable at every preview/export size. */
+  focalPoint: z
+    .object({
+      x: z.number().min(0).max(1).default(0.5),
+      y: z.number().min(0).max(1).default(0.5),
+    })
+    .prefault({}),
+});
+
+export type InstagramCarouselSlidePresentation = z.infer<typeof instagramCarouselSlidePresentationSchema>;
+
+export const DEFAULT_INSTAGRAM_CAROUSEL_SLIDE_PRESENTATION: Readonly<InstagramCarouselSlidePresentation> = {
+  fit: "cover",
+  focalPoint: { x: 0.5, y: 0.5 },
+};
 
 export const instagramCarouselDraftContentSchema = z.object({
   caption: z.string().max(10_000).default(""),
@@ -92,6 +182,8 @@ export const instagramCarouselDraftContentSchema = z.object({
         assetId: idSchema.nullable().default(null),
         headline: z.string().trim().max(300).default(""),
         body: z.string().max(2_200).default(""),
+        /** Editorial crop state is hydrated locally; generation stays text-led. */
+        presentation: instagramCarouselSlidePresentationSchema.prefault({}),
       }),
     )
     .max(20)
@@ -103,6 +195,7 @@ export const instagramCarouselDraftContentSchema = z.object({
 });
 
 export type InstagramCarouselDraftContent = z.infer<typeof instagramCarouselDraftContentSchema>;
+export type InstagramCarouselDraftContentInput = z.input<typeof instagramCarouselDraftContentSchema>;
 
 const contentDraftBaseSchema = z.object({
   id: idSchema,
@@ -149,6 +242,14 @@ export const contentDraftSchema = z
       draft.kind === "article"
         ? draft.content.sections.flatMap((section) => section.assetIds)
         : draft.content.slides.flatMap((slide) => (slide.assetId ? [slide.assetId] : []));
+
+    if (draft.kind === "article" && new Set(usedIds).size !== usedIds.length) {
+      context.addIssue({
+        code: "custom",
+        message: "An article image may only have one placement",
+        path: ["content", "sections"],
+      });
+    }
 
     for (const assetId of usedIds) {
       if (!sourceIds.has(assetId)) {
@@ -362,7 +463,7 @@ function createDraftBase(input: CreateDraftBase, fallbackName: string): z.input<
 }
 
 export function createArticleDraft(
-  input: CreateDraftBase & { settings?: Partial<ArticleDraftSettings>; content?: Partial<ArticleDraftContent> },
+  input: CreateDraftBase & { settings?: Partial<ArticleDraftSettings>; content?: ArticleDraftContentInput },
 ): ArticleContentDraft {
   const draft = contentDraftSchema.parse({
     ...createDraftBase(input, "Untitled article"),
@@ -377,7 +478,7 @@ export function createArticleDraft(
 export function createInstagramCarouselDraft(
   input: CreateDraftBase & {
     settings?: Partial<InstagramCarouselDraftSettings>;
-    content?: Partial<InstagramCarouselDraftContent>;
+    content?: InstagramCarouselDraftContentInput;
   },
 ): InstagramCarouselContentDraft {
   const draft = contentDraftSchema.parse({
