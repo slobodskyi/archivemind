@@ -124,7 +124,10 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   (not the homepage Trash view — a workspace is scoped to one project, a
   trashed photo is not). **Switching workspace re-frames the canvas** (`Fit`,
   from `useWorkspace`'s `boardScope` effect): a workspace re-packs, so without
-  it the camera still points where the previous set was.
+  it the camera still points where the previous set was. **The project name in
+  the header IS "all files"** — clicking it leaves the open workspace, a caret
+  beside it opens the project switcher, and the old `All files` chip is gone
+  (two controls, one scope).
   The chat panel IS
   Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI

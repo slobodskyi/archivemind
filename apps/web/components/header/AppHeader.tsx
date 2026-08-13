@@ -11,6 +11,14 @@ interface AppHeaderProps {
   projLabel: string;
   onHome: () => void;
   onOpenProj: () => void;
+  /** Inside a project, the project name IS "all files": clicking it leaves any
+   *  open Workspace and shows the whole project (ADR 0044 amended). Omitted on
+   *  the workspace-wide `all` canvas, where there is no narrower scope to leave
+   *  and the control stays a plain project switcher. */
+  onProjectScope?: () => void;
+  /** True when no Workspace is open — the name reads as the selected scope, the
+   *  way the chip it replaced did. */
+  projectScopeActive?: boolean;
   showZoomControl?: boolean;
   zoomPct?: string;
   onToggleZoomMenu?: () => void;
@@ -31,6 +39,8 @@ export default function AppHeader({
   projLabel,
   onHome,
   onOpenProj,
+  onProjectScope,
+  projectScopeActive = false,
   showZoomControl = true,
   zoomPct = "100%",
   onToggleZoomMenu,
@@ -67,7 +77,11 @@ export default function AppHeader({
         zIndex: 40,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 520, minWidth: 0 }}>
+      {/* `overflow: hidden` so a long chip row clips at the cap instead of
+          running under SHARE and the zoom control on a narrow window. The chips
+          themselves shrink and ellipsize first (each carries `minWidth: 0`), so
+          clipping is the last resort rather than the first thing you see. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: 520, minWidth: 0, overflow: "hidden" }}>
         <button
           onClick={onHome}
           aria-label="Home"
@@ -91,34 +105,89 @@ export default function AppHeader({
             <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
           </svg>
         </button>
-        <button
-          onClick={onOpenProj}
+        {/* Two jobs, one control (ADR 0044 amended). The NAME opens the whole
+            project — the frequent move, so it is a direct click — and the caret
+            opens the project switcher, which is rare. They were one button when
+            the header also carried an "All files" chip; that chip said the same
+            thing as the project name sitting right beside it, so it went and its
+            job came here. Split, not a menu item: burying "show me everything"
+            one level down would make leaving a Workspace harder than entering
+            one. Outside a project (`onProjectScope` absent) the whole control is
+            the switcher, exactly as before. */}
+        <div
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 7,
             height: 30,
-            padding: "0 9px",
             background: "var(--bg-sf)",
-            border: "1px solid var(--bd)",
+            border: `1px solid ${onProjectScope && projectScopeActive ? "var(--bdh)" : "var(--bd)"}`,
             borderRadius: 2,
-            color: "var(--t1)",
-            fontSize: 13,
-            fontWeight: 400,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            minWidth: 0,
+            // Does NOT shrink. It used to, and the chip row beside it would
+            // squeeze the project name to nothing on a narrow window — which was
+            // survivable while this was just a switcher label and is not now
+            // that it is how you leave a Workspace. The chips absorb the squeeze
+            // instead: they ellipsize and fold into their own "+N" overflow.
+            flex: "0 0 auto",
             maxWidth: 260,
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, flex: "0 0 auto" }}>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <span key={i} style={{ width: 5, height: 5, borderRadius: 1, background: "currentColor", opacity: 0.7 }} />
-            ))}
-          </div>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
-          <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />
-        </button>
+          <button
+            onClick={onProjectScope ?? onOpenProj}
+            title={onProjectScope ? `${projLabel} — all files in this project` : projLabel}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              height: "100%",
+              padding: "0 9px",
+              // The selected-scope tint, the same one the chips use. Only when
+              // the name is a scope at all: outside a project it is a label on
+              // the switcher and must not read as a state.
+              background: onProjectScope && projectScopeActive ? "var(--bg-el)" : "transparent",
+              border: 0,
+              borderRadius: 0,
+              color: "var(--t1)",
+              fontSize: 13,
+              fontWeight: 400,
+              fontFamily: "inherit",
+              cursor: "pointer",
+              minWidth: 0,
+            }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, flex: "0 0 auto" }}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <span key={i} style={{ width: 5, height: 5, borderRadius: 1, background: "currentColor", opacity: 0.7 }} />
+              ))}
+            </div>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
+            {!onProjectScope && (
+              <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />
+            )}
+          </button>
+          {onProjectScope && (
+            <button
+              onClick={onOpenProj}
+              aria-label="Switch project"
+              title="Switch project"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                height: "100%",
+                width: 24,
+                flex: "0 0 auto",
+                padding: 0,
+                background: "transparent",
+                border: 0,
+                borderLeft: "1px solid var(--bd)",
+                borderRadius: 0,
+                cursor: "pointer",
+              }}
+            >
+              <ChevronDownIcon width={11} height={11} stroke="var(--t3)" />
+            </button>
+          )}
+        </div>
         {afterProject && (
           <>
             <ChevronRightIcon width={12} height={12} stroke="var(--t3)" style={{ flex: "0 0 auto", opacity: 0.6 }} />

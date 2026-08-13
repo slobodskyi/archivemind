@@ -540,6 +540,12 @@ export default function ArchiveWorkspace({
         projLabel={ws.projLabel}
         onHome={ws.goHome}
         onOpenProj={ws.openProj}
+        // The project name is the way back to the whole project — it replaced
+        // the Workspace browser's "All files" chip, which said the same thing
+        // one control to the right. Only in a project: the workspace-wide `all`
+        // canvas has no Workspace to leave.
+        onProjectScope={ws.projectMode ? () => openBoard(null) : undefined}
+        projectScopeActive={bd.activeBoardId === null}
         showZoomControl={!ws.isMapView}
         zoomPct={ws.zoomPct}
         onToggleZoomMenu={ws.toggleZoomMenu}

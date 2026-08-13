@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AssetLabel, Board } from "@archivemind/shared";
-import { clearLegacyBoards, nextBoardColor, readLegacyBoards, splitBoards } from "@/lib/boards";
+import { clearLegacyBoards, nextBoardColor, nextBoardName, readLegacyBoards, splitBoards } from "@/lib/boards";
 
 export interface BoardsApi {
   /** The live ones — the chip row. */
@@ -43,6 +43,10 @@ export function useBoards(
   // cannot lose one in the gap. `splitBoards` derives the two views below.
   const [boards, setBoards] = useState<Board[]>(initialBoards);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
+  /** Creates that have been sent but not yet answered. A ref, not state: this
+   *  changes twice per create and nothing renders from it — it exists so the
+   *  NEXT create can see a name and colour that no list contains yet. */
+  const pending = useRef<{ name: string; color: AssetLabel }[]>([]);
   const fail = useRef(onError);
   useEffect(() => {
     fail.current = onError;
@@ -96,19 +100,25 @@ export function useBoards(
   const createBoard = useCallback(
     (name?: string, assetIds: string[] = []) => {
       if (projectId === "all") return;
-      const body = {
-        projectId,
-        // Numbered and coloured against the LIVE ones: a workspace in the Trash
-        // should not reserve a colour, and counting it would number the next one
-        // as if it were still on screen.
-        name: name?.trim() || `Workspace ${live.length + 1}`,
-        color: nextBoardColor(live),
-        assetIds: [...new Set(assetIds)],
+      // A create is only in the list once the server answers, so two fast clicks
+      // on ＋ both derive from the same state and mint the same name in the same
+      // colour — which is exactly what a double-click produced. The drafts still
+      // in flight reserve theirs here, and release it when the request settles.
+      //
+      // Numbered and coloured against the LIVE ones plus those drafts: a
+      // workspace in the Trash should reserve neither, since it is not on screen.
+      const draft = {
+        name: name?.trim() || nextBoardName([...live, ...pending.current]),
+        color: nextBoardColor([...live, ...pending.current]),
+      };
+      pending.current = [...pending.current, draft];
+      const release = () => {
+        pending.current = pending.current.filter((d) => d !== draft);
       };
       void fetch("/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...draft, projectId, assetIds: [...new Set(assetIds)] }),
       })
         .then(async (res) => {
           if (!res.ok) throw new Error(String(res.status));
@@ -118,7 +128,10 @@ export function useBoards(
           // there would scope the canvas to an id the server has never seen.
           setActiveBoardId(saved.id);
         })
-        .catch(() => fail.current?.("Couldn't create the workspace"));
+        .catch(() => fail.current?.("Couldn't create the workspace"))
+        // After the list is updated, never before: releasing first would let a
+        // second create in the same tick re-take the name this one just saved.
+        .finally(release);
     },
     [projectId, live],
   );

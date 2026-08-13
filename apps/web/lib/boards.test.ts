@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Board } from "@archivemind/shared";
-import { BOARD_COLORS, clearLegacyBoards, nextBoardColor, readLegacyBoards, splitBoards } from "./boards";
+import {
+  BOARD_COLORS,
+  clearLegacyBoards,
+  nextBoardColor,
+  nextBoardName,
+  readLegacyBoards,
+  splitBoards,
+} from "./boards";
 
 /** The suite runs in vitest's default `node` environment (this package ships no
  *  vitest config), where `window` is undefined and the legacy reader
@@ -146,7 +153,51 @@ describe("splitBoards", () => {
   });
 });
 
+/** Two fast clicks on ＋ used to mint two identical workspaces: both creates read
+ *  the same state, because neither is in the list until the server answers. The
+ *  fix is that a create in flight reserves its name and colour, which is only
+ *  possible because both are decided by these pure functions. */
+describe("nextBoardName", () => {
+  it("starts at 1", () => {
+    expect(nextBoardName([])).toBe("Workspace 1");
+  });
+
+  it("takes the lowest free number, not count + 1", () => {
+    // The delete case: two boards, remove the first, and `count + 1` would hand
+    // out a name the survivor already has.
+    expect(nextBoardName([{ name: "Workspace 2" }])).toBe("Workspace 1");
+    expect(nextBoardName([{ name: "Workspace 1" }, { name: "Workspace 3" }])).toBe("Workspace 2");
+  });
+
+  it("never repeats a name held by a create still in flight", () => {
+    const live = [board({ name: "Workspace 1" })];
+    const firstClick = nextBoardName(live);
+    // The second click lands before the first request comes back, so the list
+    // is unchanged — only the draft stands between them.
+    const secondClick = nextBoardName([...live, { name: firstClick }]);
+    expect(firstClick).toBe("Workspace 2");
+    expect(secondClick).toBe("Workspace 3");
+  });
+
+  it("ignores names that are not the default shape", () => {
+    expect(nextBoardName([{ name: "Pitch deck" }, { name: "Workspace 1" }])).toBe("Workspace 2");
+  });
+
+  it("is deterministic", () => {
+    const existing = [{ name: "Workspace 1" }];
+    expect(nextBoardName(existing)).toBe(nextBoardName(existing));
+  });
+});
+
 describe("nextBoardColor", () => {
+  it("never repeats a colour held by a create still in flight", () => {
+    const live = [board({ color: BOARD_COLORS[0] })];
+    const firstClick = nextBoardColor(live);
+    const secondClick = nextBoardColor([...live, { color: firstClick }]);
+    expect(firstClick).toBe(BOARD_COLORS[1]);
+    expect(secondClick).toBe(BOARD_COLORS[2]);
+  });
+
   it("gives the first unused colour", () => {
     expect(nextBoardColor([])).toBe(BOARD_COLORS[0]);
     expect(nextBoardColor([board({ color: BOARD_COLORS[0] })])).toBe(BOARD_COLORS[1]);

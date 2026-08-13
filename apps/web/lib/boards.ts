@@ -13,11 +13,28 @@ const storeKey = (projectId: string) => `${STORE_PREFIX}${projectId}`;
 export const BOARD_COLORS: readonly AssetLabel[] = ["blue", "green", "yellow", "purple", "red", "orange", "gray"];
 
 /** The colour a new workspace gets: the first unused one, else cycle by count so
- *  two made back-to-back never look identical. Pure — no `Math.random` here. */
-export function nextBoardColor(existing: readonly Board[]): AssetLabel {
+ *  two made back-to-back never look identical. Pure — no `Math.random` here.
+ *
+ *  Takes anything with a colour, not `Board[]`, so a create that is still in
+ *  flight — which has no id or membership yet — can reserve its colour against
+ *  the next one. */
+export function nextBoardColor(existing: readonly { color: AssetLabel }[]): AssetLabel {
   const used = new Set(existing.map((b) => b.color));
   const free = BOARD_COLORS.find((c) => !used.has(c));
   return free ?? BOARD_COLORS[existing.length % BOARD_COLORS.length];
+}
+
+/** The default name for a new workspace: the lowest `Workspace N` nobody is
+ *  using. NOT `count + 1` — that repeats a name as soon as the set has a hole in
+ *  it (delete "Workspace 1" of two, and the next create is a second
+ *  "Workspace 2"), and it repeats it again for two creates fired before either
+ *  has come back from the server, which is what a double-click on ＋ is. Pass
+ *  the in-flight drafts alongside the saved boards and both cases close. */
+export function nextBoardName(existing: readonly { name: string }[]): string {
+  const taken = new Set(existing.map((b) => b.name.trim()));
+  let n = 1;
+  while (taken.has(`Workspace ${n}`)) n += 1;
+  return `Workspace ${n}`;
 }
 
 /** Split what the reader returns into the two places a workspace can be (ADR

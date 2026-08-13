@@ -86,6 +86,10 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
               : "transparent",
           cursor: "pointer",
           maxWidth: 200,
+          // A flex item defaults to min-width:auto, i.e. "never narrower than my
+          // text" — so without this the row pushes past the header's cap instead
+          // of the names ellipsizing.
+          minWidth: 0,
         }}
         onClick={() => onSelect(b.id)}
         onDoubleClick={(e) => {
@@ -136,32 +140,9 @@ export default function BoardBrowser({ boards, activeBoardId, counts, onSelect, 
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
-      {/* All files — the whole project in the sorting views. */}
-      <button
-        onClick={() => onSelect(null)}
-        // Carries the attribute with an EMPTY value so a drag passing over it
-        // disarms rather than leaving the previous chip lit — see `boardChipAt`.
-        {...{ [BOARD_CHIP_ATTR]: "" }}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          height: 30,
-          padding: "0 11px",
-          borderRadius: 2,
-          border: activeBoardId === null ? "1px solid var(--bdh)" : "1px solid transparent",
-          background: activeBoardId === null ? "var(--bg-el)" : "transparent",
-          color: activeBoardId === null ? "var(--t1)" : "var(--t2)",
-          fontFamily: "inherit",
-          fontSize: 12.5,
-          letterSpacing: "0.02em",
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-        }}
-        title="All files — browse the whole project"
-      >
-        All files
-      </button>
-
+      {/* No "All files" chip: the project name to the left of this row says the
+          same thing, and clicking it is what leaves a Workspace now (ADR 0044
+          amended). Two controls for one scope is one control too many. */}
       {visible.map(chip)}
 
       {overflow.length > 0 && (
