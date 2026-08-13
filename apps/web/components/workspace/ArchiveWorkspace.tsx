@@ -41,6 +41,10 @@ import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions"
 import CreateOutputDialog from "@/components/content/CreateOutputDialog";
 import DraftLibraryDialog from "@/components/content/DraftLibraryDialog";
 import ContentDraftStudio from "@/components/content/ContentDraftStudio";
+import SharePreviewDialog, {
+  type SharePreviewOptions,
+  type SharePreviewResult,
+} from "@/components/content/SharePreviewDialog";
 import {
   contentGenerationResultSchema,
   draftFromGeneration,
@@ -55,6 +59,15 @@ import {
   type ContentDraft,
 } from "@/lib/content-drafts";
 import { downloadContentDraft } from "@/lib/content-package";
+import {
+  createPublicationShareResponseSchema,
+  deletePublicationShareLink,
+  listPublicationSharesResponseSchema,
+  loadPublicationShareLink,
+  publicationShareRequiresRevoke,
+  savePublicationShareLink,
+  type PublicationShareSummary,
+} from "@/lib/publication-shares";
 
 interface Account {
   initials: string;
@@ -218,6 +231,15 @@ export default function ArchiveWorkspace({
   const [createSeed, setCreateSeed] = useState<Partial<CreateOutputInput> | null>(null);
   const [draftSaveState, setDraftSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [draftConfirm, setDraftConfirm] = useState<"delete" | "regenerate" | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareResult, setShareResult] = useState<SharePreviewResult | null>(null);
+  const [sharedDraftId, setSharedDraftId] = useState<string | null>(null);
+  const [sharedDraftVersion, setSharedDraftVersion] = useState<number | null>(null);
+  /** Server truth about which versions of the open draft are live. `null` until
+   *  it has been read once — absence only means "ended" after a real answer. */
+  const [shareLinks, setShareLinks] = useState<readonly PublicationShareSummary[] | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshDrafts = useCallback((boardId: string | null) => {
@@ -241,6 +263,13 @@ export default function ArchiveWorkspace({
       setOutputUi("closed");
       setGenerationError(null);
       setCreateSeed(null);
+      setShareOpen(false);
+      setShareBusy(false);
+      setShareError(null);
+      setShareResult(null);
+      setSharedDraftId(null);
+      setSharedDraftVersion(null);
+      setShareLinks(null);
       if (id) refreshDrafts(id);
       bd.selectBoard(id);
       if (id !== null) ws.setView("neural");
@@ -285,7 +314,13 @@ export default function ArchiveWorkspace({
 
   const openDraft = useCallback((draft: ContentDraft) => {
     const current = loadContentDraft(draft.boardId, draft.id) ?? draft;
+    const remembered = loadPublicationShareLink(current.id);
     setActiveDraft(current);
+    setShareResult(remembered?.result ?? null);
+    setSharedDraftId(remembered?.draftId ?? current.id);
+    setSharedDraftVersion(remembered?.draftVersion ?? null);
+    setShareLinks(null);
+    setShareError(null);
     setOutputUi("studio");
     setDraftSaveState("saved");
   }, []);
@@ -345,6 +380,151 @@ export default function ArchiveWorkspace({
       refreshDrafts(next.boardId);
     }, 450);
   }, [refreshDrafts]);
+
+  /** The link's address is unrecoverable, but its status is not: the server
+   *  says which versions are still live, so a lost or cleared browser can no
+   *  longer strand a public link nobody can switch off. The question is asked
+   *  per BOARD — a draft lives in localStorage, so scoping the query by draft id
+   *  would hide exactly the links whose draft this browser has already lost. */
+  const refreshShareLinks = useCallback(async (draft: ContentDraft) => {
+    try {
+      const response = await fetch(
+        `/api/content-shares?boardId=${encodeURIComponent(draft.boardId)}`,
+      );
+      if (!response.ok) return;
+      const parsed = listPublicationSharesResponseSchema.safeParse(await response.json());
+      if (parsed.success) setShareLinks(parsed.data.shares);
+    } catch {
+      // Best-effort: an unreachable list leaves the dialog on what it knows.
+    }
+  }, []);
+
+  const openSharePreview = useCallback(() => {
+    if (!activeDraft) return;
+    if (draftSaveState === "error") {
+      ws.flashToast("Save the draft before creating a preview link.");
+      return;
+    }
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (draftSaveState !== "saved") {
+      const saved = saveContentDraft(activeDraft.boardId, activeDraft, { mode: "manual" });
+      if (!saved.ok) {
+        setDraftSaveState("error");
+        ws.flashToast("Draft could not be saved. Preview link was not created.");
+        return;
+      }
+      setActiveDraft(saved.draft);
+      setDraftSaveState("saved");
+      refreshDrafts(activeDraft.boardId);
+    }
+    const remembered = loadPublicationShareLink(activeDraft.id);
+    if (sharedDraftId !== activeDraft.id || !shareResult) {
+      setShareResult(remembered?.result ?? null);
+      setSharedDraftId(activeDraft.id);
+      setSharedDraftVersion(remembered?.draftVersion ?? null);
+    }
+    setShareError(null);
+    setShareOpen(true);
+    void refreshShareLinks(activeDraft);
+  }, [activeDraft, draftSaveState, refreshDrafts, refreshShareLinks, shareResult, sharedDraftId, ws]);
+
+  const createSharePreview = useCallback(async (options: SharePreviewOptions) => {
+    if (!activeDraft || shareBusy) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      const response = await fetch("/api/content-shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft: activeDraft, options }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const code = typeof payload === "object" && payload !== null && "error" in payload
+          ? String(payload.error)
+          : "share_unavailable";
+        throw new Error(code);
+      }
+      const created = createPublicationShareResponseSchema.parse(payload);
+      setSharedDraftId(activeDraft.id);
+      setSharedDraftVersion(activeDraft.version);
+      const result = {
+        shareId: created.shareId,
+        url: new URL(created.path, window.location.origin).toString(),
+        createdAt: created.createdAt,
+        expiresAt: created.expiresAt,
+      };
+      setShareResult(result);
+      savePublicationShareLink({
+        schemaVersion: 1,
+        draftId: activeDraft.id,
+        draftVersion: activeDraft.version,
+        result,
+      });
+      void refreshShareLinks(activeDraft);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "share_unavailable";
+      setShareError(
+        code === "media_not_ready"
+          ? "One or more images are still being prepared. Try again in a moment."
+          : code === "too_many_assets"
+            ? "A public preview can contain up to 20 placed images."
+            : code === "editor_required"
+              ? "You need editor access to create a public link."
+              : "The preview link could not be created. Try again.",
+      );
+    } finally {
+      setShareBusy(false);
+    }
+  }, [activeDraft, refreshShareLinks, shareBusy]);
+
+  const revokeSharePreview = useCallback(async (shareId: string) => {
+    if (shareBusy) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      const response = await fetch(`/api/content-shares/${encodeURIComponent(shareId)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("revoke_failed");
+      // Turning off a link this browser holds closes the dialog; turning off one
+      // it only knows about from the server leaves it open, since that list is
+      // the reason the author came here.
+      const wasLocal = shareResult?.shareId === shareId;
+      if (wasLocal) {
+        if (activeDraft) deletePublicationShareLink(activeDraft.id);
+        setShareResult(null);
+        setShareOpen(false);
+      }
+      setShareLinks((links) => links?.filter((link) => link.shareId !== shareId) ?? null);
+      if (activeDraft) void refreshShareLinks(activeDraft);
+      ws.flashToast("Preview link turned off");
+    } catch {
+      setShareError("The link could not be turned off. Try again.");
+    } finally {
+      setShareBusy(false);
+    }
+  }, [activeDraft, refreshShareLinks, shareBusy, shareResult, ws]);
+
+  /** The board-wide answer, narrowed to the draft on screen and to versions a
+   *  person can still act on. `publicationShareRequiresRevoke` drops expired
+   *  ones: they are already closed, so offering "Turn off" would be theatre. */
+  const draftShareLinks = useMemo(() => {
+    if (!shareLinks || !activeDraft) return null;
+    return shareLinks.filter(
+      (link) => link.sourceDraftId === activeDraft.id && publicationShareRequiresRevoke(link),
+    );
+  }, [activeDraft, shareLinks]);
+
+  const dismissShareResult = useCallback(() => {
+    if (activeDraft) deletePublicationShareLink(activeDraft.id);
+    setShareResult(null);
+    setSharedDraftVersion(null);
+    setShareError(null);
+  }, [activeDraft]);
 
   const generateOutput = useCallback(async (input: CreateOutputInput) => {
     const board = bd.activeBoard;
@@ -1063,7 +1243,7 @@ export default function ArchiveWorkspace({
       <ContentDraftStudio
         key={activeDraft?.id ?? "closed-draft"}
         draft={outputUi === "studio" ? activeDraft : null}
-        suspended={draftConfirm !== null}
+        suspended={draftConfirm !== null || shareOpen}
         photos={ws.photos}
         currentAssetIds={orderedBoardAssetIds}
         saveState={draftSaveState}
@@ -1103,6 +1283,7 @@ export default function ArchiveWorkspace({
           setGenerationError(null);
           setOutputUi("create");
         }}
+        onShare={openSharePreview}
         onDownloadCopy={() => activeDraft && downloadContentDraft(activeDraft, ws.photos)}
         onDownloadPhotos={(assetIds) => {
           setOutputUi("closed");
@@ -1111,10 +1292,32 @@ export default function ArchiveWorkspace({
         }}
       />
 
+      <SharePreviewDialog
+        open={shareOpen && activeDraft !== null}
+        draftName={activeDraft?.name ?? "Draft"}
+        draftKind={activeDraft?.kind ?? "article"}
+        busy={shareBusy}
+        error={shareError}
+        result={shareResult}
+        resultOutdated={Boolean(activeDraft && shareResult && sharedDraftVersion !== activeDraft.version)}
+        resultEnded={Boolean(shareResult && draftShareLinks && !draftShareLinks.some((link) => link.shareId === shareResult.shareId))}
+        unmanagedShares={draftShareLinks?.filter((link) => link.shareId !== shareResult?.shareId) ?? []}
+        onClose={() => {
+          if (shareBusy) return;
+          setShareOpen(false);
+          setShareError(null);
+        }}
+        onCreate={(options) => void createSharePreview(options)}
+        onRevoke={(shareId) => void revokeSharePreview(shareId)}
+        onDismissResult={dismissShareResult}
+      />
+
       <ConfirmModal
         open={draftConfirm === "delete" && activeDraft !== null}
         title={`Delete “${activeDraft?.name ?? "draft"}”?`}
-        body="This permanently removes the draft and its edits from this browser. The Workspace and its photos are not affected. This cannot be undone."
+        body={(draftShareLinks ? draftShareLinks.length > 0 : Boolean(shareResult))
+          ? "This permanently removes the draft and its edits from this browser. Its public preview link stays live until you turn it off, so revoke it first if people should lose access. The Workspace and photos are not affected."
+          : "This permanently removes the draft and its edits from this browser. The Workspace and its photos are not affected. This cannot be undone."}
         confirmLabel="Delete draft"
         danger
         onConfirm={deleteActiveDraft}

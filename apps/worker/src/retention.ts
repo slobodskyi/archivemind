@@ -2,6 +2,8 @@ import { EXPORT_RETENTION_DAYS } from "@archivemind/shared";
 import type pg from "pg";
 import { deleteObject } from "./services/r2";
 
+const PUBLICATION_PREPARING_ABANDON_HOURS = 24;
+
 /** Retention sweeps — periodic maintenance that isn't queue work, so it lives
  *  here rather than in queue.ts. Scheduled from index.ts alongside the reaper. */
 
@@ -74,4 +76,118 @@ export async function sweepExpiredExports(pool: pg.Pool): Promise<number> {
     removed += 1;
   }
   return removed;
+}
+
+type PublicationPreviewRow = {
+  share_id: string;
+  workspace_id: string;
+  public_id: string;
+  preview_r2_key: string;
+};
+
+/** Remove share-owned publication previews that no public capability may use.
+ *
+ * A publication's parent row and token digest deliberately survive forever:
+ * an old bearer token must never become valid again. Cleanup completion is
+ * represented by deleting its private `publication_share_assets` rows only
+ * after every copied preview was deleted successfully. Original/download and
+ * source-preview keys are never selected here.
+ *
+ * Asset Trash/purge revokes affected shares in a DB trigger (ADR 0046), so the
+ * same pass also closes the copied-pixel erasure gap without coupling purge jobs
+ * to publication storage. `preparing` versions get a 24-hour crash/retry window;
+ * after that they are terminally revoked before cleanup. */
+export async function sweepPublicationShares(pool: pg.Pool): Promise<number> {
+  // Bound by SHARES, not asset rows. A publication may hold up to 20 previews;
+  // cutting a share's rows at the batch edge and then dropping its mapping
+  // would orphan the unseen objects.
+  const { rows } = await pool.query<PublicationPreviewRow>(
+    `with candidates as (
+       select ps.id, ps.workspace_id
+         from publication_shares ps
+        where exists (
+                select 1 from publication_share_assets psa where psa.share_id = ps.id
+              )
+          and (
+            ps.status = 'revoked'
+            or (ps.status = 'ready' and ps.expires_at is not null and ps.expires_at <= now())
+            or (ps.status = 'preparing'
+                and ps.created_at <= now() - make_interval(hours => $1::int))
+          )
+        order by coalesce(ps.revoked_at, ps.expires_at, ps.created_at), ps.id
+        limit 100
+     )
+     select c.id as share_id,
+            c.workspace_id::text as workspace_id,
+            psa.public_id::text as public_id,
+            psa.preview_r2_key
+       from candidates c
+       join publication_share_assets psa on psa.share_id = c.id
+      order by c.id, psa.position`,
+    [PUBLICATION_PREPARING_ABANDON_HOURS],
+  );
+
+  const shares = new Map<
+    string,
+    { workspaceId: string; previews: { publicId: string; key: string }[] }
+  >();
+  for (const row of rows) {
+    const share = shares.get(row.share_id) ?? { workspaceId: row.workspace_id, previews: [] };
+    share.previews.push({ publicId: row.public_id, key: row.preview_r2_key });
+    shares.set(row.share_id, share);
+  }
+
+  let cleaned = 0;
+  for (const [shareId, share] of shares) {
+    try {
+      // Re-check under the UPDATE lock. An activation that raced the candidate
+      // SELECT wins if it made a still-live share ready first; otherwise this
+      // transition fails closed before any bytes or mappings disappear.
+      const claimed = await pool.query<{ workspace_id: string }>(
+        `update publication_shares
+            set status = 'revoked',
+                ready_at = null,
+                revoked_at = coalesce(revoked_at, now())
+          where id = $1
+            and (
+              status = 'revoked'
+              or (status = 'ready' and expires_at is not null and expires_at <= now())
+              or (status = 'preparing'
+                  and created_at <= now() - make_interval(hours => $2::int))
+            )
+          returning workspace_id::text as workspace_id`,
+        [shareId, PUBLICATION_PREPARING_ABANDON_HOURS],
+      );
+      const workspaceId = claimed.rows[0]?.workspace_id;
+      if (!workspaceId) continue;
+
+      // Exact contract validation is stronger than a prefix-only check: a
+      // corrupted row must never make this maintenance loop touch originals,
+      // edits, exports, or another share's objects. Keep its mapping so it can
+      // be investigated/retried rather than turning it into an orphan.
+      const invalid = share.previews.find(
+        (preview) =>
+          preview.key !==
+          `${workspaceId}/shares/${shareId}/previews/${preview.publicId}.webp`,
+      );
+      if (invalid) {
+        console.log(
+          `[publication-retention] ${shareId}: invalid preview key; cleanup skipped`,
+        );
+        continue;
+      }
+
+      // R2 first, mapping second. DeleteObject is idempotent, so a partial pass
+      // or a concurrent authenticated revoke is safe to retry next sweep.
+      for (const preview of share.previews) await deleteObject(preview.key);
+      await pool.query(`delete from publication_share_assets where share_id = $1`, [shareId]);
+      cleaned += 1;
+    } catch (err) {
+      // One broken object must not strand every other tenant's cleanup. The
+      // untouched child rows retain the complete retry plan for the next pass.
+      console.log(`[publication-retention] ${shareId}: cleanup failed — ${String(err)}`);
+    }
+  }
+
+  return cleaned;
 }

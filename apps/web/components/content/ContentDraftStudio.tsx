@@ -47,6 +47,7 @@ interface ContentDraftStudioProps {
   onClose: () => void;
   onDelete: () => void;
   onRegenerate: (draft: ContentDraft) => void;
+  onShare: () => void;
   onDownloadCopy: () => void;
   onDownloadPhotos: (assetIds: string[]) => void;
 }
@@ -721,6 +722,7 @@ export default function ContentDraftStudio({
   onClose,
   onDelete,
   onRegenerate,
+  onShare,
   onDownloadCopy,
   onDownloadPhotos,
 }: ContentDraftStudioProps) {
@@ -829,6 +831,7 @@ export default function ContentDraftStudio({
             <span role="status" style={{ marginRight: 4, color: saveState === "error" ? "var(--red)" : "var(--t3)", fontSize: 9.5 }}>{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved locally"}</span>
             <button onClick={() => { setRailOpen((open) => !open); setSelectedMedia(null); }} aria-expanded={railOpen} aria-controls={sourcesId} style={{ ...chromeButton, background: railOpen ? "var(--bg-el)" : "transparent" }}>Sources</button>
             <button onClick={() => onRegenerate(draft)} style={chromeButton}>Regenerate</button>
+            <button onClick={onShare} aria-label="Share preview" title="Create a public preview link" style={{ ...chromeButton, color: "var(--t1)" }}>Share</button>
             <button onClick={onDownloadCopy} style={{ ...chromeButton, border: 0, background: "var(--ac)", color: "#050505", fontWeight: 800 }}>Export copy</button>
             <button onClick={onClose} aria-label="Close draft editor" style={{ ...chromeButton, width: 32, padding: 0, fontSize: 17 }}>×</button>
           </div>

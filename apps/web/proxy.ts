@@ -5,7 +5,7 @@ import { createServerClient } from "@supabase/ssr";
  *  Validates the JWT via getClaims(); expired sessions are refreshed and the
  *  new cookies are written onto whichever response we return. */
 
-const PUBLIC_PATHS = ["/login", "/signup", "/auth"];
+const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/p"];
 
 function isPublic(pathname: string) {
   // "/" is public but must be matched exactly: anonymous visitors get the

@@ -43,6 +43,7 @@ Worker (Node/TS on Railway, persistent container)
   ── writes results → Postgres; progress → ai_jobs row (Realtime picks it up)
 Cloudflare R2 (S3-compatible)
   ── originals (uploads + Dropbox), previews (all assets), exports
+  ── immutable publication-preview copies (anonymous share links; ADR 0046)
 ```
 
 **Decision log (ADR-lite):**
@@ -398,6 +399,18 @@ create table canvas_layouts (
 );
 ```
 
+**Publication shares (migration `20260813000002`, ADR 0046).** A
+browser-local content draft becomes durable only at the explicit Share
+boundary. `publication_shares` stores one immutable, publishable Article or
+Carousel snapshot, frozen rights, a SHA-256 token digest and
+`preparing|ready|revoked` lifecycle; `publication_share_assets` maps its opaque
+public media ids to share-owned preview copies and permitted download sources.
+The raw token, real asset ids and R2 keys never enter the public snapshot. Both
+tables have RLS with no direct `anon`/`authenticated` table or resolver access:
+editor creation/activation/revocation uses three guarded SECURITY DEFINER RPCs;
+the fenced Next server integration invokes two service-role-only resolvers and
+projects their results before responding. See §8.7 and §9.
+
 ---
 
 ## 5. Auth & RLS
@@ -444,11 +457,21 @@ create policy assets_write  on assets for all
 {workspace_id}/exports/{job_id}.{pdf|csv|zip}     -- extension per options.format; only the KEY is
                                                   -- stored (payload.result_key), presigned per request;
                                                   -- swept after EXPORT_RETENTION_DAYS
+{workspace_id}/shares/{share_id}/previews/{public_id}.webp
+                                                  -- immutable medium copy for one public publication
 ```
 
 - Uploads: browser → `POST /api/uploads/presign` → presigned PUT direct to R2 → `POST /api/uploads/complete`. Multipart (>100 MB) uses a **fixed chunk size (~50 MiB; all parts equal except the last)**; bucket CORS must set `ExposeHeaders: ["ETag"]` (else the browser can't complete multipart); no unsigned headers on part PUTs; no POST-policy uploads (unsupported on R2). Max presigned TTL 7 days.
 - Cloud-linked files (**Drive only**): originals never copied; worker streams bytes at processing time (Drive `files.get?alt=media`), keeps only previews + derived data. **Dropbox** (Chooser direct links, 4 h TTL) is fetched once at ingest and its original is stored in R2 like an upload — the link can't be refreshed later (ADR 0008).
 - All preview serving via presigned GET or public bucket + Cloudflare CDN — zero egress cost either way.
+- Public publication media stays private in R2 and is the one path that is
+  **never presigned to the browser at all**. Each picture and file is requested
+  from a same-origin `/p/{token}/media/…` handler, which hashes the token afresh
+  and streams the object through; R2's host, signature and durable key never
+  reach the page, and a turned-off link stops answering on the next request
+  rather than one TTL later. Upload/Dropbox may expose the stored original,
+  while Drive is labelled and delivered as the share-owned 1024px WebP
+  (ADR 0046).
 
 ---
 
@@ -469,7 +492,7 @@ returning *;
 - **Loop:** poll every 2s when idle; process; update `progress/progress_label/done_items` every N items (Realtime propagates to UI).
 - **Retry:** on error, if `attempts < 3` → `status='queued', run_after = now() + (attempts * interval '2 min')`, else `failed` + `error`.
 - **Reaper:** every 5 min, `running` jobs with `claimed_at < now() - interval '15 min'` → back to `queued` (crash recovery).
-- **Retention sweeper:** on boot, then every 6 h, three independent sweeps, each caught separately so one failure cannot stall the others: `sweep_trashed_projects()` (hard-deletes projects past the 30-day window, §12), `sweep_deleted_assets()` (enqueues `purge` jobs), and `sweepExpiredExports()` — the only sweep that touches R2 itself, deleting export artifacts past `EXPORT_RETENTION_DAYS` and stripping their `result_key`. Not an `ai_jobs` type: it's neither user-triggered nor per-asset. Failures are logged and retried on the next tick. See ADR 0019.
+- **Retention sweeper:** on boot, then every 6 h, five independent sweeps, each caught separately so one failure cannot stall the others: `sweep_trashed_projects()` and `sweep_trashed_boards()` hard-delete expired Trash rows; `sweep_deleted_assets()` enqueues `purge` jobs; `sweepExpiredExports()` deletes expired export artifacts and strips their `result_key`; `sweepPublicationShares()` terminally revokes expired/abandoned publications, deletes only their exact share-owned R2 previews, and then removes the private asset mappings while retaining the parent row and token digest forever. These are not `ai_jobs`: they are retention maintenance, not user-triggered work. Failures are logged and retried on the next tick. See ADR 0019, ADR 0035 and ADR 0046.
 - **Idempotency:** handlers upsert by natural keys (`asset_previews` PK, `captions (asset_id,lang,style)`, `embeddings (asset_id,kind,chunk_index)`) — safe to re-run.
 - **Rate limiting:** exponential backoff on 429/5xx around every Gemini call (`services/gemini.ts`) — shipped. A worker-side parallelism cap is **not** implemented: analyze (like ingest) runs sequentially by design, so there is nothing to cap yet.
 - Graceful shutdown: finish current item, release job back to `queued`.
@@ -594,6 +617,47 @@ updated by an explicit product/schema decision.
   `putObject` is Buffer-only and an OOM would be a SIGKILL that `reapStaleJobs` then
   requeues forever.
 
+### 8.7 Anonymous publication previews
+
+**Shipped data boundary: migration `20260813000002`, ADR 0046.** Sharing is a
+publication operation, not a live read of a Workspace or `localStorage` draft.
+The authenticated route sanitizes one draft into a safe snapshot with opaque
+per-publication media UUIDs, then calls `create_publication_share(...)`. The RPC
+validates an owner/editor, a live board/project, 0–20 ordered active board
+members, the current medium-preview/original keys and an exact
+`snapshot.publicAssetIds` mapping. It stores only the SHA-256 digest of a random
+32-byte URL token and returns an R2 `copy_plan` while the version remains
+`preparing`.
+
+The web copies each exact edited/original medium to the share-owned R2 prefix
+from §6, then calls `activate_publication_share`; only `ready`, unexpired,
+unrevoked rows resolve. `/p/{token}` is readable without an account and offers a
+clean Article/Carousel view, Copy text, a text/Markdown download and separately
+labelled media downloads. Three service-role-only SECURITY DEFINER resolvers sit
+behind a fenced server integration — one for the page, one per rendered picture,
+one per downloaded file — and the integration consumes the private key itself,
+streaming the object rather than handing out a signature. The snapshot the page
+receives therefore contains no R2 key at all, and every image re-validates the
+token when the browser asks for its bytes, which is what keeps a lazily loaded
+figure alive without widening the revocation window. Neither underlying tables
+nor resolver functions are available to `anon`, and real asset/board/workspace
+ids, briefs, source metadata and R2 URLs never cross the response boundary.
+
+`GET /api/content-shares?boardId=` is the authoring counterpart: editor-only
+**status** for that board's unrevoked versions, carrying `source_draft_id` and
+never a token. Drafts are browser-local and the address is stored hash-only, so
+without it a cleared `localStorage` would strand a live public link that nobody
+could switch off.
+
+Links expire after 7/30 days or never (author choice), and revocation is
+terminal. Asset Trash/purge/hard-delete revokes every publication containing the
+asset; a board hard-delete sets private provenance to null while the immutable
+publication survives. Normal revocation returns copied-preview keys to the
+route for immediate best-effort deletion. The 6-hour worker sweep covers
+expiry, asset-triggered revocation and abandoned `preparing` rows: it validates
+each exact share-owned key, deletes R2 first, then removes the private asset
+mapping while retaining the parent row and token digest forever.
+
 ### Cost notes (recorded per event; re-verify current prices at Phase 2)
 - `gemini-3.1-flash-lite` analyze/caption: ≈ $0.31–0.35 per 1000 images ($0.25/M in, $1.50/M out; ~half at `media_resolution=medium`, ~half again via Batch API).
 - Embedding 2: $0.00012/image interactive, $0.00006 batch (≈ $0.60 / 10k photos batched); text $0.20/M ($0.10 batch).
@@ -604,10 +668,13 @@ updated by an explicit product/schema decision.
 
 ## 9. API surface (Next.js route handlers)
 
-All `/api/*` routes authed (Supabase session); workspace derived from membership.
-The one deliberately public handler is `GET /auth/callback` — the PKCE code exchange
-for both email confirmation and Google sign-in, which by definition runs before a
-session exists. It is the only route outside the table below; see §5 and ADR 0021.
+All `/api/*` authoring routes are authed (Supabase session); workspace is derived
+from membership. Two deliberate unauthenticated surfaces sit outside that rule:
+`GET /auth/callback`, the PKCE code exchange that runs before a session exists
+(ADR 0021), and `/p/{token}` plus its individual-media handler, a hash-gated,
+read-only publication capability resolved by a fenced server integration (ADR
+0046). Neither makes a domain table or resolver RPC directly available to
+`anon`.
 
 | Method & path | Purpose |
 |---|---|
@@ -639,6 +706,9 @@ session exists. It is the only route outside the table below; see §5 and ADR 00
 | `PATCH /api/facts/:id` | confirm / set status |
 | `POST /api/exports` · `GET /api/exports?jobId=` | **shipped (ADR 0035 + Amendments; artboard UI retired by ADR 0044 amendment)** — enqueue an `export` job for an explicit asset set with `options.format`; 400 `too_many_assets` over `EXPORT_MAX_ASSETS`, 429 `export_backlog` over `EXPORT_MAX_IN_FLIGHT`. GET presigns `payload.result_key` **per request** and returns the job's real progress + `attempts`; the legacy `groupId` contract remains parseable for compatibility |
 | `POST /api/content-drafts/generate` | **browser-local MVP (ADR 0045)** — owner/editor-only structured Article or Instagram-carousel generation from 1–20 ordered, active members of one live Workspace; returns `{content, model}`, records one `content_generated` audit event, and does not persist the draft server-side |
+| `POST /api/content-shares` · `DELETE /api/content-shares/:id` | **ADR 0046** — authenticated owner/editor publishes one immutable safe draft version (reserve → copy share-owned previews → activate) or terminally revokes it. Creation returns the one raw `/p/{token}` path; Postgres stores only its SHA-256 digest |
+| `GET /api/content-shares?boardId=` | **ADR 0046** — editor-only **status** of that board's unrevoked versions (`source_draft_id`, `status`, deadline), never a token. Drafts are browser-local and the address is hash-only, so this is what stops a cleared `localStorage` from stranding a live link nobody can switch off |
+| `GET /p/:token` · `GET /p/:token/media/:publicAssetId` · `…/preview` | **public, read-only capability (ADR 0046)** — no account required. The page returns a noindex/no-store Article/Carousel safe projection carrying **no R2 key or signature at all**; both media handlers revalidate the live token per request and stream the object through this same origin. `/preview` renders a picture and is not gated on `allow_downloads`; the bare path is the file download and is. Invalid/preparing/expired/revoked are the same 404 |
 | `GET  /api/workspace` · `PATCH /api/workspace` | **shipped** — the credit/rights block (creator · credit · copyright · usage terms, migration 20260727000001). No settings page exists, so the export dialog is its only editor; RLS is the gate (read = member, write = owner) |
 
 Contracts as zod schemas in `packages/shared` (single source for web + worker). `docs/openapi.yaml` generated later — not an MVP gate.
@@ -716,6 +786,16 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
 ## 12. Security & privacy checklist
 
 - RLS on all tables (§5); `viewer` role read-only enforced in policies.
+- Publication tables are stricter than normal member RLS: neither `anon` nor
+  `authenticated` has direct table **or resolver** privileges. A 256-bit URL
+  token is stored hash-only; three service-role-only SECURITY DEFINER resolvers
+  run inside a fenced server integration and match only `ready`, unexpired,
+  unrevoked rows. The integration keeps the internal key and streams the object
+  through a same-origin route, so no R2 URL is issued to the browser and the
+  token is re-checked for every picture and file rather than once per page
+  render. Public pages never expose tenant / board / real asset ids, generation
+  briefs, source metadata or R2 URLs, and are
+  noindex/noarchive/no-store/no-referrer (ADR 0046).
 - Encrypted OAuth tokens; short-TTL presigned URLs (15 min PUT / 1 h GET). **No long-lived export URL exists:** the worker stores only the R2 key and `GET /api/exports` presigns it per request — a 7-day URL parked in `ai_jobs.payload` was readable by every workspace member and broadcast to all of them on update.
 - Auth surface (ADR 0021): post-auth `?next=` targets are validated to a same-origin
   absolute path (`lib/safe-redirect.ts`) — no open redirect off the trusted callback.
@@ -740,7 +820,7 @@ optional: MAX_IMPORT_BYTES (default 200 MB) · WORKER_POOL_MAX (3) · POLL_MS (2
 
 ## 13. Out of MVP (explicit)
 
-Live Drive/Dropbox sync (broad scopes + CASA) · **Drive folder sync** (`drive.readonly` + CASA) · **Dropbox folder import / full-Dropbox OAuth** (production-review clock) · video/audio + transcription · smart event clustering (timeline = chronological by `taken_at`) · face identification / person naming · **billing & credit *enforcement*** — metering, the credit unit and the `plans` catalog shipped 2026-07-27 (ADR 0037), but `plans.enforced` is false on every row and no code path refuses work for lack of credits; payment and enforcement remain out · public sharing links · NAS/iCloud/Lightroom connectors · similarity organize-mode server clustering (may slip to fast-follow) · OpenAPI doc generation.
+Live Drive/Dropbox sync (broad scopes + CASA) · **Drive folder sync** (`drive.readonly` + CASA) · **Dropbox folder import / full-Dropbox OAuth** (production-review clock) · video/audio + transcription · smart event clustering (timeline = chronological by `taken_at`) · face identification / person naming · **billing & credit *enforcement*** — metering, the credit unit and the `plans` catalog shipped 2026-07-27 (ADR 0037), but `plans.enforced` is false on every row and no code path refuses work for lack of credits; payment and enforcement remain out · public-share comments/approvals/passwords/analytics/custom domains · NAS/iCloud/Lightroom connectors · similarity organize-mode server clustering (may slip to fast-follow) · OpenAPI doc generation.
 
 **Multi-representation assets** (e.g. RAW + PSD + exports grouped as one asset) are supported by the schema (asset → many files) but the MVP UI treats most assets as single-representation; the multi-rep management UI is post-MVP.
 
