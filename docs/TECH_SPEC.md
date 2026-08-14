@@ -399,6 +399,17 @@ create table canvas_layouts (
 );
 ```
 
+**Content drafts (migration `20260814000001`, ADR 0045 as amended).**
+`content_drafts` is the durable copy of a browser-authored Article or Carousel:
+one jsonb `document` (the editor saves the envelope whole), a `version` the
+editor already maintained, and `client_id` — the browser's own draft id, kept
+rather than replaced so an adopted draft stays attached to any publication made
+from it. Normal member/editor RLS is the whole boundary. Drafts cascade with a
+hard-deleted board and survive a trashed one, matching ADR 0044's 30-day window.
+This is a deliberate exception to the ADR 0022 "canvas state is client-only"
+rule for the same reason ADR 0041 moved sticky notes: a tile position is one
+user's view of data that exists elsewhere, while a draft exists nowhere else.
+
 **Publication shares (migration `20260813000002`, ADR 0046).** A
 browser-local content draft becomes durable only at the explicit Share
 boundary. `publication_shares` stores one immutable, publishable Article or
@@ -705,7 +716,8 @@ read-only publication capability resolved by a fenced server integration (ADR
 | `POST /api/assets/:id/tags` · `DELETE` | manual tags (`source='manual'`) |
 | `PATCH /api/facts/:id` | confirm / set status |
 | `POST /api/exports` · `GET /api/exports?jobId=` | **shipped (ADR 0035 + Amendments; artboard UI retired by ADR 0044 amendment)** — enqueue an `export` job for an explicit asset set with `options.format`; 400 `too_many_assets` over `EXPORT_MAX_ASSETS`, 429 `export_backlog` over `EXPORT_MAX_IN_FLIGHT`. GET presigns `payload.result_key` **per request** and returns the job's real progress + `attempts`; the legacy `groupId` contract remains parseable for compatibility |
-| `POST /api/content-drafts/generate` | **browser-local MVP (ADR 0045)** — owner/editor-only structured Article or Instagram-carousel generation from 1–20 ordered, active members of one live Workspace; returns `{content, model}`, records one `content_generated` audit event, and does not persist the draft server-side |
+| `POST /api/content-drafts/generate` | **ADR 0045** — owner/editor-only structured Article or Instagram-carousel generation from 1–20 ordered, active members of one live Workspace; returns `{content, model}` and records one `content_generated` audit event. Generation itself still persists nothing; the draft is saved by the route below |
+| `GET/PUT/DELETE /api/content-drafts` | **ADR 0045 as amended, migration `20260814000001`** — the durable copy of a draft. The browser still writes `localStorage` first (autosave runs while someone types, so the save path stays synchronous) and mirrors here. PUT upserts on the browser's own draft id, so a retried autosave cannot duplicate a draft, and returns `stale: true` rather than letting an older tab's envelope overwrite newer paragraphs. DELETE is soft, so Undo restores the same id — which is the id `publication_shares.source_draft_id` refers to |
 | `POST /api/content-shares` · `DELETE /api/content-shares/:id` | **ADR 0046** — authenticated owner/editor publishes one immutable safe draft version (reserve → copy share-owned previews → activate) or terminally revokes it. Creation returns the one raw `/p/{token}` path; Postgres stores only its SHA-256 digest |
 | `GET /api/content-shares?boardId=` | **ADR 0046** — editor-only **status** of that board's unrevoked versions (`source_draft_id`, `status`, deadline), never a token. Drafts are browser-local and the address is hash-only, so this is what stops a cleared `localStorage` from stranding a live link nobody can switch off |
 | `GET /p/:token` · `GET /p/:token/media/:publicAssetId` · `…/preview` | **public, read-only capability (ADR 0046)** — no account required. The page returns a noindex/no-store Article/Carousel safe projection carrying **no R2 key or signature at all**; both media handlers revalidate the live token per request and stream the object through this same origin. `/preview` renders a picture and is not gated on `allow_downloads`; the bare path is the file download and is. Invalid/preparing/expired/revoked are the same 404 |

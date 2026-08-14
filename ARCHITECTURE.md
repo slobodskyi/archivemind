@@ -191,6 +191,19 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                on first paint that there is something to undo).
                                                sweep_trashed_boards() hard-deletes past 30 days.
                                                Read seam: lib/boards-server.ts (getBoards)
+  app/api/content-drafts                       GET/PUT/DELETE: the durable copy of a browser-authored
+                                               Article/Carousel draft (ADR 0045 as amended, migration
+                                               20260814000001). The browser still writes localStorage
+                                               FIRST — autosave runs while somebody is typing, so the
+                                               save path stays synchronous — and lib/content-drafts-sync.ts
+                                               mirrors it here. PUT upserts on the browser's own draft id
+                                               (a retried autosave cannot duplicate a draft) and answers
+                                               `stale` instead of letting an older tab overwrite newer
+                                               paragraphs. DELETE is soft so Undo restores the same id,
+                                               which is what publication_shares.source_draft_id points at.
+                                               `saveContentDraft` stays the authoring path; the sync uses
+                                               `adoptContentDraft`, which writes verbatim, because the
+                                               authoring path bumps `version` on every write
   app/api/exports                              artboard/selection → PDF | captions.csv | ZIP (ADR 0035
                                                + its Amendments): POST enqueues an 'export' job; the
                                                worker renders the requested `format` into R2

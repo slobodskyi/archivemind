@@ -88,3 +88,55 @@ it in `workspace_usage()` requires a separate product decision plus migration.
   draft contract and optimistic tokens remain valid.
 - The existing export worker, progress UI, presigning, retention and purge rules
   remain unchanged for PDF/CSV/ZIP downloads.
+
+## Amendments
+
+### 2026-08-14 — drafts become durable (migration `20260814000001`)
+
+The Consequences above accepted that a draft "can be lost when site storage is
+cleared", on the reasoning that a draft was a scratch artifact. Two things made
+that untenable.
+
+The first is what a draft actually contains: the text a person wrote. The rest
+of the canvas keeps its state in `localStorage` under ADR 0022 because a tile
+position is one user's *view* of data that exists on the server; the photo is
+safe either way. A draft exists nowhere else, which is the same argument ADR
+0041 used to move sticky notes — including their coordinates — to the server.
+Applied consistently, it moves drafts too.
+
+The second is [ADR 0046](0046-publication-share-links.md). A publication
+outlives its draft and stores `source_draft_id`, so a cleared browser left a
+live public link pointing at an id that no longer existed anywhere.
+
+**`content_drafts` is the durable copy of record, and the browser still writes
+`localStorage` first.** That ordering is deliberate and is not a hedge: the
+editor autosaves on a debounce while somebody is typing, so making the save path
+await a network round trip would make every keystroke's persistence contingent
+on connectivity, and a dropped connection would then be *worse* than the
+behaviour this amendment replaces. Instead the local write stays synchronous and
+authoritative for the session, and `lib/content-drafts-sync.ts` mirrors it.
+`saveContentDraft` remains the authoring path; `adoptContentDraft` is the
+separate, deliberately dumb write used when the server copy is the newer truth,
+because the authoring path bumps `version` on every write and would renumber a
+draft simply for having been downloaded.
+
+`client_id` stores the browser's own draft id rather than minting a server one.
+That is what keeps an adopted draft attached to any publication already made
+from it, and what makes the save an idempotent upsert — a retried autosave after
+a dropped response cannot produce a second copy of one draft.
+
+Conflicts resolve on the draft's `version`, never on `updated_at`: two tabs can
+save inside one clock tick. A write whose version is behind the stored row
+returns `stale` instead of winning, because the editor saves the whole document
+and an older envelope would silently delete the newer one's paragraphs. Delete
+is soft, so an Undo restores the same draft id — and with it the publication's
+link to its source.
+
+Drafts cascade with a hard-deleted board and survive a trashed one, matching the
+30-day board window in ADR 0044: while the Workspace can still come back, its
+drafts must come back with it.
+
+Still out: cross-device *live* collaboration, presence, and per-field merge. Two
+people editing one draft simultaneously will still resolve as last-writer-wins
+at document granularity, and the UI does not yet show that a newer version
+exists elsewhere.
