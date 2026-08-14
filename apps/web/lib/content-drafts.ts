@@ -417,6 +417,28 @@ export function saveContentDraft(
 
 /** Delete is scoped by board id and returns whether a persisted draft existed.
  * The last deletion removes the key instead of leaving an empty envelope. */
+/** Write a draft into this browser exactly as given — no version bump, no
+ * optimistic check. The one legitimate caller is the server sync (ADR 0045
+ * amendment) adopting the durable copy: `saveContentDraft` is the *authoring*
+ * path and deliberately increments `version` on every write, so using it here
+ * would renumber a draft simply for having been downloaded, and its conflict
+ * check would reject the very copy that is meant to win. */
+export function adoptContentDraft(boardId: string, candidate: ContentDraft): boolean {
+  if (typeof window === "undefined") return false;
+  if (candidate.boardId !== boardId) return false;
+  const adopted = parseContentDraft(candidate);
+  if (!adopted) return false;
+
+  const drafts = readDrafts(boardId);
+  const index = drafts.findIndex((draft) => draft.id === adopted.id);
+  // A kind collision is corrupt data on one side or the other; refuse rather
+  // than turning an article into a carousel behind the editor's back.
+  if (index >= 0 && drafts[index]?.kind !== adopted.kind) return false;
+  if (index >= 0) drafts[index] = adopted;
+  else drafts.push(adopted);
+  return writeDrafts(boardId, drafts);
+}
+
 export function deleteContentDraft(boardId: string, draftId: string): boolean {
   if (typeof window === "undefined") return false;
   const drafts = readDrafts(boardId);

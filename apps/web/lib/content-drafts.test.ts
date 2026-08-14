@@ -7,6 +7,7 @@ import {
   listContentDrafts,
   loadContentDraft,
   parseContentDraft,
+  adoptContentDraft,
   saveContentDraft,
   sourcesChanged,
   type ArticleContentDraft,
@@ -517,5 +518,41 @@ describe("sourcesChanged", () => {
     expect(sourcesChanged(snapshot, ["asset-1", "asset-2", "asset-3"])).toBe(true);
     expect(sourcesChanged(snapshot, ["asset-1"])).toBe(true);
     expect(sourcesChanged(snapshot, ["asset-1", "asset-1"])).toBe(true);
+  });
+});
+
+describe("adopting the durable server copy", () => {
+  it("writes the server's draft verbatim instead of renumbering it", () => {
+    const local = saveContentDraft(BOARD, article(), { now: CREATED_AT });
+    expect(local.ok && local.draft.version).toBe(1);
+
+    // What comes back from the server is already the newest truth. The
+    // authoring path would bump it to 3 simply for having been downloaded.
+    const fromServer = { ...(local.ok ? local.draft : article()), version: 2, name: "From server" };
+    expect(adoptContentDraft(BOARD, fromServer)).toBe(true);
+
+    const stored = loadContentDraft(BOARD, "draft-article");
+    expect(stored?.version).toBe(2);
+    expect(stored?.name).toBe("From server");
+  });
+
+  it("adds a draft this browser has never seen", () => {
+    expect(listContentDrafts(BOARD)).toHaveLength(0);
+    expect(adoptContentDraft(BOARD, article())).toBe(true);
+    expect(listContentDrafts(BOARD).map((draft) => draft.id)).toEqual(["draft-article"]);
+  });
+
+  it("refuses a foreign board and a kind collision rather than silently replacing", () => {
+    expect(adoptContentDraft(OTHER_BOARD, article())).toBe(false);
+
+    saveContentDraft(BOARD, article(), { now: CREATED_AT });
+    const sameIdWrongKind = createInstagramCarouselDraft({
+      id: "draft-article",
+      boardId: BOARD,
+      sourceAssetIds: ["asset-1"],
+      now: CREATED_AT,
+    });
+    expect(adoptContentDraft(BOARD, sameIdWrongKind)).toBe(false);
+    expect(loadContentDraft(BOARD, "draft-article")?.kind).toBe("article");
   });
 });

@@ -60,6 +60,11 @@ import {
 } from "@/lib/content-drafts";
 import { downloadContentDraft } from "@/lib/content-package";
 import {
+  deleteContentDraftOnServer,
+  pushContentDraft,
+  syncContentDrafts,
+} from "@/lib/content-drafts-sync";
+import {
   createPublicationShareResponseSchema,
   deletePublicationShareLink,
   listPublicationSharesResponseSchema,
@@ -242,10 +247,32 @@ export default function ArchiveWorkspace({
   const [shareLinks, setShareLinks] = useState<readonly PublicationShareSummary[] | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refreshDrafts = useCallback((boardId: string | null) => {
+  /** Re-read this Workspace's drafts from the browser, and mirror the one that
+   *  just changed to the server (ADR 0045 amendment). The local write already
+   *  succeeded by the time this runs, so the upload is deliberately not awaited
+   *  and its failure is not surfaced: the draft is safe either way, and the
+   *  next sync carries it up. Passing the saved draft rather than pushing the
+   *  whole list keeps the mirror to one request per save. */
+  const refreshDrafts = useCallback((boardId: string | null, mirror?: ContentDraft) => {
     if (!boardId) return;
     setDraftsByBoard((current) => ({ ...current, [boardId]: listContentDrafts(boardId) }));
+    if (mirror) void pushContentDraft(boardId, mirror);
   }, []);
+
+  /** Opening a Workspace reconciles its drafts with the durable copies. This is
+   *  also the adoption path for anything written before the table existed, and
+   *  the reason a cleared browser no longer loses the text somebody wrote. */
+  useEffect(() => {
+    const boardId = bd.activeBoardId;
+    if (!boardId) return;
+    let cancelled = false;
+    void syncContentDrafts(boardId).then((drafts) => {
+      if (!cancelled && drafts) setDraftsByBoard((current) => ({ ...current, [boardId]: drafts }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bd.activeBoardId]);
 
   /** Opening a Workspace puts you on its canvas. Draft UI is scoped to that
    * Workspace too, so a switch closes it and loads the target's local index. */
@@ -257,7 +284,7 @@ export default function ArchiveWorkspace({
       }
       if (activeDraft && draftSaveState !== "saved") {
         const saved = saveContentDraft(activeDraft.boardId, activeDraft, { mode: "manual" });
-        if (saved.ok) refreshDrafts(activeDraft.boardId);
+        if (saved.ok) refreshDrafts(activeDraft.boardId, saved.draft);
       }
       setActiveDraft(null);
       setOutputUi("closed");
@@ -341,7 +368,7 @@ export default function ArchiveWorkspace({
         ws.flashToast("Draft could not be saved. The editor stays open.");
         return;
       }
-      refreshDrafts(activeDraft.boardId);
+      refreshDrafts(activeDraft.boardId, saved.draft);
     }
     setActiveDraft(null);
     setOutputUi("library");
@@ -358,6 +385,7 @@ export default function ArchiveWorkspace({
       ws.flashToast("Draft could not be deleted from this browser.");
       return;
     }
+    void deleteContentDraftOnServer(activeDraft.boardId, activeDraft.id);
     refreshDrafts(activeDraft.boardId);
     setDraftConfirm(null);
     setActiveDraft(null);
@@ -377,7 +405,7 @@ export default function ArchiveWorkspace({
       }
       setActiveDraft(saved.draft);
       setDraftSaveState("saved");
-      refreshDrafts(next.boardId);
+      refreshDrafts(next.boardId, saved.draft);
     }, 450);
   }, [refreshDrafts]);
 
@@ -418,7 +446,7 @@ export default function ArchiveWorkspace({
       }
       setActiveDraft(saved.draft);
       setDraftSaveState("saved");
-      refreshDrafts(activeDraft.boardId);
+      refreshDrafts(activeDraft.boardId, saved.draft);
     }
     const remembered = loadPublicationShareLink(activeDraft.id);
     if (sharedDraftId !== activeDraft.id || !shareResult) {
@@ -546,7 +574,7 @@ export default function ArchiveWorkspace({
       const candidate = draftFromGeneration(board.id, board.name, input, result);
       const saved = saveContentDraft(board.id, candidate, { mode: "generated" });
       if (!saved.ok) throw new Error(saved.reason);
-      refreshDrafts(board.id);
+      refreshDrafts(board.id, saved.draft);
       setActiveDraft(saved.draft);
       setOutputUi("studio");
       setDraftSaveState("saved");
