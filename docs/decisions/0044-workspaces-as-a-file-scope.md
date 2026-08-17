@@ -108,11 +108,12 @@ rather than being read from the prop in one place and not the other.
   until the table exists; notes and folders are shared across a project's
   workspaces; the connected-project analysis is not built. All three are accepted
   to validate the interaction first, and all three are additive to fix.
-- **Tile arrangements are shared with the full canvas.** A workspace re-packs
+- ~~**Tile arrangements are shared with the full canvas.** A workspace re-packs
   from the same `galleryOverrides.asset` bucket, so a tile dragged inside one is
   dragged on the project canvas too. Per-board arrangements need the `board_id`
   columns above; until then this is one canvas seen through a narrower window,
-  which is at least a rule that can be stated in one sentence.
+  which is at least a rule that can be stated in one sentence.~~ **Closed by the
+  2026-08-17 amendment** — one `localStorage` blob per scope, no schema needed.
 - **A deleted asset leaves a stale id in a board.** Harmless — membership is
   intersected with the loaded photos everywhere it is read, including the chip
   counts — but the table should clean up with a real foreign key.
@@ -220,8 +221,9 @@ the project canvas.
 
 ### Still not built
 The connected-project analysis (a job that synthesises a summary + embedding when
-membership changes) remains unbuilt, and per-workspace tile *arrangements* still
-share the project's one `galleryOverrides.asset` bucket.
+membership changes) remains unbuilt. Per-workspace tile *arrangements* shared the
+project's one `galleryOverrides.asset` bucket until the 2026-08-17 amendment
+below, which gives each scope its own.
 
 ## Amendment (2026-08-13) — drag onto a chip, and sorting leaves the Workspace
 
@@ -407,3 +409,72 @@ The artboard surface is retired rather than promoted to another server object.
 
 The general PDF/CSV/ZIP export pipeline from ADR 0035 remains live. What retired
 is the positional artboard as an export source, not the formats or worker job.
+
+## Amendment (2026-08-17) — every scope keeps its own coordinates
+
+The Consequences above stated it plainly and the second amendment left it on the
+"still not built" list: *"a workspace re-packs from the same
+`galleryOverrides.asset` bucket, so a tile dragged inside one is dragged on the
+project canvas too."* One canvas seen through a narrower window is a rule you can
+state in a sentence, and it is still the wrong rule. Ten photos pulled out of four
+hundred are arranged **because** they are ten; carrying that arrangement back to
+the project canvas scatters the same tiles across coordinates that were chosen for
+a set that is not on screen any more. It reads as the project canvas rearranging
+itself behind your back.
+
+### Decision
+The persisted arrangement is keyed by **scope**, and a scope is a project **plus
+the Workspace open on it** — `lib/canvas-store.ts`, one blob per scope:
+
+- `archivemind:canvas:{projectId}` — the project canvas, the **unchanged**
+  pre-Workspace key, so every arrangement saved before this loads exactly where it
+  is. No store-version bump: an old blob is a perfectly good arrangement of the
+  project canvas, and discarding every one of them to introduce a second scope
+  would be a regression dressed as a migration.
+- `archivemind:canvas:{projectId}:b:{boardId}` — one Workspace.
+
+A blob holds what it always held: `galleryOverrides` (all five buckets, so Canvas,
+Timeline and Topic each keep their own), the legacy `frames`, `groupGeom` (folder
+boxes) and `tileZ`. A scope nobody has arranged yet loads as a **clean grid** —
+the same "a workspace re-packs" rule the re-fit already follows, and the reason
+opening one for the first time now looks tidy rather than like a scatter of the
+project's coordinates.
+
+### What makes it correct rather than merely keyed
+- **The switch flushes before it loads.** `switchCanvasScope(from, to, leaving)`
+  writes the outgoing arrangement under its **own** key and returns the incoming
+  one. Writes are debounced 400 ms to keep them off the drag path, so a drag
+  followed by a chip click inside that window is exactly the case that would lose
+  work: the switch itself is the save. It is one function, and tested, because the
+  order *is* the correctness argument.
+- **The key lives in state, beside the arrangement.** `WorkspaceState.canvasScope`
+  moves in the same `setState` as the four fields it describes, and the debounced
+  save reads both off one state object. Keying the save on the *prop* would write
+  the set you just left under the key of the one you just opened — the render
+  where `activeBoardId` has changed and the arrangement has not is a real render,
+  and the same one-render skew that made the re-fit key on committed
+  `state.boardScope`.
+- **Undo history is dropped on a switch.** A snapshot holds coordinates for a set
+  that is no longer on screen; Cmd+Z would apply them anyway.
+- **Notes are unaffected and stay single-valued.** A note carries its geometry on
+  the server (ADR 0041) — one x/y, which the project canvas and its owning
+  Workspace both read. That is the remaining shared coordinate, and it is
+  deliberate: an annotation's position is its content, not a per-view preference,
+  so splitting it per scope would mean a note saying two different things about
+  where it is. A folder is the opposite case and moves with the scope: the server
+  owns its membership, the browser owns its box (ADR 0022/0034), so the box is a
+  coordinate like a tile's.
+
+### Consequences
+- **An arrangement made inside a Workspace before today is not migrated.** Those
+  coordinates are in the project's bucket, and that is where they stay — the
+  project canvas keeps them, and the workspace opens as a clean grid the first
+  time. Guessing which of the project's overrides "meant" a workspace would be a
+  guess with no evidence in the data.
+- **Per-device still, per ADR 0022.** Two browsers still keep two arrangements;
+  the scope key changes nothing about that, and a real cross-device arrangement is
+  still a schema decision nobody has needed yet.
+- **A folder made in a Workspace has no box on the project canvas** until it is
+  moved there, because the project canvas shows every folder regardless of owner
+  and now has no geometry for that one. It falls back to `defaultFolderGeom`,
+  which is deterministic, so it does not wander.

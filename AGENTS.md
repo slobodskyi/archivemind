@@ -112,7 +112,17 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   `WorkspaceState.boardScope`, which is the opposite of the label filter on
   purpose — a workspace RE-PACKS, so the geometry seam (`activeTilePositions`)
   and the render seam must run over the same set or a drag lands where nothing
-  is drawn. **Deleting one is confirmed, reversible and swept** (ADR 0044's
+  is drawn. **Every scope keeps its own coordinates** (ADR 0044's 2026-08-17
+  amendment): the arrangement is one `localStorage` blob per project *plus* open
+  workspace — `lib/canvas-store.ts`, `archivemind:canvas:{projectId}` for the
+  project canvas (the unchanged pre-workspace key) and `…:b:{boardId}` for a
+  workspace. `switchCanvasScope` flushes the outgoing scope under its own key
+  **before** loading the incoming one, because saves are debounced and a drag
+  followed by a chip click is exactly what would otherwise be lost; the key
+  lives in `WorkspaceState.canvasScope` beside the arrangement so a save can
+  never land in the scope you just left. A note is the deliberate exception —
+  its geometry is server-held content (ADR 0041), one x/y for both scopes.
+  **Deleting one is confirmed, reversible and swept** (ADR 0044's
   2026-08-13 amendment, migration `20260813000001`): the chip's `×` asks, then
   stamps `boards.deleted_at` — `PATCH { deleted: true|false }`, the project
   trash's own idiom — so membership and the notes and folders it owns survive
