@@ -269,6 +269,259 @@ textarea {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   MOBILE ADAPTATION
+
+   Three breakpoints, and each one is a decision about a specific control
+   rather than a generic "small screen" size:
+
+     860px — the homepage's 248px rail stops being affordable. Below it the
+             rail is an off-canvas drawer and the cards get the whole width.
+     760px — the canvas chrome goes phone-shaped: the workspace rail leaves
+             the header, the minimap goes away, the bottom bars wrap.
+     640px — the view switcher drops its labels; four words do not fit on a
+             phone next to anything else.
+
+   Inline styles are how this app guarantees pixel fidelity (ADR 0001), and a
+   media query cannot be expressed inline — so responsive overrides live here
+   and need `!important` to beat the components' own `style={{}}`. That is the
+   same arrangement `content-draft-*` above already uses. Every rule below is
+   keyed to a class the component sets purely as a hook.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ── homepage ───────────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  /* The rail leaves the flow and becomes a drawer. `fixed` rather than
+     `absolute` for the same reason the app header is: the mobile keyboard
+     resizes the 100dvh root out from under an absolutely-positioned child. */
+  .am-home-nav {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    width: min(280px, 84vw) !important;
+    transform: translateX(-100%);
+    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 20px 0 60px rgba(0, 0, 0, 0.55);
+  }
+
+  .am-home-nav[data-open="true"] {
+    transform: none;
+  }
+
+  .am-home-scrim {
+    display: block;
+  }
+
+  /* The hamburger only exists while the rail is a drawer. */
+  .am-home-burger {
+    display: flex !important;
+  }
+
+  .am-home-main {
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* 230px cards leave a ragged single column on a phone; 150px lets two sit
+     side by side at 390px, which is what the preview mosaic is legible at. */
+  .am-home-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)) !important;
+    gap: 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .am-home-newlabel {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-home-nav {
+    transition: none;
+  }
+}
+
+/* ── canvas chrome ──────────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  /* The header's right-hand cluster is ~270px of fixed chrome and never
+     shrinks by design, which on a phone left the breadcrumb ~100px — the
+     project name truncated to one letter and the workspace rail was pushed
+     clean off screen. Two of those controls are redundant on a phone: the
+     zoom readout is already on the left toolbar, and SHARE keeps its icon.
+     Together they give ~130px back to the name and the chips. */
+  .am-hdr-zoom {
+    display: none !important;
+  }
+
+  .am-hdr-share span {
+    display: none;
+  }
+
+  .am-hdr-share {
+    padding: 0 9px !important;
+  }
+
+  /* The workspace rail moves OUT of the header and floats just beneath it, in
+     its own full-width scroller. Deliberately floating rather than a second
+     header row: `--hdr` is the offset every panel below (canvas, drawer, chat,
+     trash, map) resolves against, so growing the header would push all of them
+     down for a rail that only exists inside a project. Floating chrome over
+     the canvas is what the left toolbar and the bottom bars already do. */
+  .am-hdr-boards {
+    position: fixed;
+    top: var(--hdr);
+    left: 0;
+    right: 0;
+    /* 36 places it exactly one step above the canvas internals the `lib/ui.ts`
+       ladder caps at 35, and below the chat/trash panels at 37 — so the rail
+       covers the canvas (which is the point) while a panel sliding over the
+       canvas still covers the rail, the way it covers everything else. */
+    z-index: 36;
+    padding: 6px 10px;
+    background: var(--bg-nb);
+    border-bottom: 1px solid var(--bd);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .am-hdr-boards::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* The breadcrumb chevron pointed at a rail that is no longer beside it. */
+  .am-hdr-sep {
+    display: none !important;
+  }
+
+  /* On a wide window the project name deliberately never shrinks — the
+     workspace chips beside it absorb the squeeze instead. Here those chips are
+     on their own row, so the name is the only thing left that can give, and
+     without this the tools cluster runs past the right edge at 320px. */
+  .am-hdr-crumb {
+    flex: 0 1 auto !important;
+  }
+
+  .am-hdr-proj {
+    flex: 0 1 auto !important;
+    min-width: 74px;
+  }
+
+  /* Anything that hangs just under the header clears the floating rail — 43px
+     of chrome that exists only at this breakpoint, and these were positioned
+     against a header that used to contain it. Gated on the rail actually being
+     rendered: the toast is shared with the homepage and with the all-files
+     canvas, neither of which has workspaces, and dropping it 52px there would
+     just be a gap. Where `:has()` is unsupported the rule no-ops and these land
+     where they do today. */
+  body:has(.am-hdr-boards) .am-under-hdr {
+    top: calc(var(--hdr) + 52px) !important;
+  }
+
+  /* Clears the floating workspace rail, and stops centring — a vertically
+     centred rail overflows both ends of a short viewport, where clipping the
+     bottom of a scrollable one only costs a scroll. */
+  .am-lefttoolbar {
+    top: calc(var(--hdr) + 50px) !important;
+    left: 8px !important;
+    transform: none !important;
+    max-height: calc(100dvh - var(--hdr) - 220px);
+    /* `hidden auto`, not plain `auto`: scrolling one axis makes the other
+       `auto` too, and each button's hover tooltip is absolutely positioned
+       100% + 10px to its RIGHT — so a bare `overflow-y` gave the rail a
+       horizontal scrollbar over 100px of invisible tooltip. Clipping x costs
+       nothing here; a hover hint has no job on the device this rule is for. */
+    overflow: hidden auto;
+    overscroll-behavior: contain;
+  }
+
+  /* 180×120 of a 390px screen to solve a problem pinch-zoom and Fit already
+     solve on touch — and it sat directly on top of the bottom bars. */
+  .am-minimap {
+    display: none !important;
+  }
+
+  /* Both bottom bars carry ~10 targets, which at the 44px touch size above is
+     ~530px on a 390px screen: centred, so both ends were off screen and
+     unreachable. They wrap instead of scrolling — a scroller would clip the
+     label popover, which hangs ABOVE the bar out of its own box. */
+  /* Capped and wrapped, NOT stretched edge to edge. Pinning left and right
+     would make the bar full width even when it holds one button — which is
+     exactly what the sorting bar holds outside Topic, and a 374px box around a
+     single swatch reads as a broken layout. A max-width lets it keep hugging
+     its content and centring, and take a second row only when it earns one. */
+  /* Wraps within the full width, but still hugs its content and centres.
+     Getting both takes all four properties: an absolutely positioned box with
+     only `left: 50%` set can never be wider than the half it starts at, so a
+     bar that needs to wrap wraps at 50% of the screen (ten buttons became four
+     rows of three). Anchoring BOTH edges gives it the real width to wrap in;
+     `fit-content` + auto margins stop that width from also stretching a bar
+     that holds one button — which is what the sorting bar holds outside Topic,
+     and a full-width box around a single swatch reads as a broken layout. */
+  .am-bar,
+  .am-viewswitcher {
+    left: 8px !important;
+    right: 8px;
+    width: fit-content;
+    margin-inline: auto;
+    transform: none !important;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  /* The group separators only mean something on a single row. Once the bar
+     wraps they break it at their own positions instead of at the edge, which
+     turned ten buttons into four ragged rows rather than two. */
+  .am-bar-div {
+    display: none;
+  }
+
+  /* Anchored above the home indicator / browser toolbar rather than at the
+     literal viewport bottom. The switcher owns the bottom row; the action bar
+     stacks on top of it. */
+  .am-viewswitcher,
+  .am-bar-low {
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .am-bar-high {
+    bottom: calc(66px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* 430px on a 390px phone, and it has to clear an action bar that is now two
+     rows tall. `dvh` rather than the inline `vh`: mobile Safari's `vh` is the
+     viewport with its toolbar collapsed, so a panel sized in it hides its own
+     footer behind the toolbar until you scroll. */
+  .am-bulk-ai {
+    left: 8px !important;
+    right: 8px;
+    width: auto !important;
+    transform: none !important;
+    bottom: calc(180px + env(safe-area-inset-bottom, 0px)) !important;
+    max-height: calc(100dvh - var(--hdr) - 210px) !important;
+  }
+
+  /* Was a hard 360px — full width at 360, overflowing below it. */
+  .am-trash-panel {
+    width: min(360px, 100vw) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  /* CANVAS / TIMELINE / TOPIC / MAP is ~342px of text — wider than the phone
+     it has to share with. The icons carry it; every button keeps its
+     aria-label and title. */
+  .am-viewswitcher-label {
+    display: none;
+  }
+
+  .am-viewswitcher button {
+    padding: 0 14px !important;
+  }
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

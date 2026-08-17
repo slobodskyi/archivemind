@@ -65,6 +65,11 @@ export default function Toast({ show, text, actionLabel, onAction, variant = "de
 
   return (
     <div
+      // Drops below the workspace rail on a phone, where that rail floats under
+      // the header instead of sitting inside it. A toast carries the Undo for
+      // every reversible delete, so landing it on top of the chips would hide
+      // the one control the user is looking for.
+      className="am-under-hdr"
       style={{
         position: "absolute",
         top: 64,

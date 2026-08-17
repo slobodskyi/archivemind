@@ -76,20 +76,16 @@ export default function AppHeader({
         borderBottom: "1px solid var(--bd)",
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between",
         gap: 12,
         padding: "env(safe-area-inset-top, 0px) 14px 0",
         zIndex: 40,
       }}
+      className="am-hdr"
     >
-      {/* Takes whatever the right-hand tools leave, instead of a fixed cap. It
-          used to stop at 520px, which on a wide window truncated workspace names
-          to "W…" with half the header empty beside them — a cap is a guess about
-          how much room there is, and the browser already knows. `minWidth: 0` +
-          `overflow: hidden` keep the squeeze graceful when the room really does
-          run out: the chips ellipsize first (each carries its own `minWidth: 0`)
-          and the row clips last, rather than running under SHARE. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+      {/* Home + the project name. A fixed-size pair: the workspace rail beside
+          it is what takes (and gives up) the room, which is also what lets that
+          rail detach into its own row on a phone without this moving. */}
+      <div className="am-hdr-crumb" style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", minWidth: 0 }}>
         <button
           onClick={onHome}
           aria-label="Home"
@@ -123,6 +119,7 @@ export default function AppHeader({
             one. Outside a project (`onProjectScope` absent) the whole control is
             the switcher, exactly as before. */}
         <div
+          className="am-hdr-proj"
           style={{
             display: "flex",
             alignItems: "center",
@@ -196,17 +193,35 @@ export default function AppHeader({
             </button>
           )}
         </div>
-        {afterProject && (
-          <>
-            <ChevronRightIcon width={12} height={12} stroke="var(--t3)" style={{ flex: "0 0 auto", opacity: 0.6 }} />
-            {afterProject}
-          </>
-        )}
       </div>
 
+      {/* The workspace rail is a sibling of the breadcrumb rather than a child
+          of it. On a wide window that is invisible — it still reads as one
+          breadcrumb, and it is still the part that absorbs the squeeze (`1 1
+          auto` + `minWidth: 0`, so chips ellipsize and then fold into their own
+          "+N" rather than running under SHARE). Being a sibling is what lets it
+          leave the header entirely below 760px and float as its own full-width
+          scroller, without dragging the project name with it. */}
+      {afterProject && (
+        <>
+          <ChevronRightIcon
+            className="am-hdr-sep"
+            width={12}
+            height={12}
+            stroke="var(--t3)"
+            style={{ flex: "0 0 auto", opacity: 0.6 }}
+          />
+          <div className="am-hdr-boards" style={{ display: "flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+            {afterProject}
+          </div>
+        </>
+      )}
+
       {/* Never shrinks: undo/redo, zoom, SHARE and the avatar are fixed chrome,
-          so the breadcrumb on the left is what gives way when space is tight. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
+          so the workspace rail is what gives way when space is tight. The auto
+          margin matters only outside a project, where there is no rail to grow
+          into the gap and hold this against the right edge. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto", marginLeft: "auto" }}>
         {workspaceActions}
         {workspaceActions && <span style={{ width: 1, height: 20, background: "var(--bd)" }} />}
         <button
@@ -253,6 +268,9 @@ export default function AppHeader({
         {showZoomControl && (
           <button
             onClick={onToggleZoomMenu}
+            // Hidden below 760px: the left toolbar carries the same readout and
+            // the Fit button, so on a phone this is the redundant copy.
+            className="am-hdr-zoom"
             style={{
               display: "flex",
               alignItems: "center",
@@ -275,6 +293,11 @@ export default function AppHeader({
         <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
         <button
           onClick={() => onFlashToast?.("Sharing coming soon")}
+          aria-label="Share"
+          title="Share"
+          // Below 760px the word goes and the icon stays — a labelled button is
+          // ~95px of a 390px header, and the icon is the half that identifies it.
+          className="am-hdr-share"
           style={{
             display: "flex",
             alignItems: "center",
@@ -292,7 +315,7 @@ export default function AppHeader({
           }}
         >
           <ShareIcon />
-          SHARE
+          <span>SHARE</span>
         </button>
         <button
           onClick={onOpenAcct}

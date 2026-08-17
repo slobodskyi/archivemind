@@ -978,6 +978,9 @@ export default function ArchiveWorkspace({
       {hiddenPhotoCount > 0 && (
         <div
           role="status"
+          // Same reason as the toast: below 760px the workspace rail occupies
+          // this band, and this notice sits under it in the z ladder.
+          className="am-under-hdr"
           style={{
             position: "absolute",
             top: 60,

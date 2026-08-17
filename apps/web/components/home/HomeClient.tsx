@@ -132,6 +132,10 @@ export default function HomeClient({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  /** Below 860px the rail is an off-canvas drawer (see `.am-home-nav`). Wider
+   *  than that the rail is always in the flow and this flag does nothing —
+   *  which is why it needs no viewport listener to stay honest. */
+  const [navOpen, setNavOpen] = useState(false);
   const [activeProjects, setActiveProjects] = useState<ProjectCard[]>(projects);
   const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
   const [trashProjects, setTrashProjects] = useState<ProjectCard[] | null>(null);
@@ -330,8 +334,22 @@ export default function HomeClient({
 
   return (
     <div style={{ position: "relative", display: "flex", width: "100vw", height: "100dvh", overflow: "hidden", background: "var(--bg)" }}>
+      {/* Only ever visible below 860px, where the rail is an overlay and needs
+          something to dismiss it against. Rendered unconditionally so the CSS
+          owns the breakpoint — a JS width check would have to be re-run on
+          every resize and rotation to stay right. */}
+      {navOpen && (
+        <div
+          className="am-home-scrim"
+          onClick={() => setNavOpen(false)}
+          style={{ display: "none", position: "fixed", inset: 0, zIndex: 59, background: "rgba(0,0,0,.55)" }}
+        />
+      )}
+
       {/* ── drawer sidebar ─────────────────────────────────────────── */}
       <aside
+        className="am-home-nav"
+        data-open={navOpen}
         style={{
           width: 248,
           flex: "0 0 auto",
@@ -359,6 +377,7 @@ export default function HomeClient({
           onClick={() => {
             setSourcesOpen(true);
             void refreshGdrive();
+            setNavOpen(false);
           }}
           style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 8px", marginBottom: 10, background: "transparent", border: 0, borderRadius: 2, color: "var(--t2)", fontSize: 13, fontFamily: "inherit", cursor: "pointer", textAlign: "left" }}
         >
@@ -392,14 +411,16 @@ export default function HomeClient({
           />
         </div>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* Picking a destination dismisses the drawer — on the desktop rail the
+            handler is a no-op, so one listener per nav covers both layouts. */}
+        <nav onClick={() => setNavOpen(false)} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <NavItem label="Projects" active={view === "projects"} icon={<GridIcon />} onClick={() => setView("projects")} />
           <NavItem label="Recents" active={view === "recents"} icon={<RecentsIcon />} onClick={openRecents} />
         </nav>
 
         <div style={{ flex: 1 }} />
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <nav onClick={() => setNavOpen(false)} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <NavItem label="Logs" icon={<LogsIcon />} onClick={() => flash("Activity log coming soon")} />
           <NavItem label="Help" icon={<HelpIcon />} onClick={() => setHelpOpen(true)} />
           <NavItem label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => flash("Privacy Policy coming soon")} />
@@ -414,16 +435,33 @@ export default function HomeClient({
       </aside>
 
       {/* ── content: project cards ─────────────────────────────────── */}
-      <main style={{ flex: 1, height: "100%", overflowY: "auto", padding: "26px 30px" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 20 }}>
-          <h1 style={{ fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0 }}>{VIEW_TITLE[view]}</h1>
+      <main className="am-home-main" style={{ flex: 1, minWidth: 0, height: "100%", overflowY: "auto", padding: "26px 30px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          {/* The drawer's only handle. `display: none` inline, shown by the
+              860px query — the rail is in the flow above that and a second way
+              to open what is already open is just a dead control. */}
+          <button
+            className="am-home-burger"
+            onClick={() => setNavOpen(true)}
+            aria-label="Open menu"
+            title="Menu"
+            style={{ display: "none", alignItems: "center", justifyContent: "center", width: 34, height: 34, flex: "0 0 auto", marginLeft: -6, background: "transparent", border: 0, borderRadius: 2, color: "var(--t2)", cursor: "pointer" }}
+          >
+            <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <h1 style={{ flex: 1, minWidth: 0, fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{VIEW_TITLE[view]}</h1>
           {view === "usage" && <UsagePlanPill plan={usage?.plan ?? null} />}
           {(view === "projects" || view === "recents") && !creating && (
             <button
               onClick={() => setCreating(true)}
-              style={{ display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, letterSpacing: ".04em", cursor: "pointer", fontFamily: "inherit" }}
+              // "+ New project" is 15 characters of a 390px row that also holds
+              // the title and the drawer handle; on a phone the glyph carries it.
+              aria-label="New project"
+              style={{ display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", flex: "0 0 auto", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, letterSpacing: ".04em", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
             >
-              + New project
+              + <span className="am-home-newlabel">New project</span>
             </button>
           )}
         </div>
@@ -464,7 +502,7 @@ export default function HomeClient({
             <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--tm)" }}>Measuring your archive…</div>
           ))}
 
-        <div style={{ display: view === "usage" ? "none" : "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
+        <div className="am-home-grid" style={{ display: view === "usage" ? "none" : "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
           {visibleProjects.map((p) => (
             <ProjectCardView
               key={p.id}
