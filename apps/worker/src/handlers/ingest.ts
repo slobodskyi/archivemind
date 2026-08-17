@@ -328,7 +328,21 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
           continue;
         }
       } else if (row.origin !== "gdrive" || !row.source_connection_id || !row.source_file_id) {
-        done += 1; // unknown cloud origin — nothing to stream from yet
+        // An origin this worker has no branch for, or a cloud row missing the
+        // ids needed to fetch it. Counted as FAILED rather than skipped.
+        //
+        // It used to `done += 1` silently, and that is precisely how a stalled
+        // Railway deploy presented during the OneDrive rollout: the web app
+        // was writing origin='onedrive' rows while the worker still ran code
+        // that had never heard of them, so every import reported
+        // "Processed 1 file(s)" and the photo simply never appeared. A file we
+        // cannot fetch is a failure the user has to be told about — silence
+        // here makes a version skew indistinguishable from success.
+        console.log(
+          `[ingest] ${label}: no handler for origin '${row.origin}' (or missing source ids) — failed`,
+        );
+        failed += 1;
+        done += 1;
         continue;
       } else {
       try {
