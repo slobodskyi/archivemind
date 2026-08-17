@@ -66,11 +66,22 @@ import {
   type CloudLayout,
   type Frame,
   type GalleryOverrides,
+  type GroupGeom,
   type MinimapLayout,
   type Rect,
   type StickyNote,
   type TilePos,
 } from "@/lib/layout";
+import {
+  canvasArrangement,
+  canvasStoreKey,
+  dropLegacyNotes,
+  readCanvasStore,
+  switchCanvasScope,
+  writeCanvasStore,
+  type CanvasArrangement,
+  type LegacyStickyNote,
+} from "@/lib/canvas-store";
 import type { SearchResponse } from "@archivemind/shared";
 import { CHAT_GREETING } from "@/lib/chat";
 import { clusterTopicKey } from "@/lib/topics";
@@ -84,33 +95,15 @@ const EMPTY_TILE_CLOUD: Record<string, string> = {};
  * crossing another cloud during free-position dragging. */
 const TOPIC_DROP_DWELL_MS = 240;
 
-/** Per-project canvas arrangement (tile drags, legacy frames, sticky notes) is kept in
- *  localStorage so it survives leaving and re-opening the project (ADR 0022).
- *  Positions are UI-only, so the browser is the right home — no backend/schema.
- *  Frames are read and written only for backward compatibility; the retired
- *  artboard UI never renders or acts on them. */
-const CANVAS_STORE_PREFIX = "archivemind:canvas:";
-const canvasStoreKey = (projectId: string) => `${CANVAS_STORE_PREFIX}${projectId}`;
 /** Copy/Paste clipboard — asset ids waiting to be linked into another project.
  *  Not per-project (the whole point is to cross between them) and not in React
  *  state, because navigating to the target project remounts the workspace. */
 const CLIPBOARD_KEY = "am:clipboard:assets";
-/** Saved arrangements from a different version are discarded on load — their
- *  coordinates were laid out against clouds that no longer exist. v2: everything
- *  saved by the design-branch DEMO_CLOUDS builds (fake Poland/Italy/topic clouds). */
-const CANVAS_STORE_VERSION = 2;
 
-/** Per-folder on-canvas geometry + collapse state, keyed by server group id.
- *  Client-only (ADR 0022): the server owns which assets are in the folder, the
- *  browser owns where the folder box sits and whether it's collapsed. Additive
- *  to the persisted blob — pre-folder saves simply lack it. */
-export interface GroupGeom {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  collapsed: boolean;
-}
+/** Folder geometry moved to `lib/layout.ts` with the rest of the persisted canvas
+ *  shapes, so `lib/canvas-store.ts` can type a saved blob without importing this
+ *  hook. Re-exported because the helpers below and `FolderModel` are here. */
+export type { GroupGeom };
 
 /** Collapsed-folder tile footprint (content-space px). */
 export const FOLDER_TILE_W = 152;
@@ -172,31 +165,6 @@ function expandBoundGroups(ids: string[], groups: string[][]): string[] {
   const out = new Set(ids);
   for (const g of groups) if (g.some((m) => out.has(m))) for (const m of g) out.add(m);
   return Array.from(out);
-}
-
-interface PersistedCanvas {
-  v?: number;
-  galleryOverrides?: Partial<GalleryOverrides>;
-  frames?: Frame[];
-  groupGeom?: Record<string, GroupGeom>;
-  /** Per-tile stacking-order deltas — client-only, additive to older saves. */
-  tileZ?: Record<string, number>;
-  /** Written by builds before ADR 0041 only. Notes live in canvas_annotations
-   *  now; this key is read once, uploaded, and deleted. Never written again. */
-  stickyNotes?: LegacyStickyNote[];
-}
-
-/** The shape a sticky note had while it lived in localStorage: a raw hex colour
- *  and no font size. Kept solely so the one-time adoption can read an old save
- *  — do not widen it, and do not use it for anything new. */
-interface LegacyStickyNote {
-  id: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  text: string;
-  color: string;
 }
 
 /** The four hexes `STICKY_NOTE_COLORS` used to hold, mapped onto the seven
@@ -303,6 +271,18 @@ interface Snapshot {
 }
 
 
+/** The arrangement half of the canvas state — exactly what one scope's blob
+ *  holds, projected out of the state it lives in so the load, the switch and the
+ *  debounced save cannot disagree about which fields belong to a scope. */
+function arrangementOf(s: WorkspaceState): CanvasArrangement {
+  return {
+    galleryOverrides: s.galleryOverrides,
+    frames: s.frames,
+    groupGeom: s.groupGeom,
+    tileZ: s.tileZ,
+  };
+}
+
 interface WorkspaceState {
   scale: number;
   tx: number;
@@ -381,6 +361,12 @@ interface WorkspaceState {
    *  same state object the render does — the geometry seam and the render seam
    *  must never disagree about which photos exist. */
   boardScope: ReadonlySet<string> | null;
+  /** The localStorage key the arrangement currently in this state came from:
+   *  project canvas, or one Workspace (ADR 0044 as amended). In state and not a
+   *  ref on purpose — the debounced save reads the key and the four arrangement
+   *  fields off the SAME state object, so a scope switch can never write the set
+   *  you just left under the key of the one you just opened. */
+  canvasScope: string;
   history: Snapshot[];
   future: Snapshot[];
   zoomMenuOpen: boolean;
@@ -1072,6 +1058,9 @@ export function useWorkspace(
       .filter((a): a is NoteAnnotation => a.kind === "note")
       .map(annotationToNote),
     boardScope: null,
+    // No Workspace can be open on the first paint (`useBoards` starts at null),
+    // so the mount-time scope is always the project canvas.
+    canvasScope: canvasStoreKey(currentProjectId, null),
     history: [],
     future: [],
     zoomMenuOpen: false,
@@ -3823,8 +3812,9 @@ export function useWorkspace(
   /** "Tidy up" (issue #3): snap the Canvas grid back to order, with the same
    *  glide a view switch uses. Selection ≥ 2 packs just those tiles into an even
    *  grid where they already sit (Figma-style, selection-first); selection ≤ 1
-   *  resets the active Workspace's asset overrides to the deterministic default
-   *  grid. Overrides outside that Workspace are preserved. Undoable via
+   *  resets this scope's asset overrides to the deterministic default grid —
+   *  only this scope's, since each has its own bucket (ADR 0044 as amended), so
+   *  tidying a Workspace leaves the project canvas as it was. Undoable via
    *  pushHistory; neural-view only (the bottom action bar that hosts it is
    *  neural-only). */
   const tidyUp = useCallback(() => {
@@ -4961,25 +4951,19 @@ export function useWorkspace(
         }
       }
       setState({ stickyNotes: created });
-      try {
-        const raw = localStorage.getItem(canvasStoreKey(currentProjectId));
-        if (!raw) return;
-        const blob = JSON.parse(raw) as PersistedCanvas;
-        delete blob.stickyNotes;
-        localStorage.setItem(canvasStoreKey(currentProjectId), JSON.stringify(blob));
-      } catch {
-        // The notes are on the server either way; a leftover key is harmless
-        // because the guard above short-circuits once the scope is non-empty.
-      }
+      // Always the PROJECT key: notes stopped being a localStorage concern (ADR
+      // 0041) two ADRs before Workspaces existed, so no per-workspace blob can
+      // ever hold one.
+      dropLegacyNotes(canvasStoreKey(currentProjectId, null));
     },
     [currentProjectId, setState],
   );
 
-  // ── Persist canvas arrangement per project (ADR 0022) ──────────────────────
-  // Load once on mount (before the rAF fit reads bounds), so tile drags and
-  // folder boxes are exactly where they were left. Legacy frames are preserved
-  // verbatim but never rendered or consulted. localStorage only — this is UI
-  // state, never a backend concern.
+  // ── Persist the canvas arrangement per SCOPE (ADR 0022; ADR 0044 amended) ───
+  // A scope is a project PLUS the Workspace open on it. Load once on mount
+  // (before the rAF fit reads bounds), so tile drags and folder boxes are exactly
+  // where they were left. Legacy frames are preserved verbatim but never rendered
+  // or consulted. localStorage only — this is UI state, never a backend concern.
   //
   // Sticky notes USED to ride along here and no longer do (ADR 0041): a note's
   // position is its content, not a view preference, so the whole note lives in
@@ -4996,61 +4980,77 @@ export function useWorkspace(
       // corrupt clipboard — Paste will report it as empty
     }
     if (currentProjectId === "all") return;
-    try {
-      const raw = localStorage.getItem(canvasStoreKey(currentProjectId));
-      if (!raw) return;
-      const saved = JSON.parse(raw) as PersistedCanvas;
-      if (saved.v !== CANVAS_STORE_VERSION) return; // stale layout generation — start clean
-      // `collapsed: false` is no longer reachable — the in-place expansion this
-      // flag drove was replaced by the folder's dropdown, so nothing can clear it
-      // again. A save from before that change can still carry it, and three
-      // readers below still branch on it: folderHitRect would keep the old
-      // expanded rect as a now-INVISIBLE drop target (tiles dropped anywhere in
-      // it silently join the folder), foldedNeuralPos would leave the members on
-      // the canvas beside the folder tile that stands in for them, and moveGroup
-      // would drag them along. Normalise on load rather than bumping the store
-      // version, which would throw away every project's arrangement.
-      const groupGeom = Object.fromEntries(
-        Object.entries(saved.groupGeom ?? {}).map(([id, g]) => [id, { ...g, collapsed: true }]),
-      );
-      setState({
-        galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, ...(saved.galleryOverrides ?? {}) },
-        frames: saved.frames ?? [],
-        groupGeom,
-        tileZ: saved.tileZ ?? {},
-      });
-      if (saved.stickyNotes?.length) void adoptLegacyNotes(saved.stickyNotes);
-    } catch {
-      // corrupt JSON or storage unavailable (private mode) — start clean
-    }
+    // The mount scope is always the project canvas: `useBoards` opens no
+    // Workspace until someone clicks a chip, so `state.canvasScope` already
+    // holds this key and does not need moving.
+    const saved = readCanvasStore(canvasStoreKey(currentProjectId, null));
+    if (!saved) return; // nothing usable saved — start clean
+    setState(canvasArrangement(saved));
+    if (saved.stickyNotes?.length) void adoptLegacyNotes(saved.stickyNotes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** The scope the arrangement on screen belongs to. */
+  const canvasScope = canvasStoreKey(currentProjectId, activeBoardId);
+
+  // Opening or leaving a Workspace SWAPS the arrangement; the two never share
+  // one. A workspace re-packs the same tiles over a different set — ten photos
+  // where the project canvas has four hundred — so a single shared bucket meant
+  // arranging a workspace re-arranged the project it was carved out of, and the
+  // other way round (ADR 0044 shipped that as a stated consequence; this closes
+  // it). A scope nobody has arranged yet opens as a clean grid, which is the same
+  // "a workspace re-packs" rule the re-fit above already follows.
+  //
+  // The ordering here is the whole correctness argument:
+  //  · the scope being LEFT is flushed under ITS OWN key first, read from
+  //    `stateRef` — the 400 ms debounce below may not have fired since the last
+  //    drag, and a switch is exactly the moment that matters;
+  //  · the incoming arrangement and `canvasScope` move in ONE setState, so the
+  //    save effect can never see a key and an arrangement from two scopes;
+  //  · undo history is dropped: a snapshot holds coordinates that mean nothing
+  //    over the set now on screen, and Cmd+Z would apply them anyway.
+  useEffect(() => {
+    if (currentProjectId === "all") return; // the recovery grid has no Workspaces
+    const s = stateRef.current;
+    if (s.canvasScope === canvasScope) return; // mount, or a re-render at the same scope
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    setState({
+      ...switchCanvasScope(s.canvasScope, canvasScope, arrangementOf(s)),
+      canvasScope,
+      history: [],
+      future: [],
+    });
+  }, [canvasScope, currentProjectId, setState]);
+
   // Debounced save whenever the arrangement changes — dragging fires overrides
   // on every pointermove, so a 400 ms debounce keeps writes off the drag path.
+  // Keyed on `state.canvasScope`, never on the prop: the key and the four fields
+  // written under it come off the same state object.
   useEffect(() => {
     if (currentProjectId === "all") return;
     if (persistTimer.current) clearTimeout(persistTimer.current);
-    persistTimer.current = setTimeout(() => {
-      try {
-        localStorage.setItem(
-          canvasStoreKey(currentProjectId),
-          JSON.stringify({
-            v: CANVAS_STORE_VERSION,
-            galleryOverrides: state.galleryOverrides,
-            frames: state.frames,
-            groupGeom: state.groupGeom,
-            tileZ: state.tileZ,
-          } satisfies PersistedCanvas),
-        );
-      } catch {
-        // over quota / unavailable — arrangement just won't persist this time
-      }
-    }, 400);
+    const scope = state.canvasScope;
+    // Spelled out field by field rather than through `arrangementOf`, so the
+    // dependency list stays the four fields a save actually watches — depending
+    // on the whole state object would re-arm this timer on every pan and hover.
+    const arrangement: CanvasArrangement = {
+      galleryOverrides: state.galleryOverrides,
+      frames: state.frames,
+      groupGeom: state.groupGeom,
+      tileZ: state.tileZ,
+    };
+    persistTimer.current = setTimeout(() => writeCanvasStore(scope, arrangement), 400);
     return () => {
       if (persistTimer.current) clearTimeout(persistTimer.current);
     };
-  }, [currentProjectId, state.galleryOverrides, state.frames, state.groupGeom, state.tileZ]);
+  }, [
+    currentProjectId,
+    state.canvasScope,
+    state.galleryOverrides,
+    state.frames,
+    state.groupGeom,
+    state.tileZ,
+  ]);
 
   // Flush the latest arrangement on unmount too, so navigating away right after
   // a drag (before the debounce fires) still saves it. Note text has its own
@@ -5061,21 +5061,8 @@ export function useWorkspace(
     return () => {
       for (const id of [...timers.keys()]) flushNoteText(id);
       if (currentProjectId === "all") return;
-      try {
-        const s = stateRef.current;
-        localStorage.setItem(
-          canvasStoreKey(currentProjectId),
-          JSON.stringify({
-            v: CANVAS_STORE_VERSION,
-            galleryOverrides: s.galleryOverrides,
-            frames: s.frames,
-            groupGeom: s.groupGeom,
-            tileZ: s.tileZ,
-          } satisfies PersistedCanvas),
-        );
-      } catch {
-        // ignore
-      }
+      const s = stateRef.current;
+      writeCanvasStore(s.canvasScope, arrangementOf(s));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

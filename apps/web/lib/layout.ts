@@ -26,6 +26,19 @@ export interface Frame {
   label: string;
 }
 
+/** Per-folder on-canvas geometry + collapse state, keyed by server group id.
+ *  Client-only (ADR 0022): the server owns which assets are in the folder, the
+ *  browser owns where the folder box sits and whether it's collapsed. Lives here
+ *  with the other persisted canvas geometry so `lib/canvas-store.ts` can type the
+ *  saved blob without reaching into the hook that renders it. */
+export interface GroupGeom {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  collapsed: boolean;
+}
+
 /** A sticky note as the canvas holds it. Server-backed since ADR 0041 — the id
  *  is a `canvas_annotations` row's uuid (or a `tmp-` placeholder for the moment
  *  between the click and the insert coming back). */
@@ -386,9 +399,11 @@ export function packGrid(
  * With a multi-selection, only those tiles are packed and every other override
  * stays in place. Without one, every tile in the active Canvas returns to its
  * deterministic grid position. Overrides whose ids are absent from `positions`
- * belong to another Workspace scope (or are otherwise not laid out here), so
- * they are preserved rather than letting a narrow Workspace rearrange the rest
- * of the project.
+ * are preserved: they belong to a tile this scope is not laying out — a file
+ * removed from the open Workspace since it was dragged — and a tidy is about the
+ * canvas in front of you, not about every coordinate in the bucket. (Each scope
+ * has its own bucket now, ADR 0044 as amended, so this is no longer what keeps a
+ * narrow Workspace from rearranging the whole project — that is the store key.)
  *
  * Legacy artboard frames are deliberately not an input. Workspaces own explicit
  * membership now; an invisible rectangle must not protect an override from a
