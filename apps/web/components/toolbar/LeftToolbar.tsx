@@ -175,7 +175,9 @@ function LeftToolbar({
         <AiAssistantIcon />
       </TbButton>
       <TbButton onClick={onToggleTrash} title="Trash" active={trashOpen}>
-        <TrashIcon />
+        {/* Explicit 16 — TrashIcon defaults to 15, and this was the only glyph
+            in the whole canvas chrome that was not 16. */}
+        <TrashIcon width={16} height={16} />
       </TbButton>
 
       <Divider />
