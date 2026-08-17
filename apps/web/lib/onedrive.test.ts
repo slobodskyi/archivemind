@@ -109,6 +109,10 @@ describe("onedrive browse shaping (ADR 0047)", () => {
     // one size, not three: this expand is the slowest part of a 200-item page
     expect(ONEDRIVE_CHILD_EXPAND).toContain("small");
     expect(ONEDRIVE_CHILD_EXPAND).not.toContain("large");
+    // The nested option needs its OWN `$`. Shipped once as
+    // `thumbnails(select=small)`; Graph 400s that and the whole folder listing
+    // fails, not just the previews.
+    expect(ONEDRIVE_CHILD_EXPAND).toBe("thumbnails($select=small)");
   });
 
   it("drops rows it cannot address", () => {

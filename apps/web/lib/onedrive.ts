@@ -17,8 +17,14 @@ export const ONEDRIVE_CHILD_SELECT =
 /** Thumbnails come from an `$expand`, not a `$select` — they are a navigation
  *  property, not a field. `small` (≈48px) is deliberate: the row renders a 32px
  *  square, and expanding thumbnails over a 200-item page is the slowest thing
- *  this request does, so asking for one size beats asking for three. */
-export const ONEDRIVE_CHILD_EXPAND = "thumbnails(select=small)";
+ *  this request does, so asking for one size beats asking for three.
+ *
+ *  The nested option needs its OWN `$`: `thumbnails($select=small)`. Shipped
+ *  once without it and Graph rejected the entire query with a 400, so the
+ *  folder listing failed outright and the previews took the feature down with
+ *  them. The browse route now also retries with no expansion on a 400, so a
+ *  cosmetic field can never do that again. */
+export const ONEDRIVE_CHILD_EXPAND = "thumbnails($select=small)";
 
 export interface GraphThumbnailSet {
   small?: { url?: unknown } | null;
