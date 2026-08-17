@@ -20,6 +20,20 @@ export function ShareIcon({ width = 13, height = 13, ...props }: IconProps) {
   );
 }
 
+/** ShareIcon's tray with the arrow pointing the other way — files coming down
+ *  out of the archive rather than going out of it. Deliberately a mirror of it
+ *  and not a new shape: the two sit side by side in the Workspace's outcome
+ *  actions, where the only thing that distinguishes them IS the direction. */
+export function DownloadIcon({ width = 13, height = 13, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+      <path d="M12 3v13" />
+      <path d="M8 12l4 4 4-4" />
+    </svg>
+  );
+}
+
 /* Sticky-note text formatting (ADR 0041 as amended). Each mark is markdown-ish
    syntax in the note's plain-string body — see lib/notes.ts. */
 export function TypeIcon({ width = 16, height = 16, ...props }: IconProps) {

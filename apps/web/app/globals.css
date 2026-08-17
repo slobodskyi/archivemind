@@ -29,6 +29,14 @@
   --hdr: calc(52px + env(safe-area-inset-top, 0px));
 }
 
+/* The header's second row is a phone-only thing: on a wide window the wrapper
+   dissolves and its children lay out as direct header children, which is what
+   keeps the desktop breadcrumb byte-identical to what it was before the row
+   existed. See the 760px block for the other half. */
+.am-hdr-row2 {
+  display: contents;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -310,8 +318,13 @@ textarea {
     transform: none;
   }
 
+  /* `!important` is not decoration here: the element carries `display: none`
+     as an INLINE style, and no stylesheet rule beats an inline one on
+     specificity alone. Without it the scrim stayed permanently hidden — and
+     therefore unclickable — so the drawer could only be dismissed by reloading
+     the page. The burger below always had it; this one did not. */
   .am-home-scrim {
-    display: block;
+    display: block !important;
   }
 
   /* The hamburger only exists while the rail is a drawer. */
@@ -369,7 +382,11 @@ textarea {
      trash, map) resolves against, so growing the header would push all of them
      down for a rail that only exists inside a project. Floating chrome over
      the canvas is what the left toolbar and the bottom bars already do. */
-  .am-hdr-boards {
+  /* The wrapper stops dissolving and becomes the actual second row. */
+  .am-hdr-row2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     position: fixed;
     top: var(--hdr);
     left: 0;
@@ -382,6 +399,10 @@ textarea {
     padding: 6px 10px;
     background: var(--bg-nb);
     border-bottom: 1px solid var(--bd);
+  }
+
+  /* The chips take what the outcome actions leave, and scroll inside it. */
+  .am-hdr-boards {
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -389,6 +410,31 @@ textarea {
 
   .am-hdr-boards::-webkit-scrollbar {
     display: none;
+  }
+
+  /* A chip must SCROLL out of the row, never shrink inside it. On a wide
+     window each chip carries `minWidth: 0` so names ellipsize gracefully as
+     the row tightens; in a 240px scroller that same rule squeezed all of them
+     at once until every name was gone and the rail was a line of bare coloured
+     dots — unreadable, and unusable for picking a workspace. Holding their
+     width is what makes the horizontal scroll do the job instead. */
+  .am-hdr-boards > div > * {
+    flex: 0 0 auto !important;
+  }
+
+  .am-hdr-boards [data-board-chip] {
+    min-width: 104px;
+  }
+
+  /* Two words of a 390px row, for the two secondary actions. Create keeps its
+     label — see the note in WorkspaceOutputActions. */
+  .am-wsa-label {
+    display: none;
+  }
+
+  .am-hdr-wsactions button {
+    padding: 0 9px !important;
+    min-width: 0 !important;
   }
 
   /* The breadcrumb chevron pointed at a rail that is no longer beside it. */
@@ -479,15 +525,17 @@ textarea {
   }
 
   /* Anchored above the home indicator / browser toolbar rather than at the
-     literal viewport bottom. The switcher owns the bottom row; the action bar
-     stacks on top of it. */
+     literal viewport bottom, and tighter than the desktop 20/66: bottom chrome
+     on a phone should hug the edge the way a native tab bar does, and every px
+     of the gap is canvas nobody can see. The switcher owns the bottom row; a
+     bar that has one under it stacks at 56 = 12 + its 36 + an 8 gap. */
   .am-viewswitcher,
   .am-bar-low {
-    bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   .am-bar-high {
-    bottom: calc(66px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   /* 430px on a 390px phone, and it has to clear an action bar that is now two

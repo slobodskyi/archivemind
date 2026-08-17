@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   createProjectResponseSchema,
   TRASH_RETENTION_DAYS,
@@ -144,6 +144,18 @@ export default function HomeClient({
   const [confirmTarget, setConfirmTarget] = useState<{ project: ProjectCard; action: "archive" | "delete" } | null>(null);
   /** Pending "delete photos permanently" confirmation (ADR 0033). */
   const [purgeTarget, setPurgeTarget] = useState<{ ids: string[]; emptyAll: boolean } | null>(null);
+
+  /** Escape closes the drawer, the way it closes every other overlay here. The
+   *  scrim is the discoverable way out and the nav items close it on their own;
+   *  this is the third, for anyone on a tablet with a keyboard. */
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   const flash = (t: string) => {
     setToast(t);
