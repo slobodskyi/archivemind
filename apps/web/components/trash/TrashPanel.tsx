@@ -66,6 +66,9 @@ export default function TrashPanel({ open, assets, boards, onClose, onRestore, o
 
   return (
     <div
+      // The chat panel and the photo drawer already clamp themselves to the
+      // viewport; this one held a hard 360 and overflowed a narrower phone.
+      className="am-trash-panel"
       style={{
         position: "absolute",
         top: "var(--hdr)",

@@ -37,6 +37,9 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
 
   return (
     <div
+      // Below 760px it spans the width and wraps instead of centring on an
+      // overflowing row; below 640px the labels go and the icons carry it.
+      className="am-viewswitcher"
       style={{
         position: "absolute",
         left: "50%",
@@ -61,6 +64,9 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
             key={key}
             onClick={() => onSelect(key)}
             title={title}
+            // The label is hidden on a phone, so the accessible name cannot
+            // come from it.
+            aria-label={label}
             aria-pressed={active}
             style={{
               display: "flex",
@@ -81,7 +87,7 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
             }}
           >
             <Icon width={13} height={13} />
-            <span>{label}</span>
+            <span className="am-viewswitcher-label">{label}</span>
           </button>
         );
       })}

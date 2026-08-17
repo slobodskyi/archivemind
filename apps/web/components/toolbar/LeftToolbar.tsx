@@ -96,6 +96,11 @@ function LeftToolbar({
 
   return (
     <div
+      // Below 760px this stops being vertically centred and hangs from under
+      // the header instead, capped and scrollable — at the 44px touch size the
+      // rail is taller than a phone viewport has to spare between the header
+      // and the bottom bars.
+      className="am-lefttoolbar"
       style={{
         position: "absolute",
         left: 20,

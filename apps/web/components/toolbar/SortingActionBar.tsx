@@ -152,6 +152,11 @@ function SortingActionBar({
 }: SortingActionBarProps) {
   return (
     <div
+      // Below 760px the bar spans the width and wraps rather than overflowing
+      // a centred row. The high/low pair mirrors the `bottom` below, because a
+      // media query cannot read a prop — and on a phone both values also have
+      // to clear the home indicator.
+      className={`am-bar ${aboveSwitcher ? "am-bar-high" : "am-bar-low"}`}
       style={{
         position: "absolute",
         left: "50%",
@@ -182,7 +187,7 @@ function SortingActionBar({
       />
       {showRegroup && (
         <>
-          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
           <Btn
             title={selCount >= 2 ? `Regroup ${selCount} selected` : "Regroup — snap tiles back into their clouds"}
             disabled={!canRegroup}
@@ -194,13 +199,13 @@ function SortingActionBar({
       )}
       {showRecluster && topicMembership && selCount > 0 && (
         <>
-          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
           <TopicMembershipMenu {...topicMembership} selectionCount={selCount} />
         </>
       )}
       {showRecluster && (
         <>
-          <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
           <Btn
             title={busy ? "A job is already running" : "Refresh AI grouping — manual moves stay (free)"}
             disabled={busy}

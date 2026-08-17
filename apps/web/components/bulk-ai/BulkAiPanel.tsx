@@ -121,6 +121,10 @@ export default function BulkAiPanel({
 
   return (
     <div
+      // Below 760px it spans the width instead of holding a fixed 430 (wider
+      // than the phone it opens on) and sits higher, because the action bar it
+      // has to clear wraps to two rows there.
+      className="am-bulk-ai"
       style={{
         position: "absolute",
         // Clears the action bar (bottom:66), which now sits above the view switcher.

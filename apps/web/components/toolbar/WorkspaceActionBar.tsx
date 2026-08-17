@@ -92,7 +92,9 @@ function Btn({
 }
 
 function Divider() {
-  return <span style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />;
+  // Hidden below 760px: once the bar wraps, a rule that groups buttons on one
+  // row only creates ragged breaks on the next — it cost the bar two extra rows.
+  return <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />;
 }
 
 /** Bottom action bar for the Workspace (neural view) only. Copy/Export are
@@ -125,6 +127,10 @@ function WorkspaceActionBar({
   const noSel = selCount === 0;
   return (
     <div
+      // Below 760px the bar spans the width and wraps to a second row. Its ten
+      // targets at the 44px touch minimum are wider than a phone, and centred
+      // that put both ends off screen. `am-bar-high` keeps it on the upper row.
+      className="am-bar am-bar-high"
       style={{
         position: "absolute",
         left: "50%",

@@ -12,6 +12,10 @@ export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
   return (
     <div
       onPointerDown={onDown}
+      // Hidden below 760px: 180×120 is half the width of a phone, it sat
+      // directly on top of the bottom bars, and pinch-zoom plus Fit already
+      // answer "where am I on this canvas" on touch.
+      className="am-minimap"
       style={{
         position: "absolute",
         bottom: 20,
