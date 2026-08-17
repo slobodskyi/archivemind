@@ -35,6 +35,11 @@ import {
   dropboxImportItemSchema,
   isDropboxDirectLink,
   ingestJobPayloadSchema,
+  analyzeJobPayloadSchema,
+  oneDriveIdSchema,
+  oneDriveImportItemSchema,
+  oneDriveExpandSchema,
+  ONEDRIVE_MAX_FOLDERS_PER_IMPORT,
   googleConnectRequestSchema,
   googleConnectionStatusSchema,
   importItemSchema,
@@ -619,6 +624,77 @@ describe("importRequestSchema provider union + mimeFromFilename (#24)", () => {
     expect(mimeFromFilename("IMG_1.HEIC")).toBe("image/heic");
     expect(mimeFromFilename("shot.NEF")).toBe("application/octet-stream");
     expect(mimeFromFilename("noext")).toBe("application/octet-stream");
+  });
+});
+
+describe("OneDrive import contracts (ADR 0047)", () => {
+  const uuid = "8f7a1c2e-0000-4000-8000-1234567890ab";
+
+  it("ids accept real Graph shapes but never URL structure", () => {
+    // personal (bang-separated) and business (b!-prefixed) ids both parse
+    expect(oneDriveIdSchema.parse("01BYE5RZ6QN3ZWBTUFOFD3GSPGOHDJD36K")).toBeTruthy();
+    expect(oneDriveIdSchema.parse("A1B2C3D4E5!107")).toBeTruthy();
+    expect(oneDriveIdSchema.parse("b!Ci_5vT-xyz_ABC-123")).toBeTruthy();
+    // the id is interpolated into a Graph path — nothing structural gets through
+    for (const bad of ["../../me/drive", "a/b", "a?$select=x", "a#frag", "a%2f", "a b", ""]) {
+      expect(oneDriveIdSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("an import item defaults to a file and always carries both id halves", () => {
+    const item = oneDriveImportItemSchema.parse({
+      driveId: "drive1",
+      itemId: "item1",
+      name: "  DSC01.jpg  ",
+    });
+    // isFolder defaults false — an unmarked item is a file, never a surprise walk
+    expect(item.isFolder).toBe(false);
+    expect(item.name).toBe("DSC01.jpg");
+    // a driveItem id alone is not an identity: the drive scope is required
+    expect(
+      oneDriveImportItemSchema.safeParse({ itemId: "item1", name: "a.jpg" }).success,
+    ).toBe(false);
+  });
+
+  it("the onedrive arm needs the caller's connection, like gdrive", () => {
+    const items = [{ driveId: "drive1", itemId: "item1", name: "a.jpg", isFolder: true }];
+    expect(
+      importRequestSchema.safeParse({ provider: "onedrive", connectionId: uuid, items }).success,
+    ).toBe(true);
+    expect(importRequestSchema.safeParse({ provider: "onedrive", items }).success).toBe(false);
+  });
+
+  it("expansion caps the folders one import may walk", () => {
+    const folder = { drive_id: "drive1", item_id: "item1", name: "2024" };
+    expect(
+      oneDriveExpandSchema.safeParse({ connection_id: uuid, folders: [folder] }).success,
+    ).toBe(true);
+    expect(
+      oneDriveExpandSchema.safeParse({
+        connection_id: uuid,
+        folders: Array.from({ length: ONEDRIVE_MAX_FOLDERS_PER_IMPORT + 1 }, () => folder),
+      }).success,
+    ).toBe(false);
+  });
+
+  it("an ingest job may start with no assets ONLY when it has folders to expand", () => {
+    const expand = {
+      connection_id: uuid,
+      folders: [{ drive_id: "drive1", item_id: "item1", name: "2024" }],
+    };
+    // a folders-only import: every asset is discovered by the walk
+    expect(ingestJobPayloadSchema.parse({ asset_ids: [], onedrive_expand: expand })).toBeTruthy();
+    // without folders, an empty ingest is still the bug it always was
+    expect(ingestJobPayloadSchema.safeParse({ asset_ids: [] }).success).toBe(false);
+    // fanned-out batches carry assets and NO expand key — the loop guard
+    expect(ingestJobPayloadSchema.parse({ asset_ids: [uuid] }).onedrive_expand).toBeUndefined();
+  });
+
+  it("analyze did not inherit ingest's empty-asset allowance", () => {
+    // analyzeJobPayloadSchema was `= ingestJobPayloadSchema` until ADR 0047;
+    // relaxing ingest must never make "analyze nothing" parse.
+    expect(analyzeJobPayloadSchema.safeParse({ asset_ids: [] }).success).toBe(false);
+    expect(analyzeJobPayloadSchema.parse({ asset_ids: [uuid] }).asset_ids).toHaveLength(1);
   });
 });
 

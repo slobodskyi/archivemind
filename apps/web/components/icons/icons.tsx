@@ -576,6 +576,16 @@ export function GDriveIcon({ width = 18, height = 18, ...props }: IconProps) {
   );
 }
 
+export function OneDriveIcon({ width = 18, height = 18, ...props }: IconProps) {
+  // The Microsoft-blue cloud, drawn in the same stroked outline style as its
+  // two siblings rather than as brand artwork — the row reads as one set.
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M9.2 8.4a4.4 4.4 0 018.1 1.4 3.4 3.4 0 01-.6 6.7H7a4 4 0 01-.6-7.9 3.6 3.6 0 012.8-.2z" />
+    </svg>
+  );
+}
+
 export function DropboxIcon({ width = 18, height = 18, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="#00C2FF" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>

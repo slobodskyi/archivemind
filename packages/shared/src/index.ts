@@ -95,6 +95,88 @@ export const dropboxImportItemSchema = z.object({
 });
 export type DropboxImportItem = z.infer<typeof dropboxImportItemSchema>;
 
+// ── OneDrive import (ADR 0047: Graph browse + folder expansion, no picker) ───
+
+/** Caps for a folder import. The point of OneDrive over Drive is that a picked
+ *  FOLDER expands into its tree (`drive.file` cannot), so these bound work the
+ *  user never enumerated by hand.
+ *
+ *  ONEDRIVE_MAX_ITEMS_PER_IMPORT is deliberately 5000 and not the 25000 first
+ *  proposed: we have never run a walk this size in anger, and a cap that is too
+ *  low fails loudly and is raised in one line, while one that is too high finds
+ *  its ceiling as a worker OOM. On breach the job FAILS naming the limit —
+ *  never a silent truncation, which would read to the user as "OneDrive only
+ *  had 5000 photos". */
+export const ONEDRIVE_MAX_ITEMS_PER_IMPORT = 5000;
+/** Cycle/shortcut guard on the recursive walk. */
+export const ONEDRIVE_MAX_DEPTH = 10;
+/** Discovered files per fanned-out ingest job — the same 500 the import route
+ *  accepts per request, so an expanded batch is indistinguishable from a
+ *  hand-picked one downstream. */
+export const ONEDRIVE_EXPAND_BATCH = 500;
+/** Folders one import may expand. Bounds the *parent* job's own runtime. */
+export const ONEDRIVE_MAX_FOLDERS_PER_IMPORT = 50;
+
+/** A Graph driveId or driveItem id. Opaque to us, but it IS interpolated into
+ *  a Graph URL path, so the charset excludes everything structural (`/ ? # %`
+ *  and whitespace) on top of the encodeURIComponent at the call site. Real ids
+ *  are alphanumeric with `!` (personal) or `b!`-prefixed base64-ish runs
+ *  (business), so this is permissive where it can afford to be. */
+export const oneDriveIdSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[A-Za-z0-9!$'()*+,.:;=@_~-]+$/, "not a OneDrive id");
+
+/** One item the user selected in our own browser (ADR 0047 D1).
+ *
+ *  `driveId` is here because a driveItem id is unique only WITHIN its drive —
+ *  the pair is the identity, which is why files gained `source_drive_id`.
+ *
+ *  Unlike the gdrive arm, an item may be a FOLDER: those never become an asset
+ *  in the web route, they become an expansion instruction for the worker.
+ *  `name`/`sizeBytes`/`mimeType` are hints from our own browse response and are
+ *  used only for the asset title and kind — the worker re-reads authoritative
+ *  metadata from Graph anyway, because it needs the download URL. (If the v8
+ *  picker is ever adopted in V2, these must become optional: the picker
+ *  guarantees only id + parentReference.driveId.) */
+export const oneDriveImportItemSchema = z.object({
+  driveId: oneDriveIdSchema,
+  itemId: oneDriveIdSchema,
+  name: z.string().trim().min(1).max(512),
+  isFolder: z.boolean().default(false),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  mimeType: z.string().min(1).max(255).optional(),
+  /** Folder path at selection time — display/clustering only (files.source_path). */
+  path: z.string().max(1024).optional(),
+});
+export type OneDriveImportItem = z.infer<typeof oneDriveImportItemSchema>;
+
+/** The folder half of an ingest job's payload: what the worker must walk.
+ *
+ *  It carries `project_id` because expansion CREATES assets, and they have to
+ *  land in the project the import targeted — the web route cannot link them,
+ *  it does not know they exist yet.
+ *
+ *  Its presence is also the loop guard. The handler fans out further ingest
+ *  jobs for what it discovers, and those carry `asset_ids` only — no
+ *  `onedrive_expand`, so an expansion can never enqueue another expansion. */
+export const oneDriveExpandSchema = z.object({
+  connection_id: uuidSchema,
+  project_id: uuidSchema.nullish(),
+  folders: z
+    .array(
+      z.object({
+        drive_id: oneDriveIdSchema,
+        item_id: oneDriveIdSchema,
+        name: z.string().trim().min(1).max(512),
+      }),
+    )
+    .min(1)
+    .max(ONEDRIVE_MAX_FOLDERS_PER_IMPORT),
+});
+export type OneDriveExpand = z.infer<typeof oneDriveExpandSchema>;
+
 // ── Upload path (TECH_SPEC §6, §9) — web routes ↔ browser, later the worker ──
 
 export const assetKindSchema = z.enum(["photo", "pdf", "document", "other"]);
@@ -178,25 +260,42 @@ export type CompleteUploadRpcResponse = z.infer<typeof completeUploadRpcResponse
  *  re-minted, so they ride in the job payload (broadcast reaches workspace
  *  members only — the same people who will see the photos) and the worker
  *  fetches each once into R2. A retry after expiry per-file-fails with
- *  `dropbox_link_expired`; a re-pick brings a fresh link in a fresh job. */
-export const ingestJobPayloadSchema = z.object({
-  asset_ids: z.array(uuidSchema).min(1),
-  dropbox: z
-    .array(
-      z.object({
-        asset_id: uuidSchema,
-        link: dropboxDirectLinkSchema,
-        name: z.string().min(1).max(512),
-      }),
-    )
-    .optional(),
-});
+ *  `dropbox_link_expired`; a re-pick brings a fresh link in a fresh job.
+ *
+ *  `onedrive_expand` (ADR 0047): a picked FOLDER is not an asset, so it cannot
+ *  ride in `asset_ids` — it is an instruction to walk. This is why `asset_ids`
+ *  is no longer `.min(1)` but a refine: an import of nothing but folders starts
+ *  with zero assets and discovers them all. Analyze keeps its own hard `.min(1)`
+ *  below, because "analyze nothing" is always a bug. */
+export const ingestJobPayloadSchema = z
+  .object({
+    asset_ids: z.array(uuidSchema),
+    dropbox: z
+      .array(
+        z.object({
+          asset_id: uuidSchema,
+          link: dropboxDirectLinkSchema,
+          name: z.string().min(1).max(512),
+        }),
+      )
+      .optional(),
+    onedrive_expand: oneDriveExpandSchema.optional(),
+  })
+  .refine((p) => p.asset_ids.length > 0 || p.onedrive_expand != null, {
+    message: "ingest needs at least one asset or a folder to expand",
+    path: ["asset_ids"],
+  });
 export type IngestJobPayload = z.infer<typeof ingestJobPayloadSchema>;
 
 // ── Analyze (spec §8.2) — user-triggered via POST /api/jobs ─────────────────
 
-export const analyzeJobPayloadSchema = ingestJobPayloadSchema;
-export type AnalyzeJobPayload = IngestJobPayload;
+/** Stated on its own rather than aliased to ingest's (which it was until ADR
+ *  0047): ingest's asset_ids can legitimately be empty for a folder expansion,
+ *  and analyze must never inherit that. */
+export const analyzeJobPayloadSchema = z.object({
+  asset_ids: z.array(uuidSchema).min(1),
+});
+export type AnalyzeJobPayload = z.infer<typeof analyzeJobPayloadSchema>;
 
 // ── Cluster (spec §10/§13; ADR 0028) — worker-only, enqueued after analyze ───
 
@@ -561,6 +660,16 @@ export const importRequestSchema = z.discriminatedUnion("provider", [
     provider: z.literal("dropbox"),
     projectId: uuidSchema.optional(),
     items: z.array(dropboxImportItemSchema).min(1).max(500),
+  }),
+  // onedrive (ADR 0047) is shaped like gdrive — the caller's own connection,
+  // the worker re-reads bytes through its refresh token, r2_key stays null —
+  // with one difference that is the whole point of the provider: an item may
+  // be a FOLDER, and folders are expanded by the worker rather than imported.
+  z.object({
+    provider: z.literal("onedrive"),
+    connectionId: uuidSchema,
+    projectId: uuidSchema.optional(),
+    items: z.array(oneDriveImportItemSchema).min(1).max(500),
   }),
 ]);
 export type ImportRequest = z.infer<typeof importRequestSchema>;

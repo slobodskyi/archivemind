@@ -34,6 +34,38 @@ const MESSAGES: Record<string, string> = Object.assign(Object.create(null), {
   dropbox_download_failed: "Couldn't fetch some files from Dropbox. Pick them again to retry.",
   dropbox_rate_limited: "Dropbox is rate-limiting us — some files were skipped; pick them again to retry.",
   dropbox_file_too_large: "That file is over the import size limit.",
+  // OneDrive (ADR 0047): a redirect OAuth leg plus OUR OWN browser, so the
+  // codes split into connect-time and browse/import-time rather than the
+  // popup-shaped set Drive needs.
+  onedrive_unavailable: "OneDrive import isn't configured yet.",
+  onedrive_access_denied: "Connection cancelled.",
+  onedrive_state_invalid: "That connection attempt expired or didn't match. Try again.",
+  onedrive_code_invalid: "That connection attempt expired. Try again.",
+  onedrive_scope_missing:
+    "OneDrive file access wasn't granted. Approve the Files permission on Microsoft's screen and try again.",
+  onedrive_reconsent_required:
+    "Microsoft didn't return a lasting permission. Click Connect again and approve access.",
+  onedrive_not_connected: "OneDrive isn't connected yet.",
+  onedrive_connection_revoked:
+    "OneDrive access was revoked or expired. Reconnect it in Data sources and try again.",
+  onedrive_token_refresh_failed: "Couldn't reach Microsoft just now. Try again in a moment.",
+  onedrive_disconnect_failed: "Couldn't disconnect OneDrive. Please try again.",
+  onedrive_connect_failed: "Couldn't connect OneDrive. Please try again.",
+  onedrive_browse_failed: "Couldn't list that OneDrive folder. Try again.",
+  onedrive_import_failed: "Some files couldn't be submitted. Try again.",
+  // Folder expansion (the capability Drive can't offer) has its own failures:
+  // both are about SIZE, and both must name the limit rather than truncate.
+  onedrive_too_many_items:
+    "That folder holds more files than one import can take. Pick a smaller folder or import its subfolders separately.",
+  onedrive_too_deep:
+    "That folder nests deeper than one import can walk. Pick a folder further down the tree.",
+  onedrive_folder_scan_failed: "Couldn't finish scanning that OneDrive folder. Try the import again.",
+  // Per-file outcomes during ingest.
+  onedrive_file_not_found: "Some files are no longer in OneDrive — their archived copies were kept.",
+  onedrive_file_too_large: "That file is over the import size limit.",
+  onedrive_rate_limited:
+    "Microsoft is rate-limiting us — some files were skipped; run the import again to pick them up.",
+  onedrive_download_failed: "Couldn't fetch some files from OneDrive. Run the import again to retry.",
   // Picker/import surface.
   drive_picker_failed: "Couldn't open the Google Drive picker. Reload and try again.",
   import_backlog: "Imports are queued up — wait for the current ones to finish, then retry.",

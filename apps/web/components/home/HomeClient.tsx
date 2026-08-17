@@ -14,6 +14,7 @@ import UsageView, { UsagePlanPill } from "@/components/account/UsageView";
 import Toast from "@/components/modals/Toast";
 import DataSourcesModal from "@/components/modals/DataSourcesModal";
 import { useGdriveConnection } from "@/hooks/useGdriveConnection";
+import { useOneDriveConnection, useOneDriveRedirectResult } from "@/hooks/useOneDriveConnection";
 import RenameModal from "@/components/modals/RenameModal";
 import ConfirmModal from "@/components/modals/ConfirmModal";
 import AccountMenu from "@/components/home/AccountMenu";
@@ -169,6 +170,17 @@ export default function HomeClient({
     connect: connectGdrive,
     disconnect: disconnectGdrive,
   } = useGdriveConnection(flash);
+
+  // OneDrive's equivalent (ADR 0047). `connect` navigates away rather than
+  // resolving, so the outcome comes back as a query parameter — see
+  // useOneDriveRedirectResult below.
+  const {
+    onedrive,
+    refresh: refreshOneDrive,
+    connect: connectOneDrive,
+    disconnect: disconnectOneDrive,
+  } = useOneDriveConnection(flash);
+  useOneDriveRedirectResult(flash, () => void refreshOneDrive());
 
   const openRecents = () => {
     try {
@@ -389,6 +401,7 @@ export default function HomeClient({
           onClick={() => {
             setSourcesOpen(true);
             void refreshGdrive();
+            void refreshOneDrive();
             setNavOpen(false);
           }}
           style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 8px", marginBottom: 10, background: "transparent", border: 0, borderRadius: 2, color: "var(--t2)", fontSize: 13, fontFamily: "inherit", cursor: "pointer", textAlign: "left" }}
@@ -597,6 +610,9 @@ export default function HomeClient({
           setSourcesOpen(false);
           flash("Dropbox needs no connection — open a project and use Add files");
         }}
+        onedrive={onedrive}
+        onOneDriveConnect={connectOneDrive}
+        onOneDriveDisconnect={() => void disconnectOneDrive()}
         gdrive={gdrive}
         onGdriveConnect={() => void connectGdrive()}
         onGdriveDisconnect={() => void disconnectGdrive()}

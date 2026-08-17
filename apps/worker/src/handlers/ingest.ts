@@ -1,7 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
 import { ingestJobPayloadSchema } from "@archivemind/shared";
 import type pg from "pg";
-import { extractExif } from "../services/exif";
+import { extractExif, type ParsedExif } from "../services/exif";
+import {
+  OneDriveFileError,
+  OneDriveTokenError,
+  OneDriveTokenSource,
+  ThrottleGate,
+  downloadOneDriveFile,
+  exifFromFacets,
+  getOneDriveItem,
+  mergeExifFallback,
+  type OneDriveItem,
+} from "../services/onedrive";
+import {
+  expandProgressLabel,
+  fanOutDiscovered,
+  walkFolders,
+} from "./onedrive-expand";
 import { isGeocodeIndexAvailable, reverseGeocode } from "../services/geocode";
 import { DropboxFileError, downloadDropboxLink } from "../services/dropbox";
 import { DriveFileError, downloadDriveFile, getDriveFileMeta } from "../services/gdrive";
@@ -33,6 +49,7 @@ interface AssetRow {
   origin: string;
   source_connection_id: string | null;
   source_file_id: string | null;
+  source_drive_id: string | null;
   content_hash: string | null;
   preview_count: number;
   has_exif: boolean;
@@ -145,10 +162,53 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
   const { asset_ids } = payload;
   const dropboxByAsset = new Map((payload.dropbox ?? []).map((d) => [d.asset_id, d]));
 
+  const oneDriveTokens = new OneDriveTokenSource(pool);
+  // One gate per job: a 429 anywhere holds every later OneDrive request,
+  // which is what the Graph docs ask for and what per-request backoff does
+  // not give you (ADR 0047 D7).
+  const oneDriveGate = new ThrottleGate();
+
+  // ── folder expansion, before anything is ingested (ADR 0047 D5) ─────────
+  // A picked folder is not an asset, so it never appears in asset_ids. Walking
+  // it produces MORE ingest jobs, batched — and those carry asset_ids only, so
+  // an expansion can never enqueue another expansion.
+  let expandLabel: string | null = null;
+  if (payload.onedrive_expand) {
+    const expand = payload.onedrive_expand;
+    const token = await oneDriveTokens.getAccessToken(expand.connection_id);
+    await progress(2, `Scanning ${expand.folders.length} folder(s)…`, 0, 0);
+    const outcome = await walkFolders({
+      expand,
+      accessToken: token,
+      gate: oneDriveGate,
+      onProgress: async (folders, files, name) => {
+        // Discovery on a large tree runs for minutes; a still bar reads as a
+        // hang, so the label names the folder and the running count.
+        await progress(
+          Math.min(40, 2 + folders),
+          `Scanning ${name} — ${files} file(s) in ${folders} folder(s)`,
+          0,
+          0,
+        );
+      },
+    });
+    const fan = await fanOutDiscovered({
+      pool,
+      workspaceId: job.workspace_id,
+      userId: job.user_id,
+      connectionId: expand.connection_id,
+      projectId: expand.project_id ?? null,
+      discovered: outcome.discovered,
+    });
+    expandLabel = expandProgressLabel(outcome, fan);
+    console.log(`[ingest] onedrive expand: ${expandLabel} → ${fan.jobIds.length} job(s)`);
+  }
+
   const { rows } = await pool.query<AssetRow>(
     `select a.id as asset_id, a.workspace_id, a.title,
             f.id as file_id, f.r2_key, f.mime_type,
-            f.origin, f.source_connection_id, f.source_file_id, f.content_hash,
+            f.origin, f.source_connection_id, f.source_file_id, f.source_drive_id,
+            f.content_hash,
             (select count(*)::int from asset_previews ap where ap.asset_id = a.id) as preview_count,
             exists (select 1 from asset_exif ae where ae.asset_id = a.id) as has_exif
      from assets a
@@ -180,6 +240,10 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     await progress(Math.round((done / rows.length) * 100), `Processing ${label}`, done, rows.length);
 
     let buf: Buffer;
+    // Graph's photo/location facets for THIS row, when it came from OneDrive.
+    // Filled by the download branch below and merged in as a FALLBACK after
+    // local extraction — never over it (ADR 0047 §8.4).
+    let facetExif: Partial<ParsedExif> | null = null;
     if (!row.r2_key) {
       // Resume guard (both cloud origins): a re-run — retry after partial
       // failure, or an explicit re-ingest — must not re-fetch files that
@@ -218,6 +282,45 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
             console.log(`[ingest] ${label}: over MAX_IMPORT_BYTES → kind='other'`);
           } else {
             const code = err instanceof DropboxFileError ? err.code : "dropbox_download_failed";
+            console.log(`[ingest] ${label}: ${code} — skipped this run`);
+            failed += 1;
+          }
+          done += 1;
+          continue;
+        }
+      } else if (row.origin === "onedrive") {
+        if (!row.source_connection_id || !row.source_file_id) {
+          done += 1; // an onedrive row with no source ids cannot be fetched
+          continue;
+        }
+        try {
+          const fetched = await downloadOneDriveWithTokenRetry(
+            oneDriveTokens,
+            oneDriveGate,
+            row.source_connection_id,
+            row.source_drive_id,
+            row.source_file_id,
+          );
+          buf = fetched.buffer;
+          facetExif = exifFromFacets(fetched.item);
+          if (buf.length !== 0) {
+            await pool.query(`update files set byte_size = $2 where id = $1`, [row.file_id, buf.length]);
+          }
+        } catch (err) {
+          if (err instanceof OneDriveTokenError) throw err; // connection is dead — fail the job
+          if (err instanceof OneDriveFileError && err.code === "onedrive_file_not_found") {
+            // Spec §12: the file moved or was deleted upstream. A HANDLED
+            // terminal state — derivatives are KEPT, because the archive's
+            // value outlives the source. Counted as `missing`, not `failed`,
+            // so it cannot trip the wholly-failed retry.
+            await pool.query(`update assets set status='source_missing' where id = $1`, [row.asset_id]);
+            console.log(`[ingest] ${label}: onedrive_file_not_found → source_missing`);
+            missing += 1;
+          } else if (err instanceof OneDriveFileError && err.code === "onedrive_file_too_large") {
+            await pool.query(`update assets set kind='other' where id = $1`, [row.asset_id]);
+            console.log(`[ingest] ${label}: over MAX_IMPORT_BYTES → kind='other'`);
+          } else {
+            const code = err instanceof OneDriveFileError ? err.code : "onedrive_download_failed";
             console.log(`[ingest] ${label}: ${code} — skipped this run`);
             failed += 1;
           }
@@ -379,7 +482,12 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     // skip it and still generate previews. has_exif stays false, so a cloud
     // re-import retries the extraction (the #113 heal path).
     try {
-    const exif = await extractExif(buf, row.title ?? "");
+    // Local extraction is the source of truth; Graph's facets fill only what
+    // it could not answer. That order is load-bearing rather than tidy:
+    // business/SharePoint accounts return ONLY takenDateTime from the photo
+    // facet, so a facets-first path would give those users a near-empty
+    // archive — and facet coverage on RAW/HEIC is unverified either way.
+    const exif = mergeExifFallback(await extractExif(buf, row.title ?? ""), facetExif);
     if (exif) {
       // Offline reverse geocode (ADR 0026) — no network, and null rather than
       // a guess, so an unlabelled asset is always "we don't know" and never
@@ -511,7 +619,15 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
     done += 1;
   }
 
-  await progress(100, ingestProgressLabel(done, deduped, failed, missing), done, rows.length);
+  // A folders-only job ingests nothing itself — its whole output is the batches
+  // it fanned out — so reporting "Processed 0 file(s)" would read as a failure.
+  const runLabel = ingestProgressLabel(done, deduped, failed, missing);
+  await progress(
+    100,
+    expandLabel ? (rows.length > 0 ? `${expandLabel} — ${runLabel}` : expandLabel) : runLabel,
+    done,
+    rows.length,
+  );
 
   // Ingest was the last job type writing no usage_events row, which is why
   // storage growth could be totalled at a point in time but never attributed
@@ -560,6 +676,50 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
 function dropboxOriginalKey(workspaceId: string, filename: string): string {
   const safe = filename.replace(/[^\w.\-()+ ]+/g, "_").slice(0, 200) || "file";
   return `${workspaceId}/originals/${randomUUID()}/${safe}`;
+}
+
+/** OneDrive bytes, plus the item metadata the EXIF fallback reads.
+ *
+ *  The metadata call is not optional overhead: `@microsoft.graph.downloadUrl`
+ *  lives on the item and is pre-authenticated for MINUTES, so it has to be
+ *  resolved immediately before the fetch. That is exactly why the Dropbox
+ *  pattern of parking a link in the job payload (ADR 0008) is wrong here — a
+ *  queued job would find it long dead. The same response gives the size guard
+ *  for free.
+ *
+ *  One re-mint on a token that expired mid-batch, like the Drive path below:
+ *  a long serial batch CAN outlive the ~1 h access token. */
+async function downloadOneDriveWithTokenRetry(
+  tokens: OneDriveTokenSource,
+  gate: ThrottleGate,
+  connectionId: string,
+  driveId: string | null,
+  itemId: string,
+): Promise<{ buffer: Buffer; item: OneDriveItem }> {
+  const fetchOnce = async (token: string) => {
+    const item = await getOneDriveItem(driveId, itemId, token, gate);
+    if (item.size != null && item.size > MAX_IMPORT_BYTES) {
+      throw new OneDriveFileError("onedrive_file_too_large");
+    }
+    if (!item.downloadUrl) {
+      // A folder, or an item with no primary stream. Neither is downloadable
+      // and neither is a transient fault, so it takes the same terminal path
+      // as a deleted file rather than burning three retries.
+      throw new OneDriveFileError("onedrive_file_not_found");
+    }
+    return { buffer: await downloadOneDriveFile(item.downloadUrl, MAX_IMPORT_BYTES), item };
+  };
+
+  const token = await tokens.getAccessToken(connectionId);
+  try {
+    return await fetchOnce(token);
+  } catch (err) {
+    if (err instanceof OneDriveFileError && err.code === "onedrive_token_expired") {
+      tokens.invalidate(connectionId);
+      return await fetchOnce(await tokens.getAccessToken(connectionId));
+    }
+    throw err;
+  }
 }
 
 /** Drive bytes with a size guard (metadata first — 5 units beats a wasted
