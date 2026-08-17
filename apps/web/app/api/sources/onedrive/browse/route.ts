@@ -73,16 +73,27 @@ export async function GET(request: NextRequest) {
       ? `/me/drive/items/${encodeURIComponent(itemId)}/children`
       : "/me/drive/root/children";
 
-  const query = new URLSearchParams({
-    $select: ONEDRIVE_CHILD_SELECT,
-    $expand: ONEDRIVE_CHILD_EXPAND,
-    $top: "200",
-  });
-  if (rawSkip) query.set("$skiptoken", rawSkip);
+  const call = (withThumbnails: boolean) => {
+    const q = new URLSearchParams({ $select: ONEDRIVE_CHILD_SELECT, $top: "200" });
+    if (withThumbnails) q.set("$expand", ONEDRIVE_CHILD_EXPAND);
+    if (rawSkip) q.set("$skiptoken", rawSkip);
+    return fetch(`${MS_GRAPH}${base}?${q}`, {
+      headers: { authorization: `Bearer ${session.accessToken}` },
+    }).catch(() => null);
+  };
 
-  const res = await fetch(`${MS_GRAPH}${base}?${query}`, {
-    headers: { authorization: `Bearer ${session.accessToken}` },
-  }).catch(() => null);
+  let res = await call(true);
+
+  // Previews are a nicety; listing the folder is the feature. Graph rejects the
+  // WHOLE query with a 400 when it dislikes the expansion — which is how a
+  // cosmetic change took the browser down in production once already. So a 400
+  // costs one retry without thumbnails instead of an error, and the reason
+  // lands in the log rather than having to be inferred afterwards.
+  if (res?.status === 400) {
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    console.error(`onedrive browse: Graph rejected the thumbnail expansion — ${detail}`);
+    res = await call(false);
+  }
 
   if (!res) return NextResponse.json({ error: "onedrive_browse_failed" }, { status: 502 });
   if (res.status === 401) {
@@ -98,7 +109,11 @@ export async function GET(request: NextRequest) {
     );
   }
   if (!res.ok) {
-    console.error(`onedrive browse: HTTP ${res.status}`);
+    // Graph's own text goes to the server log only, never to the browser
+    // (ADR 0021) — but logging just the status left the last outage
+    // undiagnosable from the outside.
+    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    console.error(`onedrive browse: HTTP ${res.status} — ${detail}`);
     return NextResponse.json({ error: "onedrive_browse_failed" }, { status: 502 });
   }
 
