@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AssetLabel, Board, LabelNames } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
 import { POPOVER_SURFACE } from "@/lib/ui";
-import { AddIcon, ChevronDownIcon } from "@/components/icons/icons";
+import { AddIcon, ChevronRightIcon } from "@/components/icons/icons";
 import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import { BOARD_CHIP_ATTR } from "@/lib/board-drop";
 
@@ -27,12 +27,16 @@ interface BoardBrowserProps {
   dropTargetId?: string | null;
 }
 
-/** Below this the rail becomes a horizontal scroller instead of folding — see
- *  the `.am-hdr-boards` block in globals.css, which is where that is actually
- *  implemented. Mirrored here because the fold has to switch itself off: a chip
- *  hidden for not fitting would be unreachable in a row whose answer to not
- *  fitting is to scroll. Keep the two in step. */
-const SCROLL_BREAKPOINT = 760;
+/** How close to an edge the pointer has to be, mid-drag, for the rail to start
+ *  scrolling itself, and how fast it goes. Photos are dropped onto chips (ADR
+ *  0044) and a held pointer cannot also turn a wheel, so without this a chip
+ *  parked off-screen is not a reachable target. */
+const DRAG_EDGE = 48;
+const DRAG_SPEED = 14;
+
+/** Width of the soft edge that says "there is more this way". Cheaper than a
+ *  scrollbar and it costs no room in a 52px header. */
+const FADE = 18;
 
 /** The Workspace browser in the header (ADR 0044): "All files" (the sorting
  *  views over the whole project) then a chip per workspace — colour dot · name ·
@@ -46,7 +50,6 @@ const SCROLL_BREAKPOINT = 760;
  *  second ↺ in the header, which read as a broken duplicate of the canvas
  *  undo sitting a few hundred pixels away. */
 export default function BoardBrowser({ boards, activeBoardId, counts, labelNames, onSelect, onCreate, onRename, onRecolor, onDelete, dropTargetId = null }: BoardBrowserProps) {
-  const [overflowOpen, setOverflowOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** The chip whose colour picker is open, and where to draw it. Local, like the
@@ -59,74 +62,135 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
    *  is laid out against the viewport, so it escapes — no ancestor here creates
    *  a containing block for it. */
   const [colorFor, setColorFor] = useState<{ id: string; x: number; y: number } | null>(null);
-  const overflowRef = useRef<HTMLDivElement>(null);
-  /** Where to draw the overflow menu. Captured on open for the same reason the
-   *  colour picker's coordinates are: this menu is `position: fixed`, so it has
-   *  no offset parent to hang off. */
-  const [overflowAt, setOverflowAt] = useState<{ x: number; y: number } | null>(null);
   const chipRowRef = useRef<HTMLDivElement>(null);
-  /** How many chips fit the row at its current width. Starts at every board —
-   *  the first layout pass measures and corrects it before the browser paints,
-   *  so the full row is never seen. */
-  const [fitCount, setFitCount] = useState(boards.length);
-  const [scrollMode, setScrollMode] = useState(false);
+  /** What the rail currently hides. `right` drives the counter, the two flags
+   *  drive the edge fades — a fade is drawn only on a side that is actually cut
+   *  off, so a rail with room to spare has hard edges like any other row. */
+  const [cut, setCut] = useState({ right: 0, atStart: true, atEnd: true });
 
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${SCROLL_BREAKPOINT}px)`);
-    const sync = () => setScrollMode(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
-  /** Count the chips that fit, so the cap is the row's real width rather than a
-   *  constant. It used to be a hard `VISIBLE_CAP = 4`: on a 2000px header four
-   *  chips showed and the other eight folded into a "+8" beside 1200px of empty
-   *  space.
+  /** Read what is currently out of view. Every chip is always rendered and
+   *  always reachable — the rail scrolls rather than folding, so nothing is
+   *  hidden from the pointer, from `elementFromPoint` (which is how a photo
+   *  finds a chip to be dropped on) or from a re-measure.
    *
-   *  Every chip stays mounted and keeps its layout box — the ones past the edge
-   *  are hidden with `visibility`, never `display: none`, and the row clips them
-   *  anyway. That is what makes this stable: the measurement cannot change based
-   *  on its own result, so there is no oscillation and no width cache to keep in
-   *  step with a rename. `useLayoutEffect` runs it before paint. */
+   *  Runs on scroll and on resize. `scrollLeft` can be fractional at fractional
+   *  zoom, hence the 1px slack on both ends — without it a rail scrolled fully
+   *  right keeps drawing a fade over a chip that is entirely visible. */
   useLayoutEffect(() => {
     const row = chipRowRef.current;
-    if (!row || scrollMode) return;
+    if (!row) return;
 
-    const measure = () => {
-      const budget = row.clientWidth;
+    const read = () => {
+      const left = row.scrollLeft;
+      const viewRight = left + row.clientWidth;
       const chips = [...row.children] as HTMLElement[];
-      let n = 0;
-      for (const el of chips) {
-        // offsetLeft is relative to the row, which is this element's own offset
-        // parent (it is `position: relative`).
-        if (el.offsetLeft + el.offsetWidth > budget) break;
-        n += 1;
-      }
-      setFitCount(n);
+      setCut({
+        right: chips.filter((el) => el.offsetLeft + el.offsetWidth > viewRight + 1).length,
+        atStart: left <= 1,
+        atEnd: left >= row.scrollWidth - row.clientWidth - 1,
+      });
     };
 
-    measure();
-    const ro = new ResizeObserver(measure);
+    read();
+    row.addEventListener("scroll", read, { passive: true });
+    const ro = new ResizeObserver(read);
     ro.observe(row);
-    return () => ro.disconnect();
-  }, [scrollMode, boards, counts, activeBoardId]);
+    return () => {
+      row.removeEventListener("scroll", read);
+      ro.disconnect();
+    };
+  }, [boards, counts, activeBoardId]);
+
+  /** A wheel mouse has no horizontal axis, and this rail has no vertical one, so
+   *  without translating the two a desktop user without a trackpad simply cannot
+   *  reach the far chips. Native and non-passive because it has to be able to
+   *  swallow the event; `deltaX` is left alone so a trackpad's own horizontal
+   *  swipe keeps working. */
+  useEffect(() => {
+    const row = chipRowRef.current;
+    if (!row) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaX !== 0 || e.deltaY === 0) return;
+      if (row.scrollWidth <= row.clientWidth) return;
+      e.preventDefault();
+      row.scrollLeft += e.deltaY;
+    };
+    row.addEventListener("wheel", onWheel, { passive: false });
+    return () => row.removeEventListener("wheel", onWheel);
+  }, []);
+
+  /** Auto-scroll while something is being dragged over an edge. The canvas drives
+   *  its own pointer drags, so a held button plus a pointer in the edge zone is
+   *  the whole signal — no new state has to be threaded through `useWorkspace`
+   *  for the header to cooperate with a drag that started on the canvas.
+   *
+   *  The rAF loop only exists while the pointer is actually in a zone, and the
+   *  move listener only while a button is down, so an idle header costs nothing. */
+  useEffect(() => {
+    let raf = 0;
+    let dir = 0;
+
+    const step = () => {
+      const row = chipRowRef.current;
+      if (!row || dir === 0) return void (raf = 0);
+      row.scrollLeft += dir * DRAG_SPEED;
+      raf = requestAnimationFrame(step);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const row = chipRowRef.current;
+      if (!row || e.buttons === 0) return;
+      const r = row.getBoundingClientRect();
+      const inRow = e.clientY >= r.top && e.clientY <= r.bottom;
+      dir =
+        !inRow || e.clientX < r.left - DRAG_EDGE || e.clientX > r.right + DRAG_EDGE
+          ? 0
+          : e.clientX < r.left + DRAG_EDGE
+            ? -1
+            : e.clientX > r.right - DRAG_EDGE
+              ? 1
+              : 0;
+      if (dir !== 0 && raf === 0) raf = requestAnimationFrame(step);
+    };
+    const stop = () => {
+      dir = 0;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    };
+    const onDown = () => window.addEventListener("pointermove", onMove);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      stop();
+    };
+
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointermove", onMove);
+      stop();
+    };
+  }, []);
+
+  /** Opening a workspace whose chip is scrolled out of sight would leave the rail
+   *  showing no selection at all. `inline: nearest` scrolls the minimum needed
+   *  and `block: nearest` keeps it from scrolling an ancestor vertically. */
+  useEffect(() => {
+    if (!activeBoardId) return;
+    chipRowRef.current
+      ?.querySelector(`[${BOARD_CHIP_ATTR}="${CSS.escape(activeBoardId)}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [activeBoardId]);
 
   const openColorPicker = (target: HTMLElement, id: string) => {
     const rect = (target.closest(`[${BOARD_CHIP_ATTR}]`) ?? target).getBoundingClientRect();
     setColorFor({ id, x: rect.left, y: rect.bottom + 6 });
   };
 
-  useEffect(() => {
-    if (!overflowOpen) return;
-    const close = (e: PointerEvent) => {
-      if (!overflowRef.current?.contains(e.target as Node)) setOverflowOpen(false);
-    };
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [overflowOpen]);
-
-  // Same click-away as the overflow menu, plus Escape: the picker sits over the
+  // Click-away for the colour picker, plus Escape: the picker sits over the
   // canvas, so a press meant for a tile must not also leave it hanging open.
   useEffect(() => {
     if (!colorFor) return;
@@ -145,41 +209,32 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
     };
   }, [colorFor]);
 
-  // In scroll mode nothing folds — the row scrolls instead, so every chip is
-  // reachable and the menu would be a second answer to a solved problem.
-  const overflow = scrollMode ? [] : boards.slice(fitCount);
-
   const commitRename = () => {
     if (editingId && draft.trim()) onRename(editingId, draft.trim());
     setEditingId(null);
   };
 
-  const chip = (b: Board, folded: boolean) => {
+  const fadeMask = `linear-gradient(to right, ${
+    cut.atStart ? "#000 0" : `transparent 0, #000 ${FADE}px`
+  }, ${cut.atEnd ? "#000 100%" : `#000 calc(100% - ${FADE}px), transparent 100%`})`;
+
+  const chip = (b: Board) => {
     const active = b.id === activeBoardId;
     const armed = b.id === dropTargetId;
     return (
       <div
         key={b.id}
         {...{ [BOARD_CHIP_ATTR]: b.id }}
-        // Kept out of the tab order and off the drop-target hit test while
-        // folded: the row clips it, so a focus ring or a highlight out there
-        // would land on something nobody can see.
-        aria-hidden={folded || undefined}
-        inert={folded || undefined}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
           height: 30,
           padding: "0 11px",
-          // `visibility`, never `display: none` — the box has to survive so the
-          // fit measurement stays independent of its own result.
-          visibility: folded ? "hidden" : "visible",
-          // Chips hold their width and fold; they no longer shrink. Two
-          // mechanisms for one squeeze meant that on a tight row every name
-          // ellipsized to nothing before anything folded, and the rail became a
-          // line of bare coloured dots. `maxWidth` below still ellipsizes a
-          // genuinely long name.
+          // A chip holds its width and scrolls out of the row; it never shrinks.
+          // Letting them shrink squeezed every name toward nothing at once and
+          // left a line of bare coloured dots. `maxWidth` below still ellipsizes
+          // a genuinely long name.
           flex: "0 0 auto",
           borderRadius: 2,
           // Armed beats active: while something is being dragged over it, the
@@ -284,90 +339,62 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
         alignItems: "center",
         gap: 4,
         minWidth: 0,
-        // Fills the header's rail on a wide window, so the chip row below can
-        // measure the space it actually has. Natural width in scroll mode, where
-        // overflowing the rail is exactly how it scrolls.
-        flex: scrollMode ? "0 0 auto" : "1 1 auto",
+        flex: "1 1 auto",
       }}
     >
       {/* No "All files" chip: the project name to the left of this row says the
           same thing, and clicking it is what leaves a Workspace now (ADR 0044
-          amended). Two controls for one scope is one control too many. */}
+          amended). Two controls for one scope is one control too many.
+
+          The rail SCROLLS rather than folding chips away. Folding meant a
+          workspace you could see the name of yesterday was simply absent today,
+          and the chips past the fold were `inert` — not clickable, and not
+          findable by `elementFromPoint`, so a photo could not be dropped on them
+          either. Scrolling keeps every chip a real, reachable object; what
+          changes is only how much of the row you are looking at. */}
       <div
         ref={chipRowRef}
+        className="am-hdr-chiprow"
         style={{
-          // `relative` so a chip's offsetLeft is measured against this row.
           position: "relative",
           display: "flex",
           alignItems: "center",
           gap: 4,
           minWidth: 0,
-          flex: scrollMode ? "0 0 auto" : "1 1 auto",
-          overflow: scrollMode ? "visible" : "hidden",
+          flex: "1 1 auto",
+          overflowX: "auto",
+          overflowY: "hidden",
+          // No visible scrollbar: a 52px header has no room for one, and the
+          // fades plus the counter already say there is more. The rail is over a
+          // canvas that claims every gesture with `touch-action: none`, so this
+          // is what hands the horizontal drag back to the row.
+          scrollbarWidth: "none",
+          touchAction: "pan-x",
+          overscrollBehaviorX: "contain",
+          // Fade only the side that is actually cut off — a rail with room to
+          // spare gets hard edges, so the fade always MEANS something.
+          maskImage: cut.atStart && cut.atEnd ? undefined : fadeMask,
+          WebkitMaskImage: cut.atStart && cut.atEnd ? undefined : fadeMask,
         }}
       >
-        {boards.map((b, i) => chip(b, !scrollMode && i >= fitCount))}
+        {boards.map(chip)}
       </div>
 
-      {overflow.length > 0 && (
-        <div ref={overflowRef} style={{ position: "relative", flex: "0 0 auto" }}>
-          <button
-            onClick={(e) => {
-              if (overflowOpen) {
-                setOverflowOpen(false);
-                return;
-              }
-              const r = e.currentTarget.getBoundingClientRect();
-              setOverflowAt({ x: r.left, y: r.bottom + 6 });
-              setOverflowOpen(true);
-            }}
-            aria-haspopup="menu"
-            aria-expanded={overflowOpen}
-            style={{ display: "flex", alignItems: "center", gap: 3, height: 30, padding: "0 8px", border: 0, borderRadius: 2, background: "transparent", color: "var(--t3)", fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}
-            title={`${overflow.length} more`}
-          >
-            +{overflow.length}
-            <ChevronDownIcon width={10} height={10} stroke="currentColor" />
-          </button>
-          {/* `fixed`, not `absolute` — and this is the whole bug it fixes. The
-              header clips this rail with an inline `overflow: hidden` so chips
-              never run under SHARE, and an absolutely positioned menu at
-              `top: 100%` renders BELOW that box: it was clipped away entirely,
-              so clicking "+N ▾" toggled state and showed nothing. The colour
-              picker in this same file already carried the comment explaining
-              this; the fix had just never reached the menu. Kept inside
-              `overflowRef` so the click-away test still recognises its own
-              items, and clamped so the last chip's menu cannot open off-screen. */}
-          {overflowOpen && overflowAt && (
-            <div
-              role="menu"
-              style={{
-                ...POPOVER_SURFACE,
-                position: "fixed",
-                left: Math.max(8, Math.min(overflowAt.x, window.innerWidth - 176)),
-                top: overflowAt.y,
-                minWidth: 160,
-                padding: 4,
-              }}
-            >
-              {overflow.map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => {
-                    onSelect(b.id);
-                    setOverflowOpen(false);
-                  }}
-                  className="am-mi"
-                  style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", height: 30, padding: "0 8px", border: 0, borderRadius: 2, background: "transparent", color: "var(--t1)", fontFamily: "inherit", fontSize: 12.5, cursor: "pointer", textAlign: "left" }}
-                >
-                  <span style={{ width: 11, height: 11, borderRadius: "50%", background: LABEL_COLORS[b.color], flex: "0 0 auto" }} />
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
-                  <span style={{ fontSize: 11, color: "var(--t3)" }}>{counts[b.id] ?? b.assetIds.length}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* Not a menu any more — a readout. It says how many chips are off to the
+          right and scrolls them into view when clicked. The dropdown it replaced
+          was a second, competing way to reach a workspace, and it listed exactly
+          the chips the rail had chosen to hide; with a scroller there is nothing
+          to hide and nothing to list. */}
+      {cut.right > 0 && (
+        <button
+          onClick={() => chipRowRef.current?.scrollBy({ left: chipRowRef.current.clientWidth * 0.8, behavior: "smooth" })}
+          aria-label={`${cut.right} more to the right — scroll`}
+          title={`${cut.right} more — click to scroll`}
+          style={{ display: "flex", alignItems: "center", gap: 3, height: 30, padding: "0 8px", border: 0, borderRadius: 2, background: "transparent", color: "var(--t3)", fontFamily: "inherit", fontSize: 12, cursor: "pointer", flex: "0 0 auto" }}
+        >
+          +{cut.right}
+          <ChevronRightIcon width={10} height={10} stroke="currentColor" />
+        </button>
       )}
 
       <button
