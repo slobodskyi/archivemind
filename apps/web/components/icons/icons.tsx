@@ -448,6 +448,36 @@ export function LabelsIcon({ width = 14, height = 14, ...props }: IconProps) {
   );
 }
 
+/* Move the selection into a topic. Deliberately NOT `ViewSenseIcon`: that glyph
+   is the TOPIC view's own identity in `ViewSwitcher`, sitting ~60px below this
+   button, so using it here said "Topic" twice and named no action. An arrow
+   entering a ring says the action — put these files IN that pile. Same reason
+   `LabelsIcon` gave up its three circles above: one meaning, one glyph. */
+export function TopicMoveIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx={16.5} cy={12} r={5.5} />
+      <path d="M2.5 12h8.5" />
+      <path d="m7.5 8.5 3.5 3.5-3.5 3.5" />
+    </svg>
+  );
+}
+
+/* Return to AI: drop the manual assignment and fall back to the machine answer.
+   It is the INVERSE of TopicMoveIcon, so it must not share a glyph with it —
+   which is what the old shared `ViewSenseIcon` did, marking a move and its undo
+   identically. A U-turn back toward a sparkle reads as "give it back to the
+   model". */
+export function TopicResetIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M20 17a7 7 0 0 0-7-7H4.5" />
+      <path d="m8 6.5-3.5 3.5L8 13.5" />
+      <path d="M17.6 3.2l.75 2 2 .75-2 .75-.75 2-.75-2-2-.75 2-.75z" />
+    </svg>
+  );
+}
+
 export function DataSourcesIcon({ width = 15, height = 15, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>

@@ -60,11 +60,15 @@ body {
   }
 
   /* A direct consequence of the rule above, and it belongs here rather than in
-     a width query: growing the view switcher's buttons to 44 makes the strip
-     52px tall, so the bar that stacks on top of it can no longer sit at the
-     66px that cleared a 36px strip. Without this a touch TABLET — coarse
-     pointer, but wider than the 760px phone breakpoint — draws the bar 6px
-     into the switcher. */
+     a width query: growing the view switcher's buttons to 44 makes its strip
+     52px tall, so the bar stacked on top has to clear 52 + the switcher's own
+     20px offset. Without this a touch TABLET — coarse pointer, but wider than
+     the 760px phone breakpoint — draws the bar into the switcher.
+
+     This currently equals the component's inline desktop value, because the
+     desktop strip is 42px and takes the same 72 to clear it with a 10px gap.
+     Keep the rule: the two arrive at one number for different reasons, and the
+     next change to either height separates them again. */
   .am-bar-high {
     bottom: 72px;
   }
