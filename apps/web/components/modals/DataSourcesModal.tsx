@@ -1,5 +1,5 @@
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
-import { CloseIcon, GDriveIcon, DropboxIcon } from "@/components/icons/icons";
+import { CloseIcon, GDriveIcon, DropboxIcon, OneDriveIcon } from "@/components/icons/icons";
 
 export interface GdriveConnectionState {
   connected: boolean;
@@ -10,16 +10,23 @@ export interface GdriveConnectionState {
 interface DataSourcesModalProps {
   open: boolean;
   onClose: () => void;
-  /** Dropbox only (points at Add files — Chooser needs no connection); gdrive has its own handlers. */
+  /** Dropbox only (points at Add files — Chooser needs no connection); the
+   *  connection-backed providers each have their own handlers. */
   onConnect: (name: string) => void;
   gdrive: GdriveConnectionState;
   onGdriveConnect: () => void;
   onGdriveDisconnect: () => void;
+  onedrive: GdriveConnectionState;
+  onOneDriveConnect: () => void;
+  onOneDriveDisconnect: () => void;
 }
 
 const CONNECTABLE = [
   { key: "gdrive", label: "Google Drive", desc: "Import photos from your Drive.", Icon: GDriveIcon },
   { key: "dropbox", label: "Dropbox", desc: "No account link needed — pick files in Add files.", Icon: DropboxIcon },
+  // The only provider that can import a folder TREE — worth saying, because it
+  // is the reason to pick it over Drive (ADR 0047 §1).
+  { key: "onedrive", label: "OneDrive", desc: "Import whole folders, subfolders included.", Icon: OneDriveIcon },
 ] as const;
 
 export default function DataSourcesModal({
@@ -29,6 +36,9 @@ export default function DataSourcesModal({
   gdrive,
   onGdriveConnect,
   onGdriveDisconnect,
+  onedrive,
+  onOneDriveConnect,
+  onOneDriveDisconnect,
 }: DataSourcesModalProps) {
   if (!open) return null;
   return (
@@ -61,9 +71,11 @@ export default function DataSourcesModal({
         </div>
         <div style={{ padding: "16px 20px 20px" }}>
           {CONNECTABLE.map(({ key, label, desc, Icon }) => {
-            const isGdrive = key === "gdrive";
-            const connected = isGdrive && gdrive.connected;
-            const busy = isGdrive && gdrive.busy;
+            // Dropbox is the odd one out: no connection to hold, so its row
+            // points at Add files instead of toggling anything (ADR 0008).
+            const state = key === "gdrive" ? gdrive : key === "onedrive" ? onedrive : null;
+            const connected = state?.connected ?? false;
+            const busy = state?.busy ?? false;
             return (
               <div
                 key={key}
@@ -84,15 +96,15 @@ export default function DataSourcesModal({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {connected ? `Connected${gdrive.email ? ` as ${gdrive.email}` : ""}` : desc}
+                    {connected ? `Connected${state?.email ? ` as ${state.email}` : ""}` : desc}
                   </div>
                 </div>
                 <button
                   onClick={() => {
-                    if (!isGdrive) return onConnect(label);
+                    if (!state) return onConnect(label);
                     if (busy) return;
-                    if (connected) onGdriveDisconnect();
-                    else onGdriveConnect();
+                    if (key === "gdrive") return connected ? onGdriveDisconnect() : onGdriveConnect();
+                    return connected ? onOneDriveDisconnect() : onOneDriveConnect();
                   }}
                   disabled={busy}
                   style={{

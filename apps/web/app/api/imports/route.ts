@@ -28,6 +28,8 @@ interface NormItem {
   mimeType: string;
   sizeBytes: number | null;
   link?: string; // dropbox only
+  driveId?: string; // onedrive only → files.source_drive_id (the other id half)
+  path?: string; // onedrive only → files.source_path (display/clustering)
 }
 
 export async function POST(request: Request) {
@@ -51,19 +53,26 @@ export async function POST(request: Request) {
   // workspace membership) — connections are personal grants, and without this
   // any editor could exercise another member's refresh token (ADR 0025).
   let connectionId: string | null = null;
-  if (data.provider === "gdrive") {
+  if (data.provider === "gdrive" || data.provider === "onedrive") {
+    // Per-provider copy, one check: a connection is a PERSONAL grant, so the
+    // caller must own it — workspace membership alone would let any editor
+    // exercise another member's refresh token.
+    const codes =
+      data.provider === "gdrive"
+        ? { failed: "drive_connect_failed", missing: "drive_not_connected", revoked: "drive_connection_revoked" }
+        : { failed: "onedrive_connect_failed", missing: "onedrive_not_connected", revoked: "onedrive_connection_revoked" };
     const { data: connRows, error: connErr } = await supabase
       .from("source_connections")
       .select("id, user_id, status, provider")
       .eq("id", data.connectionId)
       .eq("workspace_id", workspaceId);
-    if (connErr) return NextResponse.json({ error: "drive_connect_failed" }, { status: 500 });
+    if (connErr) return NextResponse.json({ error: codes.failed }, { status: 500 });
     const conn = connRows?.[0];
-    if (!conn || conn.provider !== "gdrive" || conn.user_id !== user.id) {
-      return NextResponse.json({ error: "drive_not_connected" }, { status: 403 });
+    if (!conn || conn.provider !== data.provider || conn.user_id !== user.id) {
+      return NextResponse.json({ error: codes.missing }, { status: 403 });
     }
     if (conn.status !== "active") {
-      return NextResponse.json({ error: "drive_connection_revoked" }, { status: 409 });
+      return NextResponse.json({ error: codes.revoked }, { status: 409 });
     }
     connectionId = conn.id as string;
   }
@@ -80,22 +89,56 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "import_backlog" }, { status: 429 });
   }
 
-  const items: NormItem[] =
-    data.provider === "gdrive"
-      ? data.items.map((i) => ({
-          key: i.fileId,
+  // OneDrive is the only provider whose selection can contain FOLDERS, and
+  // that is the whole reason it exists beside Drive (ADR 0047 §1). A folder
+  // never becomes an asset here: it becomes an instruction the worker walks
+  // (D5). It has to be the worker, because this request is capped at 500 items
+  // and runs under a serverless timeout, while one folder can hold 18,000.
+  const pickedFolders = data.provider === "onedrive" ? data.items.filter((i) => i.isFolder) : [];
+
+  let items: NormItem[];
+  if (data.provider === "gdrive") {
+    items = data.items.map((i) => ({
+      key: i.fileId,
+      name: i.name,
+      mimeType: i.mimeType,
+      sizeBytes: i.sizeBytes ?? null,
+    }));
+  } else if (data.provider === "dropbox") {
+    items = data.items.map((i) => ({
+      key: i.sourceId,
+      name: i.name,
+      mimeType: mimeFromFilename(i.name),
+      sizeBytes: i.sizeBytes ?? null,
+      link: i.link,
+    }));
+  } else {
+    items = data.items
+      .filter((i) => !i.isFolder)
+      .map((i) => {
+        // Prefer the extension over Graph's own MIME: Graph reports plenty of
+        // camera files as application/octet-stream, and mimeFromFilename is
+        // what uploads and Dropbox already key asset kind off. Graph's value
+        // is the fallback for extensions we don't know.
+        const byName = mimeFromFilename(i.name);
+        return {
+          key: i.itemId,
           name: i.name,
-          mimeType: i.mimeType,
+          mimeType: byName !== "application/octet-stream" ? byName : (i.mimeType ?? byName),
           sizeBytes: i.sizeBytes ?? null,
-        }))
-      : data.items.map((i) => ({
-          key: i.sourceId,
-          name: i.name,
-          mimeType: mimeFromFilename(i.name),
-          sizeBytes: i.sizeBytes ?? null,
-          link: i.link,
-        }));
+          driveId: i.driveId,
+          path: i.path,
+        };
+      });
+  }
   const itemByKey = new Map(items.map((i) => [i.key, i]));
+
+  // A selection of nothing but folders is legitimate — and is in fact the
+  // headline case — so "no files" is only an error when there is also nothing
+  // to expand.
+  if (items.length === 0 && pickedFolders.length === 0) {
+    return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  }
 
   // Pre-dedupe on the provider-stable file id. gdrive keys are scoped to the
   // caller's connection; dropbox keys are workspace-wide (no connection —
@@ -110,10 +153,17 @@ export async function POST(request: Request) {
     .select("source_file_id, asset_id, assets!inner ( status )")
     .eq("workspace_id", workspaceId)
     .in("source_file_id", [...itemByKey.keys()]);
+  // onedrive scopes by connection exactly like gdrive. Its identity is really
+  // (driveId, itemId), but our browser only ever lists the connection's OWN
+  // drive, so itemId is unique within this scope; source_drive_id is stored for
+  // provenance and re-fetch, and the worker's content-hash dedup backstops the
+  // day a second drive appears (ADR 0047 §8.3 — the pair is never the dedup key).
   const { data: existing, error: exErr } =
-    data.provider === "gdrive"
-      ? await dedupeQuery.eq("source_connection_id", connectionId)
-      : await dedupeQuery.eq("origin", "dropbox").is("source_connection_id", null);
+    items.length === 0
+      ? { data: [], error: null }
+      : data.provider === "dropbox"
+        ? await dedupeQuery.eq("origin", "dropbox").is("source_connection_id", null)
+        : await dedupeQuery.eq("source_connection_id", connectionId);
   if (exErr) return NextResponse.json({ error: "drive_import_failed" }, { status: 500 });
   type ExistingRow = { source_file_id: string; asset_id: string; assets: { status: string } };
   const existingRows = (existing ?? []) as unknown as ExistingRow[];
@@ -165,7 +215,9 @@ export async function POST(request: Request) {
   let assetIds: string[] = [];
   let jobId: string | null = null;
   const ingestIds: string[] = [...revivedIds];
-  if (fresh.length > 0 || revivedIds.length > 0) {
+  // pickedFolders alone is enough to warrant a job: a folders-only import
+  // starts with zero assets and discovers every one of them in the worker.
+  if (fresh.length > 0 || revivedIds.length > 0 || pickedFolders.length > 0) {
     const { data: assets, error: assetErr } = fresh.length === 0
       ? { data: [], error: null }
       : await supabase
@@ -195,10 +247,16 @@ export async function POST(request: Request) {
             asset_id: assetIds[idx],
             workspace_id: workspaceId,
             origin: data.provider,
-            r2_key: null, // gdrive: stays null (§6); dropbox: the worker sets it after the one-time fetch
+            // gdrive AND onedrive: stays null (§6) — both hold a durable
+            // connection, so the worker re-reads the bytes at processing time
+            // and the original is never copied into R2. dropbox is the
+            // exception: no connection, ~4 h links, so the worker fetches once
+            // into R2 and sets this.
+            r2_key: null,
             source_connection_id: connectionId,
             source_file_id: i.key,
-            source_path: null,
+            source_drive_id: i.driveId ?? null,
+            source_path: i.path ?? null,
             mime_type: i.mimeType,
             byte_size: i.sizeBytes,
           })),
@@ -244,6 +302,22 @@ export async function POST(request: Request) {
         payload: ingestJobPayloadSchema.parse({
           asset_ids: ingestIds,
           ...(dropboxLinks && dropboxLinks.length > 0 ? { dropbox: dropboxLinks } : {}),
+          // The folder half (ADR 0047 D5). project_id rides along because
+          // expansion CREATES assets and they must land in the project this
+          // import targeted — nothing downstream could infer that later.
+          ...(pickedFolders.length > 0 && connectionId
+            ? {
+                onedrive_expand: {
+                  connection_id: connectionId,
+                  project_id: projectId ?? null,
+                  folders: pickedFolders.map((f) => ({
+                    drive_id: f.driveId,
+                    item_id: f.itemId,
+                    name: f.name,
+                  })),
+                },
+              }
+            : {}),
         }),
         total_items: ingestIds.length,
         done_items: 0,

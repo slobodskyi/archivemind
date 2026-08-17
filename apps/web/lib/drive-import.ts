@@ -3,6 +3,7 @@ import {
   type DropboxImportItem,
   type ImportItem,
   type ImportResponse,
+  type OneDriveImportItem,
 } from "@archivemind/shared";
 
 /** Client side of POST /api/imports (ADR 0025). The Picker can return
@@ -30,7 +31,11 @@ export interface DriveImportResult {
 
 export type CloudImportSource =
   | { provider: "gdrive"; connectionId: string; items: ImportItem[] }
-  | { provider: "dropbox"; items: DropboxImportItem[] };
+  | { provider: "dropbox"; items: DropboxImportItem[] }
+  // onedrive items may be FOLDERS (ADR 0047). They chunk like any other item —
+  // each chunk becomes its own job, and a chunk carrying folders gets an
+  // expansion instruction alongside its files.
+  | { provider: "onedrive"; connectionId: string; items: OneDriveImportItem[] };
 
 export async function runCloudImport(input: CloudImportSource & {
   projectId?: string;
@@ -43,7 +48,7 @@ export async function runCloudImport(input: CloudImportSource & {
     linkedExisting: 0,
     failedChunks: [],
   };
-  const allItems: (ImportItem | DropboxImportItem)[] = input.items;
+  const allItems: (ImportItem | DropboxImportItem | OneDriveImportItem)[] = input.items;
   const chunks = chunkImportItems(allItems);
   let submitted = 0;
   for (const chunk of chunks) {
@@ -53,7 +58,9 @@ export async function runCloudImport(input: CloudImportSource & {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           provider: input.provider,
-          ...(input.provider === "gdrive" ? { connectionId: input.connectionId } : {}),
+          ...(input.provider === "gdrive" || input.provider === "onedrive"
+            ? { connectionId: input.connectionId }
+            : {}),
           projectId: input.projectId,
           items: chunk,
         }),

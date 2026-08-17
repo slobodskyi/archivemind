@@ -1,12 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useGdriveConnection } from "@/hooks/useGdriveConnection";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import { driveErrorMessage } from "@/lib/drive-errors";
 import { runCloudImport, type DriveImportResult } from "@/lib/drive-import";
 import { DropboxUiError, openDropboxChooser } from "@/lib/dropbox-chooser";
+import type { OneDriveImportItem } from "@archivemind/shared";
+import OneDriveBrowser from "@/components/import/OneDriveBrowser";
+import {
+  useOneDriveConnection,
+  useOneDriveRedirectResult,
+} from "@/hooks/useOneDriveConnection";
 import { DriveAuthError, openDrivePicker, requestPickerToken } from "@/lib/google-identity";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import {
@@ -32,7 +38,7 @@ import type {
  *  canvas. Drops on the modal are handled here (stopPropagation), so the global
  *  UploadManager never double-handles them. */
 
-type Source = "local" | "gdrive" | "dropbox";
+type Source = "local" | "gdrive" | "dropbox" | "onedrive";
 type Phase = "idle" | "uploading" | "done";
 type DrivePhase = "idle" | "picking" | "importing" | "done";
 
@@ -164,7 +170,31 @@ export default function ImportModal({
   const [dbxProg, setDbxProg] = useState<{ submitted: number; total: number }>({ submitted: 0, total: 0 });
   const [dbxResult, setDbxResult] = useState<DriveImportResult | null>(null);
   const dbxBusy = dbxPhase === "picking" || dbxPhase === "importing";
-  const blocked = phase === "uploading" || busyDrive || dbxBusy;
+
+  // ── OneDrive pane state (ADR 0047) ─────────────────────────────────────
+  const [odMsg, setOdMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  const notifyOneDrive = useCallback(
+    (text: string, kind: "ok" | "error" = "error") => setOdMsg({ text, kind }),
+    [],
+  );
+  const [odPhase, setOdPhase] = useState<DrivePhase>("idle");
+  const [odProg, setOdProg] = useState<{ submitted: number; total: number }>({ submitted: 0, total: 0 });
+  const [odResult, setOdResult] = useState<DriveImportResult | null>(null);
+  const [odFolders, setOdFolders] = useState(0);
+  const {
+    onedrive,
+    refresh: refreshOneDrive,
+    connect: connectOneDrive,
+  } = useOneDriveConnection(notifyOneDrive);
+  const odBusy = odPhase === "picking" || odPhase === "importing";
+  // Connecting leaves the page entirely, so the outcome comes back as a query
+  // parameter rather than a promise. Land on the OneDrive pane when it does.
+  useOneDriveRedirectResult(notifyOneDrive, () => {
+    setSource("onedrive");
+    void refreshOneDrive();
+  });
+
+  const blocked = phase === "uploading" || busyDrive || dbxBusy || odBusy;
 
   // The modal stays mounted while hidden. Reset its local File references on
   // an owner-driven close; the guarded render adjustment avoids an extra
@@ -180,6 +210,10 @@ export default function ImportModal({
   useEffect(() => {
     if (open && source === "gdrive" && !gdrive.loaded) void refreshGdrive();
   }, [open, source, gdrive.loaded, refreshGdrive]);
+
+  useEffect(() => {
+    if (open && source === "onedrive" && !onedrive.loaded) void refreshOneDrive();
+  }, [open, source, onedrive.loaded, refreshOneDrive]);
 
   // Esc closes like every other modal — owned here (not the global handler in
   // useWorkspace) because closing must be blocked while an upload/import is in
@@ -259,6 +293,33 @@ export default function ImportModal({
     } catch (err) {
       setDbxMsg({ text: driveErrorMessage(err instanceof DropboxUiError ? err.code : undefined), kind: "error" });
       setDbxPhase("idle");
+    }
+  }
+
+  async function importFromOneDrive(items: OneDriveImportItem[]) {
+    if (odBusy || !onedrive.connectionId) return;
+    setOdMsg(null);
+    setOdProg({ submitted: 0, total: items.length });
+    // Remembered for the result copy: a folder import's real total is unknown
+    // until the worker has walked it, so the done-state must say "scanning"
+    // rather than report the selection count as if it were the file count.
+    setOdFolders(items.filter((i) => i.isFolder).length);
+    setOdPhase("importing");
+    try {
+      const res = await runCloudImport({
+        provider: "onedrive",
+        items,
+        connectionId: onedrive.connectionId,
+        projectId: isProject ? projectId : undefined,
+        onProgress: (submitted, total) => setOdProg({ submitted, total }),
+      });
+      setOdResult(res);
+      if (res.failedChunks.length > 0) notifyOneDrive(driveErrorMessage(res.failedChunks[0]));
+      if (res.assetIds.length > 0 || res.linkedExisting > 0) router.refresh();
+      setOdPhase("done");
+    } catch {
+      notifyOneDrive(driveErrorMessage("onedrive_import_failed"));
+      setOdPhase("idle");
     }
   }
 
@@ -449,6 +510,7 @@ export default function ImportModal({
           <SourceItem label="Local files" active={source === "local"} onClick={() => setSource("local")} icon={<UploadIcon />} />
           <SourceItem label="Google Drive" active={source === "gdrive"} onClick={() => setSource("gdrive")} icon={<CloudIcon />} />
           <SourceItem label="Dropbox" active={source === "dropbox"} onClick={() => setSource("dropbox")} icon={<CloudIcon />} />
+          <SourceItem label="OneDrive" active={source === "onedrive"} onClick={() => setSource("onedrive")} icon={<CloudIcon />} />
           <div style={{ flex: 1 }} />
           <div style={{ fontSize: 10.5, color: "var(--tm)", padding: "0 6px", lineHeight: 1.5 }}>
             {isProject ? `Files are added to “${projectName}”.` : "Files are added to your archive."}
@@ -459,7 +521,13 @@ export default function ImportModal({
         <div style={{ flex: 1, padding: 16, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <span style={{ fontSize: 12.5, color: "var(--t2)" }}>
-              {source === "local" ? "Local files" : source === "gdrive" ? "Google Drive" : "Dropbox"}
+              {source === "local"
+                ? "Local files"
+                : source === "gdrive"
+                  ? "Google Drive"
+                  : source === "onedrive"
+                    ? "OneDrive"
+                    : "Dropbox"}
             </span>
             <button
               onClick={blocked ? undefined : closeModal}
@@ -614,6 +682,88 @@ export default function ImportModal({
                 </>
               )}
             </div>
+          ) : source === "onedrive" ? (
+            !onedrive.loaded ? (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "var(--t3)" }}>
+                Checking…
+              </div>
+            ) : !onedrive.connected ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--tm)", textAlign: "center", padding: 20, border: "2px dashed var(--bdh)", borderRadius: 3, background: "var(--bg)" }}>
+                <CloudIcon large />
+                <div style={{ fontSize: 13, color: "var(--t1)" }}>Import whole folders from OneDrive</div>
+                <div style={{ fontSize: 11.5, maxWidth: 340, lineHeight: 1.5 }}>
+                  Unlike Drive, OneDrive lets us walk a folder for you — pick one folder and everything
+                  inside it is imported, subfolders included. Read-only access to your own files.
+                </div>
+                {odMsg && <div style={{ fontSize: 10.5, color: odMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{odMsg.text}</div>}
+                <button
+                  onClick={connectOneDrive}
+                  style={{ marginTop: 4, padding: "8px 16px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  Connect OneDrive
+                </button>
+                <div style={{ fontSize: 10.5, color: "var(--tm)" }}>
+                  You&rsquo;ll be sent to Microsoft to sign in, then back here.
+                </div>
+              </div>
+            ) : odPhase === "importing" ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--tm)", textAlign: "center", padding: 20 }}>
+                <CloudIcon large />
+                <div style={{ fontSize: 13, color: "var(--t1)" }}>
+                  Submitting {odProg.submitted}/{odProg.total}…
+                </div>
+                <div style={{ width: 220, height: 3, background: "var(--bg-el)", borderRadius: 999 }}>
+                  <div style={{ height: 3, width: `${odProg.total ? Math.round((odProg.submitted / odProg.total) * 100) : 0}%`, background: "var(--ac)", borderRadius: 999, transition: "width .15s linear" }} />
+                </div>
+              </div>
+            ) : odPhase === "done" && odResult ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--tm)", textAlign: "center", padding: 20 }}>
+                <CloudIcon large />
+                {odFolders > 0 ? (
+                  <>
+                    <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 700 }}>
+                      Scanning {odFolders} folder{odFolders === 1 ? "" : "s"}…
+                    </div>
+                    {/* The count is genuinely unknown here — the walk happens in
+                        the worker (ADR 0047 D5), so promising a number now would
+                        be inventing one. Progress arrives on the canvas. */}
+                    <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                      Files will appear on the canvas as they&rsquo;re found. You can close this.
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 13, color: "var(--ac)", fontWeight: 700 }}>
+                    {odResult.assetIds.length} file{odResult.assetIds.length === 1 ? "" : "s"} imported
+                  </div>
+                )}
+                {odResult.linkedExisting > 0 && (
+                  <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                    {odResult.linkedExisting} already imported — added to this project
+                  </div>
+                )}
+                {odResult.skippedDuplicates - odResult.linkedExisting > 0 && (
+                  <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                    {odResult.skippedDuplicates - odResult.linkedExisting} duplicate
+                    {odResult.skippedDuplicates - odResult.linkedExisting === 1 ? "" : "s"} skipped
+                  </div>
+                )}
+                {odMsg && <div style={{ fontSize: 10.5, color: odMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{odMsg.text}</div>}
+                <button
+                  onClick={() => { setOdPhase("idle"); setOdResult(null); setOdMsg(null); setOdFolders(0); }}
+                  style={{ marginTop: 6, padding: "7px 12px", background: "var(--bg-el)", color: "var(--t2)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  Import more
+                </button>
+              </div>
+            ) : (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
+                <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
+                  Connected{onedrive.email ? ` as ${onedrive.email}` : ""}
+                </div>
+                {odMsg && <div style={{ fontSize: 10.5, color: odMsg.kind === "ok" ? "var(--ac)" : "var(--red)" }}>{odMsg.text}</div>}
+                <OneDriveBrowser onImport={importFromOneDrive} busy={odBusy} />
+              </div>
+            )
           ) : (
             <>
               <div
