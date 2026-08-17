@@ -129,13 +129,18 @@ function WorkspaceActionBar({
     <div
       // Below 760px the bar spans the width and wraps to a second row. Its ten
       // targets at the 44px touch minimum are wider than a phone, and centred
-      // that put both ends off screen. `am-bar-high` keeps it on the upper row.
-      className="am-bar am-bar-high"
+      // that put both ends off screen.
+      className="am-bar am-bar-low"
       style={{
         position: "absolute",
         left: "50%",
-        // Stacks above ViewSwitcher, which owns bottom:20.
-        bottom: 66,
+        // 20, not the 66 this sat at for a year: 66 was reserved for the
+        // ViewSwitcher underneath, and the two can never be on screen at once.
+        // This bar needs `activeBoardId !== null` and the switcher renders only
+        // when it is null, so the gap was always empty — invisible on a desktop
+        // canvas, and an obvious floating slab once the bar wrapped to two rows
+        // on a phone.
+        bottom: 20,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",

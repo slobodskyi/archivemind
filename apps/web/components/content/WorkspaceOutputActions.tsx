@@ -7,7 +7,12 @@ interface WorkspaceOutputActionsProps {
   onCreate: () => void;
 }
 
+import { LogsIcon, DownloadIcon } from "@/components/icons/icons";
+
 const base = {
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
   height: 30,
   borderRadius: 2,
   padding: "0 10px",
@@ -34,11 +39,18 @@ export default function WorkspaceOutputActions({
         aria-label={`Drafts${draftCount ? `, ${draftCount}` : ""}`}
         style={{ ...base, background: "transparent", border: "1px solid var(--bd)", color: "var(--t2)" }}
       >
-        DRAFTS{draftCount ? ` ${draftCount}` : ""}
+        {/* The icons exist for the phone, where the two secondary actions drop
+            their words: on a 390px header row these three cost ~220px, which
+            leaves the workspace chips beside them too little to show a name.
+            Create keeps its label at every size — it is the primary action and
+            an unlabelled glyph for "make a publication" would be a guess. */}
+        <LogsIcon width={12} height={12} />
+        <span className="am-wsa-label">DRAFTS{draftCount ? ` ${draftCount}` : ""}</span>
       </button>
       <button
         onClick={onDownload}
         disabled={sourceCount === 0}
+        aria-label={selectedCount ? `Download selected ${selectedCount}` : `Download all ${photoCount}`}
         title={selectedCount ? `Download selected ${selectedCount}` : `Download all ${photoCount}`}
         style={{
           ...base,
@@ -48,7 +60,8 @@ export default function WorkspaceOutputActions({
           cursor: sourceCount ? "pointer" : "default",
         }}
       >
-        DOWNLOAD{selectedCount ? ` ${selectedCount}` : ""}
+        <DownloadIcon width={12} height={12} />
+        <span className="am-wsa-label">DOWNLOAD{selectedCount ? ` ${selectedCount}` : ""}</span>
       </button>
       <button
         onClick={onCreate}

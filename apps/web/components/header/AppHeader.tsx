@@ -202,19 +202,39 @@ export default function AppHeader({
           "+N" rather than running under SHARE). Being a sibling is what lets it
           leave the header entirely below 760px and float as its own full-width
           scroller, without dragging the project name with it. */}
-      {afterProject && (
-        <>
-          <ChevronRightIcon
-            className="am-hdr-sep"
-            width={12}
-            height={12}
-            stroke="var(--t3)"
-            style={{ flex: "0 0 auto", opacity: 0.6 }}
-          />
-          <div className="am-hdr-boards" style={{ display: "flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
-            {afterProject}
-          </div>
-        </>
+      {/* `display: contents` on a wide window, so these two lay out as direct
+          children of the header exactly as they did before this wrapper
+          existed. Below 760px the wrapper becomes the real second row and they
+          share it: the workspace rail scrolls in whatever the outcome actions
+          leave. That pairing is the point — the chips say WHICH workspace, the
+          actions act on the open one, so the row reads as one thought. It also
+          resolves the collision that put them here: DRAFTS/DOWNLOAD/CREATE add
+          ~220px to a right-hand cluster that already never shrinks, which with
+          home and the project name came to ~500px of demand on a 390px header,
+          and the overflow drew the project chip straight over DRAFTS. */}
+      {(afterProject || workspaceActions) && (
+        <div className="am-hdr-row2">
+          {afterProject && (
+            <>
+              <ChevronRightIcon
+                className="am-hdr-sep"
+                width={12}
+                height={12}
+                stroke="var(--t3)"
+                style={{ flex: "0 0 auto", opacity: 0.6 }}
+              />
+              <div className="am-hdr-boards" style={{ display: "flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+                {afterProject}
+              </div>
+            </>
+          )}
+          {workspaceActions && (
+            <div className="am-hdr-wsactions" style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
+              {workspaceActions}
+              <span className="am-hdr-sep" style={{ width: 1, height: 20, background: "var(--bd)" }} />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Never shrinks: undo/redo, zoom, SHARE and the avatar are fixed chrome,
@@ -222,8 +242,6 @@ export default function AppHeader({
           margin matters only outside a project, where there is no rail to grow
           into the gap and hold this against the right edge. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto", marginLeft: "auto" }}>
-        {workspaceActions}
-        {workspaceActions && <span style={{ width: 1, height: 20, background: "var(--bd)" }} />}
         <button
           onClick={onUndo}
           title="Undo"
