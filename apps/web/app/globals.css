@@ -455,7 +455,10 @@ textarea {
     display: none;
   }
 
-  .am-hdr-wsactions button {
+  /* The outcome actions float on the canvas now, not in the header row — but
+     they are still three buttons on a 390px screen, and there they compete with
+     the photos underneath instead of with the chips. Same compaction. */
+  .am-wsactions button {
     padding: 0 9px !important;
     min-width: 0 !important;
   }
