@@ -63,6 +63,12 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
           <button
             key={key}
             onClick={() => onSelect(key)}
+            // `am-tb` is the app-wide touch-size rule (44px on a coarse
+            // pointer). This control was the one piece of bottom chrome
+            // without it: 28px tall next to 44px action buttons, which read as
+            // two different sizes of the same thing and was under the target
+            // size the rest of the app already commits to.
+            className="am-tb"
             title={title}
             // The label is hidden on a phone, so the accessible name cannot
             // come from it.

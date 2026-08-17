@@ -59,6 +59,16 @@ body {
     min-height: 44px;
   }
 
+  /* A direct consequence of the rule above, and it belongs here rather than in
+     a width query: growing the view switcher's buttons to 44 makes the strip
+     52px tall, so the bar that stacks on top of it can no longer sit at the
+     66px that cleared a 36px strip. Without this a touch TABLET — coarse
+     pointer, but wider than the 760px phone breakpoint — draws the bar 6px
+     into the switcher. */
+  .am-bar-high {
+    bottom: 72px;
+  }
+
   /* iOS zooms the whole page when a field smaller than 16px takes focus, and
      then leaves it zoomed — on the sign-in form that happens before the user
      has seen anything else. The app's fields are 11–13px by design, so rather
@@ -401,11 +411,20 @@ textarea {
     border-bottom: 1px solid var(--bd);
   }
 
-  /* The chips take what the outcome actions leave, and scroll inside it. */
+  /* The chips take what the outcome actions leave, and scroll inside it.
+     `!important` because the element carries `overflow: hidden` as an INLINE
+     shorthand — it clips the row on a wide window so chips never run under
+     SHARE — and an inline shorthand beats a stylesheet longhand. Without it
+     the rail kept clipping and the chips past the fold were simply
+     unreachable. Same trap as the homepage scrim. */
   .am-hdr-boards {
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
     scrollbar-width: none;
+    /* The rail sits over a canvas that claims every gesture with
+       `touch-action: none`; this says the horizontal drag belongs to the rail. */
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
   }
 
   .am-hdr-boards::-webkit-scrollbar {
@@ -528,14 +547,17 @@ textarea {
      literal viewport bottom, and tighter than the desktop 20/66: bottom chrome
      on a phone should hug the edge the way a native tab bar does, and every px
      of the gap is canvas nobody can see. The switcher owns the bottom row; a
-     bar that has one under it stacks at 56 = 12 + its 36 + an 8 gap. */
+     bar that has one under it stacks at 72 = 12 + the switcher's 52 + an 8
+     gap. That 52 is the touch size: 44px buttons plus the strip's own 3px
+     padding and border. It was 36 while the switcher's buttons were 28, and
+     leaving 56 here after they grew put the bar 8px INTO the switcher. */
   .am-viewswitcher,
   .am-bar-low {
     bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   .am-bar-high {
-    bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   /* 430px on a 390px phone, and it has to clear an action bar that is now two
@@ -567,6 +589,16 @@ textarea {
 
   .am-viewswitcher button {
     padding: 0 14px !important;
+  }
+
+  /* The last half of the size mismatch. Every other glyph in the bottom chrome
+     is 16px; the switcher's are 13, set as SVG width/height ATTRIBUTES — which
+     CSS outranks, so this needs no component change. Icon-only here, so the
+     glyph is the whole control and has to carry the same weight as its
+     neighbours. */
+  .am-viewswitcher svg {
+    width: 16px;
+    height: 16px;
   }
 }
 
