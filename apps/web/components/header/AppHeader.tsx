@@ -33,9 +33,6 @@ interface AppHeaderProps {
   accountName?: string;
   /** Rendered in the breadcrumb, right of the project name. */
   afterProject?: ReactNode;
-  /** Workspace-level outcome actions (Drafts / Download / Create). They live
-   *  before the global canvas tools so their scope is visually unambiguous. */
-  workspaceActions?: ReactNode;
 }
 
 export default function AppHeader({
@@ -56,7 +53,6 @@ export default function AppHeader({
   accountInitials = "",
   accountName,
   afterProject,
-  workspaceActions,
 }: AppHeaderProps) {
   return (
     <div
@@ -202,38 +198,29 @@ export default function AppHeader({
           "+N" rather than running under SHARE). Being a sibling is what lets it
           leave the header entirely below 760px and float as its own full-width
           scroller, without dragging the project name with it. */}
-      {/* `display: contents` on a wide window, so these two lay out as direct
-          children of the header exactly as they did before this wrapper
-          existed. Below 760px the wrapper becomes the real second row and they
-          share it: the workspace rail scrolls in whatever the outcome actions
-          leave. That pairing is the point — the chips say WHICH workspace, the
-          actions act on the open one, so the row reads as one thought. It also
-          resolves the collision that put them here: DRAFTS/DOWNLOAD/CREATE add
-          ~220px to a right-hand cluster that already never shrinks, which with
-          home and the project name came to ~500px of demand on a 390px header,
-          and the overflow drew the project chip straight over DRAFTS. */}
-      {(afterProject || workspaceActions) && (
+      {/* `display: contents` on a wide window, so this lays out as a direct
+          child of the header exactly as it did before the wrapper existed.
+          Below 760px the wrapper becomes the real second row and the workspace
+          rail gets the whole of it.
+
+          The Workspace's outcome actions used to share this row. They are on
+          the canvas now (top-right, in `ArchiveWorkspace`) because they exist
+          only inside a Workspace and cost ~220px there, so entering one folded
+          chips away — the rail measured less room in exactly the scope that
+          needed it most. Moving them also gives the phone's row back to the
+          chips, which is what it was split off for. */}
+      {afterProject && (
         <div className="am-hdr-row2">
-          {afterProject && (
-            <>
-              <ChevronRightIcon
-                className="am-hdr-sep"
-                width={12}
-                height={12}
-                stroke="var(--t3)"
-                style={{ flex: "0 0 auto", opacity: 0.6 }}
-              />
-              <div className="am-hdr-boards" style={{ display: "flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
-                {afterProject}
-              </div>
-            </>
-          )}
-          {workspaceActions && (
-            <div className="am-hdr-wsactions" style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
-              {workspaceActions}
-              <span className="am-hdr-sep" style={{ width: 1, height: 20, background: "var(--bd)" }} />
-            </div>
-          )}
+          <ChevronRightIcon
+            className="am-hdr-sep"
+            width={12}
+            height={12}
+            stroke="var(--t3)"
+            style={{ flex: "0 0 auto", opacity: 0.6 }}
+          />
+          <div className="am-hdr-boards" style={{ display: "flex", alignItems: "center", flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+            {afterProject}
+          </div>
         </div>
       )}
 

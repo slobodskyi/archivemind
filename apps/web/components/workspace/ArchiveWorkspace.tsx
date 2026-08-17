@@ -953,22 +953,6 @@ export default function ArchiveWorkspace({
             />
           ) : undefined
         }
-        workspaceActions={
-          bd.activeBoard ? (
-            <WorkspaceOutputActions
-              draftCount={drafts.length}
-              photoCount={bd.activeBoard.assetIds.length}
-              selectedCount={orderedSelectedIds.length}
-              onOpenDrafts={() => setOutputUi("library")}
-              onDownload={() => ws.openExportFor(orderedSelectedIds.length ? orderedSelectedIds : orderedBoardAssetIds)}
-              onCreate={() => {
-                setGenerationError(null);
-                setCreateSeed(null);
-                setOutputUi("create");
-              }}
-            />
-          ) : undefined
-        }
       />
 
       {/* Persistent by design: this is archive-integrity information, not a
@@ -1152,6 +1136,55 @@ export default function ArchiveWorkspace({
           show/pan the hidden neural grid and physically cover MapLibre's own
           zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
       {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />}
+
+      {/* A Workspace's outcome actions, floated at the canvas's top-right rather
+          than parked in the header. They only exist inside a Workspace, which is
+          exactly the scope whose header rail is most crowded: DRAFTS/DOWNLOAD/
+          CREATE cost ~220px, so opening a Workspace used to fold two or three
+          chips away the moment you got there. Off the header, the rail measures
+          the same room in both scopes.
+
+          It dodges the right-hand panels on `minimapRight` for the same reason
+          the minimap does — the photo drawer and the chat are full-height and
+          would otherwise cover it — and shares the bottom bars' surface so it
+          reads as canvas chrome and stays legible over a photo. z 35 is the
+          canvas-internals ceiling (`lib/ui.ts`), matching the minimap and bars.
+
+          `am-under-hdr` is what keeps it clear of the floating workspace rail
+          below 760px, where that rail becomes its own 52px row. */}
+      {bd.activeBoard && (
+        <div
+          className="am-under-hdr am-wsactions"
+          style={{
+            position: "absolute",
+            top: "calc(var(--hdr) + 12px)",
+            right: 20 + ws.minimapRight,
+            zIndex: 35,
+            display: "flex",
+            alignItems: "center",
+            padding: "6px 8px",
+            background: "rgba(20,20,20,.92)",
+            border: "1px solid var(--bd)",
+            borderRadius: 2,
+            backdropFilter: "blur(16px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,.45)",
+            transition: "right .2s cubic-bezier(.22,1,.36,1)",
+          }}
+        >
+          <WorkspaceOutputActions
+            draftCount={drafts.length}
+            photoCount={bd.activeBoard.assetIds.length}
+            selectedCount={orderedSelectedIds.length}
+            onOpenDrafts={() => setOutputUi("library")}
+            onDownload={() => ws.openExportFor(orderedSelectedIds.length ? orderedSelectedIds : orderedBoardAssetIds)}
+            onCreate={() => {
+              setGenerationError(null);
+              setCreateSeed(null);
+              setOutputUi("create");
+            }}
+          />
+        </div>
+      )}
 
       <AddToProjectPopover
         open={ws.addProjOpen}
