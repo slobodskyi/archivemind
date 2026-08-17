@@ -37,6 +37,15 @@
   display: contents;
 }
 
+/* The workspace rail scrolls horizontally instead of folding chips into a menu.
+   Its scrollbar is hidden — a 52px header has no room for one, and the edge
+   fades plus the "+N" counter carry the affordance instead. `scrollbar-width`
+   is set inline with the rest of the scroller; this is the WebKit half, which
+   has no inline equivalent. */
+.am-hdr-chiprow::-webkit-scrollbar {
+  display: none;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -421,30 +430,11 @@ textarea {
      SHARE — and an inline shorthand beats a stylesheet longhand. Without it
      the rail kept clipping and the chips past the fold were simply
      unreachable. Same trap as the homepage scrim. */
-  .am-hdr-boards {
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    scrollbar-width: none;
-    /* The rail sits over a canvas that claims every gesture with
-       `touch-action: none`; this says the horizontal drag belongs to the rail. */
-    touch-action: pan-x;
-    overscroll-behavior-x: contain;
-  }
-
-  .am-hdr-boards::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* A chip must SCROLL out of the row, never shrink inside it. On a wide
-     window each chip carries `minWidth: 0` so names ellipsize gracefully as
-     the row tightens; in a 240px scroller that same rule squeezed all of them
-     at once until every name was gone and the rail was a line of bare coloured
-     dots — unreadable, and unusable for picking a workspace. Holding their
-     width is what makes the horizontal scroll do the job instead. */
-  .am-hdr-boards > div > * {
-    flex: 0 0 auto !important;
-  }
-
+  /* The scroller is `.am-hdr-chiprow` at every size now, not this wrapper — two
+     nested scrollers would fight over the same horizontal gesture, and the
+     counter and ＋ have to stay pinned outside the part that moves. What used
+     to live here (overflow, scrollbar-width, touch-action, overscroll and the
+     "chips never shrink" rule) is inline on the row itself. */
   .am-hdr-boards [data-board-chip] {
     min-width: 104px;
   }
