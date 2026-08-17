@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AssetLabel, Board, LabelNames } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
 import { POPOVER_SURFACE } from "@/lib/ui";
@@ -27,8 +27,12 @@ interface BoardBrowserProps {
   dropTargetId?: string | null;
 }
 
-/** How many board chips show inline before the rest fold into a "+N ▾" menu. */
-const VISIBLE_CAP = 4;
+/** Below this the rail becomes a horizontal scroller instead of folding — see
+ *  the `.am-hdr-boards` block in globals.css, which is where that is actually
+ *  implemented. Mirrored here because the fold has to switch itself off: a chip
+ *  hidden for not fitting would be unreachable in a row whose answer to not
+ *  fitting is to scroll. Keep the two in step. */
+const SCROLL_BREAKPOINT = 760;
 
 /** The Workspace browser in the header (ADR 0044): "All files" (the sorting
  *  views over the whole project) then a chip per workspace — colour dot · name ·
@@ -56,6 +60,57 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
    *  a containing block for it. */
   const [colorFor, setColorFor] = useState<{ id: string; x: number; y: number } | null>(null);
   const overflowRef = useRef<HTMLDivElement>(null);
+  /** Where to draw the overflow menu. Captured on open for the same reason the
+   *  colour picker's coordinates are: this menu is `position: fixed`, so it has
+   *  no offset parent to hang off. */
+  const [overflowAt, setOverflowAt] = useState<{ x: number; y: number } | null>(null);
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  /** How many chips fit the row at its current width. Starts at every board —
+   *  the first layout pass measures and corrects it before the browser paints,
+   *  so the full row is never seen. */
+  const [fitCount, setFitCount] = useState(boards.length);
+  const [scrollMode, setScrollMode] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${SCROLL_BREAKPOINT}px)`);
+    const sync = () => setScrollMode(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  /** Count the chips that fit, so the cap is the row's real width rather than a
+   *  constant. It used to be a hard `VISIBLE_CAP = 4`: on a 2000px header four
+   *  chips showed and the other eight folded into a "+8" beside 1200px of empty
+   *  space.
+   *
+   *  Every chip stays mounted and keeps its layout box — the ones past the edge
+   *  are hidden with `visibility`, never `display: none`, and the row clips them
+   *  anyway. That is what makes this stable: the measurement cannot change based
+   *  on its own result, so there is no oscillation and no width cache to keep in
+   *  step with a rename. `useLayoutEffect` runs it before paint. */
+  useLayoutEffect(() => {
+    const row = chipRowRef.current;
+    if (!row || scrollMode) return;
+
+    const measure = () => {
+      const budget = row.clientWidth;
+      const chips = [...row.children] as HTMLElement[];
+      let n = 0;
+      for (const el of chips) {
+        // offsetLeft is relative to the row, which is this element's own offset
+        // parent (it is `position: relative`).
+        if (el.offsetLeft + el.offsetWidth > budget) break;
+        n += 1;
+      }
+      setFitCount(n);
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(row);
+    return () => ro.disconnect();
+  }, [scrollMode, boards, counts, activeBoardId]);
 
   const openColorPicker = (target: HTMLElement, id: string) => {
     const rect = (target.closest(`[${BOARD_CHIP_ATTR}]`) ?? target).getBoundingClientRect();
@@ -90,27 +145,42 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
     };
   }, [colorFor]);
 
-  const visible = boards.slice(0, VISIBLE_CAP);
-  const overflow = boards.slice(VISIBLE_CAP);
+  // In scroll mode nothing folds — the row scrolls instead, so every chip is
+  // reachable and the menu would be a second answer to a solved problem.
+  const overflow = scrollMode ? [] : boards.slice(fitCount);
 
   const commitRename = () => {
     if (editingId && draft.trim()) onRename(editingId, draft.trim());
     setEditingId(null);
   };
 
-  const chip = (b: Board) => {
+  const chip = (b: Board, folded: boolean) => {
     const active = b.id === activeBoardId;
     const armed = b.id === dropTargetId;
     return (
       <div
         key={b.id}
         {...{ [BOARD_CHIP_ATTR]: b.id }}
+        // Kept out of the tab order and off the drop-target hit test while
+        // folded: the row clips it, so a focus ring or a highlight out there
+        // would land on something nobody can see.
+        aria-hidden={folded || undefined}
+        inert={folded || undefined}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
           height: 30,
           padding: "0 11px",
+          // `visibility`, never `display: none` — the box has to survive so the
+          // fit measurement stays independent of its own result.
+          visibility: folded ? "hidden" : "visible",
+          // Chips hold their width and fold; they no longer shrink. Two
+          // mechanisms for one squeeze meant that on a tight row every name
+          // ellipsized to nothing before anything folded, and the rail became a
+          // line of bare coloured dots. `maxWidth` below still ellipsizes a
+          // genuinely long name.
+          flex: "0 0 auto",
           borderRadius: 2,
           // Armed beats active: while something is being dragged over it, the
           // chip has to read as a target, not as the workspace you are in.
@@ -126,9 +196,6 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
               : "transparent",
           cursor: "pointer",
           maxWidth: 200,
-          // A flex item defaults to min-width:auto, i.e. "never narrower than my
-          // text" — so without this the row pushes past the header's cap instead
-          // of the names ellipsizing.
           minWidth: 0,
         }}
         onClick={() => onSelect(b.id)}
@@ -211,24 +278,78 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        minWidth: 0,
+        // Fills the header's rail on a wide window, so the chip row below can
+        // measure the space it actually has. Natural width in scroll mode, where
+        // overflowing the rail is exactly how it scrolls.
+        flex: scrollMode ? "0 0 auto" : "1 1 auto",
+      }}
+    >
       {/* No "All files" chip: the project name to the left of this row says the
           same thing, and clicking it is what leaves a Workspace now (ADR 0044
           amended). Two controls for one scope is one control too many. */}
-      {visible.map(chip)}
+      <div
+        ref={chipRowRef}
+        style={{
+          // `relative` so a chip's offsetLeft is measured against this row.
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          minWidth: 0,
+          flex: scrollMode ? "0 0 auto" : "1 1 auto",
+          overflow: scrollMode ? "visible" : "hidden",
+        }}
+      >
+        {boards.map((b, i) => chip(b, !scrollMode && i >= fitCount))}
+      </div>
 
       {overflow.length > 0 && (
-        <div ref={overflowRef} style={{ position: "relative" }}>
+        <div ref={overflowRef} style={{ position: "relative", flex: "0 0 auto" }}>
           <button
-            onClick={() => setOverflowOpen((v) => !v)}
+            onClick={(e) => {
+              if (overflowOpen) {
+                setOverflowOpen(false);
+                return;
+              }
+              const r = e.currentTarget.getBoundingClientRect();
+              setOverflowAt({ x: r.left, y: r.bottom + 6 });
+              setOverflowOpen(true);
+            }}
+            aria-haspopup="menu"
+            aria-expanded={overflowOpen}
             style={{ display: "flex", alignItems: "center", gap: 3, height: 30, padding: "0 8px", border: 0, borderRadius: 2, background: "transparent", color: "var(--t3)", fontFamily: "inherit", fontSize: 12, cursor: "pointer" }}
             title={`${overflow.length} more`}
           >
             +{overflow.length}
             <ChevronDownIcon width={10} height={10} stroke="currentColor" />
           </button>
-          {overflowOpen && (
-            <div style={{ ...POPOVER_SURFACE, position: "absolute", top: "100%", left: 0, marginTop: 4, minWidth: 160, padding: 4 }}>
+          {/* `fixed`, not `absolute` — and this is the whole bug it fixes. The
+              header clips this rail with an inline `overflow: hidden` so chips
+              never run under SHARE, and an absolutely positioned menu at
+              `top: 100%` renders BELOW that box: it was clipped away entirely,
+              so clicking "+N ▾" toggled state and showed nothing. The colour
+              picker in this same file already carried the comment explaining
+              this; the fix had just never reached the menu. Kept inside
+              `overflowRef` so the click-away test still recognises its own
+              items, and clamped so the last chip's menu cannot open off-screen. */}
+          {overflowOpen && overflowAt && (
+            <div
+              role="menu"
+              style={{
+                ...POPOVER_SURFACE,
+                position: "fixed",
+                left: Math.max(8, Math.min(overflowAt.x, window.innerWidth - 176)),
+                top: overflowAt.y,
+                minWidth: 160,
+                padding: 4,
+              }}
+            >
               {overflow.map((b) => (
                 <button
                   key={b.id}
