@@ -14,6 +14,18 @@
 export const ONEDRIVE_CHILD_SELECT =
   "id,name,size,file,folder,photo,location,fileSystemInfo,parentReference";
 
+/** Thumbnails come from an `$expand`, not a `$select` — they are a navigation
+ *  property, not a field. `small` (≈48px) is deliberate: the row renders a 32px
+ *  square, and expanding thumbnails over a 200-item page is the slowest thing
+ *  this request does, so asking for one size beats asking for three. */
+export const ONEDRIVE_CHILD_EXPAND = "thumbnails(select=small)";
+
+export interface GraphThumbnailSet {
+  small?: { url?: unknown } | null;
+  medium?: { url?: unknown } | null;
+  large?: { url?: unknown } | null;
+}
+
 export interface GraphDriveItem {
   id?: unknown;
   name?: unknown;
@@ -21,6 +33,7 @@ export interface GraphDriveItem {
   file?: { mimeType?: unknown } | null;
   folder?: { childCount?: unknown } | null;
   parentReference?: { driveId?: unknown; path?: unknown } | null;
+  thumbnails?: GraphThumbnailSet[] | null;
 }
 
 export interface BrowseEntry {
@@ -34,6 +47,11 @@ export interface BrowseEntry {
    *  it as an estimate, because a folder of folders reports a small number. */
   childCount: number | null;
   path: string | null;
+  /** Pre-authenticated Microsoft CDN URL, short-lived like the download URL.
+   *  Rendered straight into an <img>: it carries its own credential, so no
+   *  header is attached and nothing of ours is exposed by it. Null for folders
+   *  and for anything Graph has not generated a thumbnail for. */
+  thumbnailUrl: string | null;
 }
 
 /** `parentReference.path` arrives as an API path like
@@ -50,6 +68,22 @@ export function displayPath(raw: unknown): string | null {
     }
   })();
   return decoded === "" ? "/" : decoded;
+}
+
+/** First usable thumbnail URL from an expanded set.
+ *
+ *  Defensive on purpose: `$expand=thumbnails` is documented but OneDrive does
+ *  not always populate it (a file type with no renderer, a thumbnail still
+ *  being generated), and the browser must degrade to the glyph rather than
+ *  render a broken image. */
+export function thumbnailFrom(sets: GraphThumbnailSet[] | null | undefined): string | null {
+  if (!Array.isArray(sets)) return null;
+  for (const set of sets) {
+    for (const size of [set?.small, set?.medium, set?.large]) {
+      if (typeof size?.url === "string" && size.url) return size.url;
+    }
+  }
+  return null;
 }
 
 /** One Graph child → our shape, or null when the row is unusable (no id, or
@@ -71,6 +105,8 @@ export function toBrowseEntry(raw: GraphDriveItem, fallbackDriveId: string | nul
     childCount:
       isFolder && typeof raw.folder?.childCount === "number" ? raw.folder.childCount : null,
     path: displayPath(raw.parentReference?.path),
+    // Folders never carry one, and asking would only add a null to every row.
+    thumbnailUrl: isFolder ? null : thumbnailFrom(raw.thumbnails),
   };
 }
 

@@ -147,8 +147,38 @@ export default function OneDriveBrowser({ onImport, busy }: Props) {
                     cursor: "pointer",
                   }}
                 >
-                  <span style={{ fontSize: 12, color: "var(--t3)", flex: "0 0 auto" }}>
-                    {e.isFolder ? "▸" : "·"}
+                  <span
+                    style={{
+                      display: "flex",
+                      width: 32,
+                      height: 32,
+                      flex: "0 0 auto",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "var(--bg)",
+                      borderRadius: 2,
+                      overflow: "hidden",
+                      fontSize: 12,
+                      color: "var(--t3)",
+                    }}
+                  >
+                    {e.thumbnailUrl ? (
+                      // Plain <img>, not next/image: these are short-lived
+                      // pre-authenticated Microsoft CDN URLs, so there is
+                      // nothing to optimise and no host to whitelist.
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={e.thumbnailUrl}
+                        alt=""
+                        width={32}
+                        height={32}
+                        loading="lazy"
+                        style={{ width: 32, height: 32, objectFit: "cover", display: "block" }}
+                      />
+                    ) : (
+                      // Folders, and anything Graph has no thumbnail for.
+                      (e.isFolder ? "▸" : "·")
+                    )}
                   </span>
                   <span
                     style={{

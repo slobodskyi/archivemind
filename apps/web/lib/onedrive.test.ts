@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  ONEDRIVE_CHILD_EXPAND,
   ONEDRIVE_CHILD_SELECT,
   displayPath,
+  thumbnailFrom,
   isSafeSkipToken,
   skipTokenFromNextLink,
   sortBrowseEntries,
@@ -18,6 +20,7 @@ const entry = (over: Partial<BrowseEntry>): BrowseEntry => ({
   mimeType: null,
   childCount: null,
   path: null,
+  thumbnailUrl: null,
   ...over,
 });
 
@@ -56,6 +59,56 @@ describe("onedrive browse shaping (ADR 0047)", () => {
       null,
     );
     expect(folder).toMatchObject({ isFolder: true, childCount: 812, sizeBytes: null });
+  });
+
+  it("picks up an expanded thumbnail, and degrades rather than breaking", () => {
+    // A photo archive browser that lists only filenames is unusable — but
+    // `$expand=thumbnails` is not guaranteed to populate (no renderer for the
+    // type, or still generating), so every absent shape must fall back to null
+    // and let the row draw its glyph.
+    const withThumb = toBrowseEntry(
+      {
+        id: "i1",
+        name: "a.jpg",
+        file: { mimeType: "image/jpeg" },
+        parentReference: { driveId: "d" },
+        thumbnails: [{ small: { url: "https://cdn.test/t.jpg" } }],
+      },
+      null,
+    );
+    expect(withThumb?.thumbnailUrl).toBe("https://cdn.test/t.jpg");
+
+    // falls through the sizes when small is missing
+    expect(
+      thumbnailFrom([{ small: null, medium: { url: "https://cdn.test/m.jpg" } }]),
+    ).toBe("https://cdn.test/m.jpg");
+
+    for (const bad of [undefined, null, [], [{}], [{ small: {} }], [{ small: { url: "" } }]]) {
+      expect(thumbnailFrom(bad as never)).toBeNull();
+    }
+
+    // folders never get one, even if Graph somehow returned a set
+    const folder = toBrowseEntry(
+      {
+        id: "f1",
+        name: "2024",
+        folder: { childCount: 2 },
+        parentReference: { driveId: "d" },
+        thumbnails: [{ small: { url: "https://cdn.test/x.jpg" } }],
+      },
+      null,
+    );
+    expect(folder?.thumbnailUrl).toBeNull();
+  });
+
+  it("expands thumbnails rather than selecting them", () => {
+    // thumbnails is a navigation property — putting it in $select silently
+    // yields nothing.
+    expect(ONEDRIVE_CHILD_SELECT).not.toContain("thumbnails");
+    expect(ONEDRIVE_CHILD_EXPAND).toContain("thumbnails");
+    // one size, not three: this expand is the slowest part of a 200-item page
+    expect(ONEDRIVE_CHILD_EXPAND).toContain("small");
+    expect(ONEDRIVE_CHILD_EXPAND).not.toContain("large");
   });
 
   it("drops rows it cannot address", () => {

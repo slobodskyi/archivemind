@@ -5,6 +5,7 @@ import { getCurrentWorkspaceId } from "@/lib/workspace";
 import { MS_GRAPH } from "@/lib/integrations/microsoft-oauth";
 import { OneDriveTokenError, getGraphSession } from "@/lib/integrations/microsoft-tokens.server";
 import {
+  ONEDRIVE_CHILD_EXPAND,
   ONEDRIVE_CHILD_SELECT,
   isSafeSkipToken,
   skipTokenFromNextLink,
@@ -72,7 +73,11 @@ export async function GET(request: NextRequest) {
       ? `/me/drive/items/${encodeURIComponent(itemId)}/children`
       : "/me/drive/root/children";
 
-  const query = new URLSearchParams({ $select: ONEDRIVE_CHILD_SELECT, $top: "200" });
+  const query = new URLSearchParams({
+    $select: ONEDRIVE_CHILD_SELECT,
+    $expand: ONEDRIVE_CHILD_EXPAND,
+    $top: "200",
+  });
   if (rawSkip) query.set("$skiptoken", rawSkip);
 
   const res = await fetch(`${MS_GRAPH}${base}?${query}`, {
