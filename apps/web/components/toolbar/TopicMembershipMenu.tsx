@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { AddIcon, CheckIcon, ViewSenseIcon } from "@/components/icons/icons";
+import { AddIcon, CheckIcon, TopicMoveIcon, TopicResetIcon } from "@/components/icons/icons";
 
 /** One persisted Topic cloud that can accept a manual membership assignment.
  *
@@ -153,7 +153,7 @@ export default function TopicMembershipMenu({
           fontFamily: "inherit",
         }}
       >
-        <ViewSenseIcon width={15} height={15} />
+        <TopicMoveIcon width={16} height={16} />
       </button>
 
       {open && selectionCount > 0 && (
@@ -363,7 +363,7 @@ export default function TopicMembershipMenu({
               opacity: busy || !canReturnToAi ? 0.42 : 1,
             }}
           >
-            <ViewSenseIcon width={13} height={13} />
+            <TopicResetIcon width={13} height={13} />
             Return to AI
           </button>
 

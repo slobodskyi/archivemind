@@ -30,8 +30,11 @@ const VIEWS: { key: ViewMode; label: string; Icon: typeof ViewCanvasIcon; title:
  *  places. Four peers in one strip, at the bottom where the other canvas
  *  controls live, states the question once.
  *
- *  Bottom-centred at 20px, which is why `SortingActionBar` sits at 66 — the two
- *  stack, and the sorting bar has to clear this one. */
+ *  Bottom-centred at 20px in a 42px-tall strip, which is why `SortingActionBar`
+ *  sits at 72 — the two stack, and the sorting bar has to clear this one. Their
+ *  padding (3), gap (3), radius (3) and button height (34) are deliberately
+ *  identical: they are one control surface in two rows, and any change here has
+ *  to move both. */
 function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
   if (!show) return null;
 
@@ -78,7 +81,12 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
               display: "flex",
               alignItems: "center",
               gap: 5,
-              height: 28,
+              // 34px is the icon-button size the left toolbar and both action
+              // bars already use, and this control was the last holdout at 28.
+              // #213 fixed exactly that mismatch for touch (28 next to 44) and
+              // left desktop alone; the same two-sizes-of-one-thing problem was
+              // still visible here, one strip below the sorting bar.
+              height: 34,
               padding: "0 12px",
               border: 0,
               borderRadius: 2,
@@ -92,7 +100,11 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
               color: active ? "var(--t1)" : "var(--t2b)",
             }}
           >
-            <Icon width={13} height={13} />
+            {/* 14, not the bars' 16: these segments carry a text label, so the
+                glyph is a locator rather than the whole control. The `pointer:
+                coarse` rule in globals.css still lifts it to 16, where the
+                label is hidden. */}
+            <Icon width={14} height={14} />
             <span className="am-viewswitcher-label">{label}</span>
           </button>
         );

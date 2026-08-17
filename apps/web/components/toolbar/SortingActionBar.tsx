@@ -25,8 +25,10 @@ export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "select
  *  silently rearrange the Canvas instead.
  *
  *  Deliberately narrow: layout controls plus Topic's explicit membership menu,
- *  all ≤ 46 px tall at bottom:66 — it sits ABOVE `ViewSwitcher` (bottom:20), and
- *  `BulkAiPanel` (bottom:124) clears both. z-index 35 matches every other canvas bar — `lib/ui.ts`
+ *  42 px tall at bottom:72 — it sits ABOVE `ViewSwitcher` (a 42px strip at
+ *  bottom:20), and `BulkAiPanel` (bottom:124) clears both. The two strips share
+ *  their padding, gap, radius and button size on purpose; they are one piece of
+ *  bottom chrome in two rows. z-index 35 matches every other canvas bar — `lib/ui.ts`
  *  reserves 0–35 for canvas internals, and anything higher would paint over
  *  the chat and trash panels. */
 export interface SortingActionBarProps {
@@ -72,12 +74,17 @@ const gp = {
   strokeLinejoin: "round" as const,
 };
 
-/* Regroup: scattered cells pulled back into a cluster. */
+/* Snap back into place: four tiles converging on the pile they belong to.
+   The arrowheads point INWARD — the previous version drew bare rays radiating
+   out from the circle, which is the brightness glyph and the exact opposite of
+   what the button does. */
 const RegroupGlyph = () => (
   <svg {...gp}>
-    <circle cx="12" cy="12" r="3.2" />
-    <path d="M12 3.5v3M12 17.3v3.2M3.5 12h3M17.3 12h3.2" />
-    <path d="m6 6 2.2 2.2M18 6l-2.2 2.2M6 18l2.2-2.2M18 18l-2.2-2.2" />
+    <circle cx="12" cy="12" r="2.8" />
+    <path d="M12 2.6v4.4m-1.9-1.9L12 7l1.9-1.9" />
+    <path d="M12 21.4v-4.4m-1.9 1.9L12 17l1.9 1.9" />
+    <path d="M2.6 12h4.4M5.1 10.1 7 12l-1.9 1.9" />
+    <path d="M21.4 12h-4.4m2.5-1.9L17 12l1.9 1.9" />
   </svg>
 );
 
@@ -132,6 +139,12 @@ function Btn({
   );
 }
 
+/* Hidden on a phone by `.am-bar-div`, where the bar wraps and a vertical rule
+   would land mid-row. */
+const Divider = () => (
+  <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+);
+
 function SortingActionBar({
   showRecluster,
   showRegroup,
@@ -160,16 +173,24 @@ function SortingActionBar({
       style={{
         position: "absolute",
         left: "50%",
-        // Stacks above ViewSwitcher (bottom:20) when it is showing.
-        bottom: aboveSwitcher ? 66 : 20,
+        // Stacks above ViewSwitcher, whose strip is 42px tall at bottom:20 —
+        // this clears it by the same 10px gap #213 verified. The `pointer:
+        // coarse` override in globals.css keeps its own value for the 52px
+        // touch strip.
+        bottom: aboveSwitcher ? 72 : 20,
         transform: "translateX(-50%)",
         display: "flex",
         alignItems: "center",
-        gap: 4,
-        padding: "6px 8px",
+        // Padding/gap/radius match ViewSwitcher exactly, so the two stacked
+        // strips are the same 42px height and read as one control surface
+        // rather than two design systems. #213 called this out as a bug and
+        // fixed it for touch only; desktop had kept 6px/8px padding, a 4px gap
+        // and a 2px radius against the switcher's 3/3/3.
+        gap: 3,
+        padding: 3,
         background: "rgba(20,20,20,.92)",
         border: "1px solid var(--bd)",
-        borderRadius: 2,
+        borderRadius: 3,
         backdropFilter: "blur(16px)",
         boxShadow: "0 8px 32px rgba(0,0,0,.45)",
         zIndex: 35,
@@ -187,9 +208,13 @@ function SortingActionBar({
       />
       {showRegroup && (
         <>
-          <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <Divider />
           <Btn
-            title={selCount >= 2 ? `Regroup ${selCount} selected` : "Regroup — snap tiles back into their clouds"}
+            title={
+              selCount >= 2
+                ? `Snap ${selCount} selected back into place`
+                : "Snap tiles back into place"
+            }
             disabled={!canRegroup}
             onClick={onRegroup}
           >
@@ -197,23 +222,31 @@ function SortingActionBar({
           </Btn>
         </>
       )}
-      {showRecluster && topicMembership && selCount > 0 && (
+      {/* The two membership controls share one group, and the divider before
+          them is what separates them from Regroup. They belong together and
+          apart from it: both change what a file BELONGS to, workspace-wide and
+          on the server, while Regroup only moves tiles in this one view. That
+          distinction is the whole of ADR 0042, and the bar used to bury it by
+          spacing all four controls identically — with two adjacent buttons
+          whose labels ("Regroup" / "Refresh AI grouping") read as synonyms. */}
+      {showRecluster && topicMembership && (
         <>
-          <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
+          <Divider />
+          {/* Rendered even with an empty selection, where it is genuinely
+              disabled and says so. Hiding it made the bar change width the
+              moment you selected something, which slid Re-cluster out from
+              under the cursor that was reaching for it. */}
           <TopicMembershipMenu {...topicMembership} selectionCount={selCount} />
         </>
       )}
       {showRecluster && (
-        <>
-          <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />
-          <Btn
-            title={busy ? "A job is already running" : "Refresh AI grouping — manual moves stay (free)"}
-            disabled={busy}
-            onClick={onRecluster}
-          >
-            <ReclusterGlyph />
-          </Btn>
-        </>
+        <Btn
+          title={busy ? "A job is already running" : "Rebuild topics — your manual moves stay (free)"}
+          disabled={busy}
+          onClick={onRecluster}
+        >
+          <ReclusterGlyph />
+        </Btn>
       )}
     </div>
   );
