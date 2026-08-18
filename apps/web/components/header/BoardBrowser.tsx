@@ -314,7 +314,8 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
             {b.name}
           </span>
         )}
-        <span style={{ fontSize: 11, color: "var(--t3)" }}>{counts[b.id] ?? b.assetIds.length}</span>
+        {/* Bracketed so the count reads as a count, not as part of the name. */}
+        <span style={{ fontSize: 11, color: "var(--t3)" }}>[{counts[b.id] ?? b.assetIds.length}]</span>
         {active && (
           <button
             onClick={(e) => {

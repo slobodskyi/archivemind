@@ -1077,9 +1077,12 @@ export function topicCloudLayout(
 // the per-day bands carry the structure; the tag web lives in Map/Topic.
 const TL_LEFT = 160;
 const TL_AXIS_Y = 0;
-const TL_DATE_GAP = 420; // fixed horizontal spacing between date labels (equal for all)
+const TL_DATE_GAP = 480; // fixed horizontal spacing between date labels (equal for all)
 const TL_COLS = 3; // files per row within one day's column
-const TL_CELL_W = 128;
+// Wider than a landscape tile's long edge (ASSET_TILE_LONG_EDGE, 148) so three
+// horizontal photos in one day's row sit side by side with a few px between them
+// instead of overlapping. TL_DATE_GAP grows with it to keep adjacent days apart.
+const TL_CELL_W = 156;
 const TL_CELL_H = 136;
 const TL_AXIS_GAP = 50; // clear half-band around the axis for the line + label
 

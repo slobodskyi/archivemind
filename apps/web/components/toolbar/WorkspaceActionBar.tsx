@@ -42,10 +42,10 @@ const RemoveFromWorkspaceGlyph = () => (<svg {...gp}><rect x="3" y="5" width="18
 /* Group: two overlapping tiles bound by a corner-bracket frame — a set that
    moves and edits as one, not a container. */
 const GroupGlyph = () => (<svg {...gp}><path d="M3 8V4a1 1 0 0 1 1-1h4" /><path d="M21 8V4a1 1 0 0 0-1-1h-4" /><path d="M3 16v4a1 1 0 0 0 1 1h4" /><path d="M21 16v4a1 1 0 0 1-1 1h-4" /><rect x="8.5" y="8.5" width="7" height="7" rx="1" /></svg>);
-/* Analyze with AI: a magic wand throwing sparkles — the universal "let the AI
-   work on these" glyph, and unlike a bare sparkle it won't read as decoration
-   or collide with Search's magnifier. */
-const AnalyzeGlyph = () => (<svg {...gp}><path d="M15 6 6 15l-2.5 5.5L9 18l9-9z" /><path d="m14 7 3 3" /><path d="M18 3v3M16.5 4.5h3" /><path d="M20 11v2M19 12h2" /></svg>);
+/* Analyze with AI: a magic wand throwing sparkles (lucide wand-sparkles) — the
+   universal "let the AI work on these" glyph, and unlike a bare sparkle it
+   won't read as decoration or collide with Search's magnifier. */
+const AnalyzeGlyph = () => (<svg {...gp}><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" /><path d="m14 7 3 3" /><path d="M5 6v4" /><path d="M19 14v4" /><path d="M10 2v2" /><path d="M7 8H3" /><path d="M21 16h-4" /><path d="M11 3H9" /></svg>);
 /* Tidy up: four photo-tile-shaped cells snapping into an even grid. */
 const TidyGlyph = () => (<svg {...gp}><rect x="3" y="4" width="8" height="6" rx="1" /><rect x="13" y="4" width="8" height="6" rx="1" /><rect x="3" y="14" width="8" height="6" rx="1" /><rect x="13" y="14" width="8" height="6" rx="1" /></svg>);
 

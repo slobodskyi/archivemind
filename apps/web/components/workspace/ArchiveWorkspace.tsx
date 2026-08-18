@@ -1148,7 +1148,7 @@ export default function ArchiveWorkspace({
       {!workingBar && (
         <SortingActionBar
           showRecluster={ws.isSenseView}
-          showRegroup={ws.isSenseView || ws.isTimelineView}
+          showRegroup={ws.isSenseView || ws.isTimelineView || (ws.isNeural && ws.projectMode)}
           aboveSwitcher={ws.showViewTabs}
           canRegroup={ws.canRegroup}
           busy={ws.proc.active}

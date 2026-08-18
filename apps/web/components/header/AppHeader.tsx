@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  FolderDotIcon,
   ShareIcon,
   UndoIcon,
   RedoIcon,
@@ -155,11 +156,7 @@ export default function AppHeader({
               minWidth: 0,
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, flex: "0 0 auto" }}>
-              {Array.from({ length: 4 }).map((_, i) => (
-                <span key={i} style={{ width: 5, height: 5, borderRadius: 1, background: "currentColor", opacity: 0.7 }} />
-              ))}
-            </div>
+            <FolderDotIcon width={15} height={15} style={{ flex: "0 0 auto", opacity: 0.8 }} />
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projLabel}</span>
             {!onProjectScope && (
               <ChevronDownIcon width={11} height={11} stroke="var(--t3)" style={{ flex: "0 0 auto" }} />

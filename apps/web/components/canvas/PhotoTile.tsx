@@ -162,7 +162,10 @@ export default function PhotoTile({
           width: "100%",
           height: pos.h,
           overflow: "hidden",
-          border: `1px solid ${stage === "error" ? "var(--red)" : selected ? "var(--ac2)" : "var(--bd)"}`,
+          // Selection is drawn by the single outer ring above; the tile's own
+          // border stays neutral so a selected tile shows one outline, not two
+          // concentric accent lines.
+          border: `1px solid ${stage === "error" ? "var(--red)" : "var(--bd)"}`,
           borderRadius: 3,
           background: "var(--bg-in)",
           backgroundImage: src ? `url(${src})` : undefined,

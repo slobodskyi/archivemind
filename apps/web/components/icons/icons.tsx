@@ -89,18 +89,24 @@ export function StrikethroughIcon({ width = 16, height = 16, ...props }: IconPro
   );
 }
 
-/** AI assistant — a chat bubble marked "AI" with a spark. The rail's single AI
- *  entry point (it opens the Smart Search / assistant panel); the ✨ that RUNS a
- *  job lives on the action bar and the tiles, and reads as a different thing on
- *  purpose. */
+/** AI assistant — a four-point astroid star. The rail's single AI entry point
+ *  (it opens the Smart Search / assistant panel); the ✨ that RUNS a job lives
+ *  on the action bar and the tiles, and reads as a different thing on purpose. */
 export function AiAssistantIcon({ width = 16, height = 16, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <rect x={3} y={3} width={14} height={14} rx={3.5} />
-      <text x={10} y={13.2} fontSize={8.5} fontWeight={700} fill="currentColor" stroke="none" textAnchor="middle" fontFamily="var(--font-space-mono), monospace">
-        AI
-      </text>
-      <path fill="currentColor" stroke="none" d="M19 13.5l1.05 2.45L22.5 17l-2.45 1.05L19 20.5l-1.05-2.45L15.5 17l2.45-1.05z" />
+      <path d="M12.983 21.186a1 1 0 0 1-1.966 0 10 10 0 0 0-8.203-8.203 1 1 0 0 1 0-1.966 10 10 0 0 0 8.203-8.203 1 1 0 0 1 1.966 0 10 10 0 0 0 8.203 8.203 1 1 0 0 1 0 1.966 10 10 0 0 0-8.203 8.203" />
+    </svg>
+  );
+}
+
+/** Folder with a centred dot (lucide folder-dot) — the project-name / "all
+ *  files in this project" control in the header. */
+export function FolderDotIcon({ width = 15, height = 15, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+      <circle cx="12" cy="13" r="1" />
     </svg>
   );
 }
