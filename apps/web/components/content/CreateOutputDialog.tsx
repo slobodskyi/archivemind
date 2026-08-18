@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
+import SegmentedTrack from "@/components/ui/SegmentedTrack";
+import Stepper from "@/components/ui/Stepper";
 import type { CreateOutputInput } from "@/lib/content-generation-client";
 
 interface CreateOutputDialogProps {
@@ -66,6 +68,9 @@ export default function CreateOutputDialog({
   const [count, setCount] = useState<number | null>(
     initial?.kind === "article" ? (initial.imageCount ?? null) : initial?.kind === "instagram_carousel" ? (initial.slideCount ?? null) : null,
   );
+  const languageId = useId();
+  const toneId = useId();
+  const shapeId = useId();
   // A seed that carries refinements should not hide them behind the fold.
   const [moreOpen, setMoreOpen] = useState(() => Boolean(
     (initial?.audience ?? "") !== "" ||
@@ -145,7 +150,9 @@ export default function CreateOutputDialog({
           (selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length)) && (
           <fieldset style={{ margin: 0, padding: 0, border: 0 }}>
             <legend style={{ marginBottom: 7, color: "var(--t2)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".07em" }}>Sources</legend>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {/* One-of-N as accent chips (the ExportDialog format row), not
+                native radios — the browser's blue dot answers to no theme. */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {([
                 ...(initialSourceIds.length ? [["snapshot", `Draft snapshot ${initialSourceIds.length}`] as const] : []),
                 // A thread is an authored chain (ADR 0048): its walk order
@@ -158,11 +165,31 @@ export default function CreateOutputDialog({
                   ? [["selected", `Selected ${selectedAssetIds.length}`] as const]
                   : []),
                 ["all", `All ${allAssetIds.length}`] as const,
-              ]).map(([value, label]) => (
-                <label key={value} style={{ color: "var(--t2)", fontSize: 12, cursor: "pointer" }}>
-                  <input type="radio" name="output-source" checked={source === value} onChange={() => setSource(value)} /> {label}
-                </label>
-              ))}
+              ]).map(([value, label]) => {
+                const active = source === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setSource(value)}
+                    style={{
+                      height: 28,
+                      padding: "0 10px",
+                      border: `1px solid ${active ? "var(--ac)" : "var(--bd)"}`,
+                      borderRadius: 2,
+                      background: active ? "color-mix(in srgb, var(--ac) 14%, transparent)" : "transparent",
+                      color: active ? "var(--ac)" : "var(--t2)",
+                      fontFamily: "inherit",
+                      fontSize: 11,
+                      fontWeight: active ? 700 : 400,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </fieldset>
         )}
@@ -180,11 +207,20 @@ export default function CreateOutputDialog({
           />
         </label>
 
-        <label style={{ ...fieldLabel, maxWidth: 220 }}>Language
-          <select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-            <option value="en">English</option><option value="uk">Українська</option><option value="ru">Русский</option>
-          </select>
-        </label>
+        <div style={{ maxWidth: 340 }}>
+          <div id={languageId} style={fieldLabel}>Language</div>
+          <SegmentedTrack
+            value={language}
+            onChange={setLanguage}
+            labelledBy={languageId}
+            options={[
+              { value: "en", label: "English" },
+              { value: "uk", label: "Українська" },
+              { value: "ru", label: "Русский" },
+            ]}
+            style={{ marginTop: 6 }}
+          />
+        </div>
 
         <div>
           <button
@@ -200,28 +236,63 @@ export default function CreateOutputDialog({
               <label style={fieldLabel}>Audience
                 <input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Readers, clients…" style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
               </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                <label style={fieldLabel}>Tone
-                  <select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                    <option value="editorial">Editorial</option><option value="personal">Personal</option><option value="social">Social</option>
-                  </select>
-                </label>
+              <div>
+                <div id={toneId} style={fieldLabel}>Tone</div>
+                <SegmentedTrack
+                  value={tone}
+                  onChange={setTone}
+                  labelledBy={toneId}
+                  options={[
+                    { value: "editorial", label: "Editorial" },
+                    { value: "personal", label: "Personal" },
+                    { value: "social", label: "Social" },
+                  ]}
+                  style={{ marginTop: 6, maxWidth: 340 }}
+                />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
                 {kind === "article" ? (
-                  <label style={fieldLabel}>Length
-                    <select value={length} onChange={(event) => setLength(event.target.value as typeof length)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                      <option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option>
-                    </select>
-                  </label>
+                  <div>
+                    <div id={shapeId} style={fieldLabel}>Length</div>
+                    <SegmentedTrack
+                      value={length}
+                      onChange={setLength}
+                      labelledBy={shapeId}
+                      options={[
+                        { value: "short", label: "Short" },
+                        { value: "medium", label: "Medium" },
+                        { value: "long", label: "Long" },
+                      ]}
+                      style={{ marginTop: 6 }}
+                    />
+                  </div>
                 ) : (
-                  <label style={fieldLabel}>Aspect ratio
-                    <select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                      <option value="4:5">Portrait 4:5</option><option value="1:1">Square 1:1</option>
-                    </select>
-                  </label>
+                  <div>
+                    <div id={shapeId} style={fieldLabel}>Aspect ratio</div>
+                    <SegmentedTrack
+                      value={aspectRatio}
+                      onChange={setAspectRatio}
+                      labelledBy={shapeId}
+                      options={[
+                        { value: "4:5", label: "Portrait 4:5" },
+                        { value: "1:1", label: "Square 1:1" },
+                      ]}
+                      style={{ marginTop: 6 }}
+                    />
+                  </div>
                 )}
-                <label style={fieldLabel}>{kind === "article" ? "Images" : "Slides"}
-                  <input type="number" min={minCount} max={maxCount} value={actualCount} onChange={(event) => setCount(Number(event.target.value))} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
-                </label>
+                <div style={{ width: 128 }}>
+                  <div style={fieldLabel}>{kind === "article" ? "Images" : "Slides"}</div>
+                  <div style={{ marginTop: 6 }}>
+                    <Stepper
+                      value={actualCount}
+                      min={minCount}
+                      max={maxCount}
+                      onChange={setCount}
+                      label={kind === "article" ? "Images" : "Slides"}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
