@@ -2,12 +2,11 @@ interface WorkspaceOutputActionsProps {
   draftCount: number;
   photoCount: number;
   selectedCount: number;
-  onOpenDrafts: () => void;
   onDownload: () => void;
   onCreate: () => void;
 }
 
-import { LogsIcon, DownloadIcon } from "@/components/icons/icons";
+import { DownloadIcon } from "@/components/icons/icons";
 
 const base = {
   display: "flex",
@@ -21,32 +20,20 @@ const base = {
   cursor: "pointer",
 } as const;
 
-/** Outcome-first Workspace actions. Create makes content, Download gets the
- * source files, and Drafts returns to material that can still be edited. */
+/** Outcome-first Workspace actions (ADR 0045 as amended): two, not three.
+ * Download gets the source files; Create opens the hub, which holds both the
+ * outcome cards and the saved drafts — the separate DRAFTS button folded into
+ * it, and its count rides on Create as a badge. */
 export default function WorkspaceOutputActions({
   draftCount,
   photoCount,
   selectedCount,
-  onOpenDrafts,
   onDownload,
   onCreate,
 }: WorkspaceOutputActionsProps) {
   const sourceCount = selectedCount || photoCount;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <button
-        onClick={onOpenDrafts}
-        aria-label={`Drafts${draftCount ? `, ${draftCount}` : ""}`}
-        style={{ ...base, background: "transparent", border: "1px solid var(--bd)", color: "var(--t2)" }}
-      >
-        {/* The icons exist for the phone, where the two secondary actions drop
-            their words: on a 390px header row these three cost ~220px, which
-            leaves the workspace chips beside them too little to show a name.
-            Create keeps its label at every size — it is the primary action and
-            an unlabelled glyph for "make a publication" would be a guess. */}
-        <LogsIcon width={12} height={12} />
-        <span className="am-wsa-label">DRAFTS{draftCount ? ` ${draftCount}` : ""}</span>
-      </button>
       <button
         onClick={onDownload}
         disabled={sourceCount === 0}
@@ -60,25 +47,36 @@ export default function WorkspaceOutputActions({
           cursor: sourceCount ? "pointer" : "default",
         }}
       >
+        {/* The icon exists for the phone, where the secondary action drops its
+            word: on a 390px row these buttons compete with the photos beneath.
+            Create keeps its label at every size — it is the primary action and
+            an unlabelled glyph for "make a publication" would be a guess. */}
         <DownloadIcon width={12} height={12} />
         <span className="am-wsa-label">DOWNLOAD{selectedCount ? ` ${selectedCount}` : ""}</span>
       </button>
       <button
         onClick={onCreate}
-        disabled={sourceCount === 0}
+        disabled={sourceCount === 0 && draftCount === 0}
+        aria-label={`Create${draftCount ? `, ${draftCount} draft${draftCount === 1 ? "" : "s"}` : ""}`}
         title={selectedCount ? `Create from selected ${selectedCount}` : `Create from all ${photoCount}`}
         style={{
           ...base,
           minWidth: 72,
-          background: sourceCount ? "var(--ac)" : "var(--bd)",
+          justifyContent: "center",
+          background: sourceCount || draftCount ? "var(--ac)" : "var(--bd)",
           border: 0,
-          color: sourceCount ? "#050505" : "var(--tm)",
+          color: sourceCount || draftCount ? "#050505" : "var(--tm)",
           fontWeight: 800,
           letterSpacing: ".04em",
-          cursor: sourceCount ? "pointer" : "default",
+          cursor: sourceCount || draftCount ? "pointer" : "default",
         }}
       >
         CREATE
+        {draftCount > 0 && (
+          <span style={{ padding: "1px 5px", background: "rgba(5,5,5,.18)", borderRadius: 2, fontSize: 9.5, fontWeight: 800 }}>
+            {draftCount}
+          </span>
+        )}
       </button>
     </div>
   );

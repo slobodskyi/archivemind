@@ -6,12 +6,16 @@ import type { CreateOutputInput } from "@/lib/content-generation-client";
 
 interface CreateOutputDialogProps {
   open: boolean;
+  /** The outcome was picked in the hub (or fixed by the draft being
+   *  regenerated) — this step only collects the brief. */
+  kind: CreateOutputInput["kind"];
   boardName: string;
   allAssetIds: string[];
   selectedAssetIds: string[];
   busy: boolean;
   error: string | null;
   initial?: Partial<CreateOutputInput> | null;
+  /** Step back to the hub. Escape and the footer's Back both land there. */
   onClose: () => void;
   onGenerate: (input: CreateOutputInput) => void;
 }
@@ -30,8 +34,12 @@ const inputStyle = {
 
 const fieldLabel = { color: "var(--t2)", fontSize: 10.5 } as const;
 
+/** The brief step (ADR 0045 as amended): prompt and language up front, the
+ * refinements behind More options — the studio is where the result gets
+ * shaped, so the form stops charging eight decisions before the first draft. */
 export default function CreateOutputDialog({
   open,
+  kind,
   boardName,
   allAssetIds,
   selectedAssetIds,
@@ -42,7 +50,6 @@ export default function CreateOutputDialog({
   onGenerate,
 }: CreateOutputDialogProps) {
   const initialSourceIds = initial?.sourceAssetIds?.length ? initial.sourceAssetIds : [];
-  const [kind, setKind] = useState<CreateOutputInput["kind"]>(initial?.kind ?? "article");
   const [source, setSource] = useState<"snapshot" | "selected" | "all">(
     initialSourceIds.length ? "snapshot" : selectedAssetIds.length ? "selected" : "all",
   );
@@ -52,7 +59,16 @@ export default function CreateOutputDialog({
   const [tone, setTone] = useState<"editorial" | "personal" | "social">(initial?.tone ?? "editorial");
   const [length, setLength] = useState<"short" | "medium" | "long">(initial?.kind === "article" ? (initial.length ?? "medium") : "medium");
   const [aspectRatio, setAspectRatio] = useState<"4:5" | "1:1">(initial?.kind === "instagram_carousel" ? (initial.aspectRatio ?? "4:5") : "4:5");
-  const [count, setCount] = useState(initial?.kind === "article" ? (initial.imageCount ?? 5) : initial?.kind === "instagram_carousel" ? (initial.slideCount ?? 5) : 5);
+  const [count, setCount] = useState<number | null>(
+    initial?.kind === "article" ? (initial.imageCount ?? null) : initial?.kind === "instagram_carousel" ? (initial.slideCount ?? null) : null,
+  );
+  // A seed that carries refinements should not hide them behind the fold.
+  const [moreOpen, setMoreOpen] = useState(() => Boolean(
+    (initial?.audience ?? "") !== "" ||
+    (initial?.tone && initial.tone !== "editorial") ||
+    (initial?.kind === "article" && initial.length && initial.length !== "medium") ||
+    (initial?.kind === "instagram_carousel" && initial.aspectRatio && initial.aspectRatio !== "4:5"),
+  ));
   if (!open) return null;
 
   const sourceAssetIds = source === "snapshot" && initialSourceIds.length
@@ -63,7 +79,8 @@ export default function CreateOutputDialog({
   const generationAssetIds = sourceAssetIds.slice(0, 20);
   const maxCount = generationAssetIds.length;
   const minCount = kind === "article" ? 1 : 2;
-  const actualCount = Math.min(Math.max(count, minCount), maxCount);
+  const defaultCount = kind === "article" ? 5 : Math.min(7, Math.max(2, maxCount));
+  const actualCount = Math.min(Math.max(count ?? defaultCount, minCount), maxCount);
   const canGenerate = prompt.trim().length > 0 && maxCount >= minCount && !busy;
   const submit = () => {
     if (!canGenerate) return;
@@ -82,19 +99,28 @@ export default function CreateOutputDialog({
     );
   };
 
+  const moreSummary = [
+    audience.trim() || null,
+    tone !== "editorial" ? tone : null,
+    kind === "article" ? (length !== "medium" ? length : null) : aspectRatio !== "4:5" ? aspectRatio : null,
+    `${actualCount} ${kind === "article" ? "images" : "slides"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <Dialog
       open={open}
       size="l"
       kicker="Create"
-      title={`Create from ${boardName}`}
-      subtitle="Choose the outcome first. File formats come after the copy is reviewed."
+      title={`${kind === "article" ? "Article" : "Instagram carousel"} from ${boardName}`}
+      subtitle="Say what it should tell. Everything else can change after the draft exists."
       closeButton={false}
       busy={busy}
       onClose={onClose}
       footer={
         <>
-          <DialogButton onClick={onClose} disabled={busy}>Cancel</DialogButton>
+          <DialogButton onClick={onClose} disabled={busy}>‹ Back</DialogButton>
           <DialogButton variant="primary" onClick={submit} disabled={!canGenerate}>
             {busy ? "Drafting…" : `Generate ${kind === "article" ? "article" : "carousel"}`}
           </DialogButton>
@@ -102,33 +128,6 @@ export default function CreateOutputDialog({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {([
-            ["article", "Article", "Narrative copy with ordered images"],
-            ["instagram_carousel", "Instagram carousel", "Phone-sized story sequence + caption"],
-          ] as const).map(([value, label, help]) => (
-            <button
-              key={value}
-              onClick={() => {
-                setKind(value);
-                setCount(value === "article" ? 5 : Math.min(7, Math.max(2, maxCount)));
-              }}
-              style={{
-                padding: "13px 14px",
-                textAlign: "left",
-                background: kind === value ? "color-mix(in srgb,var(--ac) 10%,var(--bg-el))" : "var(--bg-el)",
-                border: `1px solid ${kind === value ? "var(--ac)" : "var(--bd)"}`,
-                borderRadius: 2,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              <span style={{ display: "block", color: "var(--t1)", fontSize: 13, fontWeight: 700 }}>{label}</span>
-              <span style={{ display: "block", marginTop: 4, color: "var(--t3)", fontSize: 10.5 }}>{help}</span>
-            </button>
-          ))}
-        </div>
-
         {(initialSourceIds.length > 0 || (selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length)) && (
           <fieldset style={{ margin: 0, padding: 0, border: 0 }}>
             <legend style={{ marginBottom: 7, color: "var(--t2)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".07em" }}>Sources</legend>
@@ -161,40 +160,51 @@ export default function CreateOutputDialog({
           />
         </label>
 
-        <label style={fieldLabel}>Audience
-          <input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Readers, clients…" style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
+        <label style={{ ...fieldLabel, maxWidth: 220 }}>Language
+          <select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+            <option value="en">English</option><option value="uk">Українська</option><option value="ru">Русский</option>
+          </select>
         </label>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <label style={fieldLabel}>Language
-            <select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-              <option value="en">English</option><option value="uk">Українська</option><option value="ru">Русский</option>
-            </select>
-          </label>
-          <label style={fieldLabel}>Tone
-            <select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-              <option value="editorial">Editorial</option><option value="personal">Personal</option><option value="social">Social</option>
-            </select>
-          </label>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          {kind === "article" ? (
-            <label style={fieldLabel}>Length
-              <select value={length} onChange={(event) => setLength(event.target.value as typeof length)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                <option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option>
-              </select>
-            </label>
-          ) : (
-            <label style={fieldLabel}>Aspect ratio
-              <select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                <option value="4:5">Portrait 4:5</option><option value="1:1">Square 1:1</option>
-              </select>
-            </label>
+        <div>
+          <button
+            type="button"
+            onClick={() => setMoreOpen((value) => !value)}
+            aria-expanded={moreOpen}
+            style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: moreOpen ? 10 : 0, padding: 0, border: 0, background: "transparent", color: "var(--t3)", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", cursor: "pointer" }}
+          >
+            {moreOpen ? "▾" : "▸"} More options <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--t2)" }}>— {moreSummary}</span>
+          </button>
+          {moreOpen && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={fieldLabel}>Audience
+                <input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Readers, clients…" style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <label style={fieldLabel}>Tone
+                  <select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+                    <option value="editorial">Editorial</option><option value="personal">Personal</option><option value="social">Social</option>
+                  </select>
+                </label>
+                {kind === "article" ? (
+                  <label style={fieldLabel}>Length
+                    <select value={length} onChange={(event) => setLength(event.target.value as typeof length)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+                      <option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option>
+                    </select>
+                  </label>
+                ) : (
+                  <label style={fieldLabel}>Aspect ratio
+                    <select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+                      <option value="4:5">Portrait 4:5</option><option value="1:1">Square 1:1</option>
+                    </select>
+                  </label>
+                )}
+                <label style={fieldLabel}>{kind === "article" ? "Images" : "Slides"}
+                  <input type="number" min={minCount} max={maxCount} value={actualCount} onChange={(event) => setCount(Number(event.target.value))} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
+                </label>
+              </div>
+            </div>
           )}
-          <label style={fieldLabel}>{kind === "article" ? "Images" : "Slides"}
-            <input type="number" min={minCount} max={maxCount} value={actualCount} onChange={(event) => setCount(Number(event.target.value))} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
-          </label>
         </div>
 
         {sourceAssetIds.length > 20 && <div style={{ color: "var(--t3)", fontSize: 10.5 }}>Generation uses the first 20 sources from the current canvas order. Raw Download still includes the full Workspace.</div>}

@@ -140,3 +140,43 @@ Still out: cross-device *live* collaboration, presence, and per-field merge. Two
 people editing one draft simultaneously will still resolve as last-writer-wins
 at document granularity, and the UI does not yet show that a newer version
 exists elsewhere.
+
+### 2026-08-18 — two actions and a hub; one word per delivery job
+
+The Decision above gave an open Workspace **three** actions — Create, Drafts,
+Download. Shipping them showed the triad was one story wearing two names:
+Drafts and Create are the same activity (make content) at different moments,
+and the library dialog admitted as much by carrying its own "+ Create" button
+in the header. Meanwhile the words crossed: the DOWNLOAD button opened a dialog
+titled "Export", the studio's "Export copy" performed a download, and its
+"Download photos" opened the Export dialog.
+
+What ships now:
+
+- **Two actions.** `Download` (source files as PDF/CSV/ZIP — unchanged flow)
+  and `Create` (primary, carrying the draft count as a badge). Create opens a
+  **hub** (`CreateHubDialog`): outcome cards on top — Article, Instagram
+  carousel, and room for the next recipe — with **Continue editing**, the saved
+  drafts, below. The separate DRAFTS button is gone. Create stays enabled when
+  the Workspace has drafts but no files: the cards disable, the drafts remain
+  reachable.
+- **The brief step asks less.** `CreateOutputDialog` no longer picks the kind
+  (the hub did) and fronts only the prompt and language; audience, tone,
+  length/aspect and count sit behind a **More options** disclosure that names
+  its current values and auto-opens when a regeneration seed carries any
+  non-default. The studio is where the result gets shaped, so the form stops
+  charging eight decisions before the first draft exists.
+- **A predictable ladder.** hub → brief → studio, and Escape/Back walks it
+  backwards one step at a time; closing the hub returns to the canvas. The old
+  behaviour — Escape in the create form landing in the library only if drafts
+  existed — is gone.
+- **One word per delivery job** (landed 2026-08-18 with the vocabulary pass):
+  *Download* moves files out of the app in any format — the dialog's title and
+  CTA say Download, and the studio's "Export copy" + "Download photos" pair
+  became one Download menu (Text / Photos). *Share* makes the public preview
+  link. *Create* makes content. "Export" survives only in code, job types and
+  API routes.
+
+Consequences: `DraftLibraryDialog` is deleted in favour of `CreateHubDialog`;
+the phone row carries two buttons instead of three. The generation contract,
+draft schema, storage and usage accounting above are untouched.
