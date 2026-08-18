@@ -18,6 +18,7 @@ const articleRequest: ContentGenerationRequest = {
   brief: "A reflective story about the selected evening photographs.",
   language: "uk",
   tone: "editorial",
+  orderIsAuthored: false,
   options: { length: "short", imageCount: 2 },
 };
 
@@ -28,6 +29,7 @@ const carouselRequest: ContentGenerationRequest = {
   brief: "A concise sequence about the city at night.",
   language: "en",
   tone: "social",
+  orderIsAuthored: false,
   options: { slideCount: 3, aspect: "4:5" },
 };
 
@@ -40,6 +42,7 @@ const source = (assetId: string): SourceAssetContext => ({
   description: "A machine description of people walking under street lights.",
   confirmedFacts: ["The photographer confirmed this was made during the evening walk."],
   editedCaptions: [{ language: "en", style: "social", text: "A quiet evening in the city." }],
+  authorNotes: [],
 });
 
 describe("contentGenerationRequestSchema", () => {
@@ -73,9 +76,31 @@ describe("buildContentGenerationPrompt", () => {
     const prompt = buildContentGenerationPrompt(articleRequest, sources);
     expect(prompt).toContain("confirmedFacts are the only sources");
     expect(prompt).toContain("description are machine-written visual hints");
+    expect(prompt).toContain("authorNotes are the sole exception");
     expect(prompt).toContain("exactly 2 unique source images");
     expect(prompt.indexOf(id(1))).toBeLessThan(prompt.indexOf(id(2)));
     expect(prompt.indexOf(id(2))).toBeLessThan(prompt.indexOf(id(3)));
+  });
+
+  it("authorNotes are direction, not evidence — and their text reaches the prompt", () => {
+    const sources = articleRequest.sourceAssetIds.map(source);
+    sources[1] = { ...sources[1], authorNotes: ["Lead with this photo's mood."] };
+    const prompt = buildContentGenerationPrompt(articleRequest, sources);
+    expect(prompt).toContain("authorNotes are the author's own directions");
+    expect(prompt).toContain("they are not evidence");
+    expect(prompt).toContain("Lead with this photo's mood.");
+  });
+
+  it("tells the model to preserve order exactly when the thread is authored", () => {
+    const sources = articleRequest.sourceAssetIds.map(source);
+    const free = buildContentGenerationPrompt(articleRequest, sources);
+    expect(free).not.toContain("do not reorder");
+    const authored = buildContentGenerationPrompt(
+      { ...articleRequest, orderIsAuthored: true },
+      sources,
+    );
+    expect(authored).toContain("the author's own narrative sequence");
+    expect(authored).toContain("do not reorder");
   });
 
   it("refuses source context that no longer matches the authorized order", () => {

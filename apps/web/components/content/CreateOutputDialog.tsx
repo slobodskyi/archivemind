@@ -12,6 +12,9 @@ interface CreateOutputDialogProps {
   boardName: string;
   allAssetIds: string[];
   selectedAssetIds: string[];
+  /** Authored chains drawn on the canvas (ADR 0048), each already in its
+   *  walk order — every one becomes a source option. */
+  threads?: readonly (readonly string[])[];
   busy: boolean;
   error: string | null;
   initial?: Partial<CreateOutputInput> | null;
@@ -43,6 +46,7 @@ export default function CreateOutputDialog({
   boardName,
   allAssetIds,
   selectedAssetIds,
+  threads = [],
   busy,
   error,
   initial,
@@ -50,7 +54,7 @@ export default function CreateOutputDialog({
   onGenerate,
 }: CreateOutputDialogProps) {
   const initialSourceIds = initial?.sourceAssetIds?.length ? initial.sourceAssetIds : [];
-  const [source, setSource] = useState<"snapshot" | "selected" | "all">(
+  const [source, setSource] = useState<"snapshot" | "selected" | "all" | `thread:${number}`>(
     initialSourceIds.length ? "snapshot" : selectedAssetIds.length ? "selected" : "all",
   );
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
@@ -71,11 +75,16 @@ export default function CreateOutputDialog({
   ));
   if (!open) return null;
 
-  const sourceAssetIds = source === "snapshot" && initialSourceIds.length
-    ? initialSourceIds
-    : source === "selected" && selectedAssetIds.length
-      ? selectedAssetIds
-      : allAssetIds;
+  const pickedThread = source.startsWith("thread:")
+    ? threads[Number(source.slice("thread:".length))] ?? null
+    : null;
+  const sourceAssetIds = pickedThread
+    ? [...pickedThread]
+    : source === "snapshot" && initialSourceIds.length
+      ? initialSourceIds
+      : source === "selected" && selectedAssetIds.length
+        ? selectedAssetIds
+        : allAssetIds;
   const generationAssetIds = sourceAssetIds.slice(0, 20);
   const maxCount = generationAssetIds.length;
   const minCount = kind === "article" ? 1 : 2;
@@ -91,6 +100,9 @@ export default function CreateOutputDialog({
       additionalInstructions: "",
       language,
       tone,
+      // A thread's order is authored (ADR 0048); the route re-verifies it
+      // against the drawn edges before the prompt claims so.
+      orderIsAuthored: pickedThread !== null,
     };
     onGenerate(
       kind === "article"
@@ -128,12 +140,20 @@ export default function CreateOutputDialog({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {(initialSourceIds.length > 0 || (selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length)) && (
+        {(initialSourceIds.length > 0 ||
+          threads.length > 0 ||
+          (selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length)) && (
           <fieldset style={{ margin: 0, padding: 0, border: 0 }}>
             <legend style={{ marginBottom: 7, color: "var(--t2)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".07em" }}>Sources</legend>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {([
                 ...(initialSourceIds.length ? [["snapshot", `Draft snapshot ${initialSourceIds.length}`] as const] : []),
+                // A thread is an authored chain (ADR 0048): its walk order
+                // becomes the generation order, and the prompt is told so.
+                ...threads.map(
+                  (thread, index) =>
+                    [`thread:${index}`, threads.length === 1 ? `Thread · ${thread.length} photos` : `Thread ${index + 1} · ${thread.length} photos`] as const,
+                ),
                 ...(selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length
                   ? [["selected", `Selected ${selectedAssetIds.length}`] as const]
                   : []),

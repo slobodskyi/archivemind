@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  flattenNoteEvidenceText,
   hasLineMarks,
   parseInline,
   parseNoteLines,
@@ -156,5 +157,22 @@ describe("toggleInlineMark", () => {
     expect(r.text).toBe("~~~~");
     expect(r.selStart).toBe(2);
     expect(r.selEnd).toBe(2);
+  });
+});
+
+describe("flattenNoteEvidenceText", () => {
+  it("strips markers but keeps their text — an unticked reminder is authored intent", () => {
+    expect(flattenNoteEvidenceText("# Focus\n[ ] ask about the dog\n- keep it warm")).toBe(
+      "Focus\nask about the dog\nkeep it warm",
+    );
+  });
+
+  it("drops struck spans — a strike is the author retracting something", () => {
+    expect(flattenNoteEvidenceText("keep this ~~not this~~ and this")).toBe("keep this  and this");
+  });
+
+  it("drops blank lines and caps at the schema's per-note limit", () => {
+    expect(flattenNoteEvidenceText("a\n\n\nb")).toBe("a\nb");
+    expect(flattenNoteEvidenceText("x".repeat(2000))).toHaveLength(1500);
   });
 });

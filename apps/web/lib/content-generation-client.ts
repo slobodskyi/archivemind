@@ -54,6 +54,8 @@ export type CreateOutputInput =
       tone: "editorial" | "personal" | "social";
       length: "short" | "medium" | "long";
       imageCount: number;
+      /** The sources are an authored thread (ADR 0048) — server-verified. */
+      orderIsAuthored?: boolean;
     }
   | {
       kind: "instagram_carousel";
@@ -65,6 +67,8 @@ export type CreateOutputInput =
       tone: "editorial" | "personal" | "social";
       aspectRatio: "4:5" | "1:1";
       slideCount: number;
+      /** The sources are an authored thread (ADR 0048) — server-verified. */
+      orderIsAuthored?: boolean;
     };
 
 function partId(prefix: "section" | "slide", index: number): string {
@@ -86,6 +90,7 @@ export function generationRequestBody(boardId: string, input: CreateOutputInput)
     brief,
     language: input.language,
     tone: input.tone,
+    orderIsAuthored: input.orderIsAuthored ?? false,
   };
   return input.kind === "article"
     ? { ...common, kind: input.kind, options: { length: input.length, imageCount: input.imageCount } }
