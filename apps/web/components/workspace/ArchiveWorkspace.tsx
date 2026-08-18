@@ -1269,16 +1269,6 @@ export default function ArchiveWorkspace({
         onBatchSettled={ws.onUploadBatchSettled}
       />
 
-      {ws.exportOpen && (
-        <ExportDialog
-          assetIds={ws.exportIds}
-          photos={ws.photos}
-          defaultTitle={bd.activeBoard?.name ?? (ws.projLabel === "Projects" ? "" : ws.projLabel)}
-          workspaceId={workspaceId}
-          onClose={ws.closeExport}
-        />
-      )}
-
       <CreateHubDialog
         open={outputUi === "hub" && Boolean(bd.activeBoard)}
         boardName={bd.activeBoard?.name ?? "Workspace"}
@@ -1311,7 +1301,7 @@ export default function ArchiveWorkspace({
       <ContentDraftStudio
         key={activeDraft?.id ?? "closed-draft"}
         draft={outputUi === "studio" ? activeDraft : null}
-        suspended={draftConfirm !== null || shareOpen}
+        suspended={draftConfirm !== null || shareOpen || ws.exportOpen}
         photos={ws.photos}
         currentAssetIds={orderedBoardAssetIds}
         saveState={draftSaveState}
@@ -1330,12 +1320,22 @@ export default function ArchiveWorkspace({
         }}
         onShare={openSharePreview}
         onDownloadCopy={() => activeDraft && downloadContentDraft(activeDraft, ws.photos)}
-        onDownloadPhotos={(assetIds) => {
-          setOutputUi("closed");
-          setActiveDraft(null);
-          ws.openExportFor(assetIds);
-        }}
+        // Opens OVER the studio (the same suspension Share uses) — a delivery
+        // must not close the editor it delivers from.
+        onDownloadPhotos={(assetIds) => ws.openExportFor(assetIds)}
       />
+
+      {/* After the studio in the tree: both sit at Z.modal, so DOM order is
+          what puts the download card above a suspended editor. */}
+      {ws.exportOpen && (
+        <ExportDialog
+          assetIds={ws.exportIds}
+          photos={ws.photos}
+          defaultTitle={bd.activeBoard?.name ?? (ws.projLabel === "Projects" ? "" : ws.projLabel)}
+          workspaceId={workspaceId}
+          onClose={ws.closeExport}
+        />
+      )}
 
       <SharePreviewDialog
         open={shareOpen && activeDraft !== null}

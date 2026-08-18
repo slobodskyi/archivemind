@@ -180,3 +180,9 @@ What ships now:
 Consequences: `DraftLibraryDialog` is deleted in favour of `CreateHubDialog`;
 the phone row carries two buttons instead of three. The generation contract,
 draft schema, storage and usage accounting above are untouched.
+
+One rupture remained after the hub landed and is closed now: the studio's
+**Download → Photos** used to close the editor to show the download dialog,
+stranding the author two dialogs away from their draft. It opens *over* the
+suspended studio instead — the same mechanism Share already used — so a
+delivery never closes the editor it delivers from.
