@@ -42,6 +42,7 @@ import CreateOutputDialog from "@/components/content/CreateOutputDialog";
 import CreateHubDialog from "@/components/content/CreateHubDialog";
 import EdgeDropMenu from "@/components/canvas/EdgeDropMenu";
 import EdgeLayer from "@/components/canvas/EdgeLayer";
+import { deriveThreads } from "@/lib/threads";
 import ContentDraftStudio from "@/components/content/ContentDraftStudio";
 import SharePreviewDialog, {
   type SharePreviewOptions,
@@ -611,7 +612,18 @@ export default function ArchiveWorkspace({
   const scopedFolders = board ? ws.folders.filter((f) => f.boardId === board) : ws.folders;
   // Edges are stricter than notes: they exist ONLY inside their board
   // (board_id NOT NULL, ADR 0048), so with none open there are none to show.
-  const scopedEdges = board ? ws.edges.filter((edge) => edge.boardId === board) : [];
+  const scopedEdges = useMemo(
+    () => (board ? ws.edges.filter((edge) => edge.boardId === board) : []),
+    [board, ws.edges],
+  );
+
+  // Authored chains → CREATE source options (ADR 0048). Derived beside the
+  // reading order because a thread's tiebreaks come from it.
+  const boardAssetIdSet = useMemo(() => new Set(bd.activeBoard?.assetIds ?? []), [bd.activeBoard]);
+  const threads = useMemo(
+    () => deriveThreads(scopedEdges, boardAssetIdSet, orderedBoardAssetIds),
+    [scopedEdges, boardAssetIdSet, orderedBoardAssetIds],
+  );
 
   // Counts come from the loaded photo set, not the board's raw id list: an id
   // whose asset has since been trashed must not still be counted on a chip.
@@ -1329,6 +1341,7 @@ export default function ArchiveWorkspace({
         boardName={bd.activeBoard?.name ?? "Workspace"}
         allAssetIds={orderedBoardAssetIds}
         selectedAssetIds={orderedSelectedIds}
+        threads={threads}
         busy={generationBusy}
         error={generationError}
         initial={createSeed}
