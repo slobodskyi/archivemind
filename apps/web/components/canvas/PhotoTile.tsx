@@ -330,35 +330,58 @@ export default function PhotoTile({
     )}
     {/* The wire port (ADR 0048): drag out to connect this photo to another, to
         a note, or to empty canvas. Same reachability rule as Delete above —
-        hover OR selection, so a tablet can arm it with a tap. Sticks half out
-        of the right edge so the wire visibly starts AT the tile's boundary. */}
+        hover OR selection, so a tablet can arm it with a tap. Fully OUTSIDE
+        the frame (it must never sit on the photograph), joined to it by a
+        short stem; the stem's invisible hover bridge is what keeps `hovered`
+        alive while the pointer crosses the gap — without it the port unmounts
+        before it can be reached. */}
     {interactive && onEdgeStart && (hovered || selected || edgeDropTarget) && (
-      <button
-        type="button"
-        aria-label={`Connect ${filename}`}
-        title="Drag to connect — to another photo, a note, or empty canvas"
-        data-edge-port=""
-        onPointerDown={onEdgeStart}
-        style={{
-          position: "absolute",
-          top: "50%",
-          right: -10,
-          display: "flex",
-          width: 20,
-          height: 20,
-          alignItems: "center",
-          justifyContent: "center",
-          transform: "translateY(-50%)",
-          border: "1px solid color-mix(in srgb,var(--ac) 55%,transparent)",
-          borderRadius: 999,
-          background: "rgba(10,10,10,.8)",
-          color: "var(--ac)",
-          cursor: "crosshair",
-          zIndex: 6,
-        }}
-      >
-        <span aria-hidden="true" style={{ width: 7, height: 7, border: "1.5px solid currentColor", borderRadius: "50%" }} />
-      </button>
+      <>
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: "50%",
+            right: -9,
+            width: 9,
+            height: 22,
+            display: "flex",
+            alignItems: "center",
+            transform: "translateY(-50%)",
+            zIndex: 6,
+          }}
+        >
+          <span style={{ width: "100%", height: 1.5, background: "color-mix(in srgb,var(--ac) 55%,transparent)" }} />
+        </span>
+        <button
+          type="button"
+          aria-label={`Connect ${filename}`}
+          title="Drag to connect — to another photo, a note, or empty canvas"
+          data-edge-port=""
+          onPointerDown={onEdgeStart}
+          style={{
+            position: "absolute",
+            top: "50%",
+            right: -29,
+            display: "flex",
+            width: 20,
+            height: 20,
+            alignItems: "center",
+            justifyContent: "center",
+            transform: "translateY(-50%)",
+            border: "1px solid color-mix(in srgb,var(--ac) 55%,transparent)",
+            borderRadius: 999,
+            background: "rgba(10,10,10,.85)",
+            color: "var(--ac)",
+            cursor: "crosshair",
+            zIndex: 6,
+          }}
+        >
+          <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+          </svg>
+        </button>
+      </>
     )}
     {/* An in-flight wire is over this tile — the drop ring. */}
     {edgeDropTarget && (

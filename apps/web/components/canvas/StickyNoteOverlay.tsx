@@ -271,34 +271,56 @@ function NoteCard({
       {/* The wire port (ADR 0048), symmetric with a photo tile's: a note can
           be wired to more photos after the fact. Only with an open Workspace
           (onEdgeStart is gated by the caller), visible on hover/active like
-          the tile port is on hover/selection. */}
+          the tile port is on hover/selection. Fully outside the card, joined
+          by a stem whose invisible hover bridge keeps `hovered` alive across
+          the gap — same construction as PhotoTile's. */}
       {onEdgeStart && (hovered || active || edgeDropTarget) && (
-        <button
-          type="button"
-          aria-label="Connect note"
-          title="Drag to connect this note to a photo"
-          data-edge-port=""
-          onPointerDown={(e) => onEdgeStart(e, note.id, { x: note.x + note.w / 2, y: note.y + note.h / 2 })}
-          style={{
-            position: "absolute",
-            top: "50%",
-            right: -10,
-            display: "flex",
-            width: 20,
-            height: 20,
-            alignItems: "center",
-            justifyContent: "center",
-            transform: "translateY(-50%)",
-            border: "1px solid color-mix(in srgb,var(--ac) 55%,transparent)",
-            borderRadius: 999,
-            background: "rgba(10,10,10,.8)",
-            color: "var(--ac)",
-            cursor: "crosshair",
-            zIndex: 6,
-          }}
-        >
-          <span aria-hidden="true" style={{ width: 7, height: 7, border: "1.5px solid currentColor", borderRadius: "50%" }} />
-        </button>
+        <>
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: "50%",
+              right: -9,
+              width: 9,
+              height: 22,
+              display: "flex",
+              alignItems: "center",
+              transform: "translateY(-50%)",
+              zIndex: 6,
+            }}
+          >
+            <span style={{ width: "100%", height: 1.5, background: "color-mix(in srgb,var(--ac) 55%,transparent)" }} />
+          </span>
+          <button
+            type="button"
+            aria-label="Connect note"
+            title="Drag to connect this note to a photo"
+            data-edge-port=""
+            onPointerDown={(e) => onEdgeStart(e, note.id, { x: note.x + note.w / 2, y: note.y + note.h / 2 })}
+            style={{
+              position: "absolute",
+              top: "50%",
+              right: -29,
+              display: "flex",
+              width: 20,
+              height: 20,
+              alignItems: "center",
+              justifyContent: "center",
+              transform: "translateY(-50%)",
+              border: "1px solid color-mix(in srgb,var(--ac) 55%,transparent)",
+              borderRadius: 999,
+              background: "rgba(10,10,10,.85)",
+              color: "var(--ac)",
+              cursor: "crosshair",
+              zIndex: 6,
+            }}
+          >
+            <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden="true">
+              <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+            </svg>
+          </button>
+        </>
       )}
 
       {active && (
