@@ -46,7 +46,7 @@ export default function DraftLibraryDialog({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "18px 20px", borderBottom: "1px solid var(--bd)" }}>
           <div>
             <div id={titleId} style={{ color: "var(--t1)", fontSize: 15, fontWeight: 800 }}>Drafts · {boardName}</div>
-            <div style={{ marginTop: 4, color: "var(--t3)", fontSize: 10.5 }}>Saved in this browser · source snapshots never change silently</div>
+            <div style={{ marginTop: 4, color: "var(--t3)", fontSize: 10.5 }}>Saved with this Workspace · source snapshots never change silently</div>
           </div>
           <button data-autofocus="" onClick={onCreate} disabled={currentAssetIds.length === 0} style={{ height: 32, padding: "0 12px", border: 0, borderRadius: 2, background: currentAssetIds.length ? "var(--ac)" : "var(--bd)", color: currentAssetIds.length ? "#050505" : "var(--tm)", fontFamily: "inherit", fontSize: 11.5, fontWeight: 800, cursor: currentAssetIds.length ? "pointer" : "default" }}>+ Create</button>
         </div>

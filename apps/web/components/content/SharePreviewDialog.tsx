@@ -173,7 +173,7 @@ function SharePreviewDialogContent({
               Share “{draftName}”
             </h2>
             <p id={descriptionId} style={{ margin: "7px 0 0", color: "var(--t2)", fontSize: 11.5, lineHeight: 1.5 }}>
-              Create a view-only snapshot anyone with the link can open — no ArchiveMind account needed.
+              Create a view-only preview link anyone can open — no ArchiveMind account needed.
             </p>
           </div>
           <button type="button" onClick={close} disabled={busy} aria-label="Close share preview" style={{ ...buttonStyle, width: 40, flex: "0 0 auto", padding: 0, fontSize: 17, opacity: busy ? 0.45 : 1 }}>×</button>
@@ -267,7 +267,7 @@ function SharePreviewDialogContent({
             </div>
 
             <div style={{ marginTop: 12, padding: "12px 13px", background: "var(--bg-el)", border: "1px solid var(--bd)", borderRadius: 2, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.55 }}>
-              This snapshot stays as published even if you keep editing the draft. Shared files use the original when available, with a high-quality web-size file as the fallback.
+              This link keeps showing the version you published, even as you keep editing the draft. Shared files use the original when available, with a high-quality web-size file as the fallback.
             </div>
 
             {error ? <div role="alert" style={{ marginTop: 12, color: "var(--red)", fontSize: 11 }}>{error}</div> : null}
@@ -294,7 +294,7 @@ function SharePreviewDialogContent({
           <div style={{ padding: 20 }}>
             <div style={{ padding: "12px 13px", background: "var(--bg-el)", border: "1px solid var(--bd)", borderRadius: 2 }}>
               <div style={{ color: "var(--t1)", fontSize: 11.5, fontWeight: 700 }}>A stable publishing checkpoint</div>
-              <div style={{ marginTop: 5, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.55 }}>The current text, order, crops, and layout become a snapshot. Later edits create a new version instead of silently changing this link.</div>
+              <div style={{ marginTop: 5, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.55 }}>The link shows the draft exactly as it is right now — text, order, crops and layout. Later edits create a new version instead of silently changing what you already sent.</div>
             </div>
 
             <fieldset disabled={busy} style={{ margin: "18px 0 0", padding: 0, border: 0 }}>

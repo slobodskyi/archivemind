@@ -49,6 +49,7 @@ import {
   contentGenerationResultSchema,
   draftFromGeneration,
   generationRequestBody,
+  regenerationSeed,
   type CreateOutputInput,
 } from "@/lib/content-generation-client";
 import {
@@ -382,7 +383,7 @@ export default function ArchiveWorkspace({
     }
     if (!deleteContentDraft(activeDraft.boardId, activeDraft.id)) {
       setDraftConfirm(null);
-      ws.flashToast("Draft could not be deleted from this browser.");
+      ws.flashToast("The draft could not be deleted. Try again.");
       return;
     }
     void deleteContentDraftOnServer(activeDraft.boardId, activeDraft.id);
@@ -1319,31 +1320,7 @@ export default function ArchiveWorkspace({
             setDraftConfirm("regenerate");
             return;
           }
-          setCreateSeed(
-            draft.kind === "article"
-              ? {
-                  kind: draft.kind,
-                  sourceAssetIds: draft.sourceSnapshot.assetIds,
-                  prompt: draft.brief.prompt,
-                  audience: draft.brief.audience,
-                  additionalInstructions: draft.brief.additionalInstructions,
-                  language: draft.brief.language,
-                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
-                  length: draft.settings.length,
-                  imageCount: draft.settings.imageCount,
-                }
-              : {
-                  kind: draft.kind,
-                  sourceAssetIds: draft.sourceSnapshot.assetIds,
-                  prompt: draft.brief.prompt,
-                  audience: draft.brief.audience,
-                  additionalInstructions: draft.brief.additionalInstructions,
-                  language: draft.brief.language,
-                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
-                  aspectRatio: draft.settings.aspectRatio,
-                  slideCount: draft.settings.slideCount,
-                },
-          );
+          setCreateSeed(regenerationSeed(draft));
           setGenerationError(null);
           setOutputUi("create");
         }}
@@ -1380,8 +1357,8 @@ export default function ArchiveWorkspace({
         open={draftConfirm === "delete" && activeDraft !== null}
         title={`Delete “${activeDraft?.name ?? "draft"}”?`}
         body={(draftShareLinks ? draftShareLinks.length > 0 : Boolean(shareResult))
-          ? "This permanently removes the draft and its edits from this browser. Its public preview link stays live until you turn it off, so revoke it first if people should lose access. The Workspace and photos are not affected."
-          : "This permanently removes the draft and its edits from this browser. The Workspace and its photos are not affected. This cannot be undone."}
+          ? "This deletes the draft and everything written in it. Its public preview link stays live until you turn it off, so revoke it first if people should lose access. The Workspace and photos are not affected."
+          : "This deletes the draft and everything written in it. The Workspace and its photos are not affected."}
         confirmLabel="Delete draft"
         danger
         onConfirm={deleteActiveDraft}
@@ -1397,31 +1374,7 @@ export default function ArchiveWorkspace({
           const draft = activeDraft;
           if (!draft) return;
           setDraftConfirm(null);
-          setCreateSeed(
-            draft.kind === "article"
-              ? {
-                  kind: draft.kind,
-                  sourceAssetIds: draft.sourceSnapshot.assetIds,
-                  prompt: draft.brief.prompt,
-                  audience: draft.brief.audience,
-                  additionalInstructions: draft.brief.additionalInstructions,
-                  language: draft.brief.language,
-                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
-                  length: draft.settings.length,
-                  imageCount: draft.settings.imageCount,
-                }
-              : {
-                  kind: draft.kind,
-                  sourceAssetIds: draft.sourceSnapshot.assetIds,
-                  prompt: draft.brief.prompt,
-                  audience: draft.brief.audience,
-                  additionalInstructions: draft.brief.additionalInstructions,
-                  language: draft.brief.language,
-                  tone: draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial",
-                  aspectRatio: draft.settings.aspectRatio,
-                  slideCount: draft.settings.slideCount,
-                },
-          );
+          setCreateSeed(regenerationSeed(draft));
           setGenerationError(null);
           setOutputUi("create");
         }}

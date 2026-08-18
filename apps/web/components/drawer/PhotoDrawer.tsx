@@ -652,7 +652,7 @@ export default function PhotoDrawer({
               ADR 0035's export path is real — this now opens it for this photo. */}
           <div style={{ display: "flex", gap: 7, marginTop: 20, paddingTop: 14, borderTop: "1px solid var(--bd)" }}>
             <button onClick={onExport} style={footerBtn(true)}>
-              Export
+              Download
             </button>
           </div>
         </div>

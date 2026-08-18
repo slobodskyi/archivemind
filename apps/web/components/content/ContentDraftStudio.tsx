@@ -133,6 +133,117 @@ const AutoGrowTextarea = forwardRef(function AutoGrowTextarea(
   );
 });
 
+/** Everything that leaves the studio as a file, behind one word. "Text" is the
+ * editorial copy (the old Export copy); "Photos" opens the shared Download
+ * dialog for the placed sources. */
+function DownloadMenu({
+  draft,
+  photoCount,
+  onDownloadCopy,
+  onDownloadPhotos,
+}: {
+  draft: ContentDraft;
+  photoCount: number;
+  onDownloadCopy: () => void;
+  onDownloadPhotos: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const choose = (action: () => void) => () => {
+    setOpen(false);
+    // Focus returns to the trigger so the dialog's Tab order has an anchor —
+    // the clicked item is about to unmount with the menu.
+    triggerRef.current?.focus();
+    action();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    // Native listener on the wrapper: it fires before useDialog's keydown on
+    // the studio node, so Escape closes the menu without closing the editor.
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setOpen(false);
+      wrap.querySelector<HTMLElement>("button")?.focus();
+    };
+    const onDown = (event: PointerEvent) => {
+      if (!wrap.contains(event.target as Node)) setOpen(false);
+    };
+    wrap.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown, true);
+    return () => {
+      wrap.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [open]);
+
+  const item: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    width: "100%",
+    padding: "9px 11px",
+    border: 0,
+    borderRadius: 2,
+    background: "transparent",
+    color: "var(--t2)",
+    fontFamily: "inherit",
+    fontSize: 11.5,
+    textAlign: "left",
+    cursor: "pointer",
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        ref={triggerRef}
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        style={{ ...chromeButton, border: 0, background: "var(--ac)", color: "#050505", fontWeight: 800 }}
+      >
+        Download
+      </button>
+      {open ? (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="Download this draft"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 5px)",
+            right: 0,
+            width: 218,
+            padding: 5,
+            background: "rgba(18,18,18,.97)",
+            border: "1px solid var(--bd)",
+            borderRadius: 2,
+            backdropFilter: "blur(20px)",
+            boxShadow: "0 20px 60px rgba(0,0,0,.7)",
+            zIndex: 5,
+          }}
+        >
+          <button role="menuitem" onClick={choose(onDownloadCopy)} style={item}>
+            <span style={{ color: "var(--t1)" }}>Text</span>
+            <span style={{ color: "var(--t3)", fontSize: 10 }}>{draft.kind === "article" ? "Markdown file" : "Plain text"}</span>
+          </button>
+          <button role="menuitem" onClick={choose(onDownloadPhotos)} style={item}>
+            <span style={{ color: "var(--t1)" }}>Photos</span>
+            <span style={{ color: "var(--t3)", fontSize: 10 }}>{photoCount} {photoCount === 1 ? "file" : "files"}</span>
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function move<T>(values: readonly T[], from: number, to: number): T[] {
   if (to < 0 || to >= values.length) return [...values];
   const next = [...values];
@@ -828,11 +939,16 @@ export default function ContentDraftStudio({
             />
           </div>
           <div className="content-draft-header-actions" style={{ flex: "0 0 auto", display: "flex", alignItems: "center", gap: 6 }}>
-            <span role="status" style={{ marginRight: 4, color: saveState === "error" ? "var(--red)" : "var(--t3)", fontSize: 9.5 }}>{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved locally"}</span>
+            <span role="status" style={{ marginRight: 4, color: saveState === "error" ? "var(--red)" : "var(--t3)", fontSize: 9.5 }}>{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</span>
             <button onClick={() => { setRailOpen((open) => !open); setSelectedMedia(null); }} aria-expanded={railOpen} aria-controls={sourcesId} style={{ ...chromeButton, background: railOpen ? "var(--bg-el)" : "transparent" }}>Sources</button>
             <button onClick={() => onRegenerate(draft)} style={chromeButton}>Regenerate</button>
             <button onClick={onShare} aria-label="Share preview" title="Create a public preview link" style={{ ...chromeButton, color: "var(--t1)" }}>Share</button>
-            <button onClick={onDownloadCopy} style={{ ...chromeButton, border: 0, background: "var(--ac)", color: "#050505", fontWeight: 800 }}>Export copy</button>
+            <DownloadMenu
+              draft={draft}
+              photoCount={usedIds.length || draft.sourceSnapshot.assetIds.length}
+              onDownloadCopy={onDownloadCopy}
+              onDownloadPhotos={() => onDownloadPhotos(usedIds.length ? usedIds : draft.sourceSnapshot.assetIds)}
+            />
             <button onClick={onClose} aria-label="Close draft editor" style={{ ...chromeButton, width: 32, padding: 0, fontSize: 17 }}>×</button>
           </div>
         </header>
@@ -891,7 +1007,6 @@ export default function ContentDraftStudio({
         <footer style={{ minHeight: 48, flex: "0 0 auto", display: "flex", alignItems: "center", gap: 7, padding: "7px 12px 7px 16px", background: "var(--bg-nb)", borderTop: "1px solid var(--bd)" }}>
           <button onClick={onDelete} style={{ ...chromeButton, borderColor: "transparent", color: "var(--red)" }}>Delete draft</button>
           <span className="content-draft-footer-note" style={{ marginLeft: "auto", color: "var(--t3)", fontSize: 9.5 }}>Preview layout is saved with this draft</span>
-          <button onClick={() => onDownloadPhotos(usedIds.length ? usedIds : draft.sourceSnapshot.assetIds)} style={chromeButton}>Download photos {usedIds.length || draft.sourceSnapshot.assetIds.length}</button>
         </footer>
         </div>
       </div>
