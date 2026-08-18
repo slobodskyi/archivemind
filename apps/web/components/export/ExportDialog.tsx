@@ -90,6 +90,16 @@ const LABEL: React.CSSProperties = {
   color: "var(--t3)",
   marginBottom: 6,
 };
+/** A label inside a group (Language/Style under Captions) — one step quieter
+ *  than the group's own LABEL so the hierarchy reads. */
+const SUBLABEL: React.CSSProperties = {
+  fontSize: 9.5,
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--t3)",
+  margin: "0 0 4px",
+};
 /** Announced, never shown. Inline rather than a `sr-only` class: this codebase
  *  uses no Tailwind utilities in components, so a first-ever one that missed
  *  content detection would render the status text visibly. */
@@ -776,6 +786,28 @@ export default function ExportDialog({
                       );
                     })}
                   </div>
+                  {/* The same dots the rows carry, spelled out — their meaning
+                      used to live in a hover title nobody discovers. */}
+                  {(inc.caption || !isDoc) && items.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 6 }}>
+                      {(isDoc
+                        ? ([
+                            ["exact", `has ${LANG_UI[captionLang]} · ${STYLE_UI[captionStyle]}`],
+                            ["fallback", "closest used"],
+                            ["none", "prints without"],
+                          ] as const)
+                        : ([
+                            ["exact", `has ${STYLE_UI[captionStyle]}`],
+                            ["none", "empty cell"],
+                          ] as const)
+                      ).map(([state, label]) => (
+                        <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--t3)" }}>
+                          <span style={dot(state)} />
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {warnings.length > 0 && (
                     <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
                       {warnings.map((w) => (
@@ -855,10 +887,11 @@ export default function ExportDialog({
                 ) : (
                   <>
                     {isDoc ? (
-                      <div style={{ ...TRACK, marginBottom: 6 }} role="group" aria-labelledby={`${groupId}-caption`}>
-                        <span style={SR_ONLY} id={`${groupId}-caption`}>
-                          Caption language
-                        </span>
+                      <>
+                      <div style={SUBLABEL} id={`${groupId}-caption`}>
+                        Language
+                      </div>
+                      <div style={{ ...TRACK, marginBottom: 8 }} role="group" aria-labelledby={`${groupId}-caption`}>
                         {LANGS.map((l) => {
                           const n = captionCoverage(runPhotos, l.key, captionStyle);
                           return (
@@ -874,15 +907,16 @@ export default function ExportDialog({
                           );
                         })}
                       </div>
+                      </>
                     ) : (
-                      <div style={{ fontSize: 10.5, color: "var(--t3)", marginBottom: 6 }}>
+                      <div style={{ fontSize: 10.5, color: "var(--t3)", marginBottom: 8 }}>
                         All three languages are included as their own columns.
                       </div>
                     )}
+                    <div style={SUBLABEL} id={`${groupId}-style`}>
+                      Style
+                    </div>
                     <div style={TRACK} role="group" aria-labelledby={`${groupId}-style`}>
-                      <span style={SR_ONLY} id={`${groupId}-style`}>
-                        Caption style
-                      </span>
                       {STYLES.map((st) => (
                         <button
                           key={st.key}
