@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { EXPORT_MAX_ASSETS, type ArtboardSettings, type WorkspaceInfo } from "@archivemind/shared";
 import type { Photo } from "@/types";
-import { useDialog } from "@/hooks/useDialog";
+import Dialog, { DialogButton } from "@/components/modals/Dialog";
 import {
   LANG_UI,
   STYLE_UI,
@@ -14,7 +14,6 @@ import {
 } from "@/lib/export-plan";
 import { isNonDefaultPageSetup, loadPrefs, savePrefs } from "@/lib/export-prefs";
 import { photoSrc } from "@/lib/img";
-import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 
 interface ExportDialogProps {
   /** Asset ids in page order (openExportFor puts them in reading order). */
@@ -72,30 +71,6 @@ const JOB_ERROR_COPY: { code: string; copy: string }[] = [
 const jobErrorCopy = (raw: string | null): string | null =>
   JOB_ERROR_COPY.find((e) => raw?.startsWith(e.code))?.copy ?? null;
 
-/** Capped and column-flexed: the card is taller than a laptop viewport in the
- *  ordinary case, and a fixed-position element contributes nothing to document
- *  overflow — with `body{overflow:hidden}` neither end was reachable, so the
- *  Export button simply sat off-screen. Matches ImportModal's 86vh. */
-const CARD: React.CSSProperties = {
-  background: "var(--bg-el)",
-  border: "1px solid var(--bd)",
-  borderRadius: 4,
-  width: 420,
-  maxWidth: "92vw",
-  maxHeight: "86vh",
-  display: "flex",
-  flexDirection: "column",
-  overflow: "hidden",
-  fontFamily: "inherit",
-};
-/** minHeight:0 is load-bearing — without it a flex child refuses to shrink below
- *  its content and the cap above does nothing. */
-const BODY: React.CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  overflowY: "auto",
-  padding: "0 20px",
-};
 const INPUT: React.CSSProperties = {
   width: "100%",
   height: 28,
@@ -192,7 +167,6 @@ export default function ExportDialog({
   const [outcome, setOutcome] = useState<{ rendered: number; requested: number } | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const titleId = useId();
   const groupId = useId();
 
   const stopPoll = useCallback(() => {
@@ -234,26 +208,6 @@ export default function ExportDialog({
       // Optimistic: the next open re-reads the server's copy.
     }
   }, []);
-
-  // While rendering, this dialog is the only place the finished link appears, so
-  // it must not be dismissed out from under the job. The stall deadline below
-  // guarantees the user is never stuck here indefinitely.
-  const requestClose = useCallback(() => {
-    if (phase !== "working") onClose();
-  }, [phase, onClose]);
-  const dialogRef = useDialog<HTMLDivElement>(true, requestClose);
-
-  // Focus follows the phase. useDialog's own effect is keyed on `open`, which is
-  // a literal `true` here, so it runs once at mount — when `start()` unmounts the
-  // focused Export button, focus fell to <body>, and since the hook binds keydown
-  // to the dialog NODE, Escape and the Tab trap died with it. Declared AFTER the
-  // hook so it never clobbers the hook's own previouslyFocused bookkeeping.
-  useEffect(() => {
-    const node = dialogRef.current;
-    if (!node) return;
-    if (node.contains(document.activeElement)) return;
-    node.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-  }, [phase, dialogRef]);
 
   /** The run, in page order, with dropped photos removed. */
   const items = useMemo(() => {
@@ -528,19 +482,6 @@ export default function ExportDialog({
     fontFamily: "inherit",
   });
 
-  /** Dismissals (ConfirmModal's Cancel). Not a choice; must not look like one. */
-  const ghost: React.CSSProperties = {
-    height: 34,
-    padding: "0 16px",
-    background: "transparent",
-    color: "var(--t2b)",
-    border: "1px solid var(--bd)",
-    borderRadius: 2,
-    fontSize: 12,
-    cursor: "pointer",
-    fontFamily: "inherit",
-  };
-
   /** The collapsed-group header, shared by Page setup and Credit. */
   const disclosure = (open: boolean, marginBottom: number): React.CSSProperties => ({
     ...LABEL,
@@ -599,80 +540,70 @@ export default function ExportDialog({
     [pageSize, orientation, layout, cover],
   );
 
+  const footer =
+    phase === "ready" && url ? (
+      <>
+        <DialogButton onClick={onClose}>Close</DialogButton>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-autofocus=""
+          style={{
+            flex: 2,
+            minWidth: 0,
+            height: 36,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--ac)",
+            color: "#050505",
+            borderRadius: 2,
+            fontSize: 12,
+            fontWeight: 800,
+            textDecoration: "none",
+          }}
+        >
+          Download {fmt}
+        </a>
+      </>
+    ) : phase === "working" ? null : (
+      <>
+        <DialogButton onClick={onClose}>Cancel</DialogButton>
+        <DialogButton variant="primary" data-autofocus="" onClick={start} disabled={count === 0}>
+          {phase === "error" ? "Try again" : `Download ${fmt}`}
+        </DialogButton>
+      </>
+    );
+
   return (
-    <div
-      onPointerDown={requestClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: Z.modal,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: MODAL_BACKDROP,
-        backdropFilter: MODAL_BLUR,
-      }}
+    <Dialog
+      open
+      size="m"
+      title={`Download as ${fmt}`}
+      subtitle={`${count} ${count === 1 ? "photo" : "photos"} · ${subtitle}`}
+      busy={phase === "working"}
+      refocusKey={phase}
+      onClose={onClose}
+      footer={footer}
+      footerSeparated={phase !== "ready" && phase !== "working"}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onPointerDown={(e) => e.stopPropagation()}
-        style={CARD}
-      >
-        <div style={{ padding: "20px 20px 14px" }}>
-          <div id={titleId} style={{ fontSize: 13, fontWeight: 800, color: "var(--t1)", marginBottom: 2 }}>
-            Download as {fmt}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
-            {count} {count === 1 ? "photo" : "photos"} · {subtitle}
-          </div>
-        </div>
+      <div style={SR_ONLY} role="status" aria-live="polite">
+        {status}
+      </div>
 
-        <div style={SR_ONLY} role="status" aria-live="polite">
-          {status}
+      {phase === "ready" && url ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--t2)" }}>Your {fmt} is ready.</div>
+          {shortfall && (
+            <div style={{ fontSize: 10.5, color: "var(--t3)" }}>
+              {shortfall.rendered} of {shortfall.requested} photos made it in — the rest are no longer available.
+            </div>
+          )}
         </div>
-
-        {phase === "ready" && url ? (
-          <>
-            <div style={{ ...BODY, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, color: "var(--t2)" }}>Your {fmt} is ready.</div>
-              {shortfall && (
-                <div style={{ fontSize: 10.5, color: "var(--t3)" }}>
-                  {shortfall.rendered} of {shortfall.requested} photos made it in — the rest are no longer available.
-                </div>
-              )}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "14px 20px 20px" }}>
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-autofocus=""
-                style={{
-                  height: 36,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: "var(--ac)",
-                  color: "#050505",
-                  borderRadius: 2,
-                  fontSize: 12,
-                  fontWeight: 800,
-                  textDecoration: "none",
-                }}
-              >
-                Download {fmt}
-              </a>
-              <button onClick={onClose} style={{ ...ghost, height: 32, width: "100%" }}>
-                Close
-              </button>
-            </div>
-          </>
-        ) : phase === "working" ? (
+      ) : phase === "working" ? (
           <div
-            style={{ ...BODY, display: "flex", flexDirection: "column", gap: 10, paddingBottom: 20 }}
+            style={{ display: "flex", flexDirection: "column", gap: 10 }}
             tabIndex={-1}
             data-autofocus=""
           >
@@ -711,8 +642,7 @@ export default function ExportDialog({
             </div>
           </div>
         ) : (
-          <>
-            <div style={{ ...BODY, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {/* FORMAT FIRST: it decides which groups below exist at all and
                   rewrites the title, the list heading and the CTA. It used to
                   render third — after a page manifest and a document name that
@@ -1083,43 +1013,15 @@ export default function ExportDialog({
                   )}
                 </div>
               )}
-            </div>
 
-            <div style={{ padding: "12px 20px 20px", borderTop: "1px solid var(--bd)" }}>
               {phase === "error" && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: "var(--red)" }}>
                   {err}
                   {jobId && <span style={{ color: "var(--t3)" }}> ({jobId.slice(0, 8)})</span>}
                 </div>
               )}
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={onClose} style={ghost}>
-                  Cancel
-                </button>
-                <button
-                  onClick={start}
-                  disabled={count === 0}
-                  data-autofocus=""
-                  style={{
-                    flex: 1,
-                    height: 34,
-                    border: 0,
-                    background: count === 0 ? "var(--bd)" : "var(--ac)",
-                    color: count === 0 ? "var(--t3)" : "#050505",
-                    borderRadius: 2,
-                    fontSize: 12,
-                    fontWeight: 800,
-                    cursor: count === 0 ? "not-allowed" : "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {phase === "error" ? "Try again" : `Download ${fmt}`}
-                </button>
-              </div>
             </div>
-          </>
         )}
-      </div>
-    </div>
+    </Dialog>
   );
 }
