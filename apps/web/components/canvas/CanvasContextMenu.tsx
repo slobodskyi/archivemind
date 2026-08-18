@@ -39,6 +39,10 @@ interface CanvasContextMenuProps {
   onUngroup: () => void;
   /** The selection overlaps a bound group — show Ungroup instead of Group. */
   hasGroup: boolean;
+  /** An edge is selected (ADR 0048) — offer its removal here too, so the
+   *  right-click path matches the Delete key. */
+  edgeSelected: boolean;
+  onRemoveEdge: () => void;
   /** Layer order for the selection / right-clicked tile. */
   onBringToFront: () => void;
   onBringForward: () => void;
@@ -79,6 +83,8 @@ export default function CanvasContextMenu({
   onExport,
   onUngroup,
   hasGroup,
+  edgeSelected,
+  onRemoveEdge,
   onBringToFront,
   onBringForward,
   onSendBackward,
@@ -193,6 +199,12 @@ export default function CanvasContextMenu({
             )}
             <Item label="Put in folder" onClick={run(onFolder)} />
             <Item label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
+          </>
+        )}
+        {edgeSelected && isCanvasView && (
+          <>
+            <Divider />
+            <Item label="Remove connection" danger onClick={run(onRemoveEdge)} />
           </>
         )}
         {deletable && (

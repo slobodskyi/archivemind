@@ -1183,6 +1183,54 @@ export const patchAnnotationRequestSchema = z
   });
 export type PatchAnnotationRequest = z.infer<typeof patchAnnotationRequestSchema>;
 
+// ── Canvas edges (migration 20260818000001, ADR 0048) ────────────────────────
+//
+// A user-drawn connection between two canvas objects inside one Workspace:
+// photo↔photo (a chain — the author's narrative order) or note↔photo (the note
+// becomes that photo's author context in generation). An edge is a RELATION —
+// it stores references only and carries no geometry; its on-screen path is
+// derived at render time from wherever its endpoints currently are. Immutable:
+// drawn or deleted, never edited — hence no patch schema.
+//
+// The endpoint here is the FLAT shape ({ kind, id }); the four-FK relational
+// shape lives behind lib/edges.ts and never crosses this contract.
+
+export const canvasEdgeEndpointSchema = z.object({
+  kind: z.enum(["asset", "annotation"]),
+  id: uuidSchema,
+});
+export type CanvasEdgeEndpoint = z.infer<typeof canvasEdgeEndpointSchema>;
+
+export const canvasEdgeSchema = z.object({
+  id: uuidSchema,
+  boardId: uuidSchema,
+  from: canvasEdgeEndpointSchema,
+  to: canvasEdgeEndpointSchema,
+});
+export type CanvasEdge = z.infer<typeof canvasEdgeSchema>;
+
+export const canvasEdgesResponseSchema = z.object({
+  edges: z.array(canvasEdgeSchema),
+});
+
+export const createEdgeRequestSchema = z
+  .object({
+    boardId: uuidSchema,
+    from: canvasEdgeEndpointSchema,
+    to: canvasEdgeEndpointSchema,
+  })
+  .refine((v) => v.from.kind !== v.to.kind || v.from.id !== v.to.id, {
+    message: "an edge cannot connect an object to itself",
+  });
+export type CreateEdgeRequest = z.infer<typeof createEdgeRequestSchema>;
+
+/** The two ids an edge pair is made of, order-insensitively — mirrors the
+ *  database's least/greatest unique index, so the client can refuse a
+ *  duplicate before the POST answers 409. */
+export function edgePairKey(from: CanvasEdgeEndpoint, to: CanvasEdgeEndpoint): string {
+  return [from.id, to.id].sort().join(":");
+}
+
 // ── Workspace credit / rights block (migration 20260727000001) ───────────────
 //
 // The byline an exported deliverable carries. Workspace-level: the product's user
