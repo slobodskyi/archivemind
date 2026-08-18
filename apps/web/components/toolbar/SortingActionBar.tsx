@@ -74,28 +74,27 @@ const gp = {
   strokeLinejoin: "round" as const,
 };
 
-/* Snap back into place: four tiles converging on the pile they belong to.
-   The arrowheads point INWARD — the previous version drew bare rays radiating
-   out from the circle, which is the brightness glyph and the exact opposite of
-   what the button does. */
+/* Snap back into place: four photo-tile-shaped cells snapping into an even
+   grid — the same glyph the Workspace bar's "Tidy up" carries, because the two
+   are the same gesture (drop the manual drags, let the tiles re-pack). */
 const RegroupGlyph = () => (
   <svg {...gp}>
-    <circle cx="12" cy="12" r="2.8" />
-    <path d="M12 2.6v4.4m-1.9-1.9L12 7l1.9-1.9" />
-    <path d="M12 21.4v-4.4m-1.9 1.9L12 17l1.9 1.9" />
-    <path d="M2.6 12h4.4M5.1 10.1 7 12l-1.9 1.9" />
-    <path d="M21.4 12h-4.4m2.5-1.9L17 12l1.9 1.9" />
+    <rect x="3" y="4" width="8" height="6" rx="1" />
+    <rect x="13" y="4" width="8" height="6" rx="1" />
+    <rect x="3" y="14" width="8" height="6" rx="1" />
+    <rect x="13" y="14" width="8" height="6" rx="1" />
   </svg>
 );
 
-/* Re-cluster: a refresh arc over grouped dots. */
+/* Re-cluster: the counter-clockwise refresh glyph (lucide refresh-ccw). Drawn
+   30% smaller than the bar's other glyphs — the four arcs read as busier than a
+   single-shape icon at the same box, so it needs less room to feel equal. */
 const ReclusterGlyph = () => (
-  <svg {...gp}>
-    <path d="M20 12a8 8 0 1 1-2.4-5.7" />
-    <path d="M20 3.5V7h-3.5" />
-    <circle cx="10" cy="11" r="1.3" />
-    <circle cx="14" cy="14" r="1.3" />
-    <circle cx="9.5" cy="15" r="1.3" />
+  <svg {...gp} width={11} height={11}>
+    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+    <path d="M16 16h5v5" />
   </svg>
 );
 

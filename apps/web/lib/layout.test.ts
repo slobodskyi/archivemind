@@ -387,7 +387,7 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(layout.axis).toBeDefined();
     expect(layout.edges).toHaveLength(0); // the axis carries the structure, no tag web here
     // Evenly spaced columns: label x positions differ by the fixed gap.
-    expect(layout.clouds[1].labelX - layout.clouds[0].labelX).toBe(420);
+    expect(layout.clouds[1].labelX - layout.clouds[0].labelX).toBe(480);
     // Same-day files stay inside their day's column; the odd file sits above the axis.
     expect(layout.tileCloud.apr1).toBe("2026-04-10");
     expect(layout.tileCloud.apr2).toBe("2026-04-10");
@@ -409,10 +409,10 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     // direction: the tile's EDGE clamps inside the column, y stays free.
     const w = layout.tiles.apr1.w;
     const right = timelineAxisLayout(photos, { apr1: { x: 5000, y: -300 } });
-    expect(right.tiles.apr1.cx + w / 2).toBeLessThanOrEqual(aprX + 210);
+    expect(right.tiles.apr1.cx + w / 2).toBeLessThanOrEqual(aprX + 240);
     expect(right.tiles.apr1.cy).toBe(-300);
     const left = timelineAxisLayout(photos, { apr1: { x: -5000, y: 40 } });
-    expect(left.tiles.apr1.cx - w / 2).toBeGreaterThanOrEqual(aprX - 210);
+    expect(left.tiles.apr1.cx - w / 2).toBeGreaterThanOrEqual(aprX - 240);
     expect(left.tiles.apr1.cy).toBe(40);
   });
 
@@ -432,8 +432,8 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(layout.tiles.b.cy).toBeLessThan(0);
     expect(layout.tiles.c.cy).toBeGreaterThan(0);
     // Above row of 2 straddles the tick; the below single sits exactly on it.
-    expect(layout.tiles.a.cx).toBe(x - 64);
-    expect(layout.tiles.b.cx).toBe(x + 64);
+    expect(layout.tiles.a.cx).toBe(x - 78);
+    expect(layout.tiles.b.cx).toBe(x + 78);
     expect(layout.tiles.c.cx).toBe(x);
   });
 

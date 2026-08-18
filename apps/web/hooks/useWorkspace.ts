@@ -4232,8 +4232,11 @@ export function useWorkspace(
    *  same rule Tidy up follows); otherwise the whole bucket resets. */
   const regroupClouds = useCallback(() => {
     const s = stateRef.current;
+    // Canvas (neural) drags live in the `asset` bucket — the same one Tidy up
+    // writes — so snapping back there drops those overrides and the tiles glide
+    // to their packed gallery default.
     const bucketKey =
-      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : null;
+      s.view === "timeline" ? "timeline" : s.view === "sense" ? "topic" : s.view === "neural" ? "asset" : null;
     if (!bucketKey) return;
     const current = s.galleryOverrides[bucketKey];
     let next: Record<string, CanvasOverride>;
@@ -6056,7 +6059,8 @@ export function useWorkspace(
     regroupClouds,
     canRegroup:
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
-      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0),
+      (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
+      (isNeural && projectMode && Object.keys(state.galleryOverrides.asset).length > 0),
     recluster,
     renameCloud,
     topicOptions,

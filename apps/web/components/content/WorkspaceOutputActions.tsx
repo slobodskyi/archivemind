@@ -11,7 +11,15 @@ import { DownloadIcon } from "@/components/icons/icons";
 const base = {
   display: "flex",
   alignItems: "center",
+  // Centred content on a shared width floor, so the two buttons read as one pair
+  // and their labels sit centred rather than left-packed behind an icon. A floor
+  // rather than a fixed width: DOWNLOAD carries the selection count, and at two
+  // digits a hard 112 would push the label past its own border. Below 760px
+  // `.am-wsactions button` drops it to 0 and the labels become icons.
+  justifyContent: "center",
   gap: 5,
+  minWidth: 112,
+  boxSizing: "border-box",
   height: 30,
   borderRadius: 2,
   padding: "0 10px",
@@ -61,8 +69,6 @@ export default function WorkspaceOutputActions({
         title={selectedCount ? `Create from selected ${selectedCount}` : `Create from all ${photoCount}`}
         style={{
           ...base,
-          minWidth: 72,
-          justifyContent: "center",
           background: sourceCount || draftCount ? "var(--ac)" : "var(--bd)",
           border: 0,
           color: sourceCount || draftCount ? "#050505" : "var(--tm)",

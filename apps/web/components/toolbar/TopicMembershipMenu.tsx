@@ -133,10 +133,13 @@ export default function TopicMembershipMenu({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
-        className="am-tb"
+        className="am-tb tw-top"
         // Icon-only, a 34px square like every other control on these bars. It
         // used to be the one labelled button among icons, which made a menu that
         // is only reachable WITH a selection the loudest thing on an empty bar.
+        // `tw-top` + the `.tip` span below give it the same styled hint the
+        // Regroup / Rebuild buttons beside it carry, rather than a bare native
+        // title.
         title={selectionCount > 0 ? "Move to / create a topic" : "Select files to change topic"}
         style={{
           display: "flex",
@@ -154,6 +157,7 @@ export default function TopicMembershipMenu({
         }}
       >
         <TopicMoveIcon width={16} height={16} />
+        <span className="tip">{selectionCount > 0 ? "Move to / create a topic" : "Select files to change topic"}</span>
       </button>
 
       {open && selectionCount > 0 && (
