@@ -45,6 +45,11 @@ interface PhotoTileProps {
    *  badge and top-right is Delete. */
   label?: AssetLabel | null;
   labelName?: string;
+  /** Start pulling a wire out of this tile (ADR 0048) — the port renders only
+   *  when this is provided (neural view, open Workspace). */
+  onEdgeStart?: (e: React.PointerEvent) => void;
+  /** An in-flight wire is hovering this tile — draw the drop ring. */
+  edgeDropTarget?: boolean;
 }
 
 /** Filled = analyzed, hollow = not. Deliberately the same sparkle used by every
@@ -86,6 +91,8 @@ export default function PhotoTile({
   onAnalyze,
   label = null,
   labelName,
+  onEdgeStart,
+  edgeDropTarget = false,
 }: PhotoTileProps) {
   // The layer-order delta (`z`) shifts the whole resting band, so a tile brought
   // to front stays above its neighbours even when one of them is hovered.
@@ -320,6 +327,45 @@ export default function PhotoTile({
       >
         <CloseIcon width={10} height={10} strokeWidth={2.2} />
       </button>
+    )}
+    {/* The wire port (ADR 0048): drag out to connect this photo to another, to
+        a note, or to empty canvas. Same reachability rule as Delete above —
+        hover OR selection, so a tablet can arm it with a tap. Sticks half out
+        of the right edge so the wire visibly starts AT the tile's boundary. */}
+    {interactive && onEdgeStart && (hovered || selected || edgeDropTarget) && (
+      <button
+        type="button"
+        aria-label={`Connect ${filename}`}
+        title="Drag to connect — to another photo, a note, or empty canvas"
+        data-edge-port=""
+        onPointerDown={onEdgeStart}
+        style={{
+          position: "absolute",
+          top: "50%",
+          right: -10,
+          display: "flex",
+          width: 20,
+          height: 20,
+          alignItems: "center",
+          justifyContent: "center",
+          transform: "translateY(-50%)",
+          border: "1px solid color-mix(in srgb,var(--ac) 55%,transparent)",
+          borderRadius: 999,
+          background: "rgba(10,10,10,.8)",
+          color: "var(--ac)",
+          cursor: "crosshair",
+          zIndex: 6,
+        }}
+      >
+        <span aria-hidden="true" style={{ width: 7, height: 7, border: "1.5px solid currentColor", borderRadius: "50%" }} />
+      </button>
+    )}
+    {/* An in-flight wire is over this tile — the drop ring. */}
+    {edgeDropTarget && (
+      <span
+        aria-hidden="true"
+        style={{ position: "absolute", inset: -3, border: "2px solid var(--ac)", borderRadius: 4, pointerEvents: "none", zIndex: 6 }}
+      />
     )}
     </div>
   );

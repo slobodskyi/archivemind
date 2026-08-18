@@ -92,6 +92,14 @@ export function hexA(hex: string, a: number): string {
 
 /** Deterministic quadratic-bezier control point, offset to one side of the
  *  straight line by `str` × the line's own length — no Math.random. */
+/** A stable seed for mkBez from an object id, so a user-drawn wire's bow never
+ *  changes between renders (the no-Math.random rule on layout paths). */
+export function edgeSeed(id: string): number {
+  let n = 0;
+  for (let i = 0; i < id.length; i += 1) n = (n * 31 + id.charCodeAt(i)) >>> 0;
+  return n % 97;
+}
+
 export function mkBez(sx: number, sy: number, ex: number, ey: number, seed: number, str: number): string {
   const dx = ex - sx,
     dy = ey - sy,
