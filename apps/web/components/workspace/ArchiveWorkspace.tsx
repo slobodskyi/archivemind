@@ -39,7 +39,7 @@ import Toast from "@/components/modals/Toast";
 import ConfirmModal from "@/components/modals/ConfirmModal";
 import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions";
 import CreateOutputDialog from "@/components/content/CreateOutputDialog";
-import DraftLibraryDialog from "@/components/content/DraftLibraryDialog";
+import CreateHubDialog from "@/components/content/CreateHubDialog";
 import ContentDraftStudio from "@/components/content/ContentDraftStudio";
 import SharePreviewDialog, {
   type SharePreviewOptions,
@@ -226,10 +226,12 @@ export default function ArchiveWorkspace({
   // the two gates cannot drift into showing both or neither.
   const workingBar = bd.activeBoardId !== null && ws.view === "neural";
 
-  // Workspace → Draft → Export is a separate state machine from the canvas.
+  // Workspace → Draft → Delivery is a separate state machine from the canvas.
   // Drafts snapshot their source ids, so membership changes only raise a
   // warning; they never rewrite a publication the user may have edited.
-  const [outputUi, setOutputUi] = useState<"closed" | "library" | "create" | "studio">("closed");
+  // The chain is hub → brief → studio, and Escape walks it backwards.
+  const [outputUi, setOutputUi] = useState<"closed" | "hub" | "brief" | "studio">("closed");
+  const [briefKind, setBriefKind] = useState<CreateOutputInput["kind"]>("article");
   const [draftsByBoard, setDraftsByBoard] = useState<Record<string, ContentDraft[]>>({});
   const [activeDraft, setActiveDraft] = useState<ContentDraft | null>(null);
   const [generationBusy, setGenerationBusy] = useState(false);
@@ -372,7 +374,7 @@ export default function ArchiveWorkspace({
       refreshDrafts(activeDraft.boardId, saved.draft);
     }
     setActiveDraft(null);
-    setOutputUi("library");
+    setOutputUi("hub");
   }, [activeDraft, draftSaveState, refreshDrafts, ws]);
 
   const deleteActiveDraft = useCallback(() => {
@@ -391,7 +393,7 @@ export default function ArchiveWorkspace({
     setDraftConfirm(null);
     setActiveDraft(null);
     setDraftSaveState("saved");
-    setOutputUi("library");
+    setOutputUi("hub");
   }, [activeDraft, refreshDrafts, ws]);
 
   const editDraft = useCallback((next: ContentDraft) => {
@@ -1176,12 +1178,11 @@ export default function ArchiveWorkspace({
             draftCount={drafts.length}
             photoCount={bd.activeBoard.assetIds.length}
             selectedCount={orderedSelectedIds.length}
-            onOpenDrafts={() => setOutputUi("library")}
             onDownload={() => ws.openExportFor(orderedSelectedIds.length ? orderedSelectedIds : orderedBoardAssetIds)}
             onCreate={() => {
               setGenerationError(null);
               setCreateSeed(null);
-              setOutputUi("create");
+              setOutputUi("hub");
             }}
           />
         </div>
@@ -1278,30 +1279,32 @@ export default function ArchiveWorkspace({
         />
       )}
 
-      <DraftLibraryDialog
-        open={outputUi === "library" && Boolean(bd.activeBoard)}
+      <CreateHubDialog
+        open={outputUi === "hub" && Boolean(bd.activeBoard)}
         boardName={bd.activeBoard?.name ?? "Workspace"}
         drafts={drafts}
         currentAssetIds={orderedBoardAssetIds}
         onClose={() => setOutputUi("closed")}
-        onCreate={() => {
+        onPickKind={(kind) => {
           setGenerationError(null);
           setCreateSeed(null);
-          setOutputUi("create");
+          setBriefKind(kind);
+          setOutputUi("brief");
         }}
         onOpenDraft={openDraft}
       />
 
       <CreateOutputDialog
-        key={`${bd.activeBoardId ?? "none"}:${createSeed ? activeDraft?.id ?? "seed" : "new"}`}
-        open={outputUi === "create" && Boolean(bd.activeBoard)}
+        key={`${bd.activeBoardId ?? "none"}:${briefKind}:${createSeed ? activeDraft?.id ?? "seed" : "new"}`}
+        open={outputUi === "brief" && Boolean(bd.activeBoard)}
+        kind={briefKind}
         boardName={bd.activeBoard?.name ?? "Workspace"}
         allAssetIds={orderedBoardAssetIds}
         selectedAssetIds={orderedSelectedIds}
         busy={generationBusy}
         error={generationError}
         initial={createSeed}
-        onClose={() => setOutputUi(drafts.length ? "library" : "closed")}
+        onClose={() => setOutputUi("hub")}
         onGenerate={(input) => void generateOutput(input)}
       />
 
@@ -1321,8 +1324,9 @@ export default function ArchiveWorkspace({
             return;
           }
           setCreateSeed(regenerationSeed(draft));
+          setBriefKind(draft.kind);
           setGenerationError(null);
-          setOutputUi("create");
+          setOutputUi("brief");
         }}
         onShare={openSharePreview}
         onDownloadCopy={() => activeDraft && downloadContentDraft(activeDraft, ws.photos)}
@@ -1375,8 +1379,9 @@ export default function ArchiveWorkspace({
           if (!draft) return;
           setDraftConfirm(null);
           setCreateSeed(regenerationSeed(draft));
+          setBriefKind(draft.kind);
           setGenerationError(null);
-          setOutputUi("create");
+          setOutputUi("brief");
         }}
         onClose={() => setDraftConfirm(null)}
       />

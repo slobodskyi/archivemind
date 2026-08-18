@@ -439,15 +439,15 @@ textarea {
     min-width: 104px;
   }
 
-  /* Two words of a 390px row, for the two secondary actions. Create keeps its
+  /* Drops the secondary action's word on a 390px row. Create keeps its
      label — see the note in WorkspaceOutputActions. */
   .am-wsa-label {
     display: none;
   }
 
-  /* The outcome actions float on the canvas now, not in the header row — but
-     they are still three buttons on a 390px screen, and there they compete with
-     the photos underneath instead of with the chips. Same compaction. */
+  /* The outcome actions float on the canvas now, not in the header row — and
+     even at two buttons they compete with the photos underneath on a 390px
+     screen. Same compaction. */
   .am-wsactions button {
     padding: 0 9px !important;
     min-width: 0 !important;
