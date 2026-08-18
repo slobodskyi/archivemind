@@ -1,8 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
-import { useDialog } from "@/hooks/useDialog";
-import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
+import { useState } from "react";
+import Dialog, { DialogButton } from "@/components/modals/Dialog";
 import type { CreateOutputInput } from "@/lib/content-generation-client";
 
 interface CreateOutputDialogProps {
@@ -29,6 +28,8 @@ const inputStyle = {
   outline: "none",
 } as const;
 
+const fieldLabel = { color: "var(--t2)", fontSize: 10.5 } as const;
+
 export default function CreateOutputDialog({
   open,
   boardName,
@@ -52,8 +53,6 @@ export default function CreateOutputDialog({
   const [length, setLength] = useState<"short" | "medium" | "long">(initial?.kind === "article" ? (initial.length ?? "medium") : "medium");
   const [aspectRatio, setAspectRatio] = useState<"4:5" | "1:1">(initial?.kind === "instagram_carousel" ? (initial.aspectRatio ?? "4:5") : "4:5");
   const [count, setCount] = useState(initial?.kind === "article" ? (initial.imageCount ?? 5) : initial?.kind === "instagram_carousel" ? (initial.slideCount ?? 5) : 5);
-  const titleId = useId();
-  const dialogRef = useDialog<HTMLDivElement>(open, busy ? () => {} : onClose);
   if (!open) return null;
 
   const sourceAssetIds = source === "snapshot" && initialSourceIds.length
@@ -84,149 +83,125 @@ export default function CreateOutputDialog({
   };
 
   return (
-    <div
-      onClick={busy ? undefined : onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: Z.modal,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: MODAL_BACKDROP,
-        backdropFilter: MODAL_BLUR,
-      }}
+    <Dialog
+      open={open}
+      size="l"
+      kicker="Create"
+      title={`Create from ${boardName}`}
+      subtitle="Choose the outcome first. File formats come after the copy is reviewed."
+      closeButton={false}
+      busy={busy}
+      onClose={onClose}
+      footer={
+        <>
+          <DialogButton onClick={onClose} disabled={busy}>Cancel</DialogButton>
+          <DialogButton variant="primary" onClick={submit} disabled={!canGenerate}>
+            {busy ? "Drafting…" : `Generate ${kind === "article" ? "article" : "carousel"}`}
+          </DialogButton>
+        </>
+      }
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onClick={(event) => event.stopPropagation()}
-        tabIndex={-1}
-        style={{
-          width: "min(620px, calc(100vw - 32px))",
-          maxHeight: "calc(100dvh - 40px)",
-          overflow: "auto",
-          background: "var(--bg-sf)",
-          border: "1px solid var(--bdh)",
-          borderRadius: 2,
-          boxShadow: "0 32px 80px rgba(0,0,0,.7)",
-        }}
-      >
-        <div style={{ padding: "20px 22px 16px", borderBottom: "1px solid var(--bd)" }}>
-          <div id={titleId} style={{ color: "var(--t1)", fontSize: 16, fontWeight: 800 }}>Create from {boardName}</div>
-          <div style={{ marginTop: 5, color: "var(--t3)", fontSize: 11.5 }}>Choose the outcome first. File formats come after the copy is reviewed.</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {([
+            ["article", "Article", "Narrative copy with ordered images"],
+            ["instagram_carousel", "Instagram carousel", "Phone-sized story sequence + caption"],
+          ] as const).map(([value, label, help]) => (
+            <button
+              key={value}
+              onClick={() => {
+                setKind(value);
+                setCount(value === "article" ? 5 : Math.min(7, Math.max(2, maxCount)));
+              }}
+              style={{
+                padding: "13px 14px",
+                textAlign: "left",
+                background: kind === value ? "color-mix(in srgb,var(--ac) 10%,var(--bg-el))" : "var(--bg-el)",
+                border: `1px solid ${kind === value ? "var(--ac)" : "var(--bd)"}`,
+                borderRadius: 2,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              <span style={{ display: "block", color: "var(--t1)", fontSize: 13, fontWeight: 700 }}>{label}</span>
+              <span style={{ display: "block", marginTop: 4, color: "var(--t3)", fontSize: 10.5 }}>{help}</span>
+            </button>
+          ))}
         </div>
 
-        <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            {([
-              ["article", "Article", "Narrative copy with ordered images"],
-              ["instagram_carousel", "Instagram carousel", "Phone-sized story sequence + caption"],
-            ] as const).map(([value, label, help]) => (
-              <button
-                key={value}
-                onClick={() => {
-                  setKind(value);
-                  setCount(value === "article" ? 5 : Math.min(7, Math.max(2, maxCount)));
-                }}
-                style={{
-                  padding: "13px 14px",
-                  textAlign: "left",
-                  background: kind === value ? "color-mix(in srgb,var(--ac) 10%,var(--bg-el))" : "var(--bg-el)",
-                  border: `1px solid ${kind === value ? "var(--ac)" : "var(--bd)"}`,
-                  borderRadius: 2,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                <span style={{ display: "block", color: "var(--t1)", fontSize: 13, fontWeight: 700 }}>{label}</span>
-                <span style={{ display: "block", marginTop: 4, color: "var(--t3)", fontSize: 10.5 }}>{help}</span>
-              </button>
-            ))}
-          </div>
+        {(initialSourceIds.length > 0 || (selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length)) && (
+          <fieldset style={{ margin: 0, padding: 0, border: 0 }}>
+            <legend style={{ marginBottom: 7, color: "var(--t2)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".07em" }}>Sources</legend>
+            <div style={{ display: "flex", gap: 8 }}>
+              {([
+                ...(initialSourceIds.length ? [["snapshot", `Draft snapshot ${initialSourceIds.length}`] as const] : []),
+                ...(selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length
+                  ? [["selected", `Selected ${selectedAssetIds.length}`] as const]
+                  : []),
+                ["all", `All ${allAssetIds.length}`] as const,
+              ]).map(([value, label]) => (
+                <label key={value} style={{ color: "var(--t2)", fontSize: 12, cursor: "pointer" }}>
+                  <input type="radio" name="output-source" checked={source === value} onChange={() => setSource(value)} /> {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
 
-          {(initialSourceIds.length > 0 || (selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length)) && (
-            <fieldset style={{ margin: 0, padding: 0, border: 0 }}>
-              <legend style={{ marginBottom: 7, color: "var(--t2)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".07em" }}>Sources</legend>
-              <div style={{ display: "flex", gap: 8 }}>
-                {([
-                  ...(initialSourceIds.length ? [["snapshot", `Draft snapshot ${initialSourceIds.length}`] as const] : []),
-                  ...(selectedAssetIds.length > 0 && selectedAssetIds.length !== allAssetIds.length
-                    ? [["selected", `Selected ${selectedAssetIds.length}`] as const]
-                    : []),
-                  ["all", `All ${allAssetIds.length}`] as const,
-                ]).map(([value, label]) => (
-                  <label key={value} style={{ color: "var(--t2)", fontSize: 12, cursor: "pointer" }}>
-                    <input type="radio" name="output-source" checked={source === value} onChange={() => setSource(value)} /> {label}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-          )}
+        <label style={{ display: "flex", flexDirection: "column", gap: 7, color: "var(--t2)", fontSize: 11.5 }}>
+          What should this say?
+          <textarea
+            data-autofocus=""
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder={kind === "article" ? "Tell the story behind this selection…" : "What should viewers understand or do after the last slide?"}
+            rows={4}
+            maxLength={4000}
+            style={{ ...inputStyle, padding: "10px 11px", resize: "vertical", lineHeight: 1.45 }}
+          />
+        </label>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 7, color: "var(--t2)", fontSize: 11.5 }}>
-            What should this say?
-            <textarea
-              data-autofocus=""
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={kind === "article" ? "Tell the story behind this selection…" : "What should viewers understand or do after the last slide?"}
-              rows={4}
-              maxLength={4000}
-              style={{ ...inputStyle, padding: "10px 11px", resize: "vertical", lineHeight: 1.45 }}
-            />
+        <label style={fieldLabel}>Audience
+          <input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Readers, clients…" style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
+        </label>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <label style={fieldLabel}>Language
+            <select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+              <option value="en">English</option><option value="uk">Українська</option><option value="ru">Русский</option>
+            </select>
           </label>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1.3fr .8fr .9fr", gap: 10 }}>
-            <label style={{ color: "var(--t2)", fontSize: 10.5 }}>Audience
-              <input value={audience} onChange={(event) => setAudience(event.target.value)} placeholder="Readers, clients…" style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
-            </label>
-            <label style={{ color: "var(--t2)", fontSize: 10.5 }}>Language
-              <select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                <option value="en">English</option><option value="uk">Українська</option><option value="ru">Русский</option>
-              </select>
-            </label>
-            <label style={{ color: "var(--t2)", fontSize: 10.5 }}>Tone
-              <select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                <option value="editorial">Editorial</option><option value="personal">Personal</option><option value="social">Social</option>
-              </select>
-            </label>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {kind === "article" ? (
-              <label style={{ color: "var(--t2)", fontSize: 10.5 }}>Length
-                <select value={length} onChange={(event) => setLength(event.target.value as typeof length)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                  <option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option>
-                </select>
-              </label>
-            ) : (
-              <label style={{ color: "var(--t2)", fontSize: 10.5 }}>Aspect ratio
-                <select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
-                  <option value="4:5">Portrait 4:5</option><option value="1:1">Square 1:1</option>
-                </select>
-              </label>
-            )}
-            <label style={{ color: "var(--t2)", fontSize: 10.5 }}>{kind === "article" ? "Images" : "Slides"}
-              <input type="number" min={minCount} max={maxCount} value={actualCount} onChange={(event) => setCount(Number(event.target.value))} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
-            </label>
-          </div>
-
-          {sourceAssetIds.length > 20 && <div style={{ color: "var(--t3)", fontSize: 10.5 }}>Generation uses the first 20 sources from the current canvas order. Raw Download still includes the full Workspace.</div>}
-          <div style={{ color: "var(--t3)", fontSize: 10.5 }}>AI text is a draft. Review names, dates and claims before publishing.</div>
-          {kind === "instagram_carousel" && maxCount < 2 && <div style={{ color: "var(--red)", fontSize: 11 }}>A carousel needs at least 2 photos.</div>}
-          {error && <div role="alert" style={{ color: "var(--red)", fontSize: 11.5 }}>{error}</div>}
+          <label style={fieldLabel}>Tone
+            <select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+              <option value="editorial">Editorial</option><option value="personal">Personal</option><option value="social">Social</option>
+            </select>
+          </label>
         </div>
 
-        <div style={{ display: "flex", gap: 8, padding: "0 22px 20px" }}>
-          <button onClick={onClose} disabled={busy} style={{ flex: 1, height: 36, background: "transparent", border: "1px solid var(--bd)", borderRadius: 2, color: "var(--t2)", fontFamily: "inherit", cursor: busy ? "default" : "pointer" }}>Cancel</button>
-          <button onClick={submit} disabled={!canGenerate} style={{ flex: 2, height: 36, background: canGenerate ? "var(--ac)" : "var(--bd)", border: 0, borderRadius: 2, color: canGenerate ? "#050505" : "var(--tm)", fontFamily: "inherit", fontSize: 12, fontWeight: 800, cursor: canGenerate ? "pointer" : "default" }}>
-            {busy ? "Selecting story → drafting…" : `Generate ${kind === "article" ? "article" : "carousel"}`}
-          </button>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {kind === "article" ? (
+            <label style={fieldLabel}>Length
+              <select value={length} onChange={(event) => setLength(event.target.value as typeof length)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+                <option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option>
+              </select>
+            </label>
+          ) : (
+            <label style={fieldLabel}>Aspect ratio
+              <select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 8px" }}>
+                <option value="4:5">Portrait 4:5</option><option value="1:1">Square 1:1</option>
+              </select>
+            </label>
+          )}
+          <label style={fieldLabel}>{kind === "article" ? "Images" : "Slides"}
+            <input type="number" min={minCount} max={maxCount} value={actualCount} onChange={(event) => setCount(Number(event.target.value))} style={{ ...inputStyle, height: 34, marginTop: 6, padding: "0 9px" }} />
+          </label>
         </div>
+
+        {sourceAssetIds.length > 20 && <div style={{ color: "var(--t3)", fontSize: 10.5 }}>Generation uses the first 20 sources from the current canvas order. Raw Download still includes the full Workspace.</div>}
+        <div style={{ color: "var(--t3)", fontSize: 10.5 }}>AI text is a draft. Review names, dates and claims before publishing.</div>
+        {kind === "instagram_carousel" && maxCount < 2 && <div style={{ color: "var(--red)", fontSize: 11 }}>A carousel needs at least 2 photos.</div>}
+        {error && <div role="alert" style={{ color: "var(--red)", fontSize: 11.5 }}>{error}</div>}
       </div>
-    </div>
+    </Dialog>
   );
 }
