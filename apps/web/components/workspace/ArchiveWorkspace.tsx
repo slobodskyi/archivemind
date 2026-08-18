@@ -1274,6 +1274,7 @@ export default function ArchiveWorkspace({
         boardName={bd.activeBoard?.name ?? "Workspace"}
         drafts={drafts}
         currentAssetIds={orderedBoardAssetIds}
+        photos={ws.photos}
         onClose={() => setOutputUi("closed")}
         onPickKind={(kind) => {
           setGenerationError(null);
