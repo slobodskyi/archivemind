@@ -206,8 +206,8 @@ export default function FrameOverlay({
                 e.stopPropagation();
                 onExportFrame(fr.id);
               }}
-              title="Export artboard to PDF"
-              aria-label="Export artboard to PDF"
+              title="Download artboard as PDF"
+              aria-label="Download artboard as PDF"
               style={btn}
             >
               ↑

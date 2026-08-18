@@ -48,12 +48,12 @@ const POLL_MS = 1500;
 const STALL_MS = 5 * 60 * 1000;
 
 const ENQUEUE_ERROR_COPY: Record<string, string> = {
-  too_many_assets: `An export covers up to ${EXPORT_MAX_ASSETS} photos at a time. Deselect some and try again.`,
+  too_many_assets: `A download covers up to ${EXPORT_MAX_ASSETS} photos at a time. Deselect some and try again.`,
   no_matching_assets: "Those photos aren't available any more — they may be in Trash.",
-  group_not_found: "That export source no longer exists.",
+  group_not_found: "That download source no longer exists.",
   unauthorized: "Your session expired. Reload the page and sign in again.",
   no_workspace: "No workspace found for your account.",
-  export_backlog: "You already have exports rendering. Wait for those to finish and try again.",
+  export_backlog: "You already have downloads being prepared. Wait for those to finish and try again.",
 };
 
 /** Worker-side failures (ai_jobs.error). Codes may carry a `:detail` suffix, e.g.
@@ -449,7 +449,7 @@ export default function ExportDialog({
             stopPoll();
             setErr(
               j.status === "queued"
-                ? "This export is still waiting for the render worker. It may be offline — try again in a moment."
+                ? "This download is still waiting for the render worker. It may be offline — try again in a moment."
                 : "The render stopped responding. Try again.",
             );
             setPhase("error");
@@ -623,7 +623,7 @@ export default function ExportDialog({
       >
         <div style={{ padding: "20px 20px 14px" }}>
           <div id={titleId} style={{ fontSize: 13, fontWeight: 800, color: "var(--t1)", marginBottom: 2 }}>
-            Export as {fmt}
+            Download as {fmt}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--t3)" }}>
             {count} {count === 1 ? "photo" : "photos"} · {subtitle}
@@ -781,7 +781,7 @@ export default function ExportDialog({
                   >
                     {items.length === 0 && (
                       <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--t3)" }}>
-                        Every photo has been removed from this export.
+                        Every photo has been removed from this download.
                       </div>
                     )}
                     {items.map(({ id, photo }, i) => {
@@ -824,8 +824,8 @@ export default function ExportDialog({
                           <button
                             onClick={() => setDropped((prev) => new Set(prev).add(id))}
                             disabled={last}
-                            title={last ? "An export needs at least one photo" : "Remove from this export"}
-                            aria-label={`Remove ${photo?.filename ?? id} from this export`}
+                            title={last ? "A download needs at least one photo" : "Remove from this download"}
+                            aria-label={`Remove ${photo?.filename ?? id} from this download`}
                             style={{
                               width: 18,
                               height: 18,
@@ -1113,7 +1113,7 @@ export default function ExportDialog({
                     fontFamily: "inherit",
                   }}
                 >
-                  {phase === "error" ? "Try again" : `Export ${fmt}`}
+                  {phase === "error" ? "Try again" : `Download ${fmt}`}
                 </button>
               </div>
             </div>

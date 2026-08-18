@@ -204,7 +204,7 @@ function WorkspaceActionBar({
 
       {/* Export and Delete are the two that send the selection somewhere else —
           out of the app, or out of the archive — so they share the last group. */}
-      <Btn title="Export" disabled={noSel} onClick={onExport}>
+      <Btn title="Download" disabled={noSel} onClick={onExport}>
         <ExportGlyph />
       </Btn>
       <Btn title="Delete" danger disabled={noSel} onClick={onDelete}>

@@ -147,3 +147,23 @@ export function draftFromGeneration(
   }
   throw new Error("Unsupported generated output");
 }
+
+/** The Create form's seed for "generate another version of this draft": the
+ * same source snapshot, brief and settings the draft was made from. The saved
+ * brief keeps `tone` as free text, so anything the form no longer offers falls
+ * back to editorial. */
+export function regenerationSeed(draft: ContentDraft): CreateOutputInput {
+  const tone: CreateOutputInput["tone"] =
+    draft.brief.tone === "personal" || draft.brief.tone === "social" ? draft.brief.tone : "editorial";
+  const common = {
+    sourceAssetIds: [...draft.sourceSnapshot.assetIds],
+    prompt: draft.brief.prompt,
+    audience: draft.brief.audience,
+    additionalInstructions: draft.brief.additionalInstructions,
+    language: draft.brief.language,
+    tone,
+  };
+  return draft.kind === "article"
+    ? { ...common, kind: draft.kind, length: draft.settings.length, imageCount: draft.settings.imageCount }
+    : { ...common, kind: draft.kind, aspectRatio: draft.settings.aspectRatio, slideCount: draft.settings.slideCount };
+}

@@ -192,7 +192,7 @@ export default function CanvasContextMenu({
               <Item label={`Group ${selCount}`} onClick={run(onGroup)} />
             )}
             <Item label="Put in folder" onClick={run(onFolder)} />
-            <Item label={selCount > 1 ? `Export ${selCount}` : "Export"} onClick={run(onExport)} />
+            <Item label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
           </>
         )}
         {deletable && (
