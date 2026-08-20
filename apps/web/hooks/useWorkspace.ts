@@ -2906,10 +2906,23 @@ export function useWorkspace(
       edgeLiveRef.current?.setAttribute("d", "");
       const target = stateRef.current.edgeDropTarget;
       if (target) setState({ edgeDropTarget: null });
-      // A cancelled pointer never authorises a write (the topic-drop rule),
-      // and a click that never moved is not a wire.
-      if (e.type === "pointercancel" || !d.moved) {
+      // A cancelled pointer never authorises a write (the topic-drop rule).
+      if (e.type === "pointercancel") {
         // nothing committed
+      } else if (!d.moved) {
+        // A plain CLICK on the port (no drag) opens the same drop menu a
+        // drag-to-empty-canvas does, so the port is discoverable without
+        // knowing it can be dragged. The new object lands just to the RIGHT of
+        // the release point rather than on top of the photo.
+        const c = toContent(e.clientX, e.clientY);
+        setState({
+          edgeDropMenu: {
+            x: e.clientX,
+            y: e.clientY,
+            canvas: { x: c.x + 110, y: c.y },
+            from: d.from,
+          },
+        });
       } else if (target) {
         createEdge(d.from, target);
       } else {

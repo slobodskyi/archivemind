@@ -51,8 +51,9 @@ export async function getCanvasAnnotations(
   };
   // Migration 20260808000002 may not be applied to this DB yet — degrade to "no
   // annotations" rather than crashing the whole canvas, exactly like
-  // getCanvasGroups. 42P01 = undefined_table, 42703 = undefined_column.
-  if (error?.code === "42P01" || error?.code === "42703") return [];
+  // getCanvasGroups. 42P01 = undefined_table, 42703 = undefined_column; PGRST205
+  // is PostgREST's own "table not in the schema cache".
+  if (error?.code === "42P01" || error?.code === "42703" || error?.code === "PGRST205") return [];
   if (error) throw error as unknown as Error;
 
   return ((data ?? []) as unknown as AnnotationRow[])

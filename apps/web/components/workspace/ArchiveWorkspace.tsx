@@ -1117,7 +1117,6 @@ export default function ArchiveWorkspace({
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
           onCopy={ws.copyFiles}
-          onExport={ws.exportFiles}
           onGroup={ws.groupFiles}
           onFolder={ws.folderFiles}
           onRemoveFromWorkspace={() => {
@@ -1187,7 +1186,7 @@ export default function ArchiveWorkspace({
       {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
           show/pan the hidden neural grid and physically cover MapLibre's own
           zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
-      {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} right={ws.minimapRight} />}
+      {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />}
 
       {/* A Workspace's outcome actions, floated at the canvas's top-right rather
           than parked in the header. They only exist inside a Workspace, which is
@@ -1449,15 +1448,7 @@ export default function ArchiveWorkspace({
           if (ws.selectedEdgeId) ws.deleteEdge(ws.selectedEdgeId);
         }}
         onClose={ws.closeContextMenu}
-        onSelectTool={ws.toolSelect}
-        onHandTool={ws.toolHand}
-        onToggleChat={ws.toggleChat}
-        onToggleBulkPanel={ws.toggleBulkPanel}
         onExtractExif={ws.extractExif}
-        onAdd={ws.addToolbar}
-        onAddStickyNote={ws.addStickyNote}
-        onPaste={ws.pasteFiles}
-        clipboardCount={ws.clipboardCount}
         onGroup={ws.groupFiles}
         onFolder={ws.folderFiles}
         onExport={ws.exportFiles}

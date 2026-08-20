@@ -3,7 +3,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   FolderDotIcon,
-  ShareIcon,
+  ShareArrowIcon,
   UndoIcon,
   RedoIcon,
 } from "@/components/icons/icons";
@@ -316,7 +316,7 @@ export default function AppHeader({
             cursor: "pointer",
           }}
         >
-          <ShareIcon />
+          <ShareArrowIcon />
           <span>SHARE</span>
         </button>
         <button

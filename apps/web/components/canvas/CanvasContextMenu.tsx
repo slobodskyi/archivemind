@@ -1,32 +1,21 @@
+import { Fragment, type ReactNode } from "react";
 import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import { Z } from "@/lib/ui";
 
 interface CanvasContextMenuProps {
   menu: { x: number; y: number; targetId: string | null } | null;
-  /** Hide project-editing tools (AI/import) that don't apply to the
-   *  read-only all-files grid — matches the left toolbar's own gating. */
+  /** Hide project-editing tools that don't apply to the read-only all-files
+   *  grid — matches the left toolbar's own gating. */
   allFilesMode: boolean;
-  /** The Workspace (neural) view is showing. A sticky note's position is in
-   *  Workspace coordinates, so it is only offered there — same rule the left
-   *  toolbar and folder overlay follow. */
+  /** The Workspace (neural) view is showing — required for the edge controls,
+   *  which only exist on that canvas. */
   isCanvasView: boolean;
   /** Current selection size — with a selection, "Move to Trash" acts on it;
    *  without one it acts on the right-clicked tile (menu.targetId). */
   selCount: number;
   onClose: () => void;
-  onSelectTool: () => void;
-  onHandTool: () => void;
-  /** Opens the Smart Search panel (ChatPanel) — the single search entry point. */
-  onToggleChat: () => void;
-  onToggleBulkPanel: () => void;
   onExtractExif: () => void;
-  onAdd: () => void;
-  onAddStickyNote: () => void;
-  /** Link the copied files into the archive being viewed. */
-  onPaste: () => void;
-  /** Files sitting on the Copy clipboard — 0 hides the Paste entry. */
-  clipboardCount: number;
   /** Bind the selection into a move-/edit-together group (needs ≥ 2 selected). */
   onGroup: () => void;
   /** Folder and Export moved onto the Workspace bar, which only exists inside an
@@ -60,24 +49,16 @@ interface CanvasContextMenuProps {
   onPickLabel: (label: AssetLabel | null) => void;
 }
 
-/** Right-click menu on the grid — mirrors the functions of the left tools
- *  toolbar (not the bottom action bar). Available on the Workspace and the
- *  sorting views. */
+/** Right-click / double-click menu on the grid. Curation and arrangement only —
+ *  the tool switches, search and AI/add actions live on the toolbars, so they
+ *  were removed here. Available on the Workspace and the sorting views. */
 export default function CanvasContextMenu({
   menu,
   allFilesMode,
   isCanvasView,
   selCount,
   onClose,
-  onSelectTool,
-  onHandTool,
-  onToggleChat,
-  onToggleBulkPanel,
   onExtractExif,
-  onAdd,
-  onAddStickyNote,
-  onPaste,
-  clipboardCount,
   onGroup,
   onFolder,
   onExport,
@@ -103,9 +84,6 @@ export default function CanvasContextMenu({
   const canGroup = !allFilesMode && (hasGroup || selCount >= 2);
   // Layer order applies to the selection, or the single right-clicked tile.
   const canLayer = !allFilesMode && (selCount > 0 || menu.targetId != null);
-  // Paste links copied files into THIS archive, so it is meaningless on the
-  // workspace-wide 'all' canvas, which has no membership to add to.
-  const canPaste = !allFilesMode && clipboardCount > 0;
 
   const W = 190;
   const left = typeof window !== "undefined" ? Math.min(menu.x, window.innerWidth - W - 8) : menu.x;
@@ -115,6 +93,62 @@ export default function CanvasContextMenu({
     onClose();
     fn();
   };
+
+  // Built as a list so exactly one divider falls between the groups that are
+  // actually present — no leading, trailing or doubled dividers to hand-tune as
+  // items come and go.
+  const sections: ReactNode[] = [];
+  if (labelable) {
+    sections.push(
+      <LabelSwatchRow
+        names={labelNames}
+        current={currentLabel}
+        onPick={(label) => {
+          onClose();
+          onPickLabel(label);
+        }}
+      />,
+    );
+  }
+  if (!allFilesMode) {
+    sections.push(<Item label="Extract EXIF" onClick={run(onExtractExif)} />);
+  }
+  if (canLayer) {
+    sections.push(
+      <>
+        <Item label="Bring to front" onClick={run(onBringToFront)} />
+        <Item label="Bring forward" onClick={run(onBringForward)} />
+        <Item label="Send backward" onClick={run(onSendBackward)} />
+        <Item label="Send to back" onClick={run(onSendToBack)} />
+      </>,
+    );
+  }
+  if (canGroup) {
+    sections.push(
+      <>
+        {hasGroup ? (
+          <Item label="Ungroup" onClick={run(onUngroup)} />
+        ) : (
+          <Item label={`Group ${selCount}`} onClick={run(onGroup)} />
+        )}
+        <Item label="Put in folder" onClick={run(onFolder)} />
+        <Item label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
+      </>,
+    );
+  }
+  if (edgeSelected && isCanvasView) {
+    sections.push(<Item label="Remove connection" danger onClick={run(onRemoveEdge)} />);
+  }
+  if (deletable) {
+    sections.push(
+      <Item
+        label={selCount > 1 ? `Move ${selCount} to Trash` : "Move to Trash"}
+        danger
+        onClick={run(onDelete)}
+      />,
+    );
+  }
+  sections.push(<Item label="Fit to view" onClick={run(onFit)} />);
 
   return (
     <>
@@ -142,83 +176,12 @@ export default function CanvasContextMenu({
           padding: 6,
         }}
       >
-        {labelable && (
-          <>
-            <LabelSwatchRow
-              names={labelNames}
-              current={currentLabel}
-              onPick={(label) => {
-                onClose();
-                onPickLabel(label);
-              }}
-            />
-            <Divider />
-          </>
-        )}
-        <Item label="Select" onClick={run(onSelectTool)} />
-        <Item label="Pan" onClick={run(onHandTool)} />
-        {!allFilesMode && (
-          <>
-            <Divider />
-            <Item label="Smart Search" onClick={run(onToggleChat)} />
-            <Item label="AI actions" onClick={run(onToggleBulkPanel)} />
-            <Item label="Extract EXIF" onClick={run(onExtractExif)} />
-            <Divider />
-            <Item label="Add" onClick={run(onAdd)} />
-            {isCanvasView && <Item label="Sticky Note" onClick={run(onAddStickyNote)} />}
-          </>
-        )}
-        {allFilesMode && (
-          <>
-            <Divider />
-            <Item label="Smart Search" onClick={run(onToggleChat)} />
-          </>
-        )}
-        {canLayer && (
-          <>
-            <Divider />
-            <Item label="Bring to front" onClick={run(onBringToFront)} />
-            <Item label="Bring forward" onClick={run(onBringForward)} />
-            <Item label="Send backward" onClick={run(onSendBackward)} />
-            <Item label="Send to back" onClick={run(onSendToBack)} />
-          </>
-        )}
-        {canPaste && (
-          <>
-            <Divider />
-            <Item label={`Paste ${clipboardCount} here`} onClick={run(onPaste)} />
-          </>
-        )}
-        {canGroup && (
-          <>
-            <Divider />
-            {hasGroup ? (
-              <Item label="Ungroup" onClick={run(onUngroup)} />
-            ) : (
-              <Item label={`Group ${selCount}`} onClick={run(onGroup)} />
-            )}
-            <Item label="Put in folder" onClick={run(onFolder)} />
-            <Item label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
-          </>
-        )}
-        {edgeSelected && isCanvasView && (
-          <>
-            <Divider />
-            <Item label="Remove connection" danger onClick={run(onRemoveEdge)} />
-          </>
-        )}
-        {deletable && (
-          <>
-            <Divider />
-            <Item
-              label={selCount > 1 ? `Move ${selCount} to Trash` : "Move to Trash"}
-              danger
-              onClick={run(onDelete)}
-            />
-          </>
-        )}
-        <Divider />
-        <Item label="Fit to view" onClick={run(onFit)} />
+        {sections.map((section, i) => (
+          <Fragment key={i}>
+            {i > 0 && <Divider />}
+            {section}
+          </Fragment>
+        ))}
       </div>
     </>
   );
