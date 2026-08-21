@@ -439,11 +439,12 @@ textarea {
     min-width: 104px;
   }
 
-  /* The outcome action floats on the canvas now, not in the header row, and on
-     a 390px screen it competes with the photos underneath. It is one button
-     since Download folded into the hub, so nothing has to drop its word any
-     more — the label stays at every size and only the padding tightens.
-     (`.am-wsa-label`, which used to hide DOWNLOAD's word here, went with it.) */
+  /* The canvas's top-right action floats on the canvas now, not in the header
+     row, and on a 390px screen it competes with the photos underneath. It is
+     one button per scope — EXPORT inside a Workspace, ANALYZE outside one — so
+     nothing has to drop its word any more: the label stays at every size and
+     only the padding tightens. (`.am-wsa-label`, which used to hide DOWNLOAD's
+     word here, went with it.) */
   .am-wsactions button {
     padding: 0 9px !important;
     /* Desktop pins a width floor so the button never reads as a chip; here the

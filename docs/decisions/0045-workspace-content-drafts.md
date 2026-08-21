@@ -284,3 +284,25 @@ Consequences: `WorkspaceOutputActions` is one button, and `.am-wsa-label` — th
 rule that dropped DOWNLOAD's word on a 390px row — went with it, so the phone
 now shows a labelled button instead of a glyph and a word competing for the
 same row.
+
+### 2026-08-21 — the button reads EXPORT, because the slot is now shared
+
+The floated top-right slot stopped belonging to a Workspace. The project canvas
+took the same slot with `ANALYZE` (bulk AI had no entry point out there at all:
+`WorkspaceActionBar` carries the ✨ button but is Workspace-gated, and the
+menu's analyze item went with the trim in #233, leaving the per-tile badge —
+one photo at a time — as the only way to run AI on a project canvas), and one
+slot showing two different buttons has to say which one you are looking at.
+
+So `CREATE` reads `EXPORT`. The axis is the scope's own job: outside a
+Workspace you are bringing files in and understanding them, inside one you are
+taking work out. Nothing behind the button changed — the hub, its three blocks,
+the `download` rung and every fast path are exactly as the amendment above
+left them.
+
+One mismatch ships knowingly: the door says EXPORT and the hub still opens on
+**Make something** (Article, Instagram carousel). Renaming the hub's kicker to
+match would be untrue to that section, which is the half of the hub that is not
+export at all. The alternatives — a neutral kicker, or moving content creation
+out of the hub — are a product call, not a rename, and are deliberately left
+open rather than settled by a label.

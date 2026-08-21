@@ -39,6 +39,7 @@ import Toast from "@/components/modals/Toast";
 // SearchModal retired — the magnifier now opens the real Smart Search panel (ChatPanel).
 import ConfirmModal from "@/components/modals/ConfirmModal";
 import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions";
+import CanvasAnalyzeAction from "@/components/bulk-ai/CanvasAnalyzeAction";
 import CreateOutputDialog from "@/components/content/CreateOutputDialog";
 import CreateHubDialog from "@/components/content/CreateHubDialog";
 import ContentDraftStudio from "@/components/content/ContentDraftStudio";
@@ -1147,12 +1148,20 @@ export default function ArchiveWorkspace({
           zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
       {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />}
 
-      {/* A Workspace's outcome action, floated at the canvas's top-right rather
-          than parked in the header. It only exists inside a Workspace, which is
-          exactly the scope whose header rail is most crowded: DRAFTS/DOWNLOAD/
-          CREATE cost ~220px, so opening a Workspace used to fold two or three
-          chips away the moment you got there. Off the header — and now down to
-          one button — the rail measures the same room in both scopes.
+      {/* The canvas's one top-right action, floated rather than parked in the
+          header. It began as a Workspace's outcome action, in exactly the scope
+          whose header rail is most crowded: DRAFTS/DOWNLOAD/CREATE cost ~220px,
+          so opening a Workspace used to fold two or three chips away the moment
+          you got there. Off the header — and down to one button — the rail
+          measures the same room in both scopes.
+
+          The slot now holds one button in EITHER scope, and which one is the
+          scope's own question about the same tiles: inside a Workspace you are
+          producing something (EXPORT), outside one you are still building the
+          archive, and building it means analyzing what arrived (ANALYZE). They
+          are mutually exclusive rather than stacked — a Workspace already
+          carries the ✨ button on its action bar, and the project canvas has no
+          drafts to export from.
 
           It dodges the right-hand panels on `minimapRight` for the same reason
           the minimap does — the photo drawer and the chat are full-height and
@@ -1162,25 +1171,25 @@ export default function ArchiveWorkspace({
 
           `am-under-hdr` is what keeps it clear of the floating workspace rail
           below 760px, where that rail becomes its own 52px row. */}
-      {bd.activeBoard && (
-        <div
-          className="am-under-hdr am-wsactions"
-          style={{
-            position: "absolute",
-            top: "calc(var(--hdr) + 12px)",
-            right: 20 + ws.minimapRight,
-            zIndex: 35,
-            display: "flex",
-            alignItems: "center",
-            padding: "6px 8px",
-            background: "rgba(20,20,20,.92)",
-            border: "1px solid var(--bd)",
-            borderRadius: 2,
-            backdropFilter: "blur(16px)",
-            boxShadow: "0 8px 32px rgba(0,0,0,.45)",
-            transition: "right .2s cubic-bezier(.22,1,.36,1)",
-          }}
-        >
+      <div
+        className="am-under-hdr am-wsactions"
+        style={{
+          position: "absolute",
+          top: "calc(var(--hdr) + 12px)",
+          right: 20 + ws.minimapRight,
+          zIndex: 35,
+          display: "flex",
+          alignItems: "center",
+          padding: "6px 8px",
+          background: "rgba(20,20,20,.92)",
+          border: "1px solid var(--bd)",
+          borderRadius: 2,
+          backdropFilter: "blur(16px)",
+          boxShadow: "0 8px 32px rgba(0,0,0,.45)",
+          transition: "right .2s cubic-bezier(.22,1,.36,1)",
+        }}
+      >
+        {bd.activeBoard ? (
           <WorkspaceOutputActions
             draftCount={drafts.length}
             photoCount={bd.activeBoard.assetIds.length}
@@ -1191,8 +1200,17 @@ export default function ArchiveWorkspace({
               setOutputUi("hub");
             }}
           />
-        </div>
-      )}
+        ) : (
+          /* `selectedIds.size`, not `bulkSelectedIds` — that one falls back to
+             the source browser's selection, which `toggleBulkPanel` does not
+             accept, so the badge would count a batch the click then refused. */
+          <CanvasAnalyzeAction
+            selectedCount={ws.selectedIds.size}
+            open={ws.bulkPanelOpen}
+            onOpen={ws.toggleBulkPanel}
+          />
+        )}
+      </div>
 
       <AddToProjectPopover
         open={ws.addProjOpen}
