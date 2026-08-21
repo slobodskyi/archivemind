@@ -3,11 +3,9 @@ import type { MinimapLayout } from "@/lib/layout";
 interface MinimapProps {
   minimap: MinimapLayout;
   onDown: (e: React.PointerEvent<HTMLDivElement>) => void;
-  /** Extra right offset (px) so the chat panel never covers the minimap. */
-  right?: number;
 }
 
-export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
+export default function Minimap({ minimap, onDown }: MinimapProps) {
   if (!minimap.show) return null;
   return (
     <div
@@ -19,7 +17,10 @@ export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
       style={{
         position: "absolute",
         bottom: 20,
-        right: 20 + right,
+        // Bottom-LEFT: the full-height chat/drawer/trash panels all open on the
+        // right, so anchoring here means the minimap is never covered — and no
+        // dodge offset is needed the way it was on the right.
+        left: 20,
         width: 180,
         height: 120,
         background: "rgba(14,14,14,.92)",
@@ -30,7 +31,6 @@ export default function Minimap({ minimap, onDown, right = 0 }: MinimapProps) {
         zIndex: 35,
         overflow: "hidden",
         cursor: "grab",
-        transition: "right .2s cubic-bezier(.22,1,.36,1)",
         touchAction: "none",
       }}
     >

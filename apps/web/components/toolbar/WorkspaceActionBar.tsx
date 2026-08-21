@@ -15,7 +15,6 @@ interface WorkspaceActionBarProps {
   /** Opens the AI panel over the selection (analyze / captions). */
   onAi: () => void;
   onCopy: () => void;
-  onExport: () => void;
   /** Bind the selection into a move-/edit-together group (no folder — ADR 0034 folders live on the Folder button). */
   onGroup: () => void;
   /** Wrap the selection in a real folder (collapsible tile + Finder popup). */
@@ -37,7 +36,6 @@ interface WorkspaceActionBarProps {
 
 /* Inline glyphs for the actions without an existing icon (mono/line style). */
 const gp = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-const ExportGlyph = () => (<svg {...gp}><path d="M12 3v12" /><path d="m8 7 4-4 4 4" /><path d="M5 15v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4" /></svg>);
 const RemoveFromWorkspaceGlyph = () => (<svg {...gp}><rect x="3" y="5" width="18" height="14" rx="1" /><path d="M8 12h8" /></svg>);
 /* Group: two overlapping tiles bound by a corner-bracket frame — a set that
    moves and edits as one, not a container. */
@@ -111,7 +109,6 @@ function WorkspaceActionBar({
   onTidy,
   onAi,
   onCopy,
-  onExport,
   onGroup,
   onFolder,
   onRemoveFromWorkspace,
@@ -202,11 +199,10 @@ function WorkspaceActionBar({
 
       <Divider />
 
-      {/* Export and Delete are the two that send the selection somewhere else —
-          out of the app, or out of the archive — so they share the last group. */}
-      <Btn title="Download" disabled={noSel} onClick={onExport}>
-        <ExportGlyph />
-      </Btn>
+      {/* Download lived here too, but it duplicated the Workspace's own DOWNLOAD
+          action floated at the canvas top-right (WorkspaceOutputActions) — the
+          same export, two buttons — so it was removed. Delete stays: it is the
+          one way to send the selection out of the archive from this bar. */}
       <Btn title="Delete" danger disabled={noSel} onClick={onDelete}>
         <TrashIcon width={16} height={16} />
       </Btn>

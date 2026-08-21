@@ -45,8 +45,9 @@ export async function getCanvasGroups(
   };
   // The canvas_groups migration (20260723000002) may not be applied to this DB
   // yet — degrade to "no groups" instead of a hard crash, exactly like the
-  // getProjectCards 42703 fallback. 42P01 = undefined_table.
-  if (error?.code === "42P01" || error?.code === "42703") return [];
+  // getProjectCards 42703 fallback. 42P01 = undefined_table; PGRST205 is
+  // PostgREST's own "table not in the schema cache".
+  if (error?.code === "42P01" || error?.code === "42703" || error?.code === "PGRST205") return [];
   if (error) throw error as unknown as Error;
 
   const rows = (data ?? []) as unknown as GroupRow[];

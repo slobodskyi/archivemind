@@ -38,8 +38,10 @@ export async function getCanvasEdges(
   };
   // Migration 20260818000001 may not be applied to this DB yet — degrade to
   // "no edges" rather than crashing the canvas, exactly like getCanvasGroups
-  // and getCanvasAnnotations. 42P01 = undefined_table, 42703 = undefined_column.
-  if (error?.code === "42P01" || error?.code === "42703") return [];
+  // and getCanvasAnnotations. 42P01 = undefined_table, 42703 = undefined_column;
+  // PGRST205 is what PostgREST itself returns when the table is not in its
+  // schema cache (the real-world symptom before the migration is pushed).
+  if (error?.code === "42P01" || error?.code === "42703" || error?.code === "PGRST205") return [];
   if (error) throw error as unknown as Error;
 
   return ((data ?? []) as unknown as EdgeRow[])

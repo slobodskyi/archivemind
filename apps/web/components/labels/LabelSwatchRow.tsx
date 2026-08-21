@@ -35,9 +35,6 @@ export default function LabelSwatchRow({
   none,
   size = 16,
 }: LabelSwatchRowProps) {
-  // "Nothing to clear" is no colour ringed AND, in filter mode, the untriaged
-  // filter off too.
-  const nothingToClear = current === null && !none?.active;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px" }}>
       {ASSET_LABELS.map((label) => {
@@ -120,13 +117,14 @@ export default function LabelSwatchRow({
           <span style={{ width: 1, height: size - 4, background: "var(--bd)" }} />
           <button
             type="button"
+            // Always active: it is also the way to dismiss the label menu, so
+            // greying it out when there is no colour to clear (the common case
+            // on an unlabelled tile) left the menu with no working close. Clear
+            // when there is something to clear; otherwise it is a harmless
+            // no-op that still closes the menu through the caller's onPick.
             onClick={() => (none?.active ? none.onPick() : onPick(null))}
             title={none ? "Show everything" : "No label"}
             aria-label={none ? "Clear the colour filter" : "Remove label"}
-            // In filter mode there IS something to clear while `none` is on,
-            // even though no colour swatch is ringed — keying this on `current`
-            // alone would grey out the only way back to the full canvas.
-            disabled={nothingToClear}
             style={{
               display: "flex",
               width: size,
@@ -138,8 +136,7 @@ export default function LabelSwatchRow({
               borderRadius: "50%",
               background: "transparent",
               color: "var(--t2)",
-              cursor: nothingToClear ? "default" : "pointer",
-              opacity: nothingToClear ? 0.35 : 1,
+              cursor: "pointer",
             }}
           >
             <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round">

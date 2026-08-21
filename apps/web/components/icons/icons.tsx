@@ -20,6 +20,18 @@ export function ShareIcon({ width = 13, height = 13, ...props }: IconProps) {
   );
 }
 
+/** Box with an arrow leaving through its top-right corner (lucide
+ *  square-arrow-up-right) — the header's SHARE / open-outward action. */
+export function ShareArrowIcon({ width = 13, height = 13, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M15 15V9H9" />
+      <path d="m9 15 6-6" />
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+    </svg>
+  );
+}
+
 /** ShareIcon's tray with the arrow pointing the other way — files coming down
  *  out of the archive rather than going out of it. Deliberately a mirror of it
  *  and not a new shape: the two sit side by side in the Workspace's outcome

@@ -359,7 +359,7 @@ export default function PhotoTile({
         <button
           type="button"
           aria-label={`Connect ${filename}`}
-          title="Drag to connect — to another photo, a note, or empty canvas"
+          title="Drag to connect — or click to add a note"
           data-edge-port=""
           onPointerDown={onEdgeStart}
           style={{
