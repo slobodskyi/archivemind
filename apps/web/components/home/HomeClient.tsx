@@ -3,14 +3,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
-  createProjectResponseSchema,
-  TRASH_RETENTION_DAYS,
-  type TrashedAsset,
-} from "@archivemind/shared";
+import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import type { UsageSnapshot } from "@/lib/usage";
 import UsageView, { UsagePlanPill } from "@/components/account/UsageView";
+import TrashView from "@/components/trash/TrashView";
 import Toast from "@/components/modals/Toast";
 import DataSourcesModal from "@/components/modals/DataSourcesModal";
 import { useGdriveConnection } from "@/hooks/useGdriveConnection";
@@ -76,22 +73,6 @@ const VIEW_EMPTY: Record<ViewMode, string> = {
   usage: "",
 };
 
-/** Whole days until the sweep claims something deleted at `deletedAt`; null
- *  when the timestamp is missing (pre-migration rows) or unparseable. */
-function daysLeft(deletedAt: string | null | undefined): number | null {
-  if (!deletedAt) return null;
-  const t = new Date(deletedAt).getTime();
-  if (Number.isNaN(t)) return null;
-  return Math.max(0, Math.ceil(TRASH_RETENTION_DAYS - (Date.now() - t) / 86_400_000));
-}
-
-function daysLeftLabel(deletedAt: string | null | undefined): string | null {
-  const d = daysLeft(deletedAt);
-  if (d == null) return null;
-  if (d === 0) return "removal due";
-  return d === 1 ? "1 day left" : `${d} days left`;
-}
-
 const RECENTS_KEY = "archivemind:recentProjects";
 const RECENTS_MAX = 8;
 
@@ -125,7 +106,9 @@ export default function HomeClient({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  /** The toast carries an optional action because every reversible thing here
+   *  now offers one — including Restore, which never did (ADR 0049). */
+  const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void } } | null>(null);
   const [view, setView] = useState<ViewMode>(initialView);
   const [usage, setUsage] = useState<UsageSnapshot | null>(initialUsage);
   const [query, setQuery] = useState("");
@@ -139,12 +122,8 @@ export default function HomeClient({
   const [navOpen, setNavOpen] = useState(false);
   const [activeProjects, setActiveProjects] = useState<ProjectCard[]>(projects);
   const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
-  const [trashProjects, setTrashProjects] = useState<ProjectCard[] | null>(null);
-  const [trashAssets, setTrashAssets] = useState<TrashedAsset[] | null>(null);
   const [renameTarget, setRenameTarget] = useState<ProjectCard | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ project: ProjectCard; action: "archive" | "delete" } | null>(null);
-  /** Pending "delete photos permanently" confirmation (ADR 0033). */
-  const [purgeTarget, setPurgeTarget] = useState<{ ids: string[]; emptyAll: boolean } | null>(null);
 
   /** Escape closes the drawer, the way it closes every other overlay here. The
    *  scrim is the discoverable way out and the nav items close it on their own;
@@ -158,10 +137,13 @@ export default function HomeClient({
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
 
-  const flash = (t: string) => {
-    setToast(t);
+  const notify = (text: string, action?: { label: string; run: () => void }) => {
+    setToast({ text, action });
     setTimeout(() => setToast(null), 3200); // same duration as the workspace toast
   };
+  /** The plain one the connection hooks take — they call it with a severity
+   *  argument this shell has always ignored, so its arity must stay at one. */
+  const flash = (text: string) => notify(text);
 
   // Shared gdrive lifecycle (also drives the ImportModal pane) — ADR 0025.
   const {
@@ -221,45 +203,10 @@ export default function HomeClient({
     void fetchScope("archived").then(setArchivedProjects);
   };
 
-  const openTrash = () => {
-    setView("trash");
-    void fetchScope("trash").then(setTrashProjects);
-    void fetch("/api/assets?scope=trash")
-      .then((resp) => (resp.ok ? resp.json() : { assets: [] }))
-      .then(({ assets }) => setTrashAssets(assets as TrashedAsset[]))
-      .catch(() => setTrashAssets([]));
-  };
-
-  async function restoreAssets(ids: string[]) {
-    try {
-      const resp = await fetch("/api/assets/restore", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
-      if (!resp.ok) throw new Error(String(resp.status));
-      setTrashAssets((l) => (l ? l.filter((a) => !ids.includes(a.id)) : l));
-      flash(ids.length === 1 ? "Photo restored" : `${ids.length} photos restored`);
-    } catch {
-      flash("Could not restore — try again");
-    }
-  }
-
-  async function purgeAssets(ids: string[]) {
-    setPurgeTarget(null);
-    try {
-      const resp = await fetch("/api/assets/purge", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
-      if (!resp.ok) throw new Error(String(resp.status));
-      setTrashAssets((l) => (l ? l.filter((a) => !ids.includes(a.id)) : l));
-      flash(ids.length === 1 ? "Photo deleted permanently" : `${ids.length} photos deleted permanently`);
-    } catch {
-      flash("Could not delete — try again");
-    }
-  }
+  /** The view fetches its own list through GET /api/trash (ADR 0049), which is
+   *  why there is nothing to seed here: projects, files, Workspaces and drafts
+   *  arrive as one sorted, counted page rather than as two separate reads. */
+  const openTrash = () => setView("trash");
 
   const baseList = view === "recents"
     ? (recentIds.map((id) => activeProjects.find((p) => p.id === id)).filter(Boolean) as ProjectCard[])
@@ -267,17 +214,12 @@ export default function HomeClient({
       ? activeProjects
       : view === "archived"
         ? (archivedProjects ?? [])
-        : view === "trash"
-          ? (trashProjects ?? [])
-          : []; // usage renders its own body, not project cards
+        // Trash and Usage each render their own body — a trashed project is a
+        // row in the Trash's own list now, not a project card (ADR 0049).
+        : [];
 
   const q = query.trim().toLowerCase();
   const visibleProjects = q ? baseList.filter((p) => p.name.toLowerCase().includes(q)) : baseList;
-  const visibleTrashAssets =
-    view === "trash"
-      ? (trashAssets ?? []).filter((a) => !q || a.name.toLowerCase().includes(q))
-      : [];
-
   async function patchProject(id: string, patch: { name?: string; archived?: boolean; deleted?: boolean }): Promise<boolean> {
     try {
       const resp = await fetch(`/api/projects/${id}`, {
@@ -298,7 +240,6 @@ export default function HomeClient({
     const applyName = (list: ProjectCard[]) => list.map((p) => (p.id === id ? { ...p, name: newName } : p));
     setActiveProjects(applyName);
     setArchivedProjects((l) => (l ? applyName(l) : l));
-    setTrashProjects((l) => (l ? applyName(l) : l));
     flash("Project renamed");
   }
 
@@ -317,15 +258,13 @@ export default function HomeClient({
     if (!ok) return flash("Could not delete — try again");
     setActiveProjects((l) => l.filter((p) => p.id !== project.id));
     setArchivedProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
-    setTrashProjects((l) => (l ? [project, ...l] : l));
     flash(`"${project.name}" moved to Trash`);
   }
 
-  async function restoreProject(project: ProjectCard, from: "archived" | "trash") {
-    const ok = await patchProject(project.id, from === "archived" ? { archived: false } : { deleted: false });
+  async function restoreProject(project: ProjectCard) {
+    const ok = await patchProject(project.id, { archived: false });
     if (!ok) return flash("Could not restore — try again");
-    if (from === "archived") setArchivedProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
-    else setTrashProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
+    setArchivedProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
     setActiveProjects((l) => [project, ...l]);
     flash(`"${project.name}" restored`);
   }
@@ -527,7 +466,16 @@ export default function HomeClient({
             <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--tm)" }}>Measuring your archive…</div>
           ))}
 
-        <div className="am-home-grid" style={{ display: view === "usage" ? "none" : "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 16 }}>
+        {view === "trash" && <TrashView onToast={notify} />}
+
+        <div
+          className="am-home-grid"
+          style={{
+            display: view === "usage" || view === "trash" ? "none" : "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
+            gap: 16,
+          }}
+        >
           {visibleProjects.map((p) => (
             <ProjectCardView
               key={p.id}
@@ -536,53 +484,28 @@ export default function HomeClient({
               previews={p.previews}
               accent={cardColor(p.id)}
               href={`/projects/${p.id}`}
-              meta={view === "trash" ? daysLeftLabel(p.deletedAt) : null}
+              // An archived project's canvas redirects home (the page's guard
+              // only knows active projects), so the card must not pretend to be
+              // a door. Restore is the way in, and the card says so.
+              disabledReason={view === "archived" ? "Restore it first to open it" : null}
+              onDisabledClick={() => flash("Restore this project to open it")}
               onOpen={() => recordRecentProject(p.id)}
             >
               <CardMenu
-                restoreOnly={view === "archived" || view === "trash"}
+                restoreOnly={view === "archived"}
                 onOpen={() => openProject(p.id)}
                 onRename={() => setRenameTarget(p)}
                 onArchive={() => setConfirmTarget({ project: p, action: "archive" })}
                 onDelete={() => setConfirmTarget({ project: p, action: "delete" })}
-                onRestore={() => restoreProject(p, view === "archived" ? "archived" : "trash")}
+                onRestore={() => restoreProject(p)}
               />
             </ProjectCardView>
           ))}
         </div>
 
-        {/* Trashed PHOTOS (ADR 0033) — the asset half of the Trash: restore or
-            permanently delete individual photos, or empty the lot. Projects
-            above keep their own lifecycle; "Empty trash" is photos-only. */}
-        {view === "trash" && visibleTrashAssets.length > 0 && (
-          <section style={{ marginTop: visibleProjects.length > 0 ? 30 : 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
-              <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--t1)", margin: 0 }}>
-                Photos <span style={{ color: "var(--tm)", fontWeight: 400 }}>({visibleTrashAssets.length})</span>
-              </h2>
-              <button
-                onClick={() => setPurgeTarget({ ids: (trashAssets ?? []).map((a) => a.id), emptyAll: true })}
-                style={{ height: 28, padding: "0 12px", background: "transparent", color: "var(--red)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 11.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer", fontFamily: "inherit" }}
-              >
-                Empty trash
-              </button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
-              {visibleTrashAssets.map((a) => (
-                <TrashedPhotoCard
-                  key={a.id}
-                  asset={a}
-                  onRestore={() => void restoreAssets([a.id])}
-                  onPurge={() => setPurgeTarget({ ids: [a.id], emptyAll: false })}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
         {view !== "usage" &&
+          view !== "trash" &&
           visibleProjects.length === 0 &&
-          visibleTrashAssets.length === 0 &&
           !((view === "projects" || view === "recents") && creating) && (
           <div style={{ marginTop: 26, fontSize: 12.5, color: "var(--tm)" }}>
             {q ? "Nothing matches your search." : VIEW_EMPTY[view]}
@@ -592,7 +515,15 @@ export default function HomeClient({
 
       <UploadManager projectId="all" disabled disabledMessage="OPEN A PROJECT TO UPLOAD" />
 
-      <Toast show={!!toast} text={toast ?? ""} />
+      <Toast
+        show={!!toast}
+        text={toast?.text ?? ""}
+        actionLabel={toast?.action?.label}
+        onAction={() => {
+          toast?.action?.run();
+          setToast(null);
+        }}
+      />
 
       <HelpModal
         open={helpOpen}
@@ -644,70 +575,6 @@ export default function HomeClient({
         onClose={() => setConfirmTarget(null)}
       />
 
-      {/* Permanent photo deletion (ADR 0033) — the one action in the app that
-          truly cannot be undone, so it always confirms, even for one photo. */}
-      <ConfirmModal
-        open={!!purgeTarget}
-        title={purgeTarget?.emptyAll ? "Empty trash?" : "Delete permanently?"}
-        body={
-          purgeTarget?.emptyAll
-            ? `All ${purgeTarget.ids.length} trashed photos will be permanently deleted, including their previews and AI data. This cannot be undone.`
-            : "This photo will be permanently deleted, including its previews and AI data. This cannot be undone."
-        }
-        confirmLabel="Delete permanently"
-        danger
-        onConfirm={() => purgeTarget && void purgeAssets(purgeTarget.ids)}
-        onClose={() => setPurgeTarget(null)}
-      />
-    </div>
-  );
-}
-
-function TrashedPhotoCard({
-  asset,
-  onRestore,
-  onPurge,
-}: {
-  asset: TrashedAsset;
-  onRestore: () => void;
-  onPurge: () => void;
-}) {
-  const left = daysLeftLabel(asset.deletedAt);
-  return (
-    <div style={{ background: "var(--bg-s)", border: "1px solid var(--bd)", borderRadius: 3, overflow: "hidden" }}>
-      <div
-        style={{
-          height: 96,
-          background: asset.thumb ? `url(${asset.thumb}) center/cover` : "var(--bg-el)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {!asset.thumb && <span style={{ color: "var(--tm)", fontSize: 10.5 }}>No preview</span>}
-      </div>
-      <div style={{ padding: "8px 10px" }}>
-        <div style={{ fontSize: 11.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={asset.name}>
-          {asset.name}
-        </div>
-        {left && <div style={{ fontSize: 10.5, color: "var(--t2)", marginTop: 2 }}>{left}</div>}
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <button
-            onClick={onRestore}
-            style={{ flex: 1, height: 24, background: "var(--bg-el)", color: "var(--t1)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit" }}
-          >
-            Restore
-          </button>
-          <button
-            onClick={onPurge}
-            aria-label={`Delete ${asset.name} permanently`}
-            title="Delete permanently"
-            style={{ flex: "0 0 auto", height: 24, padding: "0 8px", background: "transparent", color: "var(--red)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 10.5, cursor: "pointer", fontFamily: "inherit" }}
-          >
-            <TrashIcon width={11} height={11} />
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -719,6 +586,8 @@ function ProjectCardView({
   accent,
   href,
   meta,
+  disabledReason,
+  onDisabledClick,
   onOpen,
   children,
 }: {
@@ -727,35 +596,19 @@ function ProjectCardView({
   previews: string[];
   accent: string;
   href: string;
-  /** Extra status line (e.g. the Trash view's "N days left" countdown). */
+  /** Extra status line under the file count. */
   meta?: string | null;
+  /** Set when the card must NOT navigate — an archived project's canvas
+   *  redirects home, so a link there is a door into a wall. The reason becomes
+   *  the card's tooltip and the click says the same thing out loud. */
+  disabledReason?: string | null;
+  onDisabledClick?: () => void;
   onOpen?: () => void;
   children?: React.ReactNode;
 }) {
   const extra = count - previews.length;
-  return (
-    <div style={{ position: "relative" }}>
-      <Link
-        href={href}
-        onNavigate={() => {
-          onOpen?.();
-          navProgressStart();
-        }}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          textAlign: "left",
-          background: "var(--bg-s)",
-          border: "1px solid var(--bd)",
-          borderRadius: 3,
-          overflow: "hidden",
-          cursor: "pointer",
-          fontFamily: "inherit",
-          padding: 0,
-          color: "inherit",
-          textDecoration: "none",
-        }}
-      >
+  const inner = (
+    <>
         <div style={{ position: "relative", height: 122, background: "var(--bg-el)", display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 1 }}>
           {previews.length === 0 && (
             <div style={{ gridColumn: "1 / 3", gridRow: "1 / 3", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--tm)", fontSize: 11 }}>
@@ -792,7 +645,51 @@ function ProjectCardView({
             {meta && <span style={{ color: "var(--t2b)" }}> · {meta}</span>}
           </div>
         </div>
-      </Link>
+    </>
+  );
+
+  const surface: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    textAlign: "left",
+    background: "var(--bg-s)",
+    border: "1px solid var(--bd)",
+    borderRadius: 3,
+    overflow: "hidden",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    padding: 0,
+    color: "inherit",
+    textDecoration: "none",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      {disabledReason ? (
+        <div
+          role="button"
+          tabIndex={0}
+          title={disabledReason}
+          onClick={onDisabledClick}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onDisabledClick?.();
+          }}
+          style={{ ...surface, cursor: "default" }}
+        >
+          {inner}
+        </div>
+      ) : (
+        <Link
+          href={href}
+          onNavigate={() => {
+            onOpen?.();
+            navProgressStart();
+          }}
+          style={surface}
+        >
+          {inner}
+        </Link>
+      )}
       {children}
     </div>
   );

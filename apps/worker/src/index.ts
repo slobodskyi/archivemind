@@ -17,6 +17,7 @@ import {
   sweepExpiredExports,
   sweepPublicationShares,
   sweepTrashedBoards,
+  sweepTrashedDrafts,
   sweepTrashedProjects,
 } from "./retention";
 import { checkExifToolAvailable } from "./services/exif";
@@ -83,7 +84,7 @@ async function main(): Promise<void> {
       .catch((e: unknown) => log(`reaper failed: ${String(e)}`));
   }, REAPER_EVERY_MS);
 
-  // Five sweeps, one cadence, independent failure domains — a broken project
+  // Six sweeps, one cadence, independent failure domains — a broken project
   // sweep must not silently stall asset purging or vice versa.
   const runSweep = () => {
     sweepTrashedProjects(pool)
@@ -92,6 +93,9 @@ async function main(): Promise<void> {
     sweepTrashedBoards(pool)
       .then((n) => n > 0 && log(`sweeper removed ${n} expired trashed workspace(s)`))
       .catch((e: unknown) => log(`workspace sweeper failed: ${String(e)}`));
+    sweepTrashedDrafts(pool)
+      .then((n) => n > 0 && log(`sweeper removed ${n} expired trashed draft(s)`))
+      .catch((e: unknown) => log(`draft sweeper failed: ${String(e)}`));
     sweepDeletedAssets(pool)
       .then((n) => n > 0 && log(`sweeper enqueued purge for ${n} expired trashed asset(s)`))
       .catch((e: unknown) => log(`asset sweeper failed: ${String(e)}`));

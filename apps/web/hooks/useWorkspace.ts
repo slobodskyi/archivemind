@@ -16,7 +16,6 @@ import type {
   NoteStroke,
   PatchAnnotationRequest,
   PatchAssetExifRequest,
-  TrashedAsset,
   TopicSummary,
 } from "@archivemind/shared";
 import { boardChipAt } from "@/lib/board-drop";
@@ -379,9 +378,10 @@ interface WorkspaceState {
   focusedCloudKey: string | null;
   /** Selection parked in the bulk-delete ConfirmModal (ADR 0033); null = closed. */
   confirmDeleteIds: string[] | null;
-  /** In-workspace Trash panel (ADR 0033). trashAssets null = not yet loaded. */
+  /** In-workspace Trash panel (ADR 0033). The list itself is the panel's own
+   *  (useTrash → GET /api/trash, ADR 0049); only the open/closed state and the
+   *  panel's exclusivity with the other right-side surfaces live here. */
   trashOpen: boolean;
-  trashAssets: TrashedAsset[] | null;
   /** Export dialog (ADR 0035). exportIds = the explicit assets it will export. */
   exportOpen: boolean;
   exportIds: string[];
@@ -852,12 +852,9 @@ export interface Workspace {
 
   // Trash panel (ADR 0033)
   trashOpen: boolean;
-  trashAssets: TrashedAsset[] | null;
   openTrash: () => void;
   closeTrash: () => void;
   toggleTrash: () => void;
-  restoreFromTrash: (ids: string[]) => void;
-  purgeFromTrash: (ids: string[]) => void;
 
   // Grouping views (Timeline / Map / Topic) are the same canvas as Canvas, just
   // sorted — `activePositions` is the current view's tile layout and `cloudDecor`
@@ -1068,7 +1065,6 @@ export function useWorkspace(
     focusedCloudKey: null,
     confirmDeleteIds: null,
     trashOpen: false,
-    trashAssets: null,
     exportOpen: false,
     exportIds: [],
     labelFilter: null,
@@ -4266,21 +4262,12 @@ export function useWorkspace(
     // Right-side panel — retire the others that live in the same slot.
     setState({
       trashOpen: true,
-      trashAssets: null,
       drawerId: null,
       chatOpen: false,
       sidebarTabs: [],
       sidebarActiveTab: null,
       sidebarAddOpen: false,
     });
-    fetch("/api/assets?scope=trash")
-      .then((resp) => (resp.ok ? resp.json() : Promise.reject(new Error(String(resp.status)))))
-      .then((data: { assets: TrashedAsset[] }) => {
-        if (stateRef.current.trashOpen) setState({ trashAssets: data.assets });
-      })
-      .catch(() => {
-        if (stateRef.current.trashOpen) setState({ trashAssets: [] });
-      });
   }, [setState]);
 
   const closeTrash = useCallback(() => setState({ trashOpen: false }), [setState]);
@@ -4291,58 +4278,6 @@ export function useWorkspace(
     if (stateRef.current.trashOpen) closeTrash();
     else openTrash();
   }, [closeTrash, openTrash]);
-
-  const restoreFromTrash = useCallback(
-    (ids: string[]) => {
-      if (!ids.length) return;
-      const idSet = new Set(ids);
-      setState((prev) => ({ trashAssets: prev.trashAssets?.filter((a) => !idSet.has(a.id)) ?? null }));
-      fetch("/api/assets/restore", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids }),
-      })
-        .then((resp) => {
-          if (!resp.ok) throw new Error(String(resp.status));
-          flashToast(ids.length === 1 ? "Photo restored" : `${ids.length} photos restored`);
-          router.refresh(); // bring the restored asset(s) back onto the canvas
-        })
-        .catch(() => {
-          flashToast("Could not restore — try again");
-          openTrash(); // reload the list so the failed row reappears
-        });
-    },
-    [setState, flashToast, router, openTrash],
-  );
-
-  const purgeFromTrash = useCallback(
-    (ids: string[]) => {
-      if (!ids.length) return;
-      const many = ids.length > 1;
-      const ok = window.confirm(
-        many
-          ? `Delete ${ids.length} photos permanently? This can’t be undone.`
-          : "Delete this photo permanently? This can’t be undone.",
-      );
-      if (!ok) return;
-      const idSet = new Set(ids);
-      setState((prev) => ({ trashAssets: prev.trashAssets?.filter((a) => !idSet.has(a.id)) ?? null }));
-      fetch("/api/assets/purge", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ids }),
-      })
-        .then((resp) => {
-          if (!resp.ok) throw new Error(String(resp.status));
-          flashToast(many ? `${ids.length} photos deleted permanently` : "Photo deleted permanently");
-        })
-        .catch(() => {
-          flashToast("Could not delete — try again");
-          openTrash();
-        });
-    },
-    [setState, flashToast, openTrash],
-  );
 
   const onUploadBatchStart = useCallback(
     (batch: UploadBatchStart) => {
@@ -5769,12 +5704,9 @@ export function useWorkspace(
     onUploadBatchSettled,
 
     trashOpen: state.trashOpen,
-    trashAssets: state.trashAssets,
     openTrash,
     closeTrash,
     toggleTrash,
-    restoreFromTrash,
-    purgeFromTrash,
 
     activePositions,
     cloudDecor: decor,

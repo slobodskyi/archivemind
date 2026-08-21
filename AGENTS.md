@@ -103,6 +103,25 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   them would make an old stroke row parse as a blank sticky note. Nothing writes
   `kind='ink'` any more, and canvas ink drawn before the change is invisible.
   Zero credits.
+  **The Trash is one typed list (ADR 0049, migration `20260821000001`):**
+  four tables carry a 30-day soft delete — `projects`, `assets`, `boards`,
+  `content_drafts` — and they used to surface through three different pieces of
+  UI, with drafts appearing in none of them (and having no sweep, so a deleted
+  draft was kept forever). Now a `TrashItem` is one union over
+  `project | workspace | asset | draft` carrying size, **where Restore puts it
+  back**, who deleted it and what expires first; `components/trash/` renders it
+  as cards or rows and the in-canvas panel is a narrower slice of the same
+  model. The chip key is the item's kind **except for an asset, where it is its
+  own `asset_kind`** — so `Photos · PDFs · Documents · Other files` are chips
+  and a new `asset_kind` needs no UI change. Filtering, sorting, paging and the
+  counts happen in `trash_items()` (SECURITY INVOKER, RLS is the boundary),
+  because "largest first" and an honest total across four tables cannot be
+  assembled in a browser — the read it replaces capped at 500 with no total, so
+  the list truncated silently and "Empty trash" purged the first 500. **A
+  destructive button acts only on what the filter matches and names the
+  number** ("Empty trash" → "Delete all (N)") — the opposite of ADR 0040's
+  label filter on purpose. `deleted_by` is stamped by a trigger, never a route.
+  Zero credits.
   **Workspaces are a named file scope (ADR 0044):** a `board` in code
   (`lib/boards.ts`, `hooks/useBoards.ts`, `BoardBrowser` in the header) — a
   named, colour-coded set of a project's files, in the `boards` table since
@@ -210,7 +229,9 @@ design from this file:**
   *with their coordinates* — read it before "correcting" that back to ADR 0022,
   which it deliberately excepts — and **its amendment** moves drawing off the
   canvas and onto the note. **0044** adds Workspaces, a named file scope, and is
-  the one ADR here whose backend is still a build list.
+  the one ADR here whose backend is still a build list. **0049** makes the Trash
+  one typed list over all four soft-deletable tables — read it before adding a
+  fifth soft delete, because its rule is that none may exist outside the Trash.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

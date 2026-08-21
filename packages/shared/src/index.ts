@@ -403,27 +403,25 @@ export const assetIdsRequestSchema = z.object({
 });
 export type AssetIdsRequest = z.infer<typeof assetIdsRequestSchema>;
 
-/** One row of GET /api/assets?scope=trash — the photo half of the Trash view.
- *  `thumb` is a presigned preview URL (null when previews never rendered);
- *  `deletedAt` drives the "N days left" countdown client-side. Purged
- *  tombstones are excluded server-side — nothing restorable, nothing shown. */
-export const trashedAssetSchema = z.object({
-  id: uuidSchema,
-  name: z.string(),
-  thumb: z.string().nullable(),
-  deletedAt: z.string().nullable(),
-});
-export type TrashedAsset = z.infer<typeof trashedAssetSchema>;
-
-export const trashedAssetsResponseSchema = z.object({
-  assets: z.array(trashedAssetSchema),
-});
-export type TrashedAssetsResponse = z.infer<typeof trashedAssetsResponseSchema>;
-
 /** Trash retention window (days) — mirrors the SQL default in
  *  sweep_trashed_projects / sweep_deleted_assets (the DB default is the source
  *  of truth; this constant only feeds UI copy + the countdown). */
 export const TRASH_RETENTION_DAYS = 30;
+
+/** Whole days until the sweep claims something trashed at `deletedAt` — the one
+ *  implementation, because the homepage and the in-canvas panel each grew their
+ *  own and one of them hardcoded the 30. Null when the timestamp is missing
+ *  (pre-migration rows) or unparseable; 0 means the next sweep takes it. */
+export function trashDaysLeft(deletedAt: string | null | undefined): number | null {
+  if (!deletedAt) return null;
+  const at = new Date(deletedAt).getTime();
+  if (Number.isNaN(at)) return null;
+  return Math.max(0, Math.ceil(TRASH_RETENTION_DAYS - (Date.now() - at) / 86_400_000));
+}
+
+/** How close to gone counts as "expiring soon" — the chip, and the red
+ *  countdown both surfaces already drew at three days. */
+export const TRASH_EXPIRING_SOON_DAYS = 3;
 
 // ── Colour labels — the human curation axis (migration 20260808000001) ───────
 
@@ -448,6 +446,122 @@ export const DEFAULT_LABEL_NAMES: Record<AssetLabel, string> = {
   purple: "Purple",
   gray: "Gray",
 };
+
+// ── The Trash, as one typed list (ADR 0049, migration 20260821000001) ────────
+
+/** What a trashed thing IS. Four tables carry a soft delete, and the Trash is
+ *  the only place any of them is visible — that rule is what forced a sweep for
+ *  drafts, which had been deleted-and-kept-forever since 20260814000001. */
+export const trashItemKindSchema = z.enum(["project", "workspace", "asset", "draft"]);
+export type TrashItemKind = z.infer<typeof trashItemKindSchema>;
+
+/** What the chips filter ON. An item's key is its kind, EXCEPT an asset, whose
+ *  key is its own `asset_kind` — so "Photos" and "PDFs" are separate chips
+ *  without `asset` ever being one, and a new member of assetKindSchema becomes a
+ *  chip with no change here, in the RPC, or in the UI. */
+export const TRASH_FILTER_KEYS = [
+  "project",
+  "workspace",
+  "draft",
+  ...assetKindSchema.options,
+] as const;
+export const trashFilterKeySchema = z.enum(TRASH_FILTER_KEYS);
+export type TrashFilterKey = z.infer<typeof trashFilterKeySchema>;
+
+export const trashSortSchema = z.enum(["recent", "expiring", "largest", "name"]);
+export type TrashSort = z.infer<typeof trashSortSchema>;
+
+/** Where a restore puts it back: the live projects an asset returns to, the
+ *  project a Workspace belongs to, the Workspace a draft was written in. A
+ *  trashed project is deliberately absent from an asset's list — naming it
+ *  would promise a return to somewhere the photo still cannot be seen. */
+export const trashLocationSchema = z.object({ id: uuidSchema, name: z.string() });
+
+/** One row of `trash_items()`, in the RPC's own snake_case. `thumb_key` is an R2
+ *  KEY, never a URL — the route presigns the page it renders and nothing else,
+ *  which is what stops a 500-row Trash from signing 500 objects to draw 60. */
+export const trashItemRowSchema = z.object({
+  kind: trashItemKindSchema,
+  id: uuidSchema,
+  name: z.string(),
+  asset_kind: assetKindSchema.nullable(),
+  mime: z.string().nullable(),
+  thumb_key: z.string().nullable(),
+  color: assetLabelSchema.nullable(),
+  bytes: z.number().nullable(),
+  item_count: z.number().nullable(),
+  location: z.array(trashLocationSchema),
+  deleted_at: z.string().nullable(),
+  deleted_by: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+  expires_at: z.string().nullable(),
+});
+export type TrashItemRow = z.infer<typeof trashItemRowSchema>;
+
+/** The whole RPC payload. Parsed rather than cast on purpose: `supabase.rpc()`
+ *  is untyped, so a drifted function signature compiles clean and fails in
+ *  production — this is where that gets caught. */
+export const trashItemsRpcSchema = z.object({
+  items: z.array(trashItemRowSchema),
+  total: z.number(),
+  total_bytes: z.number(),
+  oldest_expires_at: z.string().nullable(),
+  counts: z.record(z.string(), z.number()),
+  expiring_soon: z.number(),
+  retention_days: z.number(),
+});
+
+/** One item of the Trash as the UI reads it. */
+export const trashItemSchema = z.object({
+  kind: trashItemKindSchema,
+  id: uuidSchema,
+  name: z.string(),
+  assetKind: assetKindSchema.nullable(),
+  mime: z.string().nullable(),
+  /** Presigned preview URL for the rendered page; null when there is none. */
+  thumb: z.string().nullable(),
+  color: assetLabelSchema.nullable(),
+  bytes: z.number().nullable(),
+  count: z.number().nullable(),
+  location: z.array(trashLocationSchema),
+  deletedAt: z.string().nullable(),
+  deletedBy: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+  expiresAt: z.string().nullable(),
+});
+export type TrashItem = z.infer<typeof trashItemSchema>;
+
+export const trashResponseSchema = z.object({
+  items: z.array(trashItemSchema),
+  /** Rows matching the CURRENT filter — what the header prints and what a
+   *  "Delete all (N)" is allowed to act on. Never the size of the table. */
+  total: z.number(),
+  totalBytes: z.number(),
+  oldestExpiresAt: z.string().nullable(),
+  /** Per filter key, ignoring the type filter — a chip has to say what picking
+   *  it would find, so counting only the active one would zero the rest. */
+  counts: z.record(z.string(), z.number()),
+  expiringSoon: z.number(),
+  retentionDays: z.number(),
+});
+export type TrashResponse = z.infer<typeof trashResponseSchema>;
+
+/** A selection can mix kinds, so the bulk endpoints take (kind, id) pairs and
+ *  fan out server-side: one request, one undo toast, one confirmation. */
+export const trashTargetSchema = z.object({ kind: trashItemKindSchema, id: uuidSchema });
+export type TrashTarget = z.infer<typeof trashTargetSchema>;
+
+export const trashActionRequestSchema = z.object({
+  items: z.array(trashTargetSchema).min(1).max(500),
+});
+export type TrashActionRequest = z.infer<typeof trashActionRequestSchema>;
+
+export const trashActionResponseSchema = z.object({
+  /** Ids that actually changed, per kind — a purged asset or a row someone else
+   *  already restored simply is not in it. */
+  done: z.array(trashTargetSchema),
+  failed: z.array(trashTargetSchema),
+});
+export type TrashActionResponse = z.infer<typeof trashActionResponseSchema>;
+
 
 /** POST /api/assets/label — set or clear one colour on a selection. `label:
  *  null` clears, which is also what re-picking the colour a photo already has

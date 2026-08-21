@@ -31,6 +31,20 @@ export async function sweepTrashedBoards(pool: pg.Pool): Promise<number> {
   return rows[0]?.removed ?? 0;
 }
 
+/** Hard-delete trashed CONTENT DRAFTS past their grace period (migration
+ *  20260821000001, ADR 0049). Drafts have had a soft delete since 20260814000001
+ *  and no sweep to go with it, so a deleted draft was kept forever and listed
+ *  nowhere; now that the Trash lists them, the 30 days has to be real. Published
+ *  /p/{token} links are untouched — they carry their own snapshot and reference
+ *  the draft by plain text, deliberately not by foreign key (ADR 0046). Returns
+ *  the number of drafts removed. */
+export async function sweepTrashedDrafts(pool: pg.Pool): Promise<number> {
+  const { rows } = await pool.query<{ removed: number }>(
+    "select sweep_trashed_drafts() as removed",
+  );
+  return rows[0]?.removed ?? 0;
+}
+
 /** Enqueue 'purge' jobs for trashed ASSETS past their grace period (migration
  *  20260723000001, ADR 0033). Same shape as the project sweep — the 30-day
  *  window lives in the SQL default — but this one only enqueues: the purge
