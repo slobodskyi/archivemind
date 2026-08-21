@@ -35,11 +35,6 @@ interface ProjectAssetViewProps {
   /** The workspace's colour names, so a tile's dot can carry the user's own
    *  word for it ("Rejected") rather than the raw colour. */
   labelNames: LabelNames;
-  /** Wire ports (ADR 0048) — provided only on the neural view with an open
-   *  Workspace, which is the only place edges exist. */
-  onEdgeStart?: (event: React.PointerEvent, id: string, center: CanvasPoint) => void;
-  /** The tile an in-flight wire is hovering, for its drop ring. */
-  edgeDropTargetId?: string | null;
 }
 
 function ProjectAssetView({
@@ -61,8 +56,6 @@ function ProjectAssetView({
   openContextMenu,
   analyzePhoto,
   labelNames,
-  onEdgeStart,
-  edgeDropTargetId = null,
 }: ProjectAssetViewProps) {
   const previewByAsset = useMemo(
     () => new Map(previews.flatMap((preview) => preview.assetId ? [[preview.assetId, preview]] : [])),
@@ -122,14 +115,6 @@ function ProjectAssetView({
                   }
                 : undefined
             }
-            // Mock rows are not board members, so a wire from one could never
-            // be stored — same gate as the AI badge above.
-            onEdgeStart={
-              onEdgeStart && isRealSource(photo.source)
-                ? (event) => onEdgeStart(event, photo.id, { x: pos.cx, y: pos.cy })
-                : undefined
-            }
-            edgeDropTarget={edgeDropTargetId === photo.id}
           />
         );
       })}

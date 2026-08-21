@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/gemini", () => ({ analyzeModel: mocks.analyzeModel }));
 vi.mock("@/lib/content-generation", async () => import("../../../../lib/content-generation"));
-vi.mock("@/lib/notes", async () => import("../../../../lib/notes"));
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 vi.mock("@/lib/workspace", () => ({
   getCurrentWorkspaceId: mocks.getCurrentWorkspaceId,

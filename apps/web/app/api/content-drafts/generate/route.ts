@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { noteBodySchema } from "@archivemind/shared";
 import { analyzeModel } from "@/lib/gemini";
 import {
   contentGenerationRequestSchema,
@@ -7,7 +6,6 @@ import {
   sourceAssetContextSchema,
   type SourceAssetContext,
 } from "@/lib/content-generation";
-import { flattenNoteEvidenceText } from "@/lib/notes";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
@@ -58,24 +56,6 @@ function grouped<T extends { asset_id: string }>(rows: readonly T[]): Map<string
   }
   return byAsset;
 }
-
-interface EdgeRow {
-  from_asset_id: string | null;
-  from_annotation_id: string | null;
-  to_asset_id: string | null;
-  to_annotation_id: string | null;
-}
-
-/** The note's jsonb body → its prompt text. Parsing and the strike-drop rule
- *  live in lib/notes.ts (flattenNoteEvidenceText), where they are pure and
- *  unit-tested; this only unwraps the jsonb. */
-function flattenNoteText(rawBody: unknown): string {
-  const body = noteBodySchema.safeParse(rawBody ?? {});
-  if (!body.success) return "";
-  return flattenNoteEvidenceText(body.data.text);
-}
-
-const pairKey = (a: string, b: string) => [a, b].sort().join(":");
 
 /** POST /api/content-drafts/generate — one Workspace selection → a structured
  * article or Instagram-carousel preview. This endpoint intentionally does not
@@ -154,7 +134,7 @@ export async function POST(request: Request) {
   // visible in the query itself: facts are confirmed-only and captions are
   // human-edited-only; no broad nested relation can smuggle another status into
   // the prompt through a mapping bug.
-  const [assetsResult, exifResult, tagsResult, descriptionsResult, factsResult, captionsResult, edgesResult] =
+  const [assetsResult, exifResult, tagsResult, descriptionsResult, factsResult, captionsResult] =
     await Promise.all([
       supabase
         .from("assets")
@@ -183,26 +163,7 @@ export async function POST(request: Request) {
         .eq("lang", generationRequest.language)
         .eq("is_edited", true)
         .order("updated_at", { ascending: false }),
-      // The board's edges (ADR 0048): note↔photo wires become authorNotes, and
-      // photo↔photo pairs verify the client's orderIsAuthored claim.
-      supabase
-        .from("canvas_edges")
-        .select("from_asset_id, from_annotation_id, to_asset_id, to_annotation_id")
-        .eq("board_id", board.id as string)
-        .order("created_at", { ascending: true }),
     ]);
-
-  // Edges degrade like their reader does: the table may not be migrated yet
-  // (42P01/42703), and generation must keep working without the feature rather
-  // than 500 on every board.
-  const edgeRows =
-    edgesResult.error?.code === "42P01" || edgesResult.error?.code === "42703"
-      ? []
-      : ((edgesResult.data ?? []) as unknown as EdgeRow[]);
-  const edgesError =
-    edgesResult.error && edgesResult.error.code !== "42P01" && edgesResult.error.code !== "42703"
-      ? edgesResult.error
-      : null;
 
   const metadataError = [
     assetsResult.error,
@@ -211,7 +172,6 @@ export async function POST(request: Request) {
     descriptionsResult.error,
     factsResult.error,
     captionsResult.error,
-    edgesError,
   ].find((error) => error !== null);
   if (metadataError) return NextResponse.json({ error: "source_metadata_unavailable" }, { status: 500 });
 
@@ -233,62 +193,6 @@ export async function POST(request: Request) {
   );
   const factsByAsset = grouped((factsResult.data ?? []) as unknown as FactRow[]);
   const captionsByAsset = grouped((captionsResult.data ?? []) as unknown as CaptionRow[]);
-
-  // ── Edges (ADR 0048): note context and the authored-order check ──────────
-  // note↔photo wires map each asset to its note ids (either direction, in
-  // edge creation order); photo↔photo pairs feed the orderIsAuthored proof.
-  const noteIdsByAsset = new Map<string, string[]>();
-  const assetPairKeys = new Set<string>();
-  const wiredNoteIds = new Set<string>();
-  for (const row of edgeRows) {
-    if (row.from_asset_id && row.to_asset_id) {
-      assetPairKeys.add(pairKey(row.from_asset_id, row.to_asset_id));
-      continue;
-    }
-    const assetId = row.from_asset_id ?? row.to_asset_id;
-    const annotationId = row.from_annotation_id ?? row.to_annotation_id;
-    if (!assetId || !annotationId) continue;
-    wiredNoteIds.add(annotationId);
-    const list = noteIdsByAsset.get(assetId);
-    if (list) list.push(annotationId);
-    else noteIdsByAsset.set(assetId, [annotationId]);
-  }
-
-  // The notes' bodies, board-owned only. Assembled HERE and never accepted
-  // from the request: this is the first author-written per-asset text to reach
-  // the prompt, and deriving it server-side is what proves the note belongs to
-  // the board being generated from (ADR 0045 as amended).
-  const noteTextById = new Map<string, string>();
-  if (wiredNoteIds.size > 0) {
-    const { data: noteRows, error: notesError } = await supabase
-      .from("canvas_annotations")
-      .select("id, body")
-      .in("id", [...wiredNoteIds])
-      .eq("board_id", board.id as string)
-      .eq("kind", "note");
-    if (notesError) return NextResponse.json({ error: "source_metadata_unavailable" }, { status: 500 });
-    for (const row of (noteRows ?? []) as { id: string; body: unknown }[]) {
-      const text = flattenNoteText(row.body);
-      if (text) noteTextById.set(row.id, text);
-    }
-  }
-  const authorNotesFor = (assetId: string): string[] =>
-    (noteIdsByAsset.get(assetId) ?? [])
-      .map((noteId) => noteTextById.get(noteId))
-      .filter((text): text is string => Boolean(text))
-      .slice(0, 3);
-
-  // orderIsAuthored is client-claimed but verified against the drawn thread:
-  // every consecutive pair must be joined by an asset↔asset edge on this
-  // board, or the flag silently drops — a stale client must not be able to
-  // caption arbitrary order as authored.
-  const orderIsAuthored =
-    generationRequest.orderIsAuthored &&
-    requestedIds.length >= 2 &&
-    requestedIds.every(
-      (assetId, index) => index === 0 || assetPairKeys.has(pairKey(requestedIds[index - 1], assetId)),
-    );
-  const verifiedRequest = { ...generationRequest, orderIsAuthored };
 
   // Map over request ids — never database order. The user's editorial ordering
   // is meaningful and must survive both PostgREST and the model prompt.
@@ -317,13 +221,12 @@ export async function POST(request: Request) {
         style: row.style,
         text: row.text,
       })),
-      authorNotes: authorNotesFor(assetId),
     });
   });
 
   let content;
   try {
-    content = await generateContentDraft(verifiedRequest, sources);
+    content = await generateContentDraft(generationRequest, sources);
   } catch (error) {
     // Do not log the prompt or model response: both contain user archive data.
     console.error("Content draft generation failed", error instanceof Error ? error.name : "unknown_error");

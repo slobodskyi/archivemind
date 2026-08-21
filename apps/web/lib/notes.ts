@@ -224,22 +224,3 @@ export function toggleInlineMark(text: string, selStart: number, selEnd: number,
   return { text: before + marker + selected + marker + after, selStart: selStart + marker.length, selEnd: selEnd + marker.length };
 }
 
-/** A note's body flattened for the generation prompt (ADR 0048 / ADR 0045 as
- *  amended): the markdown-ish text through the same parser the renderer uses,
- *  with `~~struck~~` spans DROPPED — a strike is the author retracting
- *  something, and evidence assembly must honour that. Checklist/bullet markers
- *  are stripped but their text kept: an unticked reminder is still authored
- *  intent. Capped at the schema's own per-note limit. */
-export function flattenNoteEvidenceText(text: string): string {
-  return parseNoteLines(text)
-    .map((line) =>
-      parseInline(line.text)
-        .filter((span) => !span.strike)
-        .map((span) => span.text)
-        .join("")
-        .trim(),
-    )
-    .filter(Boolean)
-    .join("\n")
-    .slice(0, 1_500);
-}

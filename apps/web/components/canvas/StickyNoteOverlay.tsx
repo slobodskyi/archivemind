@@ -27,11 +27,6 @@ interface StickyNoteOverlayProps {
   onToggleCheck: (id: string, lineIndex: number) => void;
   onSetStrokes: (id: string, strokes: NoteStroke[]) => void;
   onDelete: (id: string) => void;
-  /** Wire ports (ADR 0048) — provided only with an open Workspace, the one
-   *  scope edges exist in. The port hands the note's center as the anchor. */
-  onEdgeStart?: (e: React.PointerEvent, id: string, center: { x: number; y: number }) => void;
-  /** The note an in-flight wire is hovering, for its drop ring. */
-  edgeDropTargetId?: string | null;
 }
 
 /** The three steps of `NoteStyle.fontSize`. Sizes, not a scale factor, so the
@@ -56,8 +51,6 @@ export default function StickyNoteOverlay({
   onFontSizeChange,
   onToggleCheck,
   onSetStrokes,
-  onEdgeStart,
-  edgeDropTargetId = null,
   onDelete,
 }: StickyNoteOverlayProps) {
   // Which note is active (its tools panel is showing). Pure UI — never workspace
@@ -130,18 +123,15 @@ export default function StickyNoteOverlay({
           onToggleCheck={onToggleCheck}
           onSetStrokes={onSetStrokes}
           onDelete={onDelete}
-          onEdgeStart={onEdgeStart}
-          edgeDropTarget={edgeDropTargetId === note.id}
         />
       ))}
     </>
   );
 }
 
-interface NoteCardProps extends Omit<StickyNoteOverlayProps, "notes" | "edgeDropTargetId"> {
+interface NoteCardProps extends Omit<StickyNoteOverlayProps, "notes"> {
   note: StickyNote;
   active: boolean;
-  edgeDropTarget: boolean;
   mode: NoteMode;
   drawColor: AssetLabel;
   thickness: number;
@@ -174,8 +164,6 @@ function NoteCard({
   onToggleCheck,
   onSetStrokes,
   onDelete,
-  onEdgeStart,
-  edgeDropTarget,
 }: NoteCardProps) {
   const [hovered, setHovered] = useState(false);
   const textarea = useRef<HTMLTextAreaElement | null>(null);
@@ -244,7 +232,7 @@ function NoteCard({
         background: noteSurface(note.color),
         borderRadius: 2,
         boxShadow: active ? "0 12px 34px rgba(0,0,0,.45)" : "0 10px 28px rgba(0,0,0,.35)",
-        outline: edgeDropTarget ? "2px solid var(--ac)" : active ? "1px solid rgba(0,0,0,.25)" : "none",
+        outline: active ? "1px solid rgba(0,0,0,.25)" : "none",
         display: "flex",
         flexDirection: "column",
         zIndex: active ? 16 : 15,
@@ -268,60 +256,6 @@ function NoteCard({
           glyph={<CloseIcon width={10} height={10} strokeWidth={2.2} />}
         />
       </div>
-      {/* The wire port (ADR 0048), symmetric with a photo tile's: a note can
-          be wired to more photos after the fact. Only with an open Workspace
-          (onEdgeStart is gated by the caller), visible on hover/active like
-          the tile port is on hover/selection. Fully outside the card, joined
-          by a stem whose invisible hover bridge keeps `hovered` alive across
-          the gap — same construction as PhotoTile's. */}
-      {onEdgeStart && (hovered || active || edgeDropTarget) && (
-        <>
-          <span
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: "50%",
-              right: -9,
-              width: 9,
-              height: 22,
-              display: "flex",
-              alignItems: "center",
-              transform: "translateY(-50%)",
-              zIndex: 6,
-            }}
-          >
-            <span style={{ width: "100%", height: 1.5, background: "color-mix(in srgb,var(--ac) 55%,transparent)" }} />
-          </span>
-          <button
-            type="button"
-            aria-label="Connect note"
-            title="Drag to connect this note to a photo"
-            data-edge-port=""
-            onPointerDown={(e) => onEdgeStart(e, note.id, { x: note.x + note.w / 2, y: note.y + note.h / 2 })}
-            style={{
-              position: "absolute",
-              top: "50%",
-              right: -29,
-              display: "flex",
-              width: 20,
-              height: 20,
-              alignItems: "center",
-              justifyContent: "center",
-              transform: "translateY(-50%)",
-              border: "1px solid color-mix(in srgb,var(--ac) 55%,transparent)",
-              borderRadius: 999,
-              background: "rgba(10,10,10,.85)",
-              color: "var(--ac)",
-              cursor: "crosshair",
-              zIndex: 6,
-            }}
-          >
-            <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden="true">
-              <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
-            </svg>
-          </button>
-        </>
-      )}
 
       {active && (
         <NoteToolsPanel
