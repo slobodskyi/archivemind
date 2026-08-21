@@ -16,7 +16,13 @@ interface WorkspaceOutputActionsProps {
  *  extra click; CSV and ZIP cost exactly what they did.
  *
  *  The badge is the draft count, so the button says whether there is unfinished
- *  work behind it without opening. */
+ *  work behind it without opening.
+ *
+ *  It reads EXPORT rather than CREATE: the project canvas outside a Workspace
+ *  now owns the top-right slot with ANALYZE, and between the two the axis a
+ *  reader needs is what the scope is FOR — bringing files in and understanding
+ *  them, versus taking work out. The hub behind it is unchanged and still opens
+ *  on "Make something" first; only the word on the door moved. */
 export default function WorkspaceOutputActions({
   draftCount,
   photoCount,
@@ -29,11 +35,11 @@ export default function WorkspaceOutputActions({
     <button
       onClick={onOpen}
       disabled={!live}
-      aria-label={`Create or download${draftCount ? `, ${draftCount} draft${draftCount === 1 ? "" : "s"}` : ""}`}
+      aria-label={`Export or create${draftCount ? `, ${draftCount} draft${draftCount === 1 ? "" : "s"}` : ""}`}
       title={
         selectedCount
-          ? `Create or download · ${selectedCount} selected`
-          : `Create or download · ${photoCount} ${photoCount === 1 ? "file" : "files"}`
+          ? `Export or create · ${selectedCount} selected`
+          : `Export or create · ${photoCount} ${photoCount === 1 ? "file" : "files"}`
       }
       style={{
         display: "flex",
@@ -55,7 +61,7 @@ export default function WorkspaceOutputActions({
         cursor: live ? "pointer" : "default",
       }}
     >
-      CREATE
+      EXPORT
       {draftCount > 0 && (
         <span style={{ padding: "1px 5px", background: "rgba(5,5,5,.18)", borderRadius: 2, fontSize: 9.5, fontWeight: 800 }}>
           {draftCount}
