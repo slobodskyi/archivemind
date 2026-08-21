@@ -3,6 +3,7 @@ import { boardChipAt } from "@/lib/board-drop";
 import { createPortal } from "react-dom";
 import { FOLDER_TILE_H, FOLDER_TILE_W, type FolderModel } from "@/hooks/useWorkspace";
 import { CloseIcon } from "@/components/icons/icons";
+import { MenuDivider, MenuItem, MenuPanel } from "@/components/canvas/CanvasContextMenu";
 
 interface FolderOverlayProps {
   folders: FolderModel[];
@@ -25,7 +26,8 @@ interface FolderOverlayProps {
   /** Report the chip the drag is over so the header can arm it. */
   onBoardHover?: (boardId: string | null) => void;
   onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
+  /** Dissolve the folder and put its files back on the canvas where it sits. */
+  onUngroup: (id: string) => void;
 }
 
 const DRAG_THRESHOLD = 3;
@@ -58,11 +60,15 @@ export default function FolderOverlay({
   onDropOnBoard,
   onBoardHover,
   onRename,
-  onDelete,
+  onUngroup,
 }: FolderOverlayProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // Right-click menu for one folder. Local, not hoisted into the workspace
+  // state: it is opened, read and closed entirely in here, and its own backdrop
+  // means it and the canvas menu can never be open together.
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const drag = useRef<{
     id: string;
     lastX: number;
@@ -71,6 +77,11 @@ export default function FolderOverlay({
     totalX: number;
     totalY: number;
   } | null>(null);
+
+  const startRename = (f: FolderModel) => {
+    setEditingId(f.id);
+    setDraftLabel(f.name);
+  };
 
   const commitRename = () => {
     if (editingId) {
@@ -133,9 +144,17 @@ export default function FolderOverlay({
                 if (openFolderId === f.id) onClose();
                 else onOpen(f.id);
               }}
+              onContextMenu={(e) => {
+                // Stop it here or it bubbles to the canvas, which would answer a
+                // right-click on a folder with the tile menu — labels, layer
+                // order and Trash, none of which a folder has.
+                e.preventDefault();
+                e.stopPropagation();
+                setMenu({ id: f.id, x: e.clientX, y: e.clientY });
+              }}
               onMouseEnter={() => setHoveredId(f.id)}
               onMouseLeave={() => setHoveredId((h) => (h === f.id ? null : h))}
-              title="Double-click to open"
+              title="Double-click to open · right-click for more"
               style={{
                 position: "absolute",
                 left: f.geom.x,
@@ -254,8 +273,7 @@ export default function FolderOverlay({
                       <span
                         onDoubleClick={(e) => {
                           e.stopPropagation();
-                          setEditingId(f.id);
-                          setDraftLabel(f.name);
+                          startRename(f);
                         }}
                         title="Double-click to rename"
                         style={{
@@ -280,9 +298,9 @@ export default function FolderOverlay({
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onDelete(f.id);
+                        onUngroup(f.id);
                       }}
-                      title="Ungroup (delete folder)"
+                      title="Ungroup — put the files back on the canvas"
                       aria-label="Ungroup folder"
                       style={{
                         display: "flex",
@@ -308,6 +326,44 @@ export default function FolderOverlay({
             {openFolderId === f.id && (
               <FinderDropdown folder={f} onClose={onClose} onOpenPhoto={onOpenPhoto} onDropMemberOut={onDropMemberOut} />
             )}
+
+            {/* Portalled to <body>: this panel is `position: fixed`, and the
+                canvas content div it would otherwise live in carries a
+                transform — which makes it the containing block for fixed
+                descendants, so the menu would land at the wrong end of the
+                zoom instead of under the cursor. */}
+            {menu?.id === f.id &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <MenuPanel x={menu.x} y={menu.y} height={170} onClose={() => setMenu(null)}>
+                  <MenuItem
+                    label="Open"
+                    onClick={() => {
+                      setMenu(null);
+                      if (openFolderId !== f.id) onOpen(f.id);
+                    }}
+                  />
+                  <MenuItem
+                    label="Rename"
+                    onClick={() => {
+                      setMenu(null);
+                      startRename(f);
+                    }}
+                  />
+                  <MenuDivider />
+                  {/* The folder goes, the files stay — they land back on the
+                      canvas where the folder sat. Nothing here deletes a photo,
+                      so nothing here is danger-red. */}
+                  <MenuItem
+                    label={f.count > 0 ? `Ungroup ${f.count} ${f.count === 1 ? "file" : "files"}` : "Delete folder"}
+                    onClick={() => {
+                      setMenu(null);
+                      onUngroup(f.id);
+                    }}
+                  />
+                </MenuPanel>,
+                document.body,
+              )}
           </div>
         );
       })}

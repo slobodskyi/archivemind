@@ -108,7 +108,11 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                into the project being viewed. NOT a duplicate — assets
                                                are deduped by a UNIQUE content_hash index, so a second
                                                row over the same bytes cannot exist, and M:N membership
-                                               is what "the same shot in two archives" already means
+                                               is what "the same shot in two archives" already means.
+                                               Both are ⌘C/⌘V ONLY since the Workspace bar's Copy
+                                               button was removed: every other control on that bar
+                                               edits the canvas in front of you, while Copy is a link
+                                               into an archive you are not looking at
   app/api/assets/[id]                          soft delete (status='deleted'; DB trigger stamps deleted_at)
   app/api/assets/delete · restore · purge      bulk trash ops (ADR 0033): move a selection to
                                                Trash · undo/Restore it (purged excluded) ·
@@ -187,6 +191,18 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                create/list ·
                                                rename/reorder/delete · add/remove members. Server owns
                                                membership + order; geometry stays in localStorage (ADR 0022).
+                                               DELETE on a folder is an UNGROUP: `ungroupFolder` drops the
+                                               row and writes its members fresh `asset` overrides in a block
+                                               centred on the folder. A folder hides its members instead of
+                                               moving them and a collapsed folder drags alone, so releasing
+                                               them at their stored coordinates scattered them back to
+                                               wherever they were filed from — often off-screen. Reached
+                                               from the folder's × and its right-click menu (Open · Rename ·
+                                               Ungroup N files), which is the only menu on the canvas that
+                                               is not `CanvasContextMenu` — it shares that file's MenuPanel
+                                               so the two are one object, and it portals to <body> because a
+                                               position:fixed panel inside the canvas's transform would be
+                                               laid out against the transform, not the viewport.
                                                Read seam: lib/canvas-groups.ts (getCanvasGroups)
   app/api/annotations · /[id]                  sticky notes — and later freehand ink — on the Workspace
                                                canvas (ADR 0041, migration 20260808000002). POST create ·
@@ -333,7 +349,14 @@ These are the mockup's shapes. The **target** model differs — see the note bel
 - **Drawer** — the right-side photo detail panel. Its preview carries an **Edit** button (real sources with previews) that opens the **image editor** (`components/editor/ImageEditor.tsx`) — Tier-0 non-destructive crop/rotate/straighten/flip (ADR 0030). The client only builds a `recipe`; the worker renders the edited previews. An edited asset shows "Edited" and offers Revert. The opposite corner carries the **Delete** pill (ADR 0033) — Move to Trash with the same undo toast as the tile/action-bar/right-click deletes; a big selection confirms first, and the homepage Trash view is where photos are restored or purged for good. An unprocessed photo shows one **Analyze & caption** button (analyze chained into caption — see AI actions below); once there are captions the block offers **Generate**/**Regenerate** per lang × style.
 Its footer carries **Download** (the export dialog under its user-facing name —
 "export" survives only in code and job types) — the drawer's one route into that
-dialog, and the only entry point that starts from a single photo.
+dialog, and the only entry point that starts from a single photo. The
+**Metadata / EXIF** header carries **Copy** beside Edit (`exifClipboardText` in
+`lib/format.ts` → clipboard): one `Field: value` line per field that has a value,
+skipping the em dash and `ISO 0`, which are the reader's "no value" glyphs and not
+values. This is where the canvas menu's **Extract EXIF** went — EXIF is read at
+ingest, so that item could only ever answer with a toast saying so, while taking a
+file's metadata somewhere else had no control at all. It hides while a correction
+is being typed: it copies the stored values, not the draft on screen.
 - **Facts** — bullets the analyze job extracts, each carrying a `fact_status` (`confirmed` / `likely` / `needs_check`, surfaced as the drawer's three dot colors). **Confirming is an AI action, not bookkeeping:** `apps/worker/src/handlers/caption.ts` prompts with `select text from facts where asset_id = $1 and status = 'confirmed'`, so a confirmed fact is the only user-supplied ground truth that reaches caption generation. Confirmation is per-fact (`PATCH /api/facts/[id]`, RLS `facts_update` = `is_editor_of_asset`); there is deliberately no confirm-all, which would launder unreviewed model output into the next generation's input. Facts carry their DB `id` through `lib/assets.ts` for exactly this; mock rows and the "Analyze to extract facts" placeholder carry `id: null` and get no control.
 The same column now has a second consumer, reading it the opposite way: the captions CSV
 ships `facts_confirmed` and `facts_unreviewed` as separate columns, so a machine consumer

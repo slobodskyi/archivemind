@@ -12,7 +12,6 @@ interface CanvasContextMenuProps {
    *  without one it acts on the right-clicked tile (menu.targetId). */
   selCount: number;
   onClose: () => void;
-  onExtractExif: () => void;
   /** Bind the selection into a move-/edit-together group (needs ≥ 2 selected). */
   onGroup: () => void;
   /** Folder and Export moved onto the Workspace bar, which only exists inside an
@@ -50,7 +49,6 @@ export default function CanvasContextMenu({
   allFilesMode,
   selCount,
   onClose,
-  onExtractExif,
   onGroup,
   onFolder,
   onExport,
@@ -75,10 +73,6 @@ export default function CanvasContextMenu({
   // Layer order applies to the selection, or the single right-clicked tile.
   const canLayer = !allFilesMode && (selCount > 0 || menu.targetId != null);
 
-  const W = 190;
-  const left = typeof window !== "undefined" ? Math.min(menu.x, window.innerWidth - W - 8) : menu.x;
-  const top = typeof window !== "undefined" ? Math.min(menu.y, window.innerHeight - 320) : menu.y;
-
   const run = (fn: () => void) => () => {
     onClose();
     fn();
@@ -100,16 +94,13 @@ export default function CanvasContextMenu({
       />,
     );
   }
-  if (!allFilesMode) {
-    sections.push(<Item label="Extract EXIF" onClick={run(onExtractExif)} />);
-  }
   if (canLayer) {
     sections.push(
       <>
-        <Item label="Bring to front" onClick={run(onBringToFront)} />
-        <Item label="Bring forward" onClick={run(onBringForward)} />
-        <Item label="Send backward" onClick={run(onSendBackward)} />
-        <Item label="Send to back" onClick={run(onSendToBack)} />
+        <MenuItem label="Bring to front" onClick={run(onBringToFront)} />
+        <MenuItem label="Bring forward" onClick={run(onBringForward)} />
+        <MenuItem label="Send backward" onClick={run(onSendBackward)} />
+        <MenuItem label="Send to back" onClick={run(onSendToBack)} />
       </>,
     );
   }
@@ -117,26 +108,61 @@ export default function CanvasContextMenu({
     sections.push(
       <>
         {hasGroup ? (
-          <Item label="Ungroup" onClick={run(onUngroup)} />
+          <MenuItem label="Ungroup" onClick={run(onUngroup)} />
         ) : (
-          <Item label={`Group ${selCount}`} onClick={run(onGroup)} />
+          <MenuItem label={`Group ${selCount}`} onClick={run(onGroup)} />
         )}
-        <Item label="Put in folder" onClick={run(onFolder)} />
-        <Item label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
+        <MenuItem label="Put in folder" onClick={run(onFolder)} />
+        <MenuItem label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
       </>,
     );
   }
   if (deletable) {
     sections.push(
-      <Item
+      <MenuItem
         label={selCount > 1 ? `Move ${selCount} to Trash` : "Move to Trash"}
         danger
         onClick={run(onDelete)}
       />,
     );
   }
-  sections.push(<Item label="Fit to view" onClick={run(onFit)} />);
+  sections.push(<MenuItem label="Fit to view" onClick={run(onFit)} />);
 
+  return (
+    <MenuPanel x={menu.x} y={menu.y} onClose={onClose}>
+      {sections.map((section, i) => (
+        <Fragment key={i}>
+          {i > 0 && <MenuDivider />}
+          {section}
+        </Fragment>
+      ))}
+    </MenuPanel>
+  );
+}
+
+/** The shell every canvas menu shares: a full-screen backdrop that closes on any
+ *  click (a second right-click included, so two menus can never be open at
+ *  once), and the panel itself clamped inside the viewport. Exported because the
+ *  folder menu must BE this object rather than resemble it. */
+export function MenuPanel({
+  x,
+  y,
+  width = 190,
+  /** Reserved height used only to clamp the panel above the viewport's bottom
+   *  edge — an estimate, not a fixed size. */
+  height = 320,
+  onClose,
+  children,
+}: {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const left = typeof window !== "undefined" ? Math.min(x, window.innerWidth - width - 8) : x;
+  const top = typeof window !== "undefined" ? Math.min(y, window.innerHeight - height) : y;
   return (
     <>
       <div
@@ -149,11 +175,12 @@ export default function CanvasContextMenu({
       />
       <div
         onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: "fixed",
           left,
           top,
-          width: W,
+          width,
           background: "rgba(18,18,18,.97)",
           border: "1px solid var(--bd)",
           borderRadius: 2,
@@ -163,22 +190,17 @@ export default function CanvasContextMenu({
           padding: 6,
         }}
       >
-        {sections.map((section, i) => (
-          <Fragment key={i}>
-            {i > 0 && <Divider />}
-            {section}
-          </Fragment>
-        ))}
+        {children}
       </div>
     </>
   );
 }
 
-function Divider() {
+export function MenuDivider() {
   return <div style={{ height: 1, background: "var(--bd)", margin: "5px 4px" }} />;
 }
 
-function Item({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+export function MenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       onClick={onClick}
