@@ -4,7 +4,6 @@ import {
   resolveCropRect,
   workingDimensions,
   type AssetLabel,
-  type TrashedAsset,
 } from "@archivemind/shared";
 import type { ExifData, Photo, PhotoCaptions } from "../types";
 import { presignGet } from "./r2";
@@ -269,49 +268,6 @@ function assetSelect(includeLabel: boolean, includeTopicOverrides: boolean): str
   return [includeLabel ? "label" : null, includeTopicOverrides ? TOPIC_OVERRIDE_SELECT : null, ASSET_SELECT_BASE]
     .filter((part): part is string => part !== null)
     .join(", ");
-}
-
-/** The caller's trashed photos (ADR 0033) — the photo half of the Trash view,
- *  read by GET /api/assets?scope=trash. Un-purged trash only: a purged
- *  tombstone has nothing left to show or restore, so it simply leaves the
- *  list. The edited thumb wins when present, matching the canvas. */
-export async function getTrashedAssets(supabase: SupabaseClient): Promise<TrashedAsset[]> {
-  const { data, error } = await supabase
-    .from("assets")
-    .select(
-      `id, title, deleted_at,
-       asset_previews ( size, r2_key ),
-       asset_edits ( edited_thumb_key )`,
-    )
-    .eq("status", "deleted")
-    .is("purged_at", null)
-    .order("deleted_at", { ascending: false, nullsFirst: false })
-    .limit(500);
-  // Trash-retention migration (20260723000001) not applied yet — degrade to an
-  // empty Trash rather than a hard crash, same posture as getProjectCards.
-  if (error?.code === "42703") return [];
-  if (error) throw error;
-
-  interface Row {
-    id: string;
-    title: string | null;
-    deleted_at: string | null;
-    asset_previews: { size: string; r2_key: string }[];
-    asset_edits: { edited_thumb_key: string | null } | null;
-  }
-  const rows = (data ?? []) as unknown as Row[];
-  return Promise.all(
-    rows.map(async (r) => {
-      const thumbKey =
-        r.asset_edits?.edited_thumb_key ?? r.asset_previews.find((p) => p.size === "thumb")?.r2_key;
-      return {
-        id: r.id,
-        name: r.title ?? "untitled",
-        thumb: thumbKey ? await presignGet(thumbKey) : null,
-        deletedAt: r.deleted_at,
-      };
-    }),
-  );
 }
 
 /** One canvas read, parameterised by the select list so the caller can retry

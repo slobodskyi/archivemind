@@ -1,32 +1,36 @@
-import type { Board, TrashedAsset } from "@archivemind/shared";
+"use client";
+
+import { useState } from "react";
+import type { Board, TrashFilterKey, TrashTarget } from "@archivemind/shared";
+import ConfirmModal from "@/components/modals/ConfirmModal";
 import { CloseIcon } from "@/components/icons/icons";
+import { useTrash } from "@/hooks/useTrash";
 import { LABEL_COLORS } from "@/lib/labels";
+import { trashExpiry, trashItemKey } from "@/lib/trash-view";
+import TrashItemRow from "./TrashItemRow";
 
 interface TrashPanelProps {
   open: boolean;
-  /** null = still loading the list. */
-  assets: TrashedAsset[] | null;
-  /** Trashed Workspaces of the project being viewed (ADR 0044 as amended),
-   *  newest deletion first. They arrive with the canvas, so unlike the photos
-   *  there is nothing to load and no null state. */
+  /** Scopes the drafts to this project; assets stay workspace-global, which is
+   *  what this panel has always shown and what its copy says. */
+  projectId: string;
+  /** Trashed Workspaces of the project being viewed (ADR 0044 as amended). They
+   *  arrive with the canvas and are owned by the header's board state, so they
+   *  are NOT read through /api/trash here — restoring one has to put its chip
+   *  back in the breadcrumb on the same frame. */
   boards: Board[];
   onClose: () => void;
-  onRestore: (ids: string[]) => void;
-  onPurge: (ids: string[]) => void;
   onRestoreBoard: (id: string) => void;
   onPurgeBoard: (id: string) => void;
+  onToast: (text: string, action?: { label: string; run: () => void }) => void;
+  /** Bring restored rows back onto the canvas. */
+  onRestored: () => void;
 }
 
-/** Whole days until the 30-day retention sweep claims a trashed asset (ADR 0033);
- *  null when there is no timestamp. */
-function daysLeft(deletedAt: string | null): number | null {
-  if (!deletedAt) return null;
-  const remaining = new Date(deletedAt).getTime() + 30 * 86_400_000 - Date.now();
-  return Math.max(0, Math.ceil(remaining / 86_400_000));
-}
+/** Everything the panel may list on its own. Workspaces are excluded on
+ *  purpose — see `boards` above. */
+const PANEL_TYPES: readonly TrashFilterKey[] = ["photo", "pdf", "document", "other", "draft"];
 
-/** Section heading — only drawn when the panel holds more than one kind of
- *  thing, so a photos-only Trash reads exactly as it did before. */
 const sectionLabel: React.CSSProperties = {
   padding: "8px 8px 4px",
   fontSize: 9.5,
@@ -49,20 +53,39 @@ const textBtn = (color: string): React.CSSProperties => ({
   borderRadius: 2,
 });
 
-/** In-workspace Trash (ADR 0033): the same trashed-asset list as the homepage
- *  Trash view, as a right-side panel so a mistaken delete can be undone without
- *  leaving the canvas. Restore puts the asset back on the canvas; permanent
- *  delete purges it (confirmed first).
+/** In-workspace Trash (ADR 0033, unified by ADR 0049): the same rows the
+ *  homepage Trash view renders, as a right-side panel, so a mistaken delete can
+ *  be undone without leaving the canvas. It is a narrower SLICE of one model
+ *  rather than a second implementation — the countdown, the type label and the
+ *  "restores to" line are computed in exactly one place for both surfaces.
  *
- *  Trashed Workspaces sit above the photos (ADR 0044 as amended). They are the
- *  panel's one project-scoped section — a workspace is a subset of ONE project,
- *  whereas a trashed photo is workspace-global — which is also why they appear
- *  here and not in the homepage Trash view, where there is no project to scope
- *  them to. Restoring one brings back its files, notes and folders exactly as
- *  they were: the delete only ever stamped the row. */
-export default function TrashPanel({ open, assets, boards, onClose, onRestore, onPurge, onRestoreBoard, onPurgeBoard }: TrashPanelProps) {
+ *  Trashed Workspaces sit above the files. They are the panel's one
+ *  project-scoped section — a workspace is a subset of ONE project, whereas a
+ *  trashed photo is workspace-global — which is also why they do not appear in
+ *  the homepage view. Restoring one brings back its files, notes and folders
+ *  exactly as they were: the delete only ever stamped the row. */
+export default function TrashPanel({
+  open,
+  projectId,
+  boards,
+  onClose,
+  onRestoreBoard,
+  onPurgeBoard,
+  onToast,
+  onRestored,
+}: TrashPanelProps) {
+  const trash = useTrash({
+    active: open,
+    projectId: projectId === "all" ? null : projectId,
+    allow: PANEL_TYPES,
+    onToast,
+    onRestored,
+  });
+  const [confirm, setConfirm] = useState<TrashTarget[] | null>(null);
+
   if (!open) return null;
-  const count = assets?.length ?? 0;
+
+  const count = trash.total;
 
   return (
     <div
@@ -97,9 +120,9 @@ export default function TrashPanel({ open, assets, boards, onClose, onRestore, o
           <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--t1)" }}>
             Trash
           </span>
-          {assets && (
+          {!trash.loading && (
             <span style={{ fontSize: 10.5, color: "var(--t3)" }}>
-              {count} {count === 1 ? "photo" : "photos"}
+              {count} {count === 1 ? "file" : "files"}
               {boards.length > 0 &&
                 ` · ${boards.length} ${boards.length === 1 ? "workspace" : "workspaces"}`}
             </span>
@@ -115,10 +138,29 @@ export default function TrashPanel({ open, assets, boards, onClose, onRestore, o
       </div>
 
       <div style={{ padding: "8px 10px 6px", borderBottom: "1px solid var(--bd)" }}>
-        <div style={{ fontSize: 10.5, lineHeight: 1.5, color: "var(--t3)" }}>
+        <input
+          value={trash.query}
+          onChange={(e) => trash.setQuery(e.target.value)}
+          placeholder="Search trash…"
+          aria-label="Search trash"
+          style={{
+            width: "100%",
+            height: 26,
+            padding: "0 8px",
+            background: "var(--bg-in)",
+            border: "1px solid var(--bd)",
+            borderRadius: 2,
+            color: "var(--t1)",
+            fontSize: 11.5,
+            fontFamily: "inherit",
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+        <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.5, color: "var(--t3)" }}>
           {boards.length > 0
-            ? "Deleted workspaces and photos stay here for 30 days, then they’re removed for good. Restoring a workspace brings back its files, notes and folders."
-            : "Deleted photos stay here for 30 days, then they’re removed for good."}
+            ? "Deleted workspaces and files stay here for 30 days, then they’re removed for good. Restoring a workspace brings back its files, notes and folders."
+            : "Deleted files stay here for 30 days, then they’re removed for good."}
         </div>
       </div>
 
@@ -129,7 +171,7 @@ export default function TrashPanel({ open, assets, boards, onClose, onRestore, o
           <>
             <div style={sectionLabel}>Workspaces</div>
             {boards.map((board) => {
-              const left = daysLeft(board.deletedAt);
+              const expiry = trashExpiry(board.deletedAt);
               return (
                 <div key={board.id} className="am-mi" style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 8px", borderRadius: 3 }}>
                   <span
@@ -140,10 +182,10 @@ export default function TrashPanel({ open, assets, boards, onClose, onRestore, o
                     <div style={{ fontSize: 11, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {board.name}
                     </div>
-                    <div style={{ fontSize: 10, color: left !== null && left <= 3 ? "var(--red)" : "var(--t2b)", marginTop: 2 }}>
+                    <div style={{ fontSize: 10, color: expiry.urgent ? "var(--red)" : "var(--t2b)", marginTop: 2 }}>
                       {board.assetIds.length} {board.assetIds.length === 1 ? "file" : "files"}
                       {" · "}
-                      {left === null ? "in trash" : left === 0 ? "removed today" : `${left} day${left === 1 ? "" : "s"} left`}
+                      {expiry.label}
                     </div>
                   </div>
                   <div style={{ flex: "0 0 auto", display: "flex", gap: 2 }}>
@@ -157,85 +199,87 @@ export default function TrashPanel({ open, assets, boards, onClose, onRestore, o
                 </div>
               );
             })}
-            <div style={sectionLabel}>Photos</div>
+            <div style={sectionLabel}>Files</div>
           </>
         )}
 
-        {assets === null ? (
+        {trash.loading ? (
           <div style={{ padding: "24px 12px", fontSize: 11, color: "var(--t3)" }}>Loading…</div>
-        ) : count === 0 ? (
+        ) : trash.items.length === 0 ? (
           <div style={{ padding: "24px 12px", fontSize: 11, color: "var(--t3)", lineHeight: 1.5 }}>
-            {boards.length > 0
-              ? "No deleted photos."
-              : "Trash is empty. Deleted photos will appear here."}
+            {trash.filtered
+              ? "Nothing in the Trash matches that."
+              : boards.length > 0
+                ? "No deleted files."
+                : "Trash is empty. Deleted files will appear here."}
           </div>
         ) : (
-          assets.map((asset) => {
-            const left = daysLeft(asset.deletedAt);
-            return (
-              <div
-                key={asset.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "7px 8px",
-                  borderRadius: 3,
-                }}
-                className="am-mi"
+          <>
+            {trash.items.map((item) => (
+              <TrashItemRow
+                key={trashItemKey(item)}
+                item={item}
+                selected={false}
+                compact
+                onRestore={() => trash.restore([{ kind: item.kind, id: item.id }])}
+                onPurge={() => setConfirm([{ kind: item.kind, id: item.id }])}
+              />
+            ))}
+            {trash.hasMore && (
+              <button
+                onClick={trash.loadMore}
+                disabled={trash.loadingMore}
+                style={{ ...textBtn("var(--t2)"), width: "100%", padding: "8px 6px" }}
               >
-                <span
-                  aria-hidden="true"
-                  style={{
-                    flex: "0 0 auto",
-                    width: 44,
-                    height: 44,
-                    borderRadius: 2,
-                    border: "1px solid var(--bd)",
-                    background: "var(--bg-in)",
-                    backgroundImage: asset.thumb ? `url(${asset.thumb})` : undefined,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {asset.name}
-                  </div>
-                  <div style={{ fontSize: 10, color: left !== null && left <= 3 ? "var(--red)" : "var(--t2b)", marginTop: 2 }}>
-                    {left === null ? "in trash" : left === 0 ? "removed today" : `${left} day${left === 1 ? "" : "s"} left`}
-                  </div>
-                </div>
-                <div style={{ flex: "0 0 auto", display: "flex", gap: 2 }}>
-                  <button style={textBtn("var(--ac)")} onClick={() => onRestore([asset.id])}>
-                    Restore
-                  </button>
-                  <button style={textBtn("var(--red)")} onClick={() => onPurge([asset.id])}>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            );
-          })
+                {trash.loadingMore ? "Loading…" : `Show more (${trash.total - trash.items.length} left)`}
+              </button>
+            )}
+          </>
         )}
       </div>
 
-      {count > 0 && assets && (
+      {trash.items.length > 0 && (
         <div style={{ display: "flex", gap: 8, padding: "10px 12px", borderTop: "1px solid var(--bd)" }}>
           <button
             style={{ ...textBtn("var(--ac)"), padding: "6px 10px", border: "1px solid var(--bd)" }}
-            onClick={() => onRestore(assets.map((a) => a.id))}
+            onClick={() =>
+              void trash.collectTargets().then((targets) => trash.restore(targets))
+            }
           >
             Restore all
           </button>
           <button
             style={{ ...textBtn("var(--red)"), padding: "6px 10px", border: "1px solid var(--bd)" }}
-            onClick={() => onPurge(assets.map((a) => a.id))}
+            // Acts on everything the current search matches, not on the rows
+            // that happen to be loaded — the number in the confirmation is the
+            // number that disappears (ADR 0049).
+            onClick={() =>
+              void trash.collectTargets().then((targets) => targets.length > 0 && setConfirm(targets))
+            }
           >
-            Empty trash
+            {trash.filtered ? "Delete shown" : "Empty trash"}
           </button>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirm}
+        title="Delete permanently?"
+        body={
+          confirm
+            ? confirm.length === 1
+              ? "This item will be permanently deleted, including its previews and AI data. This cannot be undone."
+              : `${confirm.length} items will be permanently deleted, including their previews and AI data. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete permanently"
+        danger
+        onConfirm={() => {
+          if (confirm) trash.purge(confirm);
+          setConfirm(null);
+        }}
+        onClose={() => setConfirm(null)}
+      />
     </div>
   );
 }

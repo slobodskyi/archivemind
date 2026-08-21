@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ArtboardSettings, AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
@@ -124,6 +125,7 @@ export default function ArchiveWorkspace({
   // is always filled by the time one can fail.
   const toastRef = useRef<(text: string) => void>(() => {});
   const boardToast = useCallback((text: string) => toastRef.current(text), []);
+  const router = useRouter();
   const bd = useBoards(currentProjectId, initialBoards, boardToast);
 
   // Same knot as the toast: the handler below needs `ws`, which needs the drop
@@ -1047,16 +1049,19 @@ export default function ArchiveWorkspace({
 
       <TrashPanel
         open={ws.trashOpen}
-        assets={ws.trashAssets}
-        // Project-scoped, unlike the photos beside them: a workspace belongs to
+        projectId={currentProjectId}
+        // Project-scoped, unlike the files beside them: a workspace belongs to
         // one project, so all-files (which has no workspaces to begin with)
-        // shows none.
+        // shows none. They stay on the header's own board state rather than
+        // coming through /api/trash, so a restore puts the chip back at once.
         boards={bd.trashedBoards}
         onClose={ws.closeTrash}
-        onRestore={ws.restoreFromTrash}
-        onPurge={ws.purgeFromTrash}
         onRestoreBoard={restoreBoard}
         onPurgeBoard={(id) => setBoardConfirm({ id, mode: "purge" })}
+        onToast={(text, action) =>
+          ws.flashToast(text, action ? { label: action.label, onAction: action.run } : undefined)
+        }
+        onRestored={() => router.refresh()}
       />
 
       {/* The working bar belongs to a Workspace. Outside one you are browsing —
