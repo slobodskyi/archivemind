@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
+import type { ArtboardSettings, AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
@@ -229,8 +229,13 @@ export default function ArchiveWorkspace({
   // Workspace → Draft → Delivery is a separate state machine from the canvas.
   // Drafts snapshot their source ids, so membership changes only raise a
   // warning; they never rewrite a publication the user may have edited.
-  // The chain is hub → brief → studio, and Escape walks it backwards.
-  const [outputUi, setOutputUi] = useState<"closed" | "hub" | "brief" | "studio">("closed");
+  // The chain is hub → brief → studio for content and hub → download for a
+  // file, and Escape walks either backwards one rung at a time. `download` is
+  // the rung the ExportDialog occupies when the hub opened it — the same dialog
+  // reached from a tile, the drawer or the studio leaves `outputUi` alone and
+  // therefore closes straight to where it was opened from.
+  const [outputUi, setOutputUi] = useState<"closed" | "hub" | "brief" | "download" | "studio">("closed");
+  const [downloadFormat, setDownloadFormat] = useState<ArtboardSettings["format"]>("pdf");
   const [briefKind, setBriefKind] = useState<CreateOutputInput["kind"]>("article");
   const [draftsByBoard, setDraftsByBoard] = useState<Record<string, ContentDraft[]>>({});
   const [activeDraft, setActiveDraft] = useState<ContentDraft | null>(null);
@@ -1138,12 +1143,12 @@ export default function ArchiveWorkspace({
           zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
       {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />}
 
-      {/* A Workspace's outcome actions, floated at the canvas's top-right rather
-          than parked in the header. They only exist inside a Workspace, which is
+      {/* A Workspace's outcome action, floated at the canvas's top-right rather
+          than parked in the header. It only exists inside a Workspace, which is
           exactly the scope whose header rail is most crowded: DRAFTS/DOWNLOAD/
           CREATE cost ~220px, so opening a Workspace used to fold two or three
-          chips away the moment you got there. Off the header, the rail measures
-          the same room in both scopes.
+          chips away the moment you got there. Off the header — and now down to
+          one button — the rail measures the same room in both scopes.
 
           It dodges the right-hand panels on `minimapRight` for the same reason
           the minimap does — the photo drawer and the chat are full-height and
@@ -1176,8 +1181,7 @@ export default function ArchiveWorkspace({
             draftCount={drafts.length}
             photoCount={bd.activeBoard.assetIds.length}
             selectedCount={orderedSelectedIds.length}
-            onDownload={() => ws.openExportFor(orderedSelectedIds.length ? orderedSelectedIds : orderedBoardAssetIds)}
-            onCreate={() => {
+            onOpen={() => {
               setGenerationError(null);
               setCreateSeed(null);
               setOutputUi("hub");
@@ -1272,6 +1276,7 @@ export default function ArchiveWorkspace({
         boardName={bd.activeBoard?.name ?? "Workspace"}
         drafts={drafts}
         currentAssetIds={orderedBoardAssetIds}
+        selectedCount={orderedSelectedIds.length}
         photos={ws.photos}
         onClose={() => setOutputUi("closed")}
         onPickKind={(kind) => {
@@ -1279,6 +1284,14 @@ export default function ArchiveWorkspace({
           setCreateSeed(null);
           setBriefKind(kind);
           setOutputUi("brief");
+        }}
+        // Same set the old DOWNLOAD button acted on — the selection when there
+        // is one — put into reading order by openExportFor, once, as every
+        // other entry point already is.
+        onPickFormat={(format) => {
+          setDownloadFormat(format);
+          setOutputUi("download");
+          ws.openExportFor(orderedSelectedIds.length ? orderedSelectedIds : orderedBoardAssetIds);
         }}
         onOpenDraft={openDraft}
       />
@@ -1331,8 +1344,16 @@ export default function ArchiveWorkspace({
           assetIds={ws.exportIds}
           photos={ws.photos}
           defaultTitle={bd.activeBoard?.name ?? (ws.projLabel === "Projects" ? "" : ws.projLabel)}
+          // The preset is read once, on mount, and only applies to the run the
+          // hub started — every other entry point opens on the dialog's own
+          // default, exactly as before.
+          initialFormat={outputUi === "download" ? downloadFormat : undefined}
+          dismissLabel={outputUi === "download" ? "‹ Back" : undefined}
           workspaceId={workspaceId}
-          onClose={ws.closeExport}
+          onClose={() => {
+            ws.closeExport();
+            if (outputUi === "download") setOutputUi("hub");
+          }}
         />
       )}
 

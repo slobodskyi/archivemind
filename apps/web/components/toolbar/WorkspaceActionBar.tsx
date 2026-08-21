@@ -199,10 +199,12 @@ function WorkspaceActionBar({
 
       <Divider />
 
-      {/* Download lived here too, but it duplicated the Workspace's own DOWNLOAD
-          action floated at the canvas top-right (WorkspaceOutputActions) — the
-          same export, two buttons — so it was removed. Delete stays: it is the
-          one way to send the selection out of the archive from this bar. */}
+      {/* Download lived here too, but it duplicated the Workspace's own delivery
+          action — the same export, two buttons — so it was removed. That action
+          is now a section inside the Create hub (WorkspaceOutputActions opens
+          it); the right-click menu still carries `Download N` for a selection,
+          which is the fast path this bar would have been. Delete stays: it is
+          the one way to send the selection out of the archive from this bar. */}
       <Btn title="Delete" danger disabled={noSel} onClick={onDelete}>
         <TrashIcon width={16} height={16} />
       </Btn>

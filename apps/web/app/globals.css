@@ -439,19 +439,15 @@ textarea {
     min-width: 104px;
   }
 
-  /* Drops the secondary action's word on a 390px row. Create keeps its
-     label — see the note in WorkspaceOutputActions. */
-  .am-wsa-label {
-    display: none;
-  }
-
-  /* The outcome actions float on the canvas now, not in the header row — and
-     even at two buttons they compete with the photos underneath on a 390px
-     screen. Same compaction. */
+  /* The outcome action floats on the canvas now, not in the header row, and on
+     a 390px screen it competes with the photos underneath. It is one button
+     since Download folded into the hub, so nothing has to drop its word any
+     more — the label stays at every size and only the padding tightens.
+     (`.am-wsa-label`, which used to hide DOWNLOAD's word here, went with it.) */
   .am-wsactions button {
     padding: 0 9px !important;
-    /* Desktop pins a width floor for equal-size buttons; here the labels drop to
-       icons, so release it and let each button shrink to its glyph. */
+    /* Desktop pins a width floor so the button never reads as a chip; here the
+       floor is what would push it wide, so release it. */
     min-width: 0 !important;
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import type { ArtboardSettings } from "@archivemind/shared";
 import type { ContentDraft } from "@/lib/content-drafts";
 import { sourcesChanged } from "@/lib/content-drafts";
 import { photoSrc } from "@/lib/img";
@@ -12,10 +13,14 @@ interface CreateHubDialogProps {
   boardName: string;
   drafts: ContentDraft[];
   currentAssetIds: string[];
+  /** How many of those files are selected on the canvas. Download acts on the
+   *  selection when there is one, so the section says which set it means. */
+  selectedCount: number;
   /** The workspace's loaded photos — draft covers look their thumbnails up. */
   photos: readonly Photo[];
   onClose: () => void;
   onPickKind: (kind: "article" | "instagram_carousel") => void;
+  onPickFormat: (format: ArtboardSettings["format"]) => void;
   onOpenDraft: (draft: ContentDraft) => void;
 }
 
@@ -28,6 +33,45 @@ const sectionLabel = {
   letterSpacing: ".08em",
   textTransform: "uppercase",
 } as const;
+
+/** The delivery formats. The download dialog opens on a Format row of its own,
+ *  so these cards are that row promoted one level — a preset, not a branch: the
+ *  row stays inside the dialog and changing your mind there needs no step back.
+ *  What the promotion buys is a name and a sentence per format instead of three
+ *  bare chips, and one place that answers "what comes out of this Workspace". */
+const FORMATS: { key: ArtboardSettings["format"]; tag: string; label: string; help: string }[] = [
+  { key: "pdf", tag: "PDF", label: "PDF document", help: "Laid-out pages with captions and a cover" },
+  { key: "captions_csv", tag: "CSV", label: "Captions CSV", help: "One row per photo, for an agency's fields" },
+  { key: "zip", tag: "ZIP", label: "The files", help: "The photos themselves, original or web-size" },
+];
+
+/** A file extension, not a drawn shape. The outcome cards above carry glyphs of
+ *  what they make; a delivery is a format, and three letters say it faster than
+ *  any icon of a page could — which is also what keeps a PDF from wearing the
+ *  same page the article does. */
+function FormatTag({ label, dim }: { label: string; dim: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        flex: "0 0 auto",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 34,
+        height: 20,
+        border: "1px solid var(--bdh)",
+        borderRadius: 2,
+        color: dim ? "var(--t3)" : "var(--t2)",
+        fontSize: 8.5,
+        fontWeight: 800,
+        letterSpacing: ".08em",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
 
 /** The outcome glyphs. One visual language, twice: the glyph on a format card
  * is the same shape its drafts' covers take below — a page for an article, an
@@ -122,31 +166,42 @@ function DraftCover({ draft, photos }: { draft: ContentDraft; photos: readonly P
   );
 }
 
-/** The single entry into making content from a Workspace (ADR 0045 as
- * amended): pick an outcome, or continue a saved draft. It replaced the
- * separate DRAFTS and CREATE buttons — the library IS where creating starts,
- * which its own "+ Create" header button had already admitted. */
+/** The single entry into everything a Workspace produces (ADR 0045 as amended
+ * twice): make something new, take the files out, or continue a saved draft.
+ * It replaced the separate DRAFTS and CREATE buttons — the library IS where
+ * creating starts, which its own "+ Create" header button had already admitted
+ * — and then the DOWNLOAD button, which asked the same question one card
+ * further along.
+ *
+ * The axis between the two card blocks is not create-versus-download but
+ * **editable versus final**: the top row makes something that lands in the
+ * studio and can still be rewritten, the row below hands over a finished file.
+ * That is why they are weighted differently rather than sitting in one grid. */
 export default function CreateHubDialog({
   open,
   boardName,
   drafts,
   currentAssetIds,
+  selectedCount,
   photos,
   onClose,
   onPickKind,
+  onPickFormat,
   onOpenDraft,
 }: CreateHubDialogProps) {
   const canCreate = currentAssetIds.length > 0;
+  const downloadCount = selectedCount || currentAssetIds.length;
   return (
     <Dialog
       open={open}
       size="l"
       kicker="Create"
       title={boardName}
-      subtitle="Turn this Workspace's files into something publishable. Every generated word stays editable."
+      subtitle="Make something publishable from this Workspace's files, or take the files out as they are."
       onClose={onClose}
       bodyStyle={{ padding: "16px 20px 20px" }}
     >
+      <span style={{ ...sectionLabel, marginTop: 0 }}>Make something</span>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         {([
           ["article", "Article", "Narrative copy with ordered images"],
@@ -179,9 +234,55 @@ export default function CreateHubDialog({
           </button>
         ))}
       </div>
+      {/* DOWNLOAD, one section down rather than one button across. The scope
+          line sits on the heading, not on each card: all three act on the same
+          set, and the rule is the one the old DOWNLOAD button used — the
+          selection when there is one, the whole Workspace otherwise. Saying it
+          once, in words, replaces a tooltip nobody opened. */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <span style={sectionLabel}>Download</span>
+        {canCreate && (
+          <span style={{ color: "var(--t3)", fontSize: 10 }}>
+            {selectedCount
+              ? `${selectedCount} selected`
+              : `${downloadCount} ${downloadCount === 1 ? "file" : "files"}`}
+          </span>
+        )}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))", gap: 8 }}>
+        {FORMATS.map(({ key, tag, label, help }) => (
+          <button
+            key={key}
+            onClick={() => onPickFormat(key)}
+            disabled={!canCreate}
+            title={canCreate ? `Download ${downloadCount} as ${tag}` : undefined}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              gap: 7,
+              padding: "11px 12px",
+              textAlign: "left",
+              background: "var(--bg-el)",
+              border: "1px solid var(--bd)",
+              borderRadius: 2,
+              cursor: canCreate ? "pointer" : "default",
+              opacity: canCreate ? 1 : 0.45,
+              fontFamily: "inherit",
+            }}
+          >
+            <FormatTag label={tag} dim={!canCreate} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block", color: "var(--t1)", fontSize: 12, fontWeight: 700 }}>{label}</span>
+              <span style={{ display: "block", marginTop: 3, color: "var(--t3)", fontSize: 10 }}>{help}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+
       {!canCreate && (
-        <div style={{ marginTop: 8, color: "var(--t3)", fontSize: 10.5 }}>
-          This Workspace has no files yet — add some to create from them.
+        <div style={{ marginTop: 10, color: "var(--t3)", fontSize: 10.5 }}>
+          This Workspace has no files yet — add some to create from them, or to download them.
         </div>
       )}
 

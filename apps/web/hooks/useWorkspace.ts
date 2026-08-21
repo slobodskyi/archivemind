@@ -52,7 +52,6 @@ import {
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
-  mkBez,
   nudgeOffOverlap,
   positionsBounds,
   readingOrder,
