@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AssetLabel, Board, CanvasAnnotation, CanvasEdge, CanvasGroup, LabelNames } from "@archivemind/shared";
+import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
@@ -40,9 +40,6 @@ import ConfirmModal from "@/components/modals/ConfirmModal";
 import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions";
 import CreateOutputDialog from "@/components/content/CreateOutputDialog";
 import CreateHubDialog from "@/components/content/CreateHubDialog";
-import EdgeDropMenu from "@/components/canvas/EdgeDropMenu";
-import EdgeLayer from "@/components/canvas/EdgeLayer";
-import { deriveThreads } from "@/lib/threads";
 import ContentDraftStudio from "@/components/content/ContentDraftStudio";
 import SharePreviewDialog, {
   type SharePreviewOptions,
@@ -102,8 +99,6 @@ interface ArchiveWorkspaceProps {
    *  the groups and annotations above: a chip row that pops in after mount
    *  reads as a glitch. */
   initialBoards: Board[];
-  /** User-drawn connections, every board's (ADR 0048) — server-read likewise. */
-  initialEdges: CanvasEdge[];
   account: Account;
 }
 
@@ -117,7 +112,6 @@ export default function ArchiveWorkspace({
   initialLabelNames,
   initialAnnotations,
   initialBoards,
-  initialEdges,
   account,
 }: ArchiveWorkspaceProps) {
   // Workspaces (boards) — a named, colour-coded set of the project's files
@@ -151,7 +145,6 @@ export default function ArchiveWorkspace({
     initialGroups,
     initialLabelNames,
     initialAnnotations,
-    initialEdges,
     bd.scopeIds,
     bd.activeBoardId,
     dropOnBoard,
@@ -610,21 +603,6 @@ export default function ArchiveWorkspace({
   const board = bd.activeBoardId;
   const scopedNotes = board ? ws.stickyNotes.filter((n) => n.boardId === board) : ws.stickyNotes;
   const scopedFolders = board ? ws.folders.filter((f) => f.boardId === board) : ws.folders;
-  // Edges are stricter than notes: they exist ONLY inside their board
-  // (board_id NOT NULL, ADR 0048), so with none open there are none to show.
-  const scopedEdges = useMemo(
-    () => (board ? ws.edges.filter((edge) => edge.boardId === board) : []),
-    [board, ws.edges],
-  );
-
-  // Authored chains → CREATE source options (ADR 0048). Derived beside the
-  // reading order because a thread's tiebreaks come from it.
-  const boardAssetIdSet = useMemo(() => new Set(bd.activeBoard?.assetIds ?? []), [bd.activeBoard]);
-  const threads = useMemo(
-    () => deriveThreads(scopedEdges, boardAssetIdSet, orderedBoardAssetIds),
-    [scopedEdges, boardAssetIdSet, orderedBoardAssetIds],
-  );
-
   // Counts come from the loaded photo set, not the board's raw id list: an id
   // whose asset has since been trashed must not still be counted on a chip.
   const boardCounts: Record<string, number> = {};
@@ -715,20 +693,6 @@ export default function ArchiveWorkspace({
               onRename={ws.renameGroup}
               onDelete={ws.deleteGroup}
             />
-            {/* User-drawn connections (ADR 0048) — board-only, like the ports
-                that create them: an edge is a statement inside one Workspace.
-                Rendered BEFORE the overlays' cards in DOM but z-pinned to the
-                CloudDecor band (1), under every tile and note. */}
-            {bd.activeBoardId !== null && (
-              <EdgeLayer
-                edges={scopedEdges}
-                positions={ws.activePositions}
-                notes={scopedNotes}
-                selectedEdgeId={ws.selectedEdgeId}
-                onSelect={ws.selectEdge}
-                setLiveRef={ws.setEdgeLiveRef}
-              />
-            )}
             <StickyNoteOverlay
               notes={scopedNotes}
               labelNames={ws.labelNames}
@@ -740,12 +704,6 @@ export default function ArchiveWorkspace({
               onToggleCheck={ws.toggleStickyCheck}
               onSetStrokes={ws.setStickyStrokes}
               onDelete={ws.deleteStickyNote}
-              onEdgeStart={
-                bd.activeBoardId !== null
-                  ? (e, id, center) => ws.onEdgeStart(e, { kind: "annotation", id }, center)
-                  : undefined
-              }
-              edgeDropTargetId={ws.edgeDropTarget?.kind === "annotation" ? ws.edgeDropTarget.id : null}
             />
           </>
         )}
@@ -782,14 +740,6 @@ export default function ArchiveWorkspace({
           openContextMenu={ws.openContextMenu}
           analyzePhoto={ws.analyzePhoto}
           labelNames={ws.labelNames}
-          // Wire ports exist only where edges do: the neural view of an open
-          // Workspace (ADR 0048).
-          onEdgeStart={
-            ws.view === "neural" && bd.activeBoardId !== null
-              ? (e, id, center) => ws.onEdgeStart(e, { kind: "asset", id }, center)
-              : undefined
-          }
-          edgeDropTargetId={ws.edgeDropTarget?.kind === "asset" ? ws.edgeDropTarget.id : null}
         />
         {ws.cloudDecor && (
           <CloudLabels
@@ -1340,7 +1290,6 @@ export default function ArchiveWorkspace({
         boardName={bd.activeBoard?.name ?? "Workspace"}
         allAssetIds={orderedBoardAssetIds}
         selectedAssetIds={orderedSelectedIds}
-        threads={threads}
         busy={generationBusy}
         error={generationError}
         initial={createSeed}
@@ -1436,17 +1385,10 @@ export default function ArchiveWorkspace({
         onClose={() => setDraftConfirm(null)}
       />
 
-      <EdgeDropMenu menu={ws.edgeDropMenu} onPick={() => ws.spawnWiredNote()} onClose={ws.closeEdgeMenu} />
-
       <CanvasContextMenu
         menu={ws.contextMenu}
         allFilesMode={ws.allFilesMode}
-        isCanvasView={ws.view === "neural"}
         selCount={ws.selectedIds.size}
-        edgeSelected={ws.selectedEdgeId !== null}
-        onRemoveEdge={() => {
-          if (ws.selectedEdgeId) ws.deleteEdge(ws.selectedEdgeId);
-        }}
         onClose={ws.closeContextMenu}
         onExtractExif={ws.extractExif}
         onGroup={ws.groupFiles}

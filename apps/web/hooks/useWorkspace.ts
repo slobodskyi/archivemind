@@ -4,12 +4,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { navProgressStart } from "@/components/nav/TopProgressBar";
 import { useJobProgress } from "@/hooks/useJobProgress";
-import { ASSET_LABELS, edgePairKey, topicsResponseSchema } from "@archivemind/shared";
+import { ASSET_LABELS, topicsResponseSchema } from "@archivemind/shared";
 import type {
   AssetLabel,
   CanvasAnnotation,
-  CanvasEdge,
-  CanvasEdgeEndpoint,
   CanvasGroup,
   EditRecipe,
   LabelNames,
@@ -53,7 +51,6 @@ import {
   DEFAULT_ZOOM,
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
-  edgeSeed,
   hitTestTiles,
   mkBez,
   nudgeOffOverlap,
@@ -271,7 +268,6 @@ interface ProcState {
 interface Snapshot {
   frames: Frame[];
   stickyNotes: StickyNote[];
-  edges: CanvasEdge[];
   galleryOverrides: GalleryOverrides;
 }
 
@@ -361,18 +357,6 @@ interface WorkspaceState {
   /** Folder whose Finder-style popup is open (double-click a folder), or null. */
   openFolderId: string | null;
   stickyNotes: StickyNote[];
-  /** User-drawn connections (ADR 0048). References only — an edge's path is
-   *  derived at render time from wherever its endpoints currently are. */
-  edges: CanvasEdge[];
-  /** The selected edge, mutually exclusive with a photo selection: one thing
-   *  answers Delete at a time. */
-  selectedEdgeId: string | null;
-  /** The object an in-flight edge drag is hovering, for the drop highlight.
-   *  Written only when it CHANGES — the wire itself never touches state. */
-  edgeDropTarget: CanvasEdgeEndpoint | null;
-  /** The menu a wire dropped on empty canvas opens; null = closed. Nothing is
-   *  written until an item is picked, so dismissing costs nothing. */
-  edgeDropMenu: { x: number; y: number; canvas: CanvasPoint; from: CanvasEdgeEndpoint } | null;
   /** The open Workspace's file ids, or null when none is open (ADR 0044). Held
    *  in state rather than a ref because `activeTilePositions` reads it from the
    *  same state object the render does — the geometry seam and the render seam
@@ -467,17 +451,6 @@ type DragSession =
       sx: number;
       sy: number;
       orig: { x: number; y: number };
-      moved: boolean;
-    }
-  | {
-      // Pulling a wire out of a tile's port (ADR 0048). `start` is the source
-      // anchor in canvas coords; the live wire is drawn imperatively (the
-      // NoteInkLayer pattern) so nothing here re-renders per pointermove.
-      mode: "edge";
-      from: CanvasEdgeEndpoint;
-      start: { x: number; y: number };
-      sx: number;
-      sy: number;
       moved: boolean;
     }
   | {
@@ -790,20 +763,6 @@ export interface Workspace {
   setStickyStrokes: (id: string, strokes: NoteStroke[]) => void;
   deleteStickyNote: (id: string) => void;
 
-  // Canvas edges (ADR 0048) — the wire gesture and its objects
-  edges: CanvasEdge[];
-  selectedEdgeId: string | null;
-  edgeDropTarget: CanvasEdgeEndpoint | null;
-  edgeDropMenu: { x: number; y: number; canvas: CanvasPoint; from: CanvasEdgeEndpoint } | null;
-  onEdgeStart: (e: React.PointerEvent, from: CanvasEdgeEndpoint, anchor: { x: number; y: number }) => void;
-  selectEdge: (id: string) => void;
-  deleteEdge: (id: string) => void;
-  /** The drop menu's one MVP action: a note at the release point, pre-wired. */
-  spawnWiredNote: () => void;
-  closeEdgeMenu: () => void;
-  /** EdgeLayer hands the live wire's <path> node up for imperative drawing. */
-  setEdgeLiveRef: (node: SVGPathElement | null) => void;
-
   // Undo / redo
   canUndo: boolean;
   canRedo: boolean;
@@ -999,10 +958,6 @@ function annotationToNote(a: NoteAnnotation): StickyNote {
 const TMP_NOTE_PREFIX = "tmp-";
 const isTmpNote = (id: string) => id.startsWith(TMP_NOTE_PREFIX);
 
-/** Same window, for an edge awaiting its INSERT (ADR 0048). */
-const TMP_EDGE_PREFIX = "tmp-edge-";
-const isTmpEdge = (id: string) => id.startsWith(TMP_EDGE_PREFIX);
-
 /** Text is saved on a debounce — a PATCH per keystroke would be one request per
  *  character on a note somebody is actually writing in. Long enough to batch a
  *  sentence, short enough that a browser closed mid-thought keeps it. */
@@ -1023,9 +978,6 @@ export function useWorkspace(
   initialGroups: CanvasGroup[],
   initialLabelNames: LabelNames,
   initialAnnotations: CanvasAnnotation[],
-  /** User-drawn connections (ADR 0048), project-wide — every board's, like
-   *  notes, so a board switch needs no fetch. */
-  initialEdges: CanvasEdge[] = [],
   /** The open Workspace's asset ids, or null for "no board open" (ADR 0044). */
   boardScopeIds: readonly string[] | null = null,
   /** The open Workspace, or null. A note or folder MADE while one is
@@ -1106,10 +1058,6 @@ export function useWorkspace(
     stickyNotes: initialAnnotations
       .filter((a): a is NoteAnnotation => a.kind === "note")
       .map(annotationToNote),
-    edges: initialEdges,
-    selectedEdgeId: null,
-    edgeDropTarget: null,
-    edgeDropMenu: null,
     boardScope: null,
     // No Workspace can be open on the first paint (`useBoards` starts at null),
     // so the mount-time scope is always the project canvas.
@@ -1230,16 +1178,6 @@ export function useWorkspace(
       return next;
     });
   }, []);
-
-  // Edge UI is per-board (ADR 0048): a selection, an armed drop target or an
-  // open drop menu from the previous scope means nothing over the next one.
-  useEffect(() => {
-    setState((s) =>
-      s.selectedEdgeId === null && s.edgeDropTarget === null && s.edgeDropMenu === null
-        ? {}
-        : { selectedEdgeId: null, edgeDropTarget: null, edgeDropMenu: null },
-    );
-  }, [activeBoardId, setState]);
 
   // Fresh server data (router.refresh after an upload / analyze / add-to-project)
   // syncs in place. The page key used to include photo counts, so every refresh
@@ -1617,13 +1555,9 @@ export function useWorkspace(
    *  it is re-inserted and the new id adopted in place. Nothing user-visible
    *  changes — it is the same note, at the same place, saying the same thing. */
   const reconcileNotes = useCallback(
-    (before: StickyNote[], after: StickyNote[]): Map<string, Promise<string>> => {
+    (before: StickyNote[], after: StickyNote[]) => {
       const beforeById = new Map(before.map((n) => [n.id, n]));
       const afterById = new Map(after.map((n) => [n.id, n]));
-      // The re-inserted notes' NEW ids, keyed by the id the snapshot knew them
-      // under — an edge being restored alongside must wait for these before it
-      // can point its annotation endpoint anywhere (ADR 0048).
-      const restored = new Map<string, Promise<string>>();
 
       for (const gone of before) {
         if (afterById.has(gone.id) || isTmpNote(gone.id)) continue;
@@ -1654,7 +1588,7 @@ export function useWorkspace(
           }
           continue;
         }
-        const insert = fetch("/api/annotations", {
+        void fetch("/api/annotations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1668,90 +1602,20 @@ export function useWorkspace(
             body: { text: now.text, strokes: now.strokes },
             style: { fontSize: now.fontSize },
           }),
-        }).then(async (res) => {
-          if (!res.ok) throw new Error(String(res.status));
-          const saved = annotationToNote(await res.json());
-          setState({
-            stickyNotes: stateRef.current.stickyNotes.map((m) =>
-              m.id === now.id ? { ...m, id: saved.id } : m,
-            ),
-          });
-          return saved.id;
-        });
-        restored.set(now.id, insert);
-        insert.catch(() => flashToast("Note not restored"));
+        })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(String(res.status));
+            const saved = annotationToNote(await res.json());
+            setState({
+              stickyNotes: stateRef.current.stickyNotes.map((m) =>
+                m.id === now.id ? { ...m, id: saved.id } : m,
+              ),
+            });
+          })
+          .catch(() => flashToast("Note not restored"));
       }
-      return restored;
     },
     [patchNote, currentProjectId, setState, flashToast],
-  );
-
-  /** The edge half of an undo/redo diff (ADR 0048). Simpler than notes — an
-   *  edge is immutable, so there is no patch branch: gone rows are DELETEd,
-   *  restored rows are re-POSTed with the new id adopted in place. A restored
-   *  edge whose note endpoint was itself just re-inserted waits for that
-   *  note's new id first — the old uuid is a deleted row the FK would refuse. */
-  const reconcileEdges = useCallback(
-    (before: CanvasEdge[], after: CanvasEdge[], restoredNotes: Map<string, Promise<string>>) => {
-      const beforeIds = new Set(before.map((edge) => edge.id));
-      const afterIds = new Set(after.map((edge) => edge.id));
-
-      for (const gone of before) {
-        if (afterIds.has(gone.id) || isTmpEdge(gone.id)) continue;
-        void fetch(`/api/edges/${gone.id}`, { method: "DELETE" }).catch(() => {
-          flashToast("Connection not deleted");
-        });
-      }
-
-      const endpointAfterRestore = async (
-        point: CanvasEdgeEndpoint,
-      ): Promise<CanvasEdgeEndpoint | null> => {
-        if (point.kind !== "annotation") return point;
-        const pending = restoredNotes.get(point.id);
-        if (!pending) return point;
-        try {
-          return { kind: "annotation", id: await pending };
-        } catch {
-          return null; // the note restore failed and already said so
-        }
-      };
-
-      for (const now of after) {
-        if (beforeIds.has(now.id) || isTmpEdge(now.id)) continue;
-        void (async () => {
-          const [from, to] = await Promise.all([
-            endpointAfterRestore(now.from),
-            endpointAfterRestore(now.to),
-          ]);
-          if (!from || !to) return;
-          try {
-            const res = await fetch("/api/edges", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ boardId: now.boardId, from, to }),
-            });
-            if (!res.ok) throw new Error(String(res.status));
-            const saved = (await res.json()) as CanvasEdge;
-            setState({
-              edges: stateRef.current.edges.map((edge) => (edge.id === now.id ? saved : edge)),
-            });
-          } catch {
-            flashToast("Connection not restored");
-          }
-        })();
-      }
-    },
-    [setState, flashToast],
-  );
-
-  /** One orchestrator for an undo/redo step: notes first (their re-inserts
-   *  mint the ids), then edges (which may wait on them). */
-  const reconcileCanvas = useCallback(
-    (before: Snapshot | WorkspaceState, after: Snapshot) => {
-      const restored = reconcileNotes(before.stickyNotes, after.stickyNotes);
-      reconcileEdges(before.edges, after.edges, restored);
-    },
-    [reconcileNotes, reconcileEdges],
   );
 
   // ── Undo / redo ──────────────────────────────────────────────────────────
@@ -1759,7 +1623,6 @@ export function useWorkspace(
   const snapshot = useCallback((s: WorkspaceState): Snapshot => ({
     frames: s.frames,
     stickyNotes: s.stickyNotes,
-    edges: s.edges,
     galleryOverrides: s.galleryOverrides,
   }), []);
 
@@ -1782,8 +1645,8 @@ export function useWorkspace(
     const future = s.future.slice();
     future.push(snapshot(s));
     setState({ ...prev, history: hist, future });
-    reconcileCanvas(s, prev);
-  }, [setState, snapshot, reconcileCanvas, flashToast]);
+    reconcileNotes(s.stickyNotes, prev.stickyNotes);
+  }, [setState, snapshot, reconcileNotes, flashToast]);
 
   const redo = useCallback(() => {
     if (topicMutationBusyRef.current) {
@@ -1797,8 +1660,8 @@ export function useWorkspace(
     const hist = s.history.slice();
     hist.push(snapshot(s));
     setState({ ...next, history: hist, future });
-    reconcileCanvas(s, next);
-  }, [setState, snapshot, reconcileCanvas, flashToast]);
+    reconcileNotes(s.stickyNotes, next.stickyNotes);
+  }, [setState, snapshot, reconcileNotes, flashToast]);
 
   /** Canonical-photo tile positions for whichever view is active — the single
    *  source both the renderer and marquee hit-testing read, so selection and
@@ -1889,7 +1752,6 @@ export function useWorkspace(
       if (s.acctOpen) patch.acctOpen = false;
       if (s.projOpen) patch.projOpen = false;
       if (s.focusedCloudKey) patch.focusedCloudKey = null; // click empty canvas clears cloud focus
-      if (s.selectedEdgeId) patch.selectedEdgeId = null; // …and edge selection (ADR 0048)
       if (Object.keys(patch).length) setState(patch);
       const r = rect();
       // Every tile view behaves like Canvas now: background drag marquee-selects
@@ -2038,7 +1900,7 @@ export function useWorkspace(
       // Any partially-selected group (e.g. one member caught by a marquee) is
       // completed here so actions and the group-drag below cover the whole set.
       selectedIds = expandBoundGroups(selectedIds, boundGroupsOf(s.groups));
-      setState({ selectedIds, drawerId: null, selectedEdgeId: null });
+      setState({ selectedIds, drawerId: null });
       // Group move: grabbing any member of a multi-selection drags the whole set
       // by one delta (Figma/Miro semantics). Capture every selected tile's center
       // now, from the active view's layout; a single-tile drag stays groupCenters
@@ -2153,138 +2015,6 @@ export function useWorkspace(
     [pushHistory, gestureClaimed],
   );
 
-  // ── Canvas edges: the wire gesture (ADR 0048) ─────────────────────────────
-
-  /** The live wire's <path> node, written imperatively during the drag (the
-   *  NoteInkLayer pattern) — `move` has no rAF throttle, so a state write per
-   *  pointermove is off the table. EdgeLayer hands the node up via a ref
-   *  setter. */
-  const edgeLiveRef = useRef<SVGPathElement | null>(null);
-  const setEdgeLiveRef = useCallback((node: SVGPathElement | null) => {
-    edgeLiveRef.current = node;
-  }, []);
-
-  /** Pulling a wire out of a port. No pushHistory here — unlike a sticky drag,
-   *  nothing mutates until the drop commits (the gallery branch's deferred
-   *  historyPushed proves the pattern). */
-  const onEdgeStart = useCallback(
-    (e: React.PointerEvent, from: CanvasEdgeEndpoint, anchor: { x: number; y: number }) => {
-      e.stopPropagation();
-      if (e.button !== 0) return;
-      if (gestureClaimed()) return;
-      if (stateRef.current.spacePan) {
-        startPan(e);
-        return;
-      }
-      dragRef.current = {
-        mode: "edge",
-        from,
-        start: anchor,
-        sx: e.clientX,
-        sy: e.clientY,
-        moved: false,
-      };
-    },
-    [gestureClaimed, startPan],
-  );
-
-  /** What the wire is currently over: a note first (they render above tiles),
-   *  else a tile — excluding the source itself. Positions come from the same
-   *  seam the marquee hit-tests, so the wire can only land on what is drawn. */
-  const edgeTargetAt = useCallback(
-    (s: WorkspaceState, p: { x: number; y: number }, from: CanvasEdgeEndpoint): CanvasEdgeEndpoint | null => {
-      const board = boardIdRef.current;
-      for (const note of s.stickyNotes) {
-        if (note.boardId !== board || isTmpNote(note.id)) continue;
-        if (from.kind === "annotation" && from.id === note.id) continue;
-        if (p.x >= note.x && p.x <= note.x + note.w && p.y >= note.y && p.y <= note.y + note.h) {
-          return { kind: "annotation", id: note.id };
-        }
-      }
-      const positions = visibleTilePositions(activeTilePositions(s), s.photos, s.labelFilter);
-      for (const [id, pos] of Object.entries(positions)) {
-        if (from.kind === "asset" && from.id === id) continue;
-        if (p.x >= pos.x && p.x <= pos.x + pos.w && p.y >= pos.y && p.y <= pos.y + pos.h) {
-          return { kind: "asset", id };
-        }
-      }
-      return null;
-    },
-    [activeTilePositions],
-  );
-
-  /** Draw one edge, optimistically. The duplicate check mirrors the DB's
-   *  direction-insensitive unique index so the common case never round-trips. */
-  const createEdge = useCallback(
-    (from: CanvasEdgeEndpoint, to: CanvasEdgeEndpoint) => {
-      const boardId = boardIdRef.current;
-      if (!boardId) return;
-      const s = stateRef.current;
-      if (from.kind === to.kind && from.id === to.id) return;
-      const key = edgePairKey(from, to);
-      if (s.edges.some((edge) => edge.boardId === boardId && edgePairKey(edge.from, edge.to) === key)) {
-        flashToast("Already connected");
-        return;
-      }
-      pushHistory();
-      const tmpId = TMP_EDGE_PREFIX + Date.now();
-      setState({ edges: [...s.edges, { id: tmpId, boardId, from, to }] });
-      void fetch("/api/edges", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boardId, from, to }),
-      })
-        .then(async (res) => {
-          if (res.status === 409) {
-            // Another tab drew it first — the statement already exists.
-            setState({ edges: stateRef.current.edges.filter((edge) => edge.id !== tmpId) });
-            return;
-          }
-          if (!res.ok) throw new Error(String(res.status));
-          const saved = (await res.json()) as CanvasEdge;
-          const local = stateRef.current.edges.find((edge) => edge.id === tmpId);
-          // Deleted (undo) while the insert was in flight — take the row back.
-          if (!local) {
-            void fetch(`/api/edges/${saved.id}`, { method: "DELETE" });
-            return;
-          }
-          setState({
-            edges: stateRef.current.edges.map((edge) => (edge.id === tmpId ? saved : edge)),
-          });
-        })
-        .catch(() => {
-          setState({ edges: stateRef.current.edges.filter((edge) => edge.id !== tmpId) });
-          flashToast("Could not connect");
-        });
-    },
-    [pushHistory, setState, flashToast],
-  );
-
-  const selectEdge = useCallback(
-    (id: string) => {
-      setState({ selectedEdgeId: id, selectedIds: [], drawerId: null });
-    },
-    [setState],
-  );
-
-  const deleteEdge = useCallback(
-    (id: string) => {
-      pushHistory();
-      setState({
-        edges: stateRef.current.edges.filter((edge) => edge.id !== id),
-        selectedEdgeId: null,
-      });
-      if (isTmpEdge(id)) return; // no row yet; the create's in-flight guard takes it back
-      void fetch(`/api/edges/${id}`, { method: "DELETE" })
-        .then((res) => {
-          if (!res.ok) flashToast("Connection not deleted");
-        })
-        .catch(() => flashToast("Connection not deleted"));
-    },
-    [pushHistory, setState, flashToast],
-  );
-
-  const closeEdgeMenu = useCallback(() => setState({ edgeDropMenu: null }), [setState]);
 
   // ── Sticky notes: server-backed (ADR 0041) ─────────────────────────────────
   // Every mutation is optimistic — the canvas updates immediately and the row
@@ -2308,24 +2038,18 @@ export function useWorkspace(
     [patchNote],
   );
 
-  /** The optimistic-create core: a note at `center`, under a tmp id until the
-   *  INSERT returns. The caller owns pushHistory (a wired-note spawn is ONE
-   *  undo step for note + edge together). Resolves with the saved note once
-   *  its real id is adopted in place, or null when nothing was stored (state
-   *  already rolled back, toast already shown) — which is what lets a chained
-   *  edge create know whether it has anything to point at. */
-  const createStickyNoteAt = useCallback((center: { x: number; y: number }): {
-    tmpId: string;
-    saved: Promise<StickyNote | null>;
-  } => {
+  const addStickyNote = useCallback(() => {
     const s = stateRef.current;
+    const r = rect();
+    const cx = (r.width / 2 - s.tx) / s.scale;
+    const cy = (r.height / 2 - s.ty) / s.scale;
     const w = 180,
       h = 160;
     const tmpId = TMP_NOTE_PREFIX + Date.now();
     const note: StickyNote = {
       id: tmpId,
-      x: center.x - w / 2,
-      y: center.y - h / 2,
+      x: cx - w / 2,
+      y: cy - h / 2,
       w,
       h,
       text: "",
@@ -2334,9 +2058,10 @@ export function useWorkspace(
       color: STICKY_NOTE_COLORS[s.stickyNotes.length % STICKY_NOTE_COLORS.length],
       fontSize: "m",
     };
+    pushHistory();
     setState({ stickyNotes: [...s.stickyNotes, note] });
 
-    const saved = fetch("/api/annotations", {
+    void fetch("/api/annotations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2354,17 +2079,17 @@ export function useWorkspace(
     })
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));
-        const savedNote = annotationToNote(await res.json());
+        const saved = annotationToNote(await res.json());
         const local = stateRef.current.stickyNotes.find((n) => n.id === tmpId);
         // Dismissed while the insert was in flight — the row exists now and
         // nothing on screen points at it, so undo the create rather than
         // orphaning it.
         if (!local) {
-          void fetch(`/api/annotations/${savedNote.id}`, { method: "DELETE" });
-          return null;
+          void fetch(`/api/annotations/${saved.id}`, { method: "DELETE" });
+          return;
         }
         // Keep whatever was typed or dragged in the meantime; take only the id.
-        const merged: StickyNote = { ...local, id: savedNote.id };
+        const merged: StickyNote = { ...local, id: saved.id };
         setState({
           stickyNotes: stateRef.current.stickyNotes.map((n) => (n.id === tmpId ? merged : n)),
         });
@@ -2383,84 +2108,14 @@ export function useWorkspace(
             body: { text: merged.text, strokes: merged.strokes },
           });
         }
-        return merged;
       })
-      .catch((): null => {
+      .catch(() => {
         // Nothing was stored, so leaving the card on screen would promise a
         // persistence that isn't there.
         setState({ stickyNotes: stateRef.current.stickyNotes.filter((n) => n.id !== tmpId) });
         flashToast("Could not create the note");
-        return null;
       });
-    return { tmpId, saved };
-  }, [setState, currentProjectId, patchNote, flashToast]);
-
-  const addStickyNote = useCallback(() => {
-    const s = stateRef.current;
-    const r = rect();
-    pushHistory();
-    createStickyNoteAt({
-      x: (r.width / 2 - s.tx) / s.scale,
-      y: (r.height / 2 - s.ty) / s.scale,
-    });
-  }, [rect, pushHistory, createStickyNoteAt]);
-
-  /** The drop menu's one MVP action (ADR 0048): a note at the release point,
-   *  already wired to the object the drag started from. ONE history entry for
-   *  the compound — undo removes both. The note POST goes first (the edge has
-   *  an FK on it); if the edge half then fails, the note STAYS and the toast
-   *  says so — the author may already be typing into it, and yanking it to
-   *  fake atomicity is worse than an honest partial. */
-  const spawnWiredNote = useCallback(() => {
-    const menu = stateRef.current.edgeDropMenu;
-    const boardId = boardIdRef.current;
-    if (!menu || !boardId) return;
-    pushHistory();
-    const { tmpId, saved } = createStickyNoteAt(menu.canvas);
-    const tmpEdgeId = TMP_EDGE_PREFIX + Date.now();
-    setState({
-      edges: [
-        ...stateRef.current.edges,
-        { id: tmpEdgeId, boardId, from: menu.from, to: { kind: "annotation", id: tmpId } },
-      ],
-      edgeDropMenu: null,
-    });
-    void saved.then((note) => {
-      if (!note) {
-        // The note never landed (its own rollback + toast ran); a wire to
-        // nothing follows it out.
-        setState({ edges: stateRef.current.edges.filter((edge) => edge.id !== tmpEdgeId) });
-        return;
-      }
-      const to: CanvasEdgeEndpoint = { kind: "annotation", id: note.id };
-      setState({
-        edges: stateRef.current.edges.map((edge) =>
-          edge.id === tmpEdgeId ? { ...edge, to } : edge,
-        ),
-      });
-      void fetch("/api/edges", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boardId, from: menu.from, to }),
-      })
-        .then(async (res) => {
-          if (!res.ok) throw new Error(String(res.status));
-          const savedEdge = (await res.json()) as CanvasEdge;
-          const local = stateRef.current.edges.find((edge) => edge.id === tmpEdgeId);
-          if (!local) {
-            void fetch(`/api/edges/${savedEdge.id}`, { method: "DELETE" });
-            return;
-          }
-          setState({
-            edges: stateRef.current.edges.map((edge) => (edge.id === tmpEdgeId ? savedEdge : edge)),
-          });
-        })
-        .catch(() => {
-          setState({ edges: stateRef.current.edges.filter((edge) => edge.id !== tmpEdgeId) });
-          flashToast("Note created, but not connected");
-        });
-    });
-  }, [pushHistory, createStickyNoteAt, setState, flashToast]);
+  }, [rect, pushHistory, setState, currentProjectId, patchNote, flashToast]);
 
   const updateStickyText = useCallback(
     (id: string, text: string) => {
@@ -2734,20 +2389,6 @@ export function useWorkspace(
               : n,
           ),
         });
-      } else if (d.mode === "edge") {
-        if (!d.moved && Math.abs(e.clientX - d.sx) <= 3 && Math.abs(e.clientY - d.sy) <= 3) return;
-        d.moved = true;
-        const p = toContent(e.clientX, e.clientY);
-        // Imperative, never through state: a wire redraw per pointermove is
-        // one setAttribute, not one React render (the NoteInkLayer rule).
-        edgeLiveRef.current?.setAttribute(
-          "d",
-          mkBez(d.start.x, d.start.y, p.x, p.y, edgeSeed(d.from.id), 0.18),
-        );
-        const target = edgeTargetAt(s, p, d.from);
-        if ((target?.id ?? null) !== (s.edgeDropTarget?.id ?? null)) {
-          setState({ edgeDropTarget: target });
-        }
       } else if (d.mode === "marquee") {
         const r = rect();
         d.x1 = e.clientX - r.left;
@@ -2789,7 +2430,6 @@ export function useWorkspace(
       armTopicDropTarget,
       clearTopicDropTarget,
       armBoardDrop,
-      edgeTargetAt,
     ],
   );
 
@@ -2902,39 +2542,6 @@ export function useWorkspace(
         const note = stateRef.current.stickyNotes.find((n) => n.id === d.id);
         if (note) patchNote(note.id, { w: note.w, h: note.h });
       }
-    } else if (d.mode === "edge") {
-      edgeLiveRef.current?.setAttribute("d", "");
-      const target = stateRef.current.edgeDropTarget;
-      if (target) setState({ edgeDropTarget: null });
-      // A cancelled pointer never authorises a write (the topic-drop rule).
-      if (e.type === "pointercancel") {
-        // nothing committed
-      } else if (!d.moved) {
-        // A plain CLICK on the port (no drag) opens the same drop menu a
-        // drag-to-empty-canvas does, so the port is discoverable without
-        // knowing it can be dragged. The new object lands just to the RIGHT of
-        // the release point rather than on top of the photo.
-        const c = toContent(e.clientX, e.clientY);
-        setState({
-          edgeDropMenu: {
-            x: e.clientX,
-            y: e.clientY,
-            canvas: { x: c.x + 110, y: c.y },
-            from: d.from,
-          },
-        });
-      } else if (target) {
-        createEdge(d.from, target);
-      } else {
-        setState({
-          edgeDropMenu: {
-            x: e.clientX,
-            y: e.clientY,
-            canvas: toContent(e.clientX, e.clientY),
-            from: d.from,
-          },
-        });
-      }
     } else if (d.mode === "cloudDrag") {
       // A click (no drag) on a label toggles focus on that cloud.
       if (!d.moved) {
@@ -3043,8 +2650,6 @@ export function useWorkspace(
     persistTopicAssignment,
     armBoardDrop,
     commitBoardDrop,
-    createEdge,
-    toContent,
   ]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
@@ -5237,11 +4842,7 @@ export function useWorkspace(
           (target.tagName === "INPUT" ||
             target.tagName === "TEXTAREA" ||
             target.isContentEditable ||
-            target.closest("[data-note-surface]") !== null ||
-            // A held port is someone aiming a wire on a tablet, not asking for
-            // the canvas menu (ADR 0048). Its own attribute, NOT data-note-surface
-            // — that one means "a note's editable body" and is documented above.
-            target.closest("[data-edge-port]") !== null);
+            target.closest("[data-note-surface]") !== null);
         if (e.pointerType !== "mouse" && !editable) {
           // Hold = right-click. iOS Safari does not deliver a usable
           // `contextmenu` from a long press, so without this the menu — and
@@ -5516,13 +5117,6 @@ export function useWorkspace(
         // there would trash the very photos being exported — and the route then
         // 404s with a generic error that gives no hint the keypress did it.
         if (s.exportOpen) return;
-        // A selected edge answers first — it is mutually exclusive with a
-        // photo selection (selectEdge clears one, selecting photos clears it).
-        if (!isTyping && s.selectedEdgeId) {
-          e.preventDefault();
-          deleteEdge(s.selectedEdgeId);
-          return;
-        }
         if (!isTyping && s.selectedIds.length > 0) {
           e.preventDefault();
           // Same guardrail as the action bar: big selections confirm first —
@@ -5538,8 +5132,6 @@ export function useWorkspace(
       // The label pickers are the shallowest thing on screen — Esc closes them
       // before it reaches the drawer or a panel underneath.
       if (s.labelMenuOpen) closeLabelMenu();
-      else if (s.edgeDropMenu) setState({ edgeDropMenu: null });
-      else if (s.selectedEdgeId) setState({ selectedEdgeId: null });
       else if (s.drawerId) closeDrawer();
       else if (s.helpOpen) closeHelp();
       else if (s.chatOpen) closeChat();
@@ -5559,8 +5151,6 @@ export function useWorkspace(
     pasteFiles,
     applyLabel,
     closeLabelMenu,
-    deleteEdge,
-    setState,
   ]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
@@ -6101,17 +5691,6 @@ export function useWorkspace(
     setObjectBoard,
     updateStickyText,
     deleteStickyNote,
-
-    edges: state.edges,
-    selectedEdgeId: state.selectedEdgeId,
-    edgeDropTarget: state.edgeDropTarget,
-    edgeDropMenu: state.edgeDropMenu,
-    onEdgeStart,
-    selectEdge,
-    deleteEdge,
-    spawnWiredNote,
-    closeEdgeMenu,
-    setEdgeLiveRef,
 
     canUndo,
     canRedo,

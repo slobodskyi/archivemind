@@ -2,7 +2,7 @@
 
 Date: 2026-08-18
 
-Status: Accepted (migration `20260818000001`; production apply is migrations-owner work)
+Status: Accepted, then **Parked** (2026-08-21 — see the amendment below)
 
 ## Context
 
@@ -99,3 +99,27 @@ currently are. Concretely, a new `canvas_edges` table:
   endpoint CHECKs, direction-insensitive uniqueness, immutability as a
   zero-row no-op, the pair-checks, endpoint cascades, and the trash-window
   contract (edges survive `deleted_at`, die at the sweep).
+
+## Amendments
+
+### 2026-08-21 — the feature is parked; the table stays
+
+Three days of live use answered the product question: connecting files on the
+Workspace canvas is premature for the current workflow, and the surface cost
+(ports on every tile, one more gesture to learn, a third source option in the
+brief) was not yet paying for itself. The whole user-facing feature — ports,
+wires, EdgeLayer, the drop menu, threads in CREATE, `authorNotes` in
+generation, `/api/edges` — was removed in one commit, cleanly rather than
+flagged off: dead code guarded by a flag still burdens every change to a
+6,000-line hook, while git keeps the full implementation one `git revert`
+away.
+
+**The `canvas_edges` table and its pgTAP suite stay.** Migrations here are
+append-only, the table is empty and costs 64 kB of indexes, and "parked" is
+not "rejected" — this is the same argument that put `'ink'` in the annotation
+enum before it had a writer. If the feature returns, the storage model above
+is already proven; if it is ever rejected outright, dropping the table is a
+one-line migration then.
+
+Nothing writes or reads `canvas_edges` as of this amendment; any rows drawn
+during the live-testing window are inert.

@@ -8,9 +8,6 @@ interface CanvasContextMenuProps {
   /** Hide project-editing tools that don't apply to the read-only all-files
    *  grid — matches the left toolbar's own gating. */
   allFilesMode: boolean;
-  /** The Workspace (neural) view is showing — required for the edge controls,
-   *  which only exist on that canvas. */
-  isCanvasView: boolean;
   /** Current selection size — with a selection, "Move to Trash" acts on it;
    *  without one it acts on the right-clicked tile (menu.targetId). */
   selCount: number;
@@ -28,10 +25,6 @@ interface CanvasContextMenuProps {
   onUngroup: () => void;
   /** The selection overlaps a bound group — show Ungroup instead of Group. */
   hasGroup: boolean;
-  /** An edge is selected (ADR 0048) — offer its removal here too, so the
-   *  right-click path matches the Delete key. */
-  edgeSelected: boolean;
-  onRemoveEdge: () => void;
   /** Layer order for the selection / right-clicked tile. */
   onBringToFront: () => void;
   onBringForward: () => void;
@@ -55,7 +48,6 @@ interface CanvasContextMenuProps {
 export default function CanvasContextMenu({
   menu,
   allFilesMode,
-  isCanvasView,
   selCount,
   onClose,
   onExtractExif,
@@ -64,8 +56,6 @@ export default function CanvasContextMenu({
   onExport,
   onUngroup,
   hasGroup,
-  edgeSelected,
-  onRemoveEdge,
   onBringToFront,
   onBringForward,
   onSendBackward,
@@ -135,9 +125,6 @@ export default function CanvasContextMenu({
         <Item label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
       </>,
     );
-  }
-  if (edgeSelected && isCanvasView) {
-    sections.push(<Item label="Remove connection" danger onClick={run(onRemoveEdge)} />);
   }
   if (deletable) {
     sections.push(

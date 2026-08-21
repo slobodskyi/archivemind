@@ -189,6 +189,12 @@ delivery never closes the editor it delivers from.
 
 ### 2026-08-18 — canvas edges reach generation (with ADR 0048)
 
+> **Parked 2026-08-21** (ADR 0048 amendment): the canvas-edges feature was
+> removed after live testing, and with it everything this section describes —
+> Thread sources, `orderIsAuthored` and `authorNotes` are no longer in the
+> request, the prompt or the route. The section stays as the record of the
+> design, ready for an un-revert.
+
 Canvas edges (ADR 0048) give the brief two new inputs, and both stay inside
 the Decision's evidence discipline:
 
