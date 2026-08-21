@@ -22,6 +22,14 @@ interface ExportDialogProps {
   photos: Photo[];
   /** Suggested document name — the current project's label. */
   defaultTitle?: string;
+  /** Preselects the Format row. The Create hub's delivery cards are that row
+   *  promoted one level (ADR 0045), so they hand the choice down rather than
+   *  branching — the row stays, and changing your mind here needs no step back. */
+  initialFormat?: ArtboardSettings["format"];
+  /** Overrides the dismiss button's word. The hub passes "‹ Back", because from
+   *  there this dialog is a rung on the hub → format → file ladder, not a
+   *  free-standing modal. */
+  dismissLabel?: string;
   /** Scopes the remembered page/caption preferences (see lib/export-prefs). */
   workspaceId: string;
   onClose: () => void;
@@ -130,6 +138,8 @@ export default function ExportDialog({
   assetIds,
   photos,
   defaultTitle,
+  initialFormat,
+  dismissLabel,
   workspaceId,
   onClose,
 }: ExportDialogProps) {
@@ -144,7 +154,7 @@ export default function ExportDialog({
   const [credit, setCredit] = useState<WorkspaceInfo | null>(null);
   const [creditFailed, setCreditFailed] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const [format, setFormat] = useState<ArtboardSettings["format"]>("pdf");
+  const [format, setFormat] = useState<ArtboardSettings["format"]>(initialFormat ?? "pdf");
   const [zipContents, setZipContents] = useState<ArtboardSettings["zipContents"]>("originals");
   const [layout, setLayout] = useState(prefs.pageLayout);
   const [pageSize, setPageSize] = useState(prefs.pageSize);
@@ -553,7 +563,7 @@ export default function ExportDialog({
   const footer =
     phase === "ready" && url ? (
       <>
-        <DialogButton onClick={onClose}>Close</DialogButton>
+        <DialogButton onClick={onClose}>{dismissLabel ?? "Close"}</DialogButton>
         <a
           href={url}
           target="_blank"
@@ -579,7 +589,7 @@ export default function ExportDialog({
       </>
     ) : phase === "working" ? null : (
       <>
-        <DialogButton onClick={onClose}>Cancel</DialogButton>
+        <DialogButton onClick={onClose}>{dismissLabel ?? "Cancel"}</DialogButton>
         <DialogButton variant="primary" data-autofocus="" onClick={start} disabled={count === 0}>
           {phase === "error" ? "Try again" : `Download ${fmt}`}
         </DialogButton>

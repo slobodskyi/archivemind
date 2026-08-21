@@ -225,3 +225,62 @@ the Decision's evidence discipline:
 Generation remains synchronous, snapshots stay ids-only, and a regenerated
 draft re-derives notes at generation time — so editing a wired note between
 versions is reflected without any draft-schema change.
+
+### 2026-08-21 — one action: Download folds into the hub
+
+The amendment above cut three buttons to two and called the pair settled. It
+was not: `Download` and `Create` asked the same question — *what comes out of
+this Workspace* — and differed only in whether the answer stays editable. Two
+buttons for one question is what put DRAFTS beside CREATE in the first place.
+
+The move looks like burying a frequent action one level down, and the click
+count says otherwise. The download dialog opens on a **Format** row of its own,
+so choosing anything but the default already cost a second click:
+
+| | before | after |
+|---|---|---|
+| PDF | 1 click | 2 clicks |
+| Captions CSV | 2 clicks | 2 clicks |
+| ZIP | 2 clicks | 2 clicks |
+
+So Download is not pushed down; that Format row is **pulled up** one level, to
+where a format can carry a name and a sentence instead of being a bare chip.
+Only the default PDF pays, and it pays one click.
+
+What ships:
+
+- **One action.** `CREATE` (primary, still badged with the draft count) is the
+  Workspace's only floated button. It stays enabled when there are drafts but no
+  files, exactly as before.
+- **The hub gains a Download section.** Its axis between the two card blocks is
+  not create-versus-download but **editable versus final**: *Make something*
+  (Article, Instagram carousel) lands in the studio and can still be rewritten;
+  *Download* (PDF document, Captions CSV, The files) hands over a finished file.
+  They are weighted differently — drawn glyphs above, three-letter format tags
+  below — rather than sharing one grid, because they are not peers. *Continue
+  editing* stays last.
+- **The section says what it acts on, once.** `5 selected` / `48 files` on the
+  heading, not a count per card: all three formats act on the same set, under
+  the rule the old button used — the selection when there is one, the whole
+  Workspace otherwise.
+- **A card is a preset, not a branch.** `ExportDialog` keeps its Format row and
+  takes an `initialFormat`; changing your mind inside needs no step back. The
+  cost is two format pickers on one path, accepted deliberately: the hub answers
+  *what comes out*, the dialog configures *this run*.
+- **The ladder extends rather than forks.** `outputUi` gains a `download` rung,
+  so hub → format → file walks back exactly like hub → brief → studio: the
+  dialog's dismiss button reads `‹ Back` and Escape returns to the hub. The same
+  dialog opened from a tile, the drawer or the studio leaves `outputUi` alone
+  and closes to where it came from, unchanged. One consequence is deliberate: a
+  finished download also returns to the hub rather than the canvas — one rule,
+  no phase-dependent exception, and the next format is right there.
+
+Fast paths are untouched. The right-click menu still carries `Download N` for a
+selection and the drawer still downloads one photo; those, not the removed
+button, are where a hurried delivery starts. Nothing about the export contract,
+job types or `/api/exports` changes — this is a change of entry point only.
+
+Consequences: `WorkspaceOutputActions` is one button, and `.am-wsa-label` — the
+rule that dropped DOWNLOAD's word on a 390px row — went with it, so the phone
+now shows a labelled button instead of a glyph and a word competing for the
+same row.
