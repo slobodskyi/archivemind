@@ -698,7 +698,7 @@ export default function ArchiveWorkspace({
               }
               onBoardHover={setFolderDropTarget}
               onRename={ws.renameGroup}
-              onDelete={ws.deleteGroup}
+              onUngroup={ws.ungroupFolder}
             />
             <StickyNoteOverlay
               notes={scopedNotes}
@@ -1076,7 +1076,6 @@ export default function ArchiveWorkspace({
           onAddStickyNote={ws.addStickyNote}
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
-          onCopy={ws.copyFiles}
           onGroup={ws.groupFiles}
           onFolder={ws.folderFiles}
           onRemoveFromWorkspace={() => {
@@ -1416,7 +1415,6 @@ export default function ArchiveWorkspace({
         allFilesMode={ws.allFilesMode}
         selCount={ws.selectedIds.size}
         onClose={ws.closeContextMenu}
-        onExtractExif={ws.extractExif}
         onGroup={ws.groupFiles}
         onFolder={ws.folderFiles}
         onExport={ws.exportFiles}
@@ -1454,6 +1452,7 @@ export default function ArchiveWorkspace({
         onDelete={() => ws.drawerPhoto && ws.deletePhoto(ws.drawerPhoto.id)}
         onSetFactStatus={ws.setFactStatus}
         onExport={() => ws.drawerPhoto && ws.openExportFor([ws.drawerPhoto.id])}
+        onCopyMeta={ws.copyMetadata}
         labelNames={ws.labelNames}
         // The drawer is about ONE photo, so it labels that photo even when a
         // selection is live — passing its id as the fallback would let a

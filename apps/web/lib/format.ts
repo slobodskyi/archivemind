@@ -44,3 +44,30 @@ export function formatGps(exif: Pick<ExifData, "gpsLat" | "gpsLon" | "gpsLabel">
   if (coords && label) return `${coords} · ${label}`;
   return coords ?? label ?? "—";
 }
+
+/** The drawer's Metadata / EXIF block as plain text for the clipboard — one
+ *  `Field: value` line per field that actually carries a value, under the
+ *  filename.
+ *
+ *  Fields with nothing in them are dropped rather than pasted: the em dash is
+ *  the drawer's "no value" glyph and not a value (the manual editor already
+ *  follows that rule when building a patch), and `iso: 0` is what the reader
+ *  writes when the file records no ISO at all — pasting "ISO: 0" into an
+ *  agency's metadata field would assert a number the camera never wrote. */
+export function exifClipboardText(photo: Pick<Photo, "filename" | "exif">): string {
+  const e = photo.exif;
+  const has = (v: string) => {
+    const t = v.trim();
+    return t !== "" && t !== "—";
+  };
+  const rows: [string, string][] = [];
+  if (has(e.camera)) rows.push(["Camera", e.camera.trim()]);
+  if (has(e.lens)) rows.push(["Lens", e.lens.trim()]);
+  if (has(e.dateTaken)) rows.push(["Date", e.dateTaken.trim()]);
+  const gps = formatGps(e);
+  if (has(gps)) rows.push(["GPS", gps]);
+  if (e.iso > 0) rows.push(["ISO", String(e.iso)]);
+  if (has(e.aperture)) rows.push(["Aperture", e.aperture.trim()]);
+  if (has(e.shutter)) rows.push(["Shutter", e.shutter.trim()]);
+  return [photo.filename, ...rows.map(([k, v]) => `${k}: ${v}`)].join("\n");
+}

@@ -166,11 +166,12 @@ function LeftToolbar({
 
       {/* The rail is the same in every view now. Three things left it: the
           colour-label filter (it is a per-selection/per-canvas action and moved
-          onto the bottom bars, which is also where labelling already lived),
-          and AI actions + Extract EXIF, which act on a selection and are one
-          right-click away — the canvas context menu carries both. Trash stays:
-          it is a lens on the archive like Search, and nothing else on the canvas
-          opens it. */}
+          onto the bottom bars, which is also where labelling already lived), AI
+          actions, which act on a selection and are one right-click away, and
+          Extract EXIF, which has since gone entirely — ingest already reads the
+          EXIF, so it became the drawer's Copy button next to the values it was
+          claiming to fetch. Trash stays: it is a lens on the archive like
+          Search, and nothing else on the canvas opens it. */}
       <TbButton onClick={onOpenSearch} title="AI assistant" active={searchOpen}>
         <AiAssistantIcon />
       </TbButton>

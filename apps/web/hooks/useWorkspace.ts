@@ -19,7 +19,7 @@ import type {
   TopicSummary,
 } from "@archivemind/shared";
 import { boardChipAt } from "@/lib/board-drop";
-import { getCaptionRow } from "@/lib/format";
+import { exifClipboardText, getCaptionRow } from "@/lib/format";
 import { filterByLabel, type LabelFilter } from "@/lib/labels";
 import { toggleChecklistLine } from "@/lib/notes";
 import { planAiRun, type CaptionJobSpec } from "@/lib/ai-ops";
@@ -674,7 +674,8 @@ export interface Workspace {
   /** Drag a member out of a folder dropdown onto the Canvas at (clientX, clientY). */
   dropMemberOnCanvas: (folderId: string, assetId: string, clientX: number, clientY: number) => void;
   renameGroup: (id: string, name: string) => void;
-  deleteGroup: (id: string) => void;
+  /** Dissolve a folder: delete it and spill its files onto the canvas. */
+  ungroupFolder: (id: string) => void;
   moveGroup: (id: string, dx: number, dy: number) => void;
 
   // Selection actions (bottom action bar + right-click menu)
@@ -785,7 +786,8 @@ export interface Workspace {
    * open chat, source browser, or photo drawer. */
   minimapRight: number;
 
-  extractExif: () => void;
+  /** Copy the open photo's Metadata / EXIF block to the clipboard (drawer). */
+  copyMetadata: () => void;
 
   // Chat
   chatOpen: boolean;
@@ -3743,19 +3745,62 @@ export function useWorkspace(
     [setState],
   );
 
-  const deleteGroup = useCallback(
+  /** Dissolve a folder and put its files back on the canvas AT THE FOLDER — the
+   *  only "delete a folder" there is, reached from the folder's × and from its
+   *  right-click menu, which is why `deleteGroup` no longer exists separately.
+   *
+   *  The spread is the whole point. A folder hides its members rather than
+   *  moving them, and dragging a collapsed folder deliberately leaves their
+   *  coordinates alone, so simply dropping the row released ten files back to
+   *  wherever they sat before they were filed — often a screen away from the
+   *  folder the user was looking at, which reads as "my photos are gone". They
+   *  land in a block centred on the folder instead, the same helper a dropped
+   *  batch of uploads uses, and they come back selected so the release is
+   *  visible and immediately actionable.
+   *
+   *  Undo restores those coordinates, not the folder: `Snapshot` carries the
+   *  arrangement, and the folder is a server row that the DELETE below has
+   *  already taken. */
+  const ungroupFolder = useCallback(
     (id: string) => {
       const s = stateRef.current;
-      const geom = { ...s.groupGeom };
-      delete geom[id];
+      const folder = s.groups.find((g) => g.id === id && g.kind === "folder");
+      if (!folder) return;
+      const geom = s.groupGeom[id] ?? defaultFolderGeom(id);
+      // Members the current scope can't render (another Workspace, another
+      // project) get no coordinates — there is no tile to place.
+      const onCanvas = new Set(canvasPhotos(s.photos, s.boardScope).map((p) => p.id));
+      const released = folder.members.filter((m) => onCanvas.has(m));
+      if (released.length > 0) pushHistory();
+      const centers = droppedAssetCenters(released, {
+        x: geom.x + FOLDER_TILE_W / 2,
+        y: geom.y + FOLDER_TILE_H / 2,
+      });
+      const nextGeom = { ...s.groupGeom };
+      delete nextGeom[id];
+      // Every released file gets a position; only the ones a colour filter is
+      // showing get selected. A filter hides tiles without moving them (ADR
+      // 0040), so the geometry runs over the whole set while the selection can
+      // never hold a tile nobody can see.
+      const shown = new Set(filterByLabel(s.photos, s.labelFilter).map((p) => p.id));
       setState({
         groups: s.groups.filter((g) => g.id !== id),
-        groupGeom: geom,
+        groupGeom: nextGeom,
         openFolderId: s.openFolderId === id ? null : s.openFolderId,
+        galleryOverrides: {
+          ...s.galleryOverrides,
+          asset: { ...s.galleryOverrides.asset, ...centers },
+        },
+        selectedIds: released.filter((m) => shown.has(m)),
       });
       void fetch(`/api/canvas-groups/${id}`, { method: "DELETE" }).catch(() => {});
+      flashToast(
+        released.length > 0
+          ? `Ungrouped ${released.length} ${released.length === 1 ? "file" : "files"} from "${folder.name}"`
+          : `Removed "${folder.name}"`,
+      );
     },
-    [setState],
+    [flashToast, pushHistory, setState],
   );
 
   /** Drag a member out of a folder's dropdown and drop it onto the Canvas: it
@@ -4475,12 +4520,25 @@ export function useWorkspace(
 
   // ── Misc toolbar actions ────────────────────────────────────────────────
 
-  const extractExif = useCallback(
-    // EXIF is already read during ingest (worker) — this button never did work.
-    // Tell the truth instead of faking a completion toast for a no-op.
-    () => flashToast("EXIF is read automatically when files are imported"),
-    [flashToast],
-  );
+  /** Copy the open photo's Metadata / EXIF block to the clipboard, as the text
+   *  `lib/format` lays it out. This is what the canvas menu's "Extract EXIF"
+   *  became: EXIF is read during ingest, so that item could only ever answer
+   *  with a toast saying so, while the thing people actually wanted from a
+   *  file's metadata — taking it somewhere else — had no control at all. It
+   *  copies the STORED values; an unsaved correction in the drawer is still a
+   *  draft, and the drawer hides this button while one is being typed. */
+  const copyMetadata = useCallback(async () => {
+    const s = stateRef.current;
+    const photo = s.photos.find((p) => p.id === s.drawerId);
+    if (!photo) return;
+    try {
+      await navigator.clipboard.writeText(exifClipboardText(photo));
+    } catch {
+      flashToast("Couldn't copy — select the values and copy manually");
+      return;
+    }
+    flashToast("Metadata copied");
+  }, [flashToast]);
 
   // ── Bulk AI ──────────────────────────────────────────────────────────────
 
@@ -5571,7 +5629,7 @@ export function useWorkspace(
     openFolderId: state.openFolderId,
     dropMemberOnCanvas,
     renameGroup,
-    deleteGroup,
+    ungroupFolder,
     moveGroup,
 
     deleteSelected,
@@ -5643,7 +5701,7 @@ export function useWorkspace(
     drawerRight,
     minimapRight,
 
-    extractExif,
+    copyMetadata,
 
     chatOpen: state.chatOpen,
     chatMsgs: state.chatMsgs,

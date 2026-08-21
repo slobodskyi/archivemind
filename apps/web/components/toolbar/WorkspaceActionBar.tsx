@@ -2,7 +2,7 @@ import { memo } from "react";
 import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import type { LabelFilter } from "@/lib/labels";
 import LabelBarControl from "@/components/labels/LabelBarControl";
-import { StickyNoteIcon, CopyIcon, TrashIcon, FolderIcon } from "@/components/icons/icons";
+import { StickyNoteIcon, TrashIcon, FolderIcon } from "@/components/icons/icons";
 
 interface WorkspaceActionBarProps {
   selCount: number;
@@ -14,7 +14,6 @@ interface WorkspaceActionBarProps {
   onTidy: () => void;
   /** Opens the AI panel over the selection (analyze / captions). */
   onAi: () => void;
-  onCopy: () => void;
   /** Bind the selection into a move-/edit-together group (no folder — ADR 0034 folders live on the Folder button). */
   onGroup: () => void;
   /** Wrap the selection in a real folder (collapsible tile + Finder popup). */
@@ -95,20 +94,20 @@ function Divider() {
   return <span className="am-bar-div" style={{ width: 1, height: 20, background: "var(--bd)", margin: "0 3px" }} />;
 }
 
-/** Bottom action bar for the Workspace (neural view) only. Copy/Export are
- *  selection actions; Group binds the selection into a move-/edit-together set (no
- *  container) and Folder wraps it in a real folder (ADR 0034) — the two used to
- *  be one button. Delete is real (bulk trash + undo, ADR 0033 — the old Archive
- *  stub sat next to it implying a parity that never existed, so it's gone until
- *  asset archiving is a real feature), and so is the AI button. (Duplicate was
- *  removed — Copy already covers it.) */
+/** Bottom action bar for the Workspace (neural view) only. Group binds the
+ *  selection into a move-/edit-together set (no container) and Folder wraps it in
+ *  a real folder (ADR 0034) — the two used to be one button. Delete is real (bulk
+ *  trash + undo, ADR 0033 — the old Archive stub sat next to it implying a parity
+ *  that never existed, so it's gone until asset archiving is a real feature), and
+ *  so is the AI button. (Duplicate went first, because Copy covered it; Copy
+ *  itself then left this bar — it is a cross-archive link, not a canvas edit like
+ *  everything else here, and it stays on ⌘C/⌘V where a copy is looked for.) */
 function WorkspaceActionBar({
   selCount,
   aiOpen,
   onAddStickyNote,
   onTidy,
   onAi,
-  onCopy,
   onGroup,
   onFolder,
   onRemoveFromWorkspace,
@@ -124,7 +123,7 @@ function WorkspaceActionBar({
   const noSel = selCount === 0;
   return (
     <div
-      // Below 760px the bar spans the width and wraps to a second row. Its ten
+      // Below 760px the bar spans the width and wraps to a second row. Its
       // targets at the 44px touch minimum are wider than a phone, and centred
       // that put both ends off screen.
       className="am-bar am-bar-low"
@@ -184,9 +183,6 @@ function WorkspaceActionBar({
         onSetFilter={onSetFilter}
       />
 
-      <Btn title="Copy" disabled={noSel} onClick={onCopy}>
-        <CopyIcon width={16} height={16} />
-      </Btn>
       <Btn title={selCount >= 2 ? `Group ${selCount} (move & edit together)` : "Group"} disabled={noSel} onClick={onGroup}>
         <GroupGlyph />
       </Btn>

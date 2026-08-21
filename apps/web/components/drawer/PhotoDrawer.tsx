@@ -42,6 +42,11 @@ interface PhotoDrawerProps {
   onSetFactStatus: (factId: string, status: "confirmed" | "likely") => void;
   /** Export this one photo to PDF (ADR 0035). */
   onExport: () => void;
+  /** Copy this photo's Metadata / EXIF block to the clipboard as text. The
+   *  canvas menu's old "Extract EXIF" landed here: extraction already happened
+   *  at ingest, and taking the values somewhere else is what was actually
+   *  wanted — one file at a time, which is what this panel is. */
+  onCopyMeta: () => void;
   /** Persist a manual Metadata/EXIF correction (migration 20260805000001). */
   onSaveExif: (patch: PatchAssetExifRequest) => void;
   /** Drop every manual correction, restoring what ingest extracted. */
@@ -74,6 +79,7 @@ export default function PhotoDrawer({
   onDelete,
   onSetFactStatus,
   onExport,
+  onCopyMeta,
   onSaveExif,
   onRevertExif,
   labelNames,
@@ -497,21 +503,37 @@ export default function PhotoDrawer({
           <div style={{ marginTop: 18 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={labelCaps}>Metadata / EXIF</span>
-              {/* Editing is only offered on real assets: a mock row has no
-                  asset_exif row behind it, so the route would have nothing to
-                  correct and every save would 404. */}
-              {isRealSource(photo.source) && (
-                <button
-                  onClick={() => setExifEditing((v) => !v)}
-                  title={exifEditing ? "Stop editing" : "Correct the metadata by hand"}
-                  aria-label={exifEditing ? "Stop editing metadata" : "Correct the metadata by hand"}
-                  aria-pressed={exifEditing}
-                  style={exifEditBtn(exifEditing)}
-                >
-                  {exifEditing ? <CloseIcon width={10} height={10} strokeWidth={2.2} /> : <PenGlyph />}
-                  {exifEditing ? "Cancel" : "Edit"}
-                </button>
-              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {/* Copy hides while a correction is being typed: it copies the
+                    STORED values, and offering it over a half-finished draft
+                    would hand back something other than what is on screen. */}
+                {!exifEditing && (
+                  <button
+                    onClick={onCopyMeta}
+                    title="Copy this file's metadata as text"
+                    aria-label="Copy metadata"
+                    style={exifEditBtn(false)}
+                  >
+                    <CopyIcon width={10} height={10} />
+                    Copy
+                  </button>
+                )}
+                {/* Editing is only offered on real assets: a mock row has no
+                    asset_exif row behind it, so the route would have nothing to
+                    correct and every save would 404. */}
+                {isRealSource(photo.source) && (
+                  <button
+                    onClick={() => setExifEditing((v) => !v)}
+                    title={exifEditing ? "Stop editing" : "Correct the metadata by hand"}
+                    aria-label={exifEditing ? "Stop editing metadata" : "Correct the metadata by hand"}
+                    aria-pressed={exifEditing}
+                    style={exifEditBtn(exifEditing)}
+                  >
+                    {exifEditing ? <CloseIcon width={10} height={10} strokeWidth={2.2} /> : <PenGlyph />}
+                    {exifEditing ? "Cancel" : "Edit"}
+                  </button>
+                )}
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "7px 14px", marginTop: 10, fontSize: 12, alignItems: "center" }}>
               {/* Labels use --t2b (4.72:1), not --t3 (2.96:1, WCAG fail) — this
