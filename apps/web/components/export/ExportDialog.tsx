@@ -599,7 +599,10 @@ export default function ExportDialog({
   return (
     <Dialog
       open
-      size="m"
+      // `l`, matching the Create hub and CreateOutputDialog: every popup in the
+      // export/create flow is the same width, so choosing a format doesn't snap
+      // the window narrower than the hub it opened from.
+      size="l"
       title={`Download as ${fmt}`}
       subtitle={`${count} ${count === 1 ? "photo" : "photos"} · ${subtitle}`}
       busy={phase === "working"}

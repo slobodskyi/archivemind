@@ -1,5 +1,3 @@
-import { SparkleIcon } from "@/components/icons/icons";
-
 interface CanvasAnalyzeActionProps {
   /** Photos selected on the canvas — the set `BulkAiPanel` will plan its run
    *  over. Read from the same `selectedIds` that gates the panel opening, so
@@ -66,10 +64,6 @@ export default function CanvasAnalyzeAction({ selectedCount, open, onOpen }: Can
         boxShadow: open && live ? "inset 0 0 0 2px rgba(5,5,5,.42)" : "none",
       }}
     >
-      {/* The same sparkle every AI entry point wears (PhotoTile's badge, the
-          action bar, the panel's own CTA) — the word alone would read as a
-          report, not as a model run. */}
-      <SparkleIcon width={12.5} height={12.5} />
       ANALYZE
       {live && (
         <span style={{ padding: "1px 5px", background: "rgba(5,5,5,.18)", borderRadius: 2, fontSize: 9.5, fontWeight: 800 }}>

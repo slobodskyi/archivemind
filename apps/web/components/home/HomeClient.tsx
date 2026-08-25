@@ -30,7 +30,6 @@ import {
   MoreIcon,
   LogsIcon,
   HelpIcon,
-  PrivacyIcon,
 } from "@/components/icons/icons";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
@@ -387,7 +386,6 @@ export default function HomeClient({
         <nav onClick={() => setNavOpen(false)} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <NavItem label="Logs" icon={<LogsIcon />} onClick={() => flash("Activity log coming soon")} />
           <NavItem label="Help" icon={<HelpIcon />} onClick={() => setHelpOpen(true)} />
-          <NavItem label="Privacy Policy" icon={<PrivacyIcon />} onClick={() => flash("Privacy Policy coming soon")} />
           {/* Directly above Archived/Trash on purpose: the storage meter's
               biggest reclaimable slice IS the Trash, and this is where people
               already look for it. */}
