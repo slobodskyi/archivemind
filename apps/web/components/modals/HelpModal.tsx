@@ -2,7 +2,7 @@ import { useId } from "react";
 import { HELP_FAQ } from "@/lib/chat";
 import { useDialog } from "@/hooks/useDialog";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
-import { CloseIcon, SparkleIcon } from "@/components/icons/icons";
+import { CloseIcon } from "@/components/icons/icons";
 
 interface HelpModalProps {
   open: boolean;
@@ -113,7 +113,6 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
               cursor: "pointer",
             }}
           >
-            <SparkleIcon width={14} height={14} />
             Send ticket
           </button>
         </div>

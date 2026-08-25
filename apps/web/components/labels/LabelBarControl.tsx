@@ -45,6 +45,14 @@ export default function LabelBarControl({
   // ring carries it instead, so the colour row shows nothing selected.
   const filterColour: AssetLabel | "mixed" | null = filter === "none" ? null : filter;
 
+  const label = filtering
+    ? filter !== null
+      ? "Filter by colour — on"
+      : "Filter by colour"
+    : selCount >= 2
+      ? `Label ${selCount} files`
+      : "Label";
+
   return (
     // Deliberately NOT `position: relative`: the popup below is absolutely
     // positioned, so leaving this wrapper static makes it resolve against the
@@ -83,15 +91,7 @@ export default function LabelBarControl({
       <button
         onClick={onToggle}
         className="am-tb tw-top"
-        title={
-          filtering
-            ? filter !== null
-              ? "Filter by colour — on"
-              : "Filter by colour"
-            : selCount >= 2
-              ? `Label ${selCount} files`
-              : "Label"
-        }
+        title={label}
         aria-label={filtering ? "Filter by colour" : "Label the selection"}
         aria-pressed={open}
         style={{
@@ -110,6 +110,8 @@ export default function LabelBarControl({
         }}
       >
         <LabelsIcon width={16} height={16} />
+        {/* Name-on-hover, matching the other bottom-bar buttons' styled hint. */}
+        <span className="tip">{label}</span>
       </button>
     </div>
   );
