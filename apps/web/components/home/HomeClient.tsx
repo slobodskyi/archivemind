@@ -21,7 +21,6 @@ import { Z } from "@/lib/ui";
 import HelpModal from "@/components/modals/HelpModal";
 import {
   SearchIcon,
-  DataSourcesIcon,
   RecentsIcon,
   ArchiveIcon,
   TrashIcon,
@@ -30,6 +29,7 @@ import {
   MoreIcon,
   LogsIcon,
   HelpIcon,
+  PencilIcon,
 } from "@/components/icons/icons";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
@@ -333,20 +333,13 @@ export default function HomeClient({
           onToggle={() => setAccountMenuOpen((v) => !v)}
           onClose={() => setAccountMenuOpen(false)}
           onFlashToast={flash}
-        />
-
-        <button
-          onClick={() => {
+          onDataSources={() => {
             setSourcesOpen(true);
             void refreshGdrive();
             void refreshOneDrive();
             setNavOpen(false);
           }}
-          style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 8px", marginBottom: 10, background: "transparent", border: 0, borderRadius: 2, color: "var(--t2)", fontSize: 13, fontFamily: "inherit", cursor: "pointer", textAlign: "left" }}
-        >
-          <span style={{ display: "flex", flex: "0 0 auto" }}><DataSourcesIcon /></span>
-          <span style={{ flex: 1 }}>Data Sources</span>
-        </button>
+        />
 
         <div style={{ height: 1, background: "var(--bd)", margin: "2px 0 10px" }} />
 
@@ -488,6 +481,7 @@ export default function HomeClient({
               disabledReason={view === "archived" ? "Restore it first to open it" : null}
               onDisabledClick={() => flash("Restore this project to open it")}
               onOpen={() => recordRecentProject(p.id)}
+              onRename={view === "archived" ? undefined : () => setRenameTarget(p)}
             >
               <CardMenu
                 restoreOnly={view === "archived"}
@@ -587,6 +581,7 @@ function ProjectCardView({
   disabledReason,
   onDisabledClick,
   onOpen,
+  onRename,
   children,
 }: {
   title: string;
@@ -602,6 +597,9 @@ function ProjectCardView({
   disabledReason?: string | null;
   onDisabledClick?: () => void;
   onOpen?: () => void;
+  /** Rename in place — draws a pencil beside the name. Omitted for archived
+   *  cards, which have no rename. */
+  onRename?: () => void;
   children?: React.ReactNode;
 }) {
   const extra = count - previews.length;
@@ -635,9 +633,27 @@ function ProjectCardView({
           <span style={{ position: "absolute", top: 8, left: 8, width: 8, height: 8, borderRadius: 999, background: accent }} />
         </div>
         <div style={{ padding: "10px 12px" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {title}
-        </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {title}
+            </div>
+            {onRename && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  // Inside the card's <Link> — don't navigate, just rename.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRename();
+                }}
+                aria-label={`Rename ${title}`}
+                title="Rename"
+                style={{ display: "flex", flex: "0 0 auto", width: 22, height: 22, alignItems: "center", justifyContent: "center", border: 0, borderRadius: 2, background: "transparent", color: "var(--t3)", cursor: "pointer" }}
+              >
+                <PencilIcon width={12} height={12} />
+              </button>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: "var(--t2)", marginTop: 2 }}>
             {count} {count === 1 ? "file" : "files"}
             {meta && <span style={{ color: "var(--t2b)" }}> · {meta}</span>}

@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { Z } from "@/lib/ui";
 import {
@@ -10,6 +11,7 @@ import {
   TeamIcon,
   ThemeIcon,
   DesktopIcon,
+  DataSourcesIcon,
   SignOutIcon,
 } from "@/components/icons/icons";
 
@@ -25,6 +27,9 @@ interface AccountMenuProps {
   onToggle: () => void;
   onClose: () => void;
   onFlashToast: (text: string) => void;
+  /** Opens the Data sources modal — it lives in this menu now, between Settings
+   *  and Add account, rather than as a standalone sidebar button. */
+  onDataSources: () => void;
 }
 
 const ITEMS = [
@@ -51,7 +56,7 @@ const MENU_ITEM_STYLE: React.CSSProperties = {
   textDecoration: "none",
 };
 
-export default function AccountMenu({ account, open, onToggle, onClose, onFlashToast }: AccountMenuProps) {
+export default function AccountMenu({ account, open, onToggle, onClose, onFlashToast, onDataSources }: AccountMenuProps) {
   return (
     <div style={{ position: "relative", marginBottom: 14 }}>
       <button
@@ -129,18 +134,34 @@ export default function AccountMenu({ account, open, onToggle, onClose, onFlashT
             {ITEMS.map((it) => {
               const Icon = it.icon;
               return (
-                <button
-                  key={it.label}
-                  className="am-mi"
-                  onClick={() => {
-                    onClose();
-                    onFlashToast(it.toast);
-                  }}
-                  style={MENU_ITEM_STYLE}
-                >
-                  <Icon />
-                  <span>{it.label}</span>
-                </button>
+                <Fragment key={it.label}>
+                  <button
+                    className="am-mi"
+                    onClick={() => {
+                      onClose();
+                      onFlashToast(it.toast);
+                    }}
+                    style={MENU_ITEM_STYLE}
+                  >
+                    <Icon />
+                    <span>{it.label}</span>
+                  </button>
+                  {/* Data sources sits between Settings and Add account — a real
+                      action (opens the modal), not another "coming soon". */}
+                  {it.label === "Settings" && (
+                    <button
+                      className="am-mi"
+                      onClick={() => {
+                        onClose();
+                        onDataSources();
+                      }}
+                      style={MENU_ITEM_STYLE}
+                    >
+                      <DataSourcesIcon />
+                      <span>Data sources</span>
+                    </button>
+                  )}
+                </Fragment>
               );
             })}
             <div style={{ height: 1, background: "var(--bd)", margin: "4px 0" }} />

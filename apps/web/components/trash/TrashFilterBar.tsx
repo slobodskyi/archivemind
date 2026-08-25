@@ -1,5 +1,6 @@
 import type { TrashFilterKey, TrashSort } from "@archivemind/shared";
 import { SearchIcon } from "@/components/icons/icons";
+import Dropdown from "@/components/ui/Dropdown";
 import SegmentedTrack from "@/components/ui/SegmentedTrack";
 import { trashChips } from "@/lib/trash-view";
 import type { TrashMode } from "@/hooks/useTrash";
@@ -91,31 +92,16 @@ export default function TrashFilterBar({
           />
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--t2)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--t2)" }}>
           <span style={{ color: "var(--t3)" }}>Sort</span>
-          <select
+          <Dropdown<TrashSort>
             value={sort}
-            onChange={(e) => onSort(e.target.value as TrashSort)}
-            aria-label="Sort trash"
-            style={{
-              height: 30,
-              padding: "0 6px",
-              background: "var(--bg-in)",
-              border: "1px solid var(--bd)",
-              borderRadius: 2,
-              color: "var(--t1)",
-              fontSize: 11.5,
-              fontFamily: "inherit",
-              outline: "none",
-            }}
-          >
-            {SORTS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            options={SORTS}
+            onChange={onSort}
+            ariaLabel="Sort trash"
+            width={168}
+          />
+        </div>
 
         <div style={{ flex: 1 }} />
 
