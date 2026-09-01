@@ -15,6 +15,10 @@ interface LabelBarControlProps {
   filter: LabelFilter;
   onPickLabel: (label: AssetLabel | null) => void;
   onSetFilter: (filter: LabelFilter) => void;
+  /** Closes the popup. Separate from `onToggle` on purpose: in mark mode
+   *  picking already closes the menu, so a toggle fired after it would reopen
+   *  the thing the click was meant to dismiss. */
+  onCloseMenu: () => void;
 }
 
 /** The colour-label control that lives on both bottom bars (ADR 0040, amended).
@@ -29,7 +33,10 @@ interface LabelBarControlProps {
  *
  *  In filter mode the row also offers the untriaged pile (`"none"`) beside the
  *  ✕ that clears the filter — see `LabelSwatchRow`'s `none` for why the two are
- *  not the same button. */
+ *  not the same button. That ✕ also CLOSES the popup, and needs `onCloseMenu`
+ *  to do it: filtering does not close the menu the way marking does, so the row
+ *  had nothing to borrow and the ✕ cleared the filter while leaving the popup
+ *  open. */
 export default function LabelBarControl({
   names,
   open,
@@ -39,6 +46,7 @@ export default function LabelBarControl({
   filter,
   onPickLabel,
   onSetFilter,
+  onCloseMenu,
 }: LabelBarControlProps) {
   const filtering = selCount === 0;
   // `"none"` is a filter state with no swatch to ring — the dedicated hollow
@@ -84,6 +92,7 @@ export default function LabelBarControl({
                 ? { active: filter === "none", onPick: () => onSetFilter(filter === "none" ? null : "none") }
                 : undefined
             }
+            onDismiss={onCloseMenu}
             size={18}
           />
         </div>

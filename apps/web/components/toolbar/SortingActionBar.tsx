@@ -54,6 +54,8 @@ export interface SortingActionBarProps {
   selectionLabel: AssetLabel | "mixed" | null;
   labelFilter: LabelFilter;
   onToggleLabelMenu: () => void;
+  /** Close it outright — the swatch row's ✕ needs a close, not a toggle. */
+  onCloseLabelMenu: () => void;
   onPickLabel: (label: AssetLabel | null) => void;
   onSetFilter: (filter: LabelFilter) => void;
 }
@@ -139,6 +141,7 @@ function SortingActionBar({
   selectionLabel,
   labelFilter,
   onToggleLabelMenu,
+  onCloseLabelMenu,
   onPickLabel,
   onSetFilter,
 }: SortingActionBarProps) {
@@ -179,6 +182,7 @@ function SortingActionBar({
         names={labelNames}
         open={labelMenuOpen}
         onToggle={onToggleLabelMenu}
+        onCloseMenu={onCloseLabelMenu}
         selCount={selCount}
         selectionLabel={selectionLabel}
         filter={labelFilter}

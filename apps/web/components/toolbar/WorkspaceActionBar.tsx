@@ -29,6 +29,8 @@ interface WorkspaceActionBarProps {
   selectionLabel: AssetLabel | "mixed" | null;
   labelFilter: LabelFilter;
   onToggleLabelMenu: () => void;
+  /** Close it outright — the swatch row's ✕ needs a close, not a toggle. */
+  onCloseLabelMenu: () => void;
   onPickLabel: (label: AssetLabel | null) => void;
   onSetFilter: (filter: LabelFilter) => void;
 }
@@ -117,6 +119,7 @@ function WorkspaceActionBar({
   selectionLabel,
   labelFilter,
   onToggleLabelMenu,
+  onCloseLabelMenu,
   onPickLabel,
   onSetFilter,
 }: WorkspaceActionBarProps) {
@@ -173,6 +176,7 @@ function WorkspaceActionBar({
         names={labelNames}
         open={labelMenuOpen}
         onToggle={onToggleLabelMenu}
+        onCloseMenu={onCloseLabelMenu}
         selCount={selCount}
         selectionLabel={selectionLabel}
         filter={labelFilter}

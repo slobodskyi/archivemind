@@ -21,6 +21,12 @@ interface LabelSwatchRowProps {
    *  reachable because both are things you ask for, and collapsing them is how
    *  the untriaged pile becomes impossible to look at. */
   none?: { active: boolean; onPick: () => void };
+  /** Close the surface this row is drawn in. The ✕ is a two-part control —
+   *  clear, then dismiss — and this is the dismiss half. It used to be left to
+   *  a side effect of `onPick`, which held only where picking closed the menu:
+   *  in the bar's FILTER mode it does not, so the ✕ cleared the filter and left
+   *  the popover sitting open. Must close, never toggle. */
+  onDismiss?: () => void;
   size?: number;
 }
 
@@ -33,6 +39,7 @@ export default function LabelSwatchRow({
   onPick,
   clearable = true,
   none,
+  onDismiss,
   size = 16,
 }: LabelSwatchRowProps) {
   return (
@@ -120,9 +127,14 @@ export default function LabelSwatchRow({
             // Always active: it is also the way to dismiss the label menu, so
             // greying it out when there is no colour to clear (the common case
             // on an unlabelled tile) left the menu with no working close. Clear
-            // when there is something to clear; otherwise it is a harmless
-            // no-op that still closes the menu through the caller's onPick.
-            onClick={() => (none?.active ? none.onPick() : onPick(null))}
+            // when there is something to clear, then dismiss — with nothing to
+            // clear the first half is a harmless no-op and the ✕ is purely the
+            // close.
+            onClick={() => {
+              if (none?.active) none.onPick();
+              else onPick(null);
+              onDismiss?.();
+            }}
             title={none ? "Show everything" : "No label"}
             aria-label={none ? "Clear the colour filter" : "Remove label"}
             style={{
