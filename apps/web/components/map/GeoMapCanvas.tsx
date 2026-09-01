@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
 import type Supercluster from "supercluster";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { boundsOf, formatCount, markerSize, type GeoPoint } from "@/lib/geo";
+import { boundsOf, formatCount, markerSize, mosaicCells, type GeoPoint } from "@/lib/geo";
 import {
   buildClusterIndex,
   coverThumbs,
@@ -83,7 +83,7 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
 
       const el = buildMarkerElement({
         count: cluster ? cluster.point_count : 1,
-        // Cover first; the rest are the prints peeking out behind it.
+        // Newest first — the mosaic reads top-left to bottom-right.
         thumbs: cluster ? coverThumbs(cluster.cover, points) : [point?.thumb],
         selected: point != null && selectedIds.has(point.assetId),
       });
@@ -296,23 +296,22 @@ function paintSelection(plate: HTMLElement, selected: boolean): void {
   plate.style.borderWidth = selected ? "2px" : "1px";
 }
 
-/** A CSS background for a thumbnail, dimmed by `veil` so a print behind the
- *  cover reads as depth rather than competing with it. Quoted, because a
- *  presigned URL is not guaranteed to be free of `url()`-hostile characters. */
-function thumbBackground(thumb: string | undefined, veil: number): string {
-  if (!thumb) return "var(--bg-in)";
-  const image = `center/cover url("${thumb}")`;
-  if (veil <= 0) return image;
-  return `linear-gradient(rgba(0,0,0,${veil}),rgba(0,0,0,${veil})),${image}`;
+/** A CSS background for a thumbnail. Quoted, because a presigned URL is not
+ *  guaranteed to be free of `url()`-hostile characters. */
+function thumbBackground(thumb: string | undefined): string {
+  return thumb ? `center/cover url("${thumb}")` : "var(--bg-in)";
 }
 
-/** The two prints behind the cover. Fanned to opposite sides so a stack reads
- *  as a stack at a glance — and far enough out that the photograph on each is
- *  actually visible, which a 2 px sliver was not. */
-const PRINT_TRANSFORMS = [
-  "rotate(-4.5deg) translate(-5px,-3px)",
-  "rotate(3.5deg) translate(5px,-2px)",
-] as const;
+/** The grid a mosaic of N photos is laid out on. Two and three split into ROWS
+ *  rather than columns: a half-width cell crops a landscape photo — which most
+ *  of an archive is — down to a vertical sliver of its middle, while a
+ *  half-height one keeps the frame readable. Three is the asymmetric case: the
+ *  newest takes the full-width top, rather than a 2×2 with a hole in it. */
+function mosaicGrid(cells: number): string {
+  if (cells <= 1) return "grid-template-columns:1fr;grid-template-rows:1fr;";
+  if (cells === 2) return "grid-template-columns:1fr;grid-template-rows:1fr 1fr;";
+  return "grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;";
+}
 
 /** Built imperatively: MapLibre wants a real DOM node, and keeping these off
  *  React's reconciler is what makes panning cheap. */
@@ -322,7 +321,7 @@ function buildMarkerElement({
   selected,
 }: {
   count: number;
-  /** Cover first, then the photos for the prints behind it. */
+  /** Newest first — the mosaic fills top-left to bottom-right. */
   thumbs: readonly (string | undefined)[];
   selected: boolean;
 }): HTMLElement {
@@ -343,19 +342,6 @@ function buildMarkerElement({
     "position:absolute;inset:0;transform-origin:bottom center;transition:transform .15s;";
   wrap.appendChild(inner);
 
-  // Prints peeking out behind the plate — a stack, each wearing a real photo
-  // from the cluster. Never more than the cluster actually holds: two cards
-  // behind a pair of photos would promise a depth that isn't there.
-  const prints = Math.min(count - 1, PRINT_TRANSFORMS.length);
-  for (let i = 0; i < prints; i += 1) {
-    const card = document.createElement("div");
-    card.style.cssText =
-      `position:absolute;inset:0;border:1px solid var(--bd);border-radius:3px;` +
-      `background:${thumbBackground(thumbs[i + 1], 0.55)};` +
-      `transform:${PRINT_TRANSFORMS[i]};box-shadow:0 2px 8px rgba(0,0,0,.45);`;
-    inner.appendChild(card);
-  }
-
   // The tail is a rotated square, so its two visible edges are the same 1 px
   // hairline as the plate; the plate then covers its top half.
   const tail = document.createElement("div");
@@ -365,15 +351,32 @@ function buildMarkerElement({
     "border-right:1px solid var(--bd);border-bottom:1px solid var(--bd);";
   inner.appendChild(tail);
 
+  // The plate is a grid of the cluster's newest photos rather than one cover:
+  // a place is recognised by what is at it, and a stack of prints only ever
+  // showed the top one. `box-sizing` matters here in a way it did not for a
+  // single background — without it the border pushes the cells out of the tile.
+  // The 1 px gaps are the plate's own background showing through, which is what
+  // keeps two dark photographs from reading as one.
+  const cells = mosaicCells(count);
   const plate = document.createElement("div");
   plate.dataset.plate = "";
   plate.style.cssText =
-    `position:relative;width:100%;height:100%;overflow:hidden;border-radius:3px;` +
+    `position:relative;box-sizing:border-box;width:100%;height:100%;` +
+    `overflow:hidden;border-radius:3px;display:grid;gap:1px;` +
+    mosaicGrid(cells) +
     `border:${selected ? "2px" : "1px"} solid ${selected ? "var(--ac2)" : "var(--bd)"};` +
-    `background:${thumbBackground(thumbs[0], 0)};` +
+    `background:var(--bg-in);` +
     // A resting shadow, unlike the canvas tiles: these float over a live
     // basemap and need to detach from it.
     `box-shadow:0 4px 14px rgba(0,0,0,.55);transition:box-shadow .15s;`;
+  for (let i = 0; i < cells; i += 1) {
+    const cell = document.createElement("div");
+    cell.style.cssText =
+      `background:${thumbBackground(thumbs[i])};` +
+      // Three photos: the newest takes the full-width top row.
+      (cells === 3 && i === 0 ? "grid-column:span 2;" : "");
+    plate.appendChild(cell);
+  }
   inner.appendChild(plate);
 
   wrap.addEventListener("pointerenter", () => {

@@ -7,6 +7,7 @@ import {
   geoPointsFromPhotos,
   markerSize,
   mergeCoverIndices,
+  mosaicCells,
   missingLocationLabel,
 } from "./geo";
 
@@ -159,14 +160,14 @@ describe("missingLocationLabel", () => {
 });
 
 describe("mergeCoverIndices", () => {
-  it("keeps the three smallest indices, ascending", () => {
+  it("keeps the smallest indices, ascending", () => {
     // Input is newest-first, so smallest index = newest photo.
-    expect(mergeCoverIndices([0, 4, 9], [2, 3])).toEqual([0, 2, 3]);
+    expect(mergeCoverIndices([0, 4, 9], [2, 3])).toEqual([0, 2, 3, 4]);
     expect(mergeCoverIndices([], [7])).toEqual([7]);
     expect(mergeCoverIndices([1], [])).toEqual([1]);
   });
 
-  it("never returns more than the marker can show", () => {
+  it("never returns more than the mosaic can tile", () => {
     expect(mergeCoverIndices([0, 1, 2], [3, 4, 5])).toHaveLength(CLUSTER_COVER_LIMIT);
   });
 
@@ -176,5 +177,20 @@ describe("mergeCoverIndices", () => {
     mergeCoverIndices(a, b);
     expect(a).toEqual([0, 1, 2]);
     expect(b).toEqual([3]);
+  });
+});
+
+describe("mosaicCells", () => {
+  it("tiles what the cluster holds, never more", () => {
+    // A cluster of two draws two cells, not a 2x2 with holes in it.
+    expect(mosaicCells(1)).toBe(1);
+    expect(mosaicCells(2)).toBe(2);
+    expect(mosaicCells(3)).toBe(3);
+    expect(mosaicCells(4)).toBe(CLUSTER_COVER_LIMIT);
+    expect(mosaicCells(9000)).toBe(CLUSTER_COVER_LIMIT);
+  });
+
+  it("never asks for an empty grid", () => {
+    expect(mosaicCells(0)).toBe(1);
   });
 });
