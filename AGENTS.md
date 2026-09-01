@@ -55,7 +55,9 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   cloud's *core*, so one far-dragged tile can no longer drag the name into empty
   canvas; **Regroup** (`SortingActionBar`, Topic + Timeline) drops the
   overrides; **Re-cluster** (`POST /api/topics/recluster`, zero credits)
-  recomputes the clouds on demand; and **double-clicking a cloud's label renames
+  recomputes the clouds on demand but has **no UI entry point** — its button
+  was removed 2026-09-01 (ADR 0038's amendment), the route kept on purpose,
+  so don't "restore" a caller as if it were a bug; and **double-clicking a cloud's label renames
   it** (`PATCH /api/topics/[id]` + `topic_clusters.is_renamed` — a pinned name
   survives every re-cluster, and its cluster is never deleted for failing to
   match). Cluster labels are also exempt from the `TOPIC_CLOUD_CAP` "Other"
@@ -179,7 +181,7 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   `assets.cluster_id`; auto-enqueued after analyze, zero Gemini calls so the
   "AI only by button" rule holds — ADR 0028; it also RELABELS a matched cluster
   now unless a human pinned the name via `is_renamed`, and can be triggered by
-  the user's own Re-cluster button — ADR 0038) and purge (erase an expired
+  the workspace-scoped recluster route, now buttonless — ADR 0038) and purge (erase an expired
   trashed asset's R2 bytes + DB derivatives, keep the row as a dedup
   tombstone; enqueued by the 6-hourly `sweep_deleted_assets()` after the
   30-day photo-trash window or by "Delete permanently" — ADR 0033), edit (renders the
@@ -223,8 +225,8 @@ design from this file:**
   readable at any zoom),
   **0027** (Map as a real MapLibre geographic map over EXIF GPS; ADR 0026 for the
   offline reverse geocoding that labels it) and **0038** (Topic legibility —
-  cluster-anchored overrides, core-anchored labels, Regroup / Re-cluster /
-  rename; it amends the label ranking and the label-stability rule in 0028 and
+  cluster-anchored overrides, core-anchored labels, Regroup / rename (its
+  Re-cluster button is gone — read the amendment); it amends the label ranking and the label-stability rule in 0028 and
   the "Other" fold in 0023) for what ships today. **0040** is colour labels as a
   human curation axis, and the rule that a label filter hides tiles without
   moving them — **read its amendments**: the LABELS view is retired and the

@@ -713,8 +713,6 @@ export interface Workspace {
   /** True when the active sorting view has drags to undo — the Regroup button
    *  is dead otherwise. */
   canRegroup: boolean;
-  /** Re-run the workspace's semantic clustering now (ADR 0038). Zero credits. */
-  recluster: () => void;
   /** Rename one Topic cloud (ADR 0038); null clusterId clouds aren't renameable. */
   renameCloud: (clusterId: string, label: string) => void;
   /** Persisted Topic destinations in the workspace, including clouds not
@@ -2699,39 +2697,6 @@ export function useWorkspace(
     },
     [setState],
   );
-
-  /** "Re-cluster" (ADR 0038) — recompute the workspace's Topic clouds now.
-   *
-   *  Costs no credits: the worker's cluster handler is pure CPU over embeddings
-   *  analyze already stored and makes no Gemini call. It shares `activeJobId`
-   *  with the AI runs anyway, because the worker has one lane for every job type
-   *  and workspace — but it says so in its own words rather than borrowing the
-   *  paid-work copy. */
-  const recluster = useCallback(async () => {
-    if (activeJobId.current) {
-      flashToast("A job is already running — wait for it to finish");
-      return;
-    }
-    setState({ proc: { active: true, label: "Regrouping topics…", pct: 3 }, aiBusyIds: [] });
-    try {
-      const resp = await fetch("/api/topics/recluster", { method: "POST" });
-      if (!resp.ok) {
-        const body = (await resp.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? String(resp.status));
-      }
-      const { jobId } = (await resp.json()) as { jobId: string };
-      activeJobId.current = jobId;
-      setState({ proc: { active: true, label: "Regrouping topics…", pct: 5 } });
-    } catch (err) {
-      activeJobId.current = null;
-      setState({ proc: { active: false, label: "", pct: 0 } });
-      flashToast(
-        err instanceof Error && err.message === "cluster_in_flight"
-          ? "Topics are already being regrouped"
-          : "Couldn't start regrouping — try again",
-      );
-    }
-  }, [flashToast, setState]);
 
   /** Rename one Topic cloud (ADR 0038). The stable cluster id remains the
    *  canvas key; the refresh only re-derives the display label. Positional
@@ -5656,7 +5621,6 @@ export function useWorkspace(
       (isSenseView && Object.keys(state.galleryOverrides.topic).length > 0) ||
       (isTimelineView && Object.keys(state.galleryOverrides.timeline).length > 0) ||
       (isNeural && projectMode && Object.keys(state.galleryOverrides.asset).length > 0),
-    recluster,
     renameCloud,
     topicOptions,
     selectedTopicId,

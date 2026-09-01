@@ -211,3 +211,26 @@ you happened to open, since the fold counts only the rows that read returned.
   photo returns to that cluster. Regroup is the only thing that clears them.
 - The Map bucket (`galleryOverrides.map`) remains the dead path it was: nothing
   reads it. Untouched here on purpose.
+
+
+## Amendment — 2026-09-01: Re-cluster loses its button
+
+The manual Re-cluster control is **removed from `SortingActionBar`**. Nothing in
+the Decision above changes: clustering still runs automatically at the tail of
+an analyze run (ADR 0028), a renamed cluster is still pinned by `is_renamed`,
+and overrides are still ignored once their cluster changes.
+
+`POST /api/topics/recluster` is **kept and is now unreachable from the UI** —
+the same shape as ADR 0040's colour-label *names*, which stayed writable in the
+data with no control pointing at them. Keeping it costs nothing (it grants no
+privilege an editor lacks — `ai_jobs_insert` never restricted `type`) and makes
+restoring the button a UI change rather than a rebuild. Treat its absence as
+deliberate: it is not a control that went missing.
+
+The UI-side plumbing goes rather than lingering — `ws.recluster`, the
+`onRecluster` and `busy` props, and the `showRecluster` gate. That gate was the
+one thing worth deleting on its own merits: it duplicated the condition
+`topicMembership` already carried (both were `isSenseView`), so the membership
+menu now gates on the object it renders. Dead UI plumbing that no longer has a
+control is exactly the trap this repo has documented before — a reader finds
+`recluster` in the hook and concludes the feature ships.

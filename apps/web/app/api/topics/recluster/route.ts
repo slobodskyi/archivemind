@@ -6,6 +6,12 @@ import { getCurrentWorkspaceId } from "@/lib/workspace";
 /** POST /api/topics/recluster — re-run the semantic clustering on demand
  *  (ADR 0038).
  *
+ *  NO UI ENTRY POINT since 2026-09-01: the Re-cluster button was removed from
+ *  `SortingActionBar` (ADR 0038's amendment). The route is kept deliberately —
+ *  it grants no privilege an editor lacks, and it makes bringing the button
+ *  back a UI change rather than a rebuild. Do not "restore" a caller for it as
+ *  if this were a bug.
+ *
  *  ADR 0028 enqueued `cluster` only at the tail of an analyze run, which meant
  *  that after deleting or adding photos the Topic clouds could only be refreshed
  *  by paying for an analyze the user did not want. This route removes that
