@@ -111,6 +111,33 @@ export async function requestPickerToken(loginHint?: string): Promise<string> {
   });
 }
 
+/** The Picker is an iframe on docs.google.com, and it reads the caller's Google
+ *  session as a THIRD-PARTY cookie. Every iOS browser is WebKit, and WebKit has
+ *  blocked cross-site cookies outright since 2020 — so on an iPhone or iPad the
+ *  frame renders Google's "Can't access your Google Account … allowing cookie
+ *  access" page where the file list should be. Signing into Google again does
+ *  not help: the cookie exists, the frame just may not read it.
+ *
+ *  There is no way to detect this at runtime. The frame is cross-origin, Google
+ *  paints the error INSIDE it, and neither `setCallback` action ever fires — so
+ *  a UA sniff is the only signal available. It therefore gates COPY only: the
+ *  picker stays reachable behind an explicit "try anyway", because a sniff that
+ *  hard-blocks a working browser is a bug nobody can diagnose from the outside.
+ *
+ *  Pure half exported for tests; `maxTouchPoints` is what separates an iPad on
+ *  iPadOS 13+ (which reports the desktop macOS UA) from an actual Mac. */
+export function isPickerBlockedUA(userAgent: string, maxTouchPoints: number): boolean {
+  if (/iPad|iPhone|iPod/.test(userAgent)) return true;
+  return /Macintosh/.test(userAgent) && maxTouchPoints > 1;
+}
+
+/** Browser-side wrapper. Returns false during SSR — callers must read it in an
+ *  effect, or the server and the first client render disagree. */
+export function isPickerBlockedHere(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return isPickerBlockedUA(navigator.userAgent, navigator.maxTouchPoints);
+}
+
 export interface PickedDriveFile {
   fileId: string;
   name: string;
