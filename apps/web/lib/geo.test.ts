@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Photo } from "@/types";
-import { boundsOf, formatCount, geoPointsFromPhotos, markerSize, missingLocationLabel } from "./geo";
+import {
+  boundsOf,
+  CLUSTER_COVER_LIMIT,
+  formatCount,
+  geoPointsFromPhotos,
+  markerSize,
+  mergeCoverIndices,
+  missingLocationLabel,
+} from "./geo";
 
 const photo = (id: string, gpsLat: number | null, gpsLon: number | null): Photo =>
   ({
@@ -147,5 +155,26 @@ describe("missingLocationLabel", () => {
   it("counts what the map is not showing", () => {
     expect(missingLocationLabel(128, 125)).toBe("3 of 128 files have no location");
     expect(missingLocationLabel(2, 1)).toBe("1 of 2 files has no location");
+  });
+});
+
+describe("mergeCoverIndices", () => {
+  it("keeps the three smallest indices, ascending", () => {
+    // Input is newest-first, so smallest index = newest photo.
+    expect(mergeCoverIndices([0, 4, 9], [2, 3])).toEqual([0, 2, 3]);
+    expect(mergeCoverIndices([], [7])).toEqual([7]);
+    expect(mergeCoverIndices([1], [])).toEqual([1]);
+  });
+
+  it("never returns more than the marker can show", () => {
+    expect(mergeCoverIndices([0, 1, 2], [3, 4, 5])).toHaveLength(CLUSTER_COVER_LIMIT);
+  });
+
+  it("leaves both inputs untouched — supercluster shares the array it clones", () => {
+    const a = [0, 1, 2];
+    const b = [3];
+    mergeCoverIndices(a, b);
+    expect(a).toEqual([0, 1, 2]);
+    expect(b).toEqual([3]);
   });
 });

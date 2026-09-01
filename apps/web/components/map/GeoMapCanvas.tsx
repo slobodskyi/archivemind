@@ -2,9 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
-import Supercluster from "supercluster";
+import type Supercluster from "supercluster";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { boundsOf, formatCount, markerSize, type GeoPoint } from "@/lib/geo";
+import {
+  buildClusterIndex,
+  coverThumbs,
+  MAX_ZOOM,
+  type ClusterProps,
+  type PointProps,
+} from "@/lib/geo-cluster";
 import { applyArchiveMindTheme, BASEMAP_STYLE_URL } from "@/lib/map-style";
 
 /** The Map view's actual map (ADR 0027). Browser-only — MapLibre touches
@@ -16,15 +23,6 @@ import { applyArchiveMindTheme, BASEMAP_STYLE_URL } from "@/lib/map-style";
  *  (tens on screen, never thousands) that is the cheaper and far more
  *  controllable option. */
 
-interface PointProps {
-  assetId: string;
-  thumb?: string;
-  filename: string;
-}
-interface ClusterProps {
-  thumb?: string;
-}
-
 interface GeoMapCanvasProps {
   points: readonly GeoPoint[];
   selectedIds: ReadonlySet<string>;
@@ -32,38 +30,18 @@ interface GeoMapCanvasProps {
   onSelectAssets: (assetIds: string[]) => void;
 }
 
-/** Past this the basemap has no more detail to give and clusters should have
- *  resolved into individual photos. */
-const MAX_ZOOM = 17;
-const CLUSTER_RADIUS = 64;
-
 export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelectAssets }: GeoMapCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
+  /** Which supercluster index the live markers were built from. */
+  const builtFromRef = useRef<Supercluster<PointProps, ClusterProps> | null>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   /** Photos sharing one spot can't be split by zooming — they get a panel. */
   const [stack, setStack] = useState<GeoPoint[] | null>(null);
 
-  const index = useMemo(() => {
-    const cluster = new Supercluster<PointProps, ClusterProps>({
-      radius: CLUSTER_RADIUS,
-      maxZoom: MAX_ZOOM - 1,
-      // The representative thumbnail is the first point in input order, and
-      // the caller hands us newest-first — so a cluster wears its newest
-      // photo, deterministically.
-      map: (props) => ({ thumb: props.thumb }),
-    });
-    cluster.load(
-      points.map((p) => ({
-        type: "Feature" as const,
-        properties: { assetId: p.assetId, thumb: p.thumb, filename: p.filename },
-        geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
-      })),
-    );
-    return cluster;
-  }, [points]);
+  const index = useMemo(() => buildClusterIndex(points), [points]);
 
   const pointsById = useMemo(() => new Map(points.map((p) => [p.assetId, p])), [points]);
 
@@ -73,6 +51,14 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
   const syncMarkers = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
+    // A cluster id means nothing across two indexes, and previews arrive after
+    // the first paint — reusing a marker built from the old index kept its
+    // blank plate forever once the thumbnail finally landed.
+    if (builtFromRef.current !== index) {
+      for (const marker of markersRef.current.values()) marker.remove();
+      markersRef.current.clear();
+      builtFromRef.current = index;
+    }
     const b = map.getBounds();
     const zoom = Math.round(map.getZoom());
     const features = index.getClusters([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], zoom);
@@ -97,7 +83,8 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
 
       const el = buildMarkerElement({
         count: cluster ? cluster.point_count : 1,
-        thumb: props.thumb,
+        // Cover first; the rest are the prints peeking out behind it.
+        thumbs: cluster ? coverThumbs(cluster.cover, points) : [point?.thumb],
         selected: point != null && selectedIds.has(point.assetId),
       });
 
@@ -135,7 +122,7 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
         markersRef.current.delete(key);
       }
     }
-  }, [index, pointsById, selectedIds, onOpenAsset]);
+  }, [index, points, pointsById, selectedIds, onOpenAsset]);
 
   // Style is fetched rather than passed by URL so it can be recoloured before
   // the first paint; handing MapLibre the URL shows a frame of stock styling.
@@ -309,15 +296,34 @@ function paintSelection(plate: HTMLElement, selected: boolean): void {
   plate.style.borderWidth = selected ? "2px" : "1px";
 }
 
+/** A CSS background for a thumbnail, dimmed by `veil` so a print behind the
+ *  cover reads as depth rather than competing with it. Quoted, because a
+ *  presigned URL is not guaranteed to be free of `url()`-hostile characters. */
+function thumbBackground(thumb: string | undefined, veil: number): string {
+  if (!thumb) return "var(--bg-in)";
+  const image = `center/cover url("${thumb}")`;
+  if (veil <= 0) return image;
+  return `linear-gradient(rgba(0,0,0,${veil}),rgba(0,0,0,${veil})),${image}`;
+}
+
+/** The two prints behind the cover. Fanned to opposite sides so a stack reads
+ *  as a stack at a glance — and far enough out that the photograph on each is
+ *  actually visible, which a 2 px sliver was not. */
+const PRINT_TRANSFORMS = [
+  "rotate(-4.5deg) translate(-5px,-3px)",
+  "rotate(3.5deg) translate(5px,-2px)",
+] as const;
+
 /** Built imperatively: MapLibre wants a real DOM node, and keeping these off
  *  React's reconciler is what makes panning cheap. */
 function buildMarkerElement({
   count,
-  thumb,
+  thumbs,
   selected,
 }: {
   count: number;
-  thumb?: string;
+  /** Cover first, then the photos for the prints behind it. */
+  thumbs: readonly (string | undefined)[];
   selected: boolean;
 }): HTMLElement {
   const size = markerSize(count);
@@ -337,18 +343,17 @@ function buildMarkerElement({
     "position:absolute;inset:0;transform-origin:bottom center;transition:transform .15s;";
   wrap.appendChild(inner);
 
-  if (count > 1) {
-    // Two hairline cards peeking out behind the plate — a stack of prints.
-    for (const [i, transform] of [
-      [1, "rotate(-3deg) translate(-2px,-2px)"],
-      [2, "rotate(2.5deg) translate(2px,-1px)"],
-    ] as const) {
-      const card = document.createElement("div");
-      card.style.cssText =
-        `position:absolute;inset:0;border:1px solid var(--bd);border-radius:3px;` +
-        `background:var(--bg-in);transform:${transform};opacity:${i === 1 ? 0.7 : 0.45};`;
-      inner.appendChild(card);
-    }
+  // Prints peeking out behind the plate — a stack, each wearing a real photo
+  // from the cluster. Never more than the cluster actually holds: two cards
+  // behind a pair of photos would promise a depth that isn't there.
+  const prints = Math.min(count - 1, PRINT_TRANSFORMS.length);
+  for (let i = 0; i < prints; i += 1) {
+    const card = document.createElement("div");
+    card.style.cssText =
+      `position:absolute;inset:0;border:1px solid var(--bd);border-radius:3px;` +
+      `background:${thumbBackground(thumbs[i + 1], 0.55)};` +
+      `transform:${PRINT_TRANSFORMS[i]};box-shadow:0 2px 8px rgba(0,0,0,.45);`;
+    inner.appendChild(card);
   }
 
   // The tail is a rotated square, so its two visible edges are the same 1 px
@@ -365,7 +370,7 @@ function buildMarkerElement({
   plate.style.cssText =
     `position:relative;width:100%;height:100%;overflow:hidden;border-radius:3px;` +
     `border:${selected ? "2px" : "1px"} solid ${selected ? "var(--ac2)" : "var(--bd)"};` +
-    `background:${thumb ? `center/cover url(${thumb})` : "var(--bg-in)"};` +
+    `background:${thumbBackground(thumbs[0], 0)};` +
     // A resting shadow, unlike the canvas tiles: these float over a live
     // basemap and need to detach from it.
     `box-shadow:0 4px 14px rgba(0,0,0,.55);transition:box-shadow .15s;`;

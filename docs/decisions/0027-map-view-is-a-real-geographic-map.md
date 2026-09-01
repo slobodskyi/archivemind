@@ -124,3 +124,53 @@ PAINT_OVERRIDES).
 
 Net visual change away from the junctions: `highway_minor` moves from an effective
 #141414 (0.055 × upstream's 0.9) to #161616 — two levels out of 255.
+
+
+## Amendment — 2026-09-01: a cluster wears photographs, not a blank plate
+
+The Decision above says a cluster marker is a photo thumbnail with two cards
+peeking out behind it. On production it was a **black square with a count** —
+the one marker on the map that showed no photograph at all, and the only thing
+a place with more than one photo ever rendered as.
+
+The cause is a silent supercluster contract: `map` — which projects a point's
+properties onto its cluster — is only ever *called* when a `reduce` is supplied
+alongside it (`if (reduce)` guards the whole path in its clustering loop). We
+shipped `map: (props) => ({ thumb: props.thumb })` with no `reduce`, so no
+cluster ever received a `thumb`, and `buildMarkerElement` fell through to its
+`var(--bg-in)` placeholder for every one of them. Nothing failed; the option was
+simply ignored. `lib/geo-cluster.test.ts` now asserts the covers arrive, because
+that is exactly the kind of defect a type checker cannot see.
+
+**A cluster now carries the three newest photos at that place**, and the marker
+spends them on depth rather than density: the plate is the newest photo — the
+cover, Apple Photos' own answer — and the prints behind it wear the second and
+third, dimmed 55% so they read as a stack rather than competing with the cover.
+A cluster of two draws one print, not two: two cards behind a pair of photos
+promise a depth that isn't there. The prints also fan further out than the 2 px
+sliver the blank cards used, because a sliver of a photograph is not a
+photograph.
+
+**The rejected alternative was a 2×2 mosaic of four thumbnails.** It was
+prototyped and looked at: inside a 66–82 px marker each cell lands at 33–41 px,
+which over a live basemap is four unreadable smudges instead of one recognisable
+photograph. The whole reason markers are DOM thumbnails rather than a symbol
+layer is that you should recognise a place *by its picture*; a mosaic spends
+that. The count badge already answers "how many" — the marker's job is "which
+place".
+
+Clusters carry **indices** into the point array, not thumbnail URLs. A presigned
+URL is ~500 bytes and the cluster tree holds a node per zoom level, so copying
+URLs upward would duplicate an archive's worth of them several times over.
+Indices also make the cover *meaningful*: smallest index wins, the caller hands
+us newest-first, so the cover is the newest photo at that place rather than
+whichever leaf supercluster's spatially-sorted tree happened to reach first.
+`mergeCoverIndices` never mutates its inputs, because supercluster hands `reduce`
+a **shallow** clone of a lower cluster's properties — pushing into
+`accumulated.cover` would corrupt the cluster it was cloned from.
+
+One adjacent bug goes with it: markers were reconciled by key across *index
+rebuilds*, and a cluster id is stable for the same points — so a marker built
+while previews were still being generated kept its blank plate forever once the
+thumbnail finally landed. The live markers now record which index built them and
+are rebuilt when it changes.
