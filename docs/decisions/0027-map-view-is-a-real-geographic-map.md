@@ -174,3 +174,38 @@ rebuilds*, and a cluster id is stable for the same points — so a marker built
 while previews were still being generated kept its blank plate forever once the
 thumbnail finally landed. The live markers now record which index built them and
 are rebuilt when it changes.
+
+
+## Amendment — 2026-09-01 (later): the mosaic, after all
+
+Supersedes the "rejected alternative" paragraph of the amendment above. The
+cluster marker tiles **up to four photos** instead of showing one cover with
+prints behind it. Everything else in that amendment stands — the `map`/`reduce`
+pairing, the indices-not-URLs rule, the index-rebuild fix.
+
+The rejection was argued on cell size, and the number it was argued against was
+wrong: it assumed the marker stays 58–82 px. Growing the cluster instead
+dissolves the objection — a cluster is now 72–92 px, so a 2×2 cell lands at
+35–45 px rather than the 33–41 px the sketch was judged on, and at those sizes a
+photograph survives. A single photo is **untouched at 52 px**: it has nothing to
+divide, and the size gap now also does work, saying "many" before you read the
+badge.
+
+Two and three photos split into **rows, not columns**. A half-width cell crops a
+landscape photo — which most of an archive is — down to a vertical sliver of its
+middle; a half-height one keeps the frame readable. Three is the asymmetric
+case: the newest photo takes the full-width top. A cluster of two tiles two
+cells, never a 2×2 with holes in it (`mosaicCells`).
+
+What the cover version bought and this spends: a stack of prints is a *stronger*
+single image, and only ever showed one photograph. What the mosaic buys: a place
+holding a wedding and a place holding a street both showed one photo before, and
+now show what is actually there. That is the trade, and it was made
+deliberately.
+
+The plate is a grid, so it needs `box-sizing: border-box` — without it the
+border pushes the cells out of the tile — and the 1 px gaps are the plate's own
+`--bg-in` showing through, which is what stops two dark photographs from reading
+as one. `CLUSTER_COVER_LIMIT` is 4 because that is what a 2×2 holds; it is the
+same constant that bounds `mergeCoverIndices`, so widening the mosaic is one
+number, not a rewrite.

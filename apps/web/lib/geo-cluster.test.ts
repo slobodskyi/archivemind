@@ -26,15 +26,15 @@ describe("buildClusterIndex", () => {
     expect(rest).toHaveLength(0);
     const props = feature.properties;
     expect("cluster" in props && props.point_count).toBe(5);
-    expect("cluster" in props && props.cover).toEqual([0, 1, 2]);
+    expect("cluster" in props && props.cover).toEqual([0, 1, 2, 3]);
   });
 
   it("carries the NEWEST photos up, not whichever leaf the tree reached first", () => {
     // Reversing the coordinates leaves the same spatial set with the newest
-    // photo at the other end of it; the cover must still be index 0, 1, 2.
+    // photo at the other end of it; the mosaic must still be 0, 1, 2, 3.
     const reversed = oneSpot.map((p, i) => ({ ...p, lng: oneSpot[oneSpot.length - 1 - i].lng }));
     const props = clustersOf(reversed, 4)[0].properties;
-    expect("cluster" in props && props.cover).toEqual([0, 1, 2]);
+    expect("cluster" in props && props.cover).toEqual([0, 1, 2, 3]);
   });
 
   it("resolves to individual points once the zoom can split them", () => {

@@ -18,6 +18,9 @@ export interface GeoPoint {
 /** west, south, east, north — the order supercluster and MapLibre both use. */
 export type GeoBounds = [number, number, number, number];
 
+/** How many photos one cluster marker tiles: a full 2×2 mosaic. */
+export const CLUSTER_COVER_LIMIT = 4;
+
 function isPlottable(lat: number | null, lon: number | null): boolean {
   if (lat === null || lon === null) return false;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
@@ -66,13 +69,25 @@ export function boundsOf(points: readonly GeoPoint[]): GeoBounds | null {
 }
 
 /** Marker diameter in px. Bigger clusters read as heavier without the scale
- *  running away — 200 photos and 20 000 look the same at a glance anyway. */
+ *  running away — 200 photos and 20 000 look the same at a glance anyway.
+ *
+ *  A cluster is wider than the 58–82 px it used to be because it now tiles its
+ *  photos rather than showing one cover: a 2×2 mosaic halves every edge, so the
+ *  marker has to grow or each cell drops under ~35 px and stops being a
+ *  photograph. A single photo is untouched — it has nothing to divide. */
 export function markerSize(count: number): number {
   if (count <= 1) return 52;
-  if (count < 10) return 58;
-  if (count < 50) return 66;
-  if (count < 200) return 74;
-  return 82;
+  if (count < 10) return 72;
+  if (count < 50) return 80;
+  if (count < 200) return 86;
+  return 92;
+}
+
+/** How many photos the mosaic tiles: what the cluster holds, up to the cover
+ *  limit. Deliberately not always four — three cells behind a cluster of two
+ *  would draw a place fuller than it is. */
+export function mosaicCells(count: number): number {
+  return Math.max(1, Math.min(count, CLUSTER_COVER_LIMIT));
 }
 
 /** Thin-space thousands, the way the counts read in Apple Photos: "27 027".
@@ -91,19 +106,14 @@ export function missingLocationLabel(total: number, plotted: number): string | n
   return `${formatCount(missing)} of ${formatCount(total)} files ${missing === 1 ? "has" : "have"} no location`;
 }
 
-/** How many photos one cluster marker shows: a cover plus the two prints
- *  peeking out behind it. Three is what a 52–82 px marker can carry without
- *  any of them shrinking below "recognisable photograph". */
-export const CLUSTER_COVER_LIMIT = 3;
-
 /** Merge two ascending index lists into the `CLUSTER_COVER_LIMIT` smallest.
  *
  *  A cluster carries INDICES into the newest-first point array rather than
  *  thumbnail URLs: a presigned URL is ~500 bytes and the cluster tree holds a
  *  node per zoom level, so copying URLs up the tree would duplicate the whole
  *  archive's worth of them several times over. Smallest-index-wins is also what
- *  makes the cover *meaningful* — the newest photo at that place, rather than
- *  whichever leaf supercluster's spatially-sorted tree happened to reach
+ *  makes the mosaic *meaningful* — the newest photos at that place, rather than
+ *  whichever leaves supercluster's spatially-sorted tree happened to reach
  *  first. */
 export function mergeCoverIndices(a: readonly number[], b: readonly number[]): number[] {
   const out: number[] = [];
