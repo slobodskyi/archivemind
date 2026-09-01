@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { LabelNames } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import { geoPointsFromPhotos, missingLocationLabel } from "@/lib/geo";
 
@@ -18,12 +19,20 @@ const GeoMapCanvas = dynamic(() => import("./GeoMapCanvas"), {
 
 interface GeoMapPaneProps {
   photos: Photo[];
+  /** Per-workspace names for the seven colours, for the label dots' tooltips. */
+  labelNames: LabelNames;
   selectedIds: ReadonlySet<string>;
   onOpenAsset: (assetId: string) => void;
   onSelectAssets: (assetIds: string[]) => void;
 }
 
-export default function GeoMapPane({ photos, selectedIds, onOpenAsset, onSelectAssets }: GeoMapPaneProps) {
+export default function GeoMapPane({
+  photos,
+  labelNames,
+  selectedIds,
+  onOpenAsset,
+  onSelectAssets,
+}: GeoMapPaneProps) {
   const points = geoPointsFromPhotos(photos);
   const missing = missingLocationLabel(photos.length, points.length);
 
@@ -42,6 +51,7 @@ export default function GeoMapPane({ photos, selectedIds, onOpenAsset, onSelectA
         <>
           <GeoMapCanvas
             points={points}
+            labelNames={labelNames}
             selectedIds={selectedIds}
             onOpenAsset={onOpenAsset}
             onSelectAssets={onSelectAssets}

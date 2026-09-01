@@ -170,3 +170,39 @@ bottom bar, filtering on the left rail.
   photos carried each colour; the swatch row does not. Accepted — `labelCounts`
   is deleted rather than left dangling, and it is a pure function of the loaded
   photos if a future surface wants it back.
+
+
+## Amendment — 2026-09-01: the Map shows the colour it was already filtering by
+
+The amendment above retires the LABELS view on the grounds that "a colour is a
+marker you read on every tile in every view". Map was the exception that made
+that sentence untrue: `SortingActionBar` renders there, so you could *filter* the
+map by a colour, and the markers themselves never carried one. A photo marked
+red on the canvas lost its mark the moment it appeared on the map.
+
+**The dot is drawn per marker CELL, not per marker.** A cluster tiles up to four
+photos (ADR 0027's mosaic amendment), and a colour label belongs to a photo — so
+each tile of the mosaic carries its own dot or none, exactly as each canvas tile
+does. The alternative, summarising a cluster's colours into one row of dots, was
+rejected because the marker only carries the four photos it draws: a summary
+would silently describe those four while looking like it described the hundreds
+behind them.
+
+Placement differs from the canvas tile out of necessity rather than taste. On a
+tile the dot sits beside the filename, on the tile's own chrome; a map marker has
+no chrome, so the dot goes **on the photograph**, top-left inside its cell —
+the one corner nothing else uses, since the count badge hangs outside the
+opposite one. A 1.5 px dark ring is what keeps a yellow dot on a bright sky
+readable; without it the swatch washes out at exactly the size it is least
+recoverable.
+
+`GeoPoint.label` is non-optional (`AssetLabel | null`) rather than `label?:`,
+so a reader of the map's data cannot forget the field exists — which is how it
+went missing in the first place. `coverThumbs` becomes `coverCells`: the marker
+needed a second per-photo fact, and a parallel array of labels beside the
+thumbnails is the shape that drifts.
+
+The workspace's renamed colour names reach the marker (`labelNames` through
+`GeoMapPane`), so a dot's tooltip reads "Client picks" wherever the canvas says
+so rather than "red". The filter needed no work — `GeoMapPane` already receives
+`ws.visiblePhotos`, which is label-filtered.

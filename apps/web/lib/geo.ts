@@ -1,3 +1,4 @@
+import type { AssetLabel } from "@archivemind/shared";
 import type { Photo } from "@/types";
 
 /** Pure geo helpers for the Map view (ADR 0027). Everything here is
@@ -13,6 +14,11 @@ export interface GeoPoint {
   /** Presigned 256 px thumb; absent while previews are still being made. */
   thumb?: string;
   filename: string;
+  /** Colour label (ADR 0040), or null when nobody has marked this photo. The
+   *  map reads it for the same reason the canvas tile does: a colour is a
+   *  marker you should see on a photo wherever the photo appears, and Map was
+   *  the one surface that filtered BY the label without ever showing it. */
+  label: AssetLabel | null;
 }
 
 /** west, south, east, north — the order supercluster and MapLibre both use. */
@@ -43,6 +49,7 @@ export function geoPointsFromPhotos(photos: readonly Photo[]): GeoPoint[] {
       lat: gpsLat as number,
       thumb: p.src,
       filename: p.filename,
+      label: p.label ?? null,
     });
   }
   return points;

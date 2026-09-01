@@ -795,6 +795,7 @@ export default function ArchiveWorkspace({
       {ws.isMapView && (
         <GeoMapPane
           photos={ws.visiblePhotos}
+          labelNames={ws.labelNames}
           selectedIds={ws.selectedIds}
           onOpenAsset={ws.openDrawer}
           onSelectAssets={ws.selectSearchResults}

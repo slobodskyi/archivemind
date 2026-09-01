@@ -76,7 +76,10 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   full set and the filter is applied at one seam (`visibleTilePositions`), so
   artboards, folders and exports keep seeing the real geometry. **The LABELS
   sorting view is retired** and so is `LabelFilterPanel`; a colour is a marker
-  you read on every tile in every view, not a fourth way to sort. The seven
+  you read on every tile in every view, not a fourth way to sort — including
+  **on the Map**, where each marker cell carries the dot of the photo it shows
+  (ADR 0040's 2026-09-01 amendment; Map could filter by a colour without ever
+  drawing one). The seven
   names stay renameable in the data (`workspace_labels`, `PATCH /api/labels`)
   but have **no UI entry point** — deliberate, recorded in the ADR, don't
   "restore" it as a bug. Zero credits.
