@@ -1105,6 +1105,7 @@ export default function ArchiveWorkspace({
           selectionLabel={currentLabel}
           labelFilter={ws.labelFilter}
           onToggleLabelMenu={ws.toggleLabelMenu}
+          onCloseLabelMenu={ws.closeLabelMenu}
           onPickLabel={(label) => ws.labelSelection(label)}
           onSetFilter={ws.setLabelFilter}
         />
@@ -1130,6 +1131,7 @@ export default function ArchiveWorkspace({
           selectionLabel={currentLabel}
           labelFilter={ws.labelFilter}
           onToggleLabelMenu={ws.toggleLabelMenu}
+          onCloseLabelMenu={ws.closeLabelMenu}
           onPickLabel={(label) => ws.labelSelection(label)}
           onSetFilter={ws.setLabelFilter}
           topicMembership={
