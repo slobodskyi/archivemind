@@ -217,7 +217,10 @@ design from this file:**
   tag-driven connecting lines, now Topic-only), **0023** (tag-derived Topic clouds,
   now the *fallback*), **0028** (Topic clouds cluster by stored embedding k-means —
   the primary source of a photo's Topic now),
-  **0024** (Timeline as a per-day date axis; cloud focus/whole-cloud drag),
+  **0024** (Timeline as a per-day date axis; cloud focus/whole-cloud drag —
+  **read its 2026-09-01 amendment**: that axis is a three-tier day/month/year
+  ruler whose every thickness, font and chip is sized in SCREEN px, so it is
+  readable at any zoom),
   **0027** (Map as a real MapLibre geographic map over EXIF GPS; ADR 0026 for the
   offline reverse geocoding that labels it) and **0038** (Topic legibility —
   cluster-anchored overrides, core-anchored labels, Regroup / Re-cluster /

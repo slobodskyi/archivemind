@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { hexA, type CloudLayout, type CloudNode } from "@/lib/layout";
+import { hexA, timelineTierFits, type CloudLayout, type CloudNode } from "@/lib/layout";
 
 /** Extra margin the blurred backdrop blob extends past each cloud's tile bbox.
  *  Topic's soft blobs get a wide margin so the cloud reads as a large, easily
@@ -28,10 +28,11 @@ interface CloudDecorProps {
 }
 
 /** Backdrop for the grouping views (Timeline / Map / Topic): the blurred faded
- *  color cloud behind each group, the timeline date borders, and the connecting
- *  lines. Rendered *behind* the photo tiles; the labels render on top via
- *  CloudLabels. Tiles themselves are drawn by the shared ProjectAssetView so
- *  they persist (and animate) across every view (ADR 0022). */
+ *  color cloud behind each group and the connecting lines. Rendered *behind* the
+ *  photo tiles; the labels render on top via CloudLabels. Tiles themselves are
+ *  drawn by the shared ProjectAssetView so they persist (and animate) across
+ *  every view (ADR 0022). Timeline's axis and ruler are TimelineScale's, drawn
+ *  on this same layer — see the note where they used to be, below. */
 function CloudDecor({ layout, edgesReady, focusedCloudKey, dropTargetKey = null }: CloudDecorProps) {
   const dimOf = (key: string) => (key === dropTargetKey ? 1 : focusedCloudKey && key !== focusedCloudKey ? DIM : 1);
   // Timeline's day clouds are pinned bands, so paint them more strongly than
@@ -136,38 +137,11 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey, dropTargetKey = null 
         />
       ))}
 
-      {/* Timeline only: the horizontal date axis + a tick under each date label. */}
-      {layout.axis && (
-        <>
-          <div
-            style={{
-              position: "absolute",
-              left: layout.axis.x1,
-              top: layout.axis.y,
-              width: layout.axis.x2 - layout.axis.x1,
-              height: 0,
-              borderTop: "1px solid var(--bd)",
-              pointerEvents: "none",
-            }}
-          />
-          {layout.clouds.map((c) => (
-            <div
-              key={`tick-${c.key}`}
-              style={{
-                position: "absolute",
-                left: c.labelX,
-                top: layout.axis!.y - 4,
-                width: 0,
-                height: 9,
-                borderLeft: `2px solid ${c.color}`,
-                opacity: dimOf(c.key),
-                transform: "translateX(-50%)",
-                pointerEvents: "none",
-              }}
-            />
-          ))}
-        </>
-      )}
+      {/* Timeline's own chrome — the axis line, its day ticks and the month/year
+          ruler — lives in TimelineScale, which is drawn on the same layer: every
+          part of it is sized in SCREEN px, so it needs the live zoom, and giving
+          this component that prop would re-render the blobs and the tag web on
+          each wheel tick for nothing. */}
 
       <svg style={{ position: "absolute", left: 0, top: 0, width: 1600, height: 1100, overflow: "visible", pointerEvents: "none", opacity: edgesReady ? 1 : 0, transition: "opacity .3s ease" }}>
         <defs>
@@ -206,6 +180,11 @@ function CloudDecor({ layout, edgesReady, focusedCloudKey, dropTargetKey = null 
 interface CloudLabelsProps {
   layout: CloudLayout;
   focusedCloudKey: string | null;
+  /** Live canvas zoom. Timeline only (its day labels are a ruler tier and are
+   *  drawn at a constant on-screen size, like the rest of TimelineScale); Topic
+   *  leaves it at 1, so its labels keep zooming with their clouds and this
+   *  component keeps skipping re-renders while panning there. */
+  scale?: number;
   /** Pointer-down on a label: drag it to move the whole cloud, or click (no
    *  drag) to focus it and fade the rest (ADR 0024). */
   onCloudLabelDown: (e: React.PointerEvent, cloudKey: string) => void;
@@ -234,6 +213,7 @@ const RENAME_DOUBLE_CLICK_SLOP = 6;
 function CloudLabelsBase({
   layout,
   focusedCloudKey,
+  scale = 1,
   onCloudLabelDown,
   onRenameCloud,
   canRenameCloud,
@@ -292,9 +272,19 @@ function CloudLabelsBase({
   // `isEditing` is only ever true for a cloud this render is drawing, and
   // `commit` clears the state and writes nothing on the next press.
 
+  // Timeline's day labels are the finest tier of a ruler, so they are drawn at
+  // a constant on-screen size and drop out entirely once a day column is too
+  // narrow to hold "DD/MM/YYYY" — the month and year rows below the axis carry
+  // the reading from there. Dropping them rather than fading them is deliberate:
+  // a 4px-wide label nobody can read is still a drag handle for a whole day's
+  // files, and a smear of them is what made a zoomed-out timeline illegible.
+  const axis = layout.axis;
+  const dayTier = axis ? timelineTierFits(axis.columnW, scale, "day") : true;
+  const labelled = dayTier ? layout.clouds : [];
+
   return (
     <>
-      {layout.clouds.map((c) => {
+      {labelled.map((c) => {
         const isEditing = editing?.key === c.key;
         const isDropTarget = dropTargetKey === c.key;
         const dim = isDropTarget ? 1 : focusedCloudKey && c.key !== focusedCloudKey && !isEditing ? DIM : 1;
@@ -345,8 +335,16 @@ function CloudLabelsBase({
             style={{
               position: "absolute",
               left: c.labelX,
-              top: c.labelY - 34,
-              transform: `translateX(-50%)${isDropTarget ? " scale(1.05)" : ""}`,
+              // Topic hangs its label above the cloud in content px. Timeline
+              // anchors it ON the axis instead and counter-scales from there —
+              // transform-origin at that anchor, so the scale grows the label
+              // about the tick and scales the translate that sits it 10px clear
+              // of the line with it. Same date, same size, at every zoom.
+              top: axis ? c.labelY : c.labelY - 34,
+              transformOrigin: axis ? "0 0" : undefined,
+              transform: axis
+                ? `scale(${1 / scale}) translate(-50%, calc(-100% - 10px))`
+                : `translateX(-50%)${isDropTarget ? " scale(1.05)" : ""}`,
               padding: "3px 8px",
               whiteSpace: "nowrap",
               fontSize: 15,

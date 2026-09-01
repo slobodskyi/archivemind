@@ -14,6 +14,7 @@ import FolderOverlay from "@/components/canvas/FolderOverlay";
 import StickyNoteOverlay from "@/components/canvas/StickyNoteOverlay";
 import ProjectAssetView from "@/components/canvas/ProjectAssetView";
 import CloudDecor, { CloudLabels } from "@/components/canvas/CloudDecor";
+import TimelineScale, { TimelineScaleLabels } from "@/components/canvas/TimelineScale";
 import GeoMapPane from "@/components/map/GeoMapPane";
 import AppHeader from "@/components/header/AppHeader";
 import ViewSwitcher from "@/components/toolbar/ViewSwitcher";
@@ -726,6 +727,10 @@ export default function ArchiveWorkspace({
             dropTargetKey={ws.isSenseView ? ws.topicDropTargetKey : null}
           />
         )}
+        {/* Timeline's axis and its month/year ruler. Drawn after the day blobs
+            so the structure sits on top of the haze rather than under it, and
+            still behind the tiles — only the ruler's own labels go over them. */}
+        {ws.cloudDecor?.axis && <TimelineScale layout={ws.cloudDecor} scale={ws.scale} focusedCloudKey={ws.focusedCloudKey} />}
         <ProjectAssetView
           // visiblePhotos, not projectPhotos: the label filter narrows what is
           // DRAWN while every layout above still runs over the full set, so a
@@ -753,6 +758,10 @@ export default function ArchiveWorkspace({
           <CloudLabels
             layout={ws.cloudDecor}
             focusedCloudKey={ws.focusedCloudKey}
+            // Timeline only: its day labels are the ruler's finest tier and are
+            // sized in screen px. Topic's zoom with their clouds, so it keeps
+            // the default and this component keeps skipping the zoom renders.
+            scale={ws.isTimelineView ? ws.scale : 1}
             onCloudLabelDown={ws.onCloudLabelDown}
             // Topic is the only view whose cloud names mean anything a user can
             // set — a rename there pins a cluster's label (ADR 0038). Timeline's
@@ -774,6 +783,10 @@ export default function ArchiveWorkspace({
             dropCount={ws.selectedIds.size}
           />
         )}
+        {/* The ruler's own month/year chips, over the tiles: at a small zoom
+            they are the only thing left that says WHEN, so a photo that happens
+            to sit under the axis must not bury them. */}
+        {ws.cloudDecor?.axis && <TimelineScaleLabels layout={ws.cloudDecor} scale={ws.scale} />}
       </PanZoomCanvas>
 
       {/* MAP is the one view that is not a sort of the canvas tiles — it is a

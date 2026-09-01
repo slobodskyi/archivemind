@@ -437,6 +437,44 @@ describe("cloud connecting lines (shared-AI-tag relations, ADR 0022)", () => {
     expect(layout.tiles.c.cx).toBe(x);
   });
 
+  it("groups the day columns into month and year spans that cover them exactly", () => {
+    const at = (d: string) => ({ ...photo("x").exif, dateTaken: d });
+    const layout = timelineAxisLayout(
+      [
+        photo("a", { exif: at("2025-12-30 09:00") }),
+        photo("b", { exif: at("2026-01-04 09:00") }),
+        photo("c", { exif: at("2026-01-31 09:00") }),
+        photo("d", { exif: at("2026-03-02 09:00") }),
+        photo("e", { exif: at("2026-03-02 18:00") }),
+      ],
+      {},
+    );
+    const axis = layout.axis!;
+    // One span per month/year run, chronological, labelled for the ruler.
+    expect(axis.months.map((m) => [m.key, m.label])).toEqual([
+      ["2025-12", "DEC"],
+      ["2026-01", "JAN"],
+      ["2026-03", "MAR"],
+    ]);
+    expect(axis.years.map((y) => [y.label, y.count])).toEqual([
+      ["2025", 1],
+      ["2026", 4],
+    ]);
+    // A span covers its own columns and nothing else: the January span is two
+    // columns wide, starts where December ends, and centers between them.
+    const [dec, jan] = axis.months;
+    expect(jan.x1).toBe(dec.x2);
+    expect(jan.x2 - jan.x1).toBe(axis.columnW * 2);
+    expect(jan.cx).toBe((jan.x1 + jan.x2) / 2);
+    // The tiers tile the axis end to end — no gap a date could fall into.
+    expect(axis.months[0].x1).toBe(axis.x1);
+    expect(axis.years[axis.years.length - 1].x2).toBe(axis.x2);
+    expect(axis.years[1].x1).toBe(axis.years[0].x2);
+    // Same day twice is one column, so its month counts photos, not columns.
+    expect(axis.months[2].count).toBe(2);
+    expect(axis.months[2].x2 - axis.months[2].x1).toBe(axis.columnW);
+  });
+
   it("buckets malformed capture dates on the local 1970-01-01 epoch day", () => {
     const layout = timelineAxisLayout(
       [photo("bad", { exif: { ...photo("x").exif, dateTaken: "not a date" } })],

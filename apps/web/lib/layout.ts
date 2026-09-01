@@ -578,6 +578,10 @@ function dayLabel(key: string): string {
   return `${d}/${m}/${y}`;
 }
 
+/** The month tier spells its name where the day tier is numeric: three letters
+ *  are read at a glance and can never be misread as a day number. */
+const MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
 // ── Timeline / Map / Topic: freeform clusters ("clouds") connected by lines ─
 // Each cluster ("cloud") is a group of photo tiles packed together, labeled on
 // its colored backdrop. Connecting lines are REAL relations (ADR 0022): two
@@ -643,9 +647,62 @@ export interface CloudLayout {
   /** Which cloud each tile belongs to (tile id → cloud key) — lets the renderer
    *  fade non-focused clouds and drag a whole cloud by its label (ADR 0024). */
   tileCloud: Record<string, string>;
-  /** Present only for the Timeline view: a horizontal date axis to draw, with a
-   *  tick at each cloud's `labelX`. Map/Topic leave this undefined. */
-  axis?: { y: number; x1: number; x2: number };
+  /** Present only for the Timeline view: the date axis to draw — a tick at each
+   *  cloud's `labelX`, and the month/year tiers over the same columns. Map/Topic
+   *  leave this undefined, which is also how a renderer tells the two apart. */
+  axis?: TimelineAxis;
+}
+
+/** One coarser tier of the Timeline's axis — a month or a year — as the union
+ *  of the day columns it covers, in content coordinates (ADR 0024 amendment).
+ *  Days are evenly spaced regardless of the real time between them, so a month
+ *  or a year is simply a run of consecutive columns and can never be a gap. */
+export interface TimeSpan {
+  /** "YYYY-MM" for a month, "YYYY" for a year — sortable, never displayed. */
+  key: string;
+  /** What the ruler prints: "JUL" / "2026". */
+  label: string;
+  x1: number;
+  x2: number;
+  /** Where the label sits: the middle of the span. */
+  cx: number;
+  /** Photos inside the span — the year row prints it once the day tier is too
+   *  small to read, which is exactly when the shape of the archive is the only
+   *  thing a zoomed-out timeline can still say. */
+  count: number;
+}
+
+export interface TimelineAxis {
+  y: number;
+  x1: number;
+  x2: number;
+  /** Width of ONE day column in content px. The renderer multiplies it by the
+   *  live zoom to get the room a day label has on screen, which is what decides
+   *  whether the day tier is legible at all (`timelineTierFits`). */
+  columnW: number;
+  /** The two coarser tiers over the same columns, in chronological order. */
+  months: TimeSpan[];
+  years: TimeSpan[];
+}
+
+/** How much room (in SCREEN px, not content px) each tier of the axis needs
+ *  before its label is worth drawing. Every label there is drawn at a constant
+ *  on-screen size — that is what makes the timeline readable at any zoom — so
+ *  the only question left is whether the span under it is still wide enough to
+ *  hold the label clear of its neighbour. Each value is the widest label the
+ *  tier can print, plus its chip and a gap: "DD/MM/YYYY", "2026", "SEP", and
+ *  "2026 · 412" for the year that also prints its photo count. */
+const TIMELINE_TIER_MIN_PX = { day: 140, year: 62, yearCount: 124, month: 52 } as const;
+
+export type TimelineTier = keyof typeof TIMELINE_TIER_MIN_PX;
+
+/** Does `width` (content px — a day column, or a month/year span) still hold
+ *  that tier's label once the canvas is at `scale`? This is the whole level-of-
+ *  detail rule of the timeline ruler: the day tier hands over to months and
+ *  months to years as the zoom shrinks their spans, and a year — whose span is
+ *  all of its months — is what survives to the bottom. */
+export function timelineTierFits(width: number, scale: number, tier: TimelineTier): boolean {
+  return width * scale >= TIMELINE_TIER_MIN_PX[tier];
 }
 
 const UNSORTED_CLOUD_COLOR = "#8a8f98";
@@ -1077,6 +1134,34 @@ const TL_COLS = 3; // files per row within one day's column
 const TL_CELL_W = 156;
 const TL_CELL_H = 136;
 const TL_AXIS_GAP = 50; // clear half-band around the axis for the line + label
+// Room reserved BELOW the axis for the month/year ruler rows, so a fit keeps
+// them on screen even for a project whose days all sit above the line.
+const TL_RULER_H = 56;
+
+/** Groups the day columns into the coarser tier `keyOf` names (a month, a year)
+ *  and returns each run as one span. Days are evenly spaced and sorted, so a
+ *  tier's columns are always consecutive — a span is a range, never a set. */
+function axisSpans(
+  dayKeys: readonly string[],
+  countOf: (dayKey: string) => number,
+  keyOf: (dayKey: string) => string,
+  labelOf: (spanKey: string) => string,
+): TimeSpan[] {
+  const spans: TimeSpan[] = [];
+  dayKeys.forEach((dayKey, i) => {
+    const key = keyOf(dayKey);
+    const x1 = TL_LEFT + i * TL_DATE_GAP - TL_DATE_GAP / 2;
+    const last = spans[spans.length - 1];
+    if (last && last.key === key) {
+      last.x2 = x1 + TL_DATE_GAP;
+      last.count += countOf(dayKey);
+    } else {
+      spans.push({ key, label: labelOf(key), x1, x2: x1 + TL_DATE_GAP, cx: 0, count: countOf(dayKey) });
+    }
+  });
+  for (const s of spans) s.cx = (s.x1 + s.x2) / 2;
+  return spans;
+}
 
 /** Timeline: evenly-spaced date columns. Each distinct capture day gets a fixed
  *  x (equal gap between labels, independent of the real time between them); its
@@ -1167,19 +1252,28 @@ export function timelineAxisLayout(
     });
   });
 
-  const axis = {
+  const countOf = (dayKey: string) => byDay[dayKey].length;
+  const axis: TimelineAxis = {
     y: TL_AXIS_Y,
     x1: TL_LEFT - TL_DATE_GAP / 2,
     x2: TL_LEFT + (dayKeys.length - 1) * TL_DATE_GAP + TL_DATE_GAP / 2,
+    columnW: TL_DATE_GAP,
+    // The coarser tiers of the same axis. A day column is unreadable long
+    // before the timeline stops being worth looking at, so zooming out has to
+    // hand the structure over to something bigger rather than to nothing.
+    months: axisSpans(dayKeys, countOf, (k) => k.slice(0, 7), (k) => MONTH_ABBR[Number(k.slice(5, 7)) - 1] ?? k),
+    years: axisSpans(dayKeys, countOf, (k) => k.slice(0, 4), (k) => k),
   };
   // Bounds cover the axis line, ticks and date labels on every side — not just
   // the top — so fit/centering keeps the axis with the tiles (e.g. a project of
-  // single-photo days has no below-axis tiles at all).
+  // single-photo days has no below-axis tiles at all). Below the line that
+  // means the ruler rows too, which hang under the axis whether or not any file
+  // does.
   const bounds = positionsBounds(tiles);
   bounds.xl = Math.min(bounds.xl, axis.x1);
   bounds.xr = Math.max(bounds.xr, axis.x2);
   bounds.yt = Math.min(bounds.yt, TL_AXIS_Y - 44);
-  bounds.yb = Math.max(bounds.yb, TL_AXIS_Y + 10);
+  bounds.yb = Math.max(bounds.yb, TL_AXIS_Y + TL_RULER_H);
   return { clouds, tiles, edges: [], tileCloud, bounds, axis };
 }
 
