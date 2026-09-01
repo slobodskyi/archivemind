@@ -4,12 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type Map as MapLibreMap, type StyleSpecification } from "maplibre-gl";
 import type Supercluster from "supercluster";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import { boundsOf, formatCount, markerSize, mosaicCells, type GeoPoint } from "@/lib/geo";
+import { LABEL_COLORS } from "@/lib/labels";
 import {
   buildClusterIndex,
-  coverThumbs,
+  coverCells,
   MAX_ZOOM,
   type ClusterProps,
+  type MarkerCell,
   type PointProps,
 } from "@/lib/geo-cluster";
 import { applyArchiveMindTheme, BASEMAP_STYLE_URL } from "@/lib/map-style";
@@ -25,12 +28,21 @@ import { applyArchiveMindTheme, BASEMAP_STYLE_URL } from "@/lib/map-style";
 
 interface GeoMapCanvasProps {
   points: readonly GeoPoint[];
+  /** The workspace's names for the seven colours — a dot's tooltip has to read
+   *  "Client picks" wherever the canvas says so, not "red" (ADR 0040). */
+  labelNames: LabelNames;
   selectedIds: ReadonlySet<string>;
   onOpenAsset: (assetId: string) => void;
   onSelectAssets: (assetIds: string[]) => void;
 }
 
-export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelectAssets }: GeoMapCanvasProps) {
+export default function GeoMapCanvas({
+  points,
+  labelNames,
+  selectedIds,
+  onOpenAsset,
+  onSelectAssets,
+}: GeoMapCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
@@ -84,7 +96,10 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
       const el = buildMarkerElement({
         count: cluster ? cluster.point_count : 1,
         // Newest first — the mosaic reads top-left to bottom-right.
-        thumbs: cluster ? coverThumbs(cluster.cover, points) : [point?.thumb],
+        cells: cluster
+          ? coverCells(cluster.cover, points)
+          : [{ thumb: point?.thumb, label: point?.label ?? null }],
+        labelNames,
         selected: point != null && selectedIds.has(point.assetId),
       });
 
@@ -122,7 +137,7 @@ export default function GeoMapCanvas({ points, selectedIds, onOpenAsset, onSelec
         markersRef.current.delete(key);
       }
     }
-  }, [index, points, pointsById, selectedIds, onOpenAsset]);
+  }, [index, points, labelNames, pointsById, selectedIds, onOpenAsset]);
 
   // Style is fetched rather than passed by URL so it can be recoloured before
   // the first paint; handing MapLibre the URL shows a frame of stock styling.
@@ -302,6 +317,27 @@ function thumbBackground(thumb: string | undefined): string {
   return thumb ? `center/cover url("${thumb}")` : "var(--bg-in)";
 }
 
+/** The colour label a person put on this photo (ADR 0040), drawn on the
+ *  photograph itself. On a canvas tile the dot sits beside the filename, on the
+ *  tile's own chrome; a map marker has no chrome, so it goes top-left inside
+ *  the cell — the one corner nothing else uses, since the count badge hangs
+ *  outside the opposite one. The dark ring is what keeps it visible on a bright
+ *  photo, where the swatch alone would wash out. */
+function labelDot(label: AssetLabel, name: string, cells: number): HTMLElement {
+  const size = cells > 1 ? 6 : 7;
+  const dot = document.createElement("span");
+  // The colour is the only carrier of this meaning, so the name has to reach a
+  // screen reader some other way — same reasoning as PhotoTile's dot.
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", name);
+  dot.title = name;
+  dot.style.cssText =
+    `position:absolute;top:3px;left:3px;width:${size}px;height:${size}px;` +
+    `border-radius:50%;background:${LABEL_COLORS[label]};` +
+    `box-shadow:0 0 0 1.5px rgba(0,0,0,.55);pointer-events:none;`;
+  return dot;
+}
+
 /** The grid a mosaic of N photos is laid out on. Two and three split into ROWS
  *  rather than columns: a half-width cell crops a landscape photo — which most
  *  of an archive is — down to a vertical sliver of its middle, while a
@@ -317,12 +353,14 @@ function mosaicGrid(cells: number): string {
  *  React's reconciler is what makes panning cheap. */
 function buildMarkerElement({
   count,
-  thumbs,
+  cells: cellData,
+  labelNames,
   selected,
 }: {
   count: number;
   /** Newest first — the mosaic fills top-left to bottom-right. */
-  thumbs: readonly (string | undefined)[];
+  cells: readonly MarkerCell[];
+  labelNames: LabelNames;
   selected: boolean;
 }): HTMLElement {
   const size = markerSize(count);
@@ -372,9 +410,11 @@ function buildMarkerElement({
   for (let i = 0; i < cells; i += 1) {
     const cell = document.createElement("div");
     cell.style.cssText =
-      `background:${thumbBackground(thumbs[i])};` +
+      `position:relative;background:${thumbBackground(cellData[i]?.thumb)};` +
       // Three photos: the newest takes the full-width top row.
       (cells === 3 && i === 0 ? "grid-column:span 2;" : "");
+    const label = cellData[i]?.label;
+    if (label) cell.appendChild(labelDot(label, labelNames[label], cells));
     plate.appendChild(cell);
   }
   inner.appendChild(plate);

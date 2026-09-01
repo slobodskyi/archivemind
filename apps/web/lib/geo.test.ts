@@ -100,15 +100,15 @@ describe("boundsOf", () => {
 
   it("spans every point, west/south/east/north", () => {
     const bounds = boundsOf([
-      { assetId: "a", lng: 30.5, lat: 50.4, filename: "a" },
-      { assetId: "b", lng: 24.0, lat: 49.8, filename: "b" },
-      { assetId: "c", lng: 36.2, lat: 50.0, filename: "c" },
+      { assetId: "a", lng: 30.5, lat: 50.4, filename: "a", label: null },
+      { assetId: "b", lng: 24.0, lat: 49.8, filename: "b", label: null },
+      { assetId: "c", lng: 36.2, lat: 50.0, filename: "c", label: null },
     ]);
     expect(bounds).toEqual([24.0, 49.8, 36.2, 50.4]);
   });
 
   it("pads a zero-extent box so a single photo doesn't fit to maximum zoom", () => {
-    const bounds = boundsOf([{ assetId: "a", lng: 30.5, lat: 50.4, filename: "a" }]);
+    const bounds = boundsOf([{ assetId: "a", lng: 30.5, lat: 50.4, filename: "a", label: null }]);
     expect(bounds).not.toBeNull();
     const [w, s, e, n] = bounds as [number, number, number, number];
     expect(e - w).toBeGreaterThan(0);

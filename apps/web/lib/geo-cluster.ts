@@ -1,4 +1,5 @@
 import Supercluster from "supercluster";
+import type { AssetLabel } from "@archivemind/shared";
 import { CLUSTER_COVER_LIMIT, mergeCoverIndices, type GeoPoint } from "./geo";
 
 /** The Map view's clustering (ADR 0027). Kept out of `lib/geo.ts` because that
@@ -10,6 +11,7 @@ export interface PointProps {
   assetId: string;
   thumb?: string;
   filename: string;
+  label: AssetLabel | null;
   /** Position in the caller's newest-first array — see `cover` below. */
   idx: number;
 }
@@ -45,18 +47,31 @@ export function buildClusterIndex(points: readonly GeoPoint[]): Supercluster<Poi
   index.load(
     points.map((p, idx) => ({
       type: "Feature" as const,
-      properties: { assetId: p.assetId, thumb: p.thumb, filename: p.filename, idx },
+      properties: { assetId: p.assetId, thumb: p.thumb, filename: p.filename, label: p.label, idx },
       geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
     })),
   );
   return index;
 }
 
-/** The photos a cluster marker wears: cover first, then the prints behind it.
- *  A missing thumbnail stays `undefined` — previews arrive after the row. */
-export function coverThumbs(
-  cover: readonly number[],
-  points: readonly GeoPoint[],
-): (string | undefined)[] {
-  return cover.slice(0, CLUSTER_COVER_LIMIT).map((i) => points[i]?.thumb);
+/** One tile of a marker's mosaic: the photograph and, if a person marked it,
+ *  its colour. A cell rather than a bare thumbnail because the colour label
+ *  belongs to the PHOTO, and the mosaic shows photos — so the dot is drawn per
+ *  cell instead of summarised for the cluster, which could only ever describe
+ *  the four we carry rather than the hundreds we do not. */
+export interface MarkerCell {
+  /** Absent while previews are still being made. */
+  thumb?: string;
+  label: AssetLabel | null;
+}
+
+/** The photos a cluster marker tiles, newest first. A cover index with no
+ *  point behind it yields an empty cell rather than being dropped: the mosaic's
+ *  shape is decided by the cluster's SIZE, so silently shrinking it here would
+ *  make a grid and its cell list disagree. */
+export function coverCells(cover: readonly number[], points: readonly GeoPoint[]): MarkerCell[] {
+  return cover.slice(0, CLUSTER_COVER_LIMIT).map((i) => {
+    const p = points[i];
+    return { thumb: p?.thumb, label: p?.label ?? null };
+  });
 }
