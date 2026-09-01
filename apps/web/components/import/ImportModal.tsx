@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useGdriveConnection } from "@/hooks/useGdriveConnection";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import { driveErrorMessage } from "@/lib/drive-errors";
@@ -13,7 +13,12 @@ import {
   useOneDriveConnection,
   useOneDriveRedirectResult,
 } from "@/hooks/useOneDriveConnection";
-import { DriveAuthError, openDrivePicker, requestPickerToken } from "@/lib/google-identity";
+import {
+  DriveAuthError,
+  isPickerBlockedHere,
+  openDrivePicker,
+  requestPickerToken,
+} from "@/lib/google-identity";
 import { MODAL_BACKDROP, MODAL_BLUR, Z } from "@/lib/ui";
 import {
   createUploadBatchId,
@@ -58,6 +63,12 @@ interface LocalUploadResult {
   errors: string[];
   hiddenErrorCount: number;
 }
+
+/** Module-level so their identities are stable across renders — see the
+ *  useSyncExternalStore call that reads whether this browser can run the
+ *  Google Picker at all. */
+const subscribeNever = () => () => {};
+const returnFalse = () => false;
 
 const MAX_VISIBLE_UPLOAD_ERRORS = 3;
 const EMPTY_SKIP_COUNTS: Record<UploadSkipReason, number> = {
@@ -163,6 +174,15 @@ export default function ImportModal({
   const [driveProg, setDriveProg] = useState<{ submitted: number; total: number }>({ submitted: 0, total: 0 });
   const [driveResult, setDriveResult] = useState<DriveImportResult | null>(null);
   const { gdrive, refresh: refreshGdrive, connect: connectGdrive } = useGdriveConnection(notifyDrive);
+  // The server cannot know the UA the page will land on, so this reads false
+  // there and the real answer in the browser — which is precisely the mismatch
+  // useSyncExternalStore's third argument exists to bridge. Nothing to
+  // subscribe to: a UA does not change mid-session.
+  const pickerBlocked = useSyncExternalStore(
+    subscribeNever,
+    isPickerBlockedHere,
+    returnFalse,
+  );
 
   const busyDrive = drivePhase === "picking" || drivePhase === "importing";
   const [dbxMsg, setDbxMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
@@ -488,6 +508,7 @@ export default function ImportModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="am-import-card"
         style={{
           width: 660,
           maxWidth: "92vw",
@@ -501,24 +522,24 @@ export default function ImportModal({
           boxShadow: "0 30px 90px rgba(0,0,0,.6)",
         }}
       >
-        {/* ── left: sources ─────────────────────────────────────────── */}
-        <div style={{ width: 186, flex: "0 0 auto", background: "var(--bg)", borderRight: "1px solid var(--bd)", padding: 14, display: "flex", flexDirection: "column" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", padding: "2px 6px 14px" }}>Add files</div>
-          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--tm)", padding: "0 6px 8px" }}>
+        {/* ── left: sources (a scrolling row above the pane on a phone) ── */}
+        <div className="am-import-rail" style={{ width: 186, flex: "0 0 auto", background: "var(--bg)", borderRight: "1px solid var(--bd)", padding: 14, display: "flex", flexDirection: "column" }}>
+          <div className="am-import-railmeta" style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)", padding: "2px 6px 14px" }}>Add files</div>
+          <div className="am-import-railmeta" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--tm)", padding: "0 6px 8px" }}>
             Source
           </div>
           <SourceItem label="Local files" active={source === "local"} onClick={() => setSource("local")} icon={<UploadIcon />} />
           <SourceItem label="Google Drive" active={source === "gdrive"} onClick={() => setSource("gdrive")} icon={<CloudIcon />} />
           <SourceItem label="Dropbox" active={source === "dropbox"} onClick={() => setSource("dropbox")} icon={<CloudIcon />} />
           <SourceItem label="OneDrive" active={source === "onedrive"} onClick={() => setSource("onedrive")} icon={<CloudIcon />} />
-          <div style={{ flex: 1 }} />
-          <div style={{ fontSize: 10.5, color: "var(--tm)", padding: "0 6px", lineHeight: 1.5 }}>
+          <div className="am-import-railmeta" style={{ flex: 1 }} />
+          <div className="am-import-railmeta" style={{ fontSize: 10.5, color: "var(--tm)", padding: "0 6px", lineHeight: 1.5 }}>
             {isProject ? `Files are added to “${projectName}”.` : "Files are added to your archive."}
           </div>
         </div>
 
         {/* ── right: upload area ────────────────────────────────────── */}
-        <div style={{ flex: 1, padding: 16, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div className="am-import-pane" style={{ flex: 1, padding: 16, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <span style={{ fontSize: 12.5, color: "var(--t2)" }}>
               {source === "local"
@@ -650,6 +671,14 @@ export default function ImportModal({
                     </button>
                   </div>
                 </>
+              ) : pickerBlocked ? (
+                <PickerBlockedNotice
+                  connected={gdrive.connected}
+                  busy={busyDrive || gdrive.busy}
+                  message={driveMsg}
+                  onUseLocal={() => setSource("local")}
+                  onTryAnyway={() => (gdrive.connected ? void pickFromDrive() : void connectGdrive())}
+                />
               ) : !gdrive.connected ? (
                 <>
                   <div style={{ fontSize: 13, color: "var(--t2)" }}>Connect your Google Drive to pick files</div>
@@ -894,6 +923,64 @@ export default function ImportModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** iOS blocks the cross-site cookies Google's picker frame reads, so on an
+ *  iPhone or iPad the frame shows Google's own "Can't access your Google
+ *  Account" page instead of the file list (lib/google-identity.ts). Lead with
+ *  the path that actually works — iOS's file picker lists Drive as a location —
+ *  but keep the picker reachable, because the check behind this is a UA sniff
+ *  and a sniff must not be the last word on whether a browser can do something. */
+export function PickerBlockedNotice({
+  connected,
+  busy,
+  message,
+  onUseLocal,
+  onTryAnyway,
+}: {
+  connected: boolean;
+  busy: boolean;
+  message: { text: string; kind: "ok" | "error" } | null;
+  onUseLocal: () => void;
+  onTryAnyway: () => void;
+}) {
+  return (
+    <>
+      <div style={{ fontSize: 13, color: "var(--t1)", fontWeight: 700 }}>
+        Drive picking doesn&rsquo;t work on iPhone or iPad
+      </div>
+      {/* --t2, not the pane's inherited --tm: every other pane uses that alpha
+          for a one-line aside, but this copy IS the screen, and .2 on --bg does
+          not clear 3:1. */}
+      <div style={{ fontSize: 11.5, maxWidth: 340, lineHeight: 1.5, color: "var(--t2)" }}>
+        Google&rsquo;s picker needs cross-site cookies, and every iOS browser blocks them — so it
+        shows &ldquo;Can&rsquo;t access your Google Account&rdquo; instead of your files. Signing in
+        again won&rsquo;t change it.
+      </div>
+      <div style={{ fontSize: 11.5, maxWidth: 340, lineHeight: 1.5, color: "var(--t2)" }}>
+        Use <strong style={{ color: "var(--t1)", fontWeight: 700 }}>Local files</strong>: iOS&rsquo;s
+        own file picker reaches Google Drive directly if you have the Drive app installed.
+      </div>
+      {message && (
+        <div style={{ fontSize: 10.5, color: message.kind === "ok" ? "var(--ac)" : "var(--red)" }}>
+          {message.text}
+        </div>
+      )}
+      <button
+        onClick={onUseLocal}
+        style={{ marginTop: 4, padding: "8px 16px", background: "var(--ac)", color: "#050505", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+      >
+        Upload from this device
+      </button>
+      <button
+        onClick={onTryAnyway}
+        disabled={busy}
+        style={{ padding: "2px 4px", background: "transparent", color: "var(--t3)", border: 0, fontSize: 10.5, textDecoration: "underline", cursor: busy ? "default" : "pointer", fontFamily: "inherit" }}
+      >
+        {connected ? "Try the picker anyway" : "Connect Google Drive anyway"}
+      </button>
+    </>
   );
 }
 

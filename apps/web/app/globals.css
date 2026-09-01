@@ -596,6 +596,49 @@ textarea {
     width: 16px;
     height: 16px;
   }
+
+  /* ImportModal's 186px source rail is a desktop split: on a 375px phone it
+     leaves the pane 81px of text — narrower than most of the words in it, and
+     the Drive pane's "why this doesn't work here" notice is unreadable at that
+     width. Stack instead: sources become a scrolling row above the pane, which
+     then gets the card's full width. The rail's own chrome (title, section
+     label, the project footnote) drops — the pane header already names the
+     selected source, and the modal is opened from inside the project. */
+  .am-import-card {
+    flex-direction: column !important;
+    height: auto !important;
+    max-height: 92vh !important;
+  }
+
+  .am-import-rail {
+    width: 100% !important;
+    flex-direction: row !important;
+    gap: 4px;
+    align-items: center;
+    padding: 8px !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--bd) !important;
+    /* Both axes stated: `overflow-x` alone computes the other one to auto. */
+    overflow: auto hidden;
+  }
+
+  /* A source in a scroller HOLDS its width — the desktop's full-width button
+     would otherwise squeeze all four into unreadable stubs. */
+  .am-import-rail > button {
+    width: auto !important;
+    flex: 0 0 auto;
+  }
+
+  .am-import-railmeta {
+    display: none !important;
+  }
+
+  /* `height: auto` on the card collapses `flex: 1` children onto their content,
+     which would shrink the drop zone to the height of its own label. */
+  .am-import-pane {
+    min-height: 300px;
+    overflow: hidden auto;
+  }
 }
 
 ::-webkit-scrollbar {
