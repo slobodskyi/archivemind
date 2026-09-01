@@ -89,3 +89,53 @@ same glide).
 - `timelineCloudLayout`, `monthOf` and the month helpers are gone; Timeline no
   longer passes `frames` (no lines to detach — frames still draw and tiles can
   still be dropped on them, it just has no web to leave).
+
+## Amendment — 2026-09-01: the axis is a three-tier ruler, drawn in screen px
+
+The decision above put one tier on the axis — the day — and drew it, like
+everything else on the canvas, in **content** coordinates. That is correct for a
+photo (a tile 148px wide *is* 148px of archive) and wrong for a ruler: at 30%
+zoom a 15px date renders at 4.5px and the 1px axis line at 0.3px, so the view
+that exists to say *when* stopped saying anything long before it stopped being
+useful to look at. Zooming out to see the shape of an archive is the normal way
+to use a timeline, so this was not an edge case.
+
+- **Three tiers, one axis.** `timelineAxisLayout` now also returns
+  `axis.months` and `axis.years` (`TimeSpan[]`): the union of the day columns
+  each covers, in content coordinates. Days are evenly spaced and sorted, so a
+  month or a year is always a run of consecutive columns — a range, never a
+  set — and the tiers tile the axis end to end with no gap a date could fall
+  into. `axis.columnW` carries one day column's width for the same reason.
+- **Everything the ruler draws is sized in SCREEN px** — every thickness, gap,
+  font and chip is divided by the live zoom (`components/canvas/TimelineScale.tsx`),
+  so the axis line, its ticks, the day labels and the month/year rows are the
+  same size at 8% as at 400%. Spans, brackets and stripes stay content-sized:
+  those are real geometry. The two kinds are never mixed in one value.
+- **Level of detail is one rule, per span** (`timelineTierFits`): a tier draws
+  its label only while its own span is still wide enough on screen to hold it
+  clear of its neighbour. So the day tier hands over to months and months to
+  years as the zoom shrinks them, and a year — whose span is all of its
+  months — survives to the bottom. Per span, not per tier: a fortnight-long
+  month beside a one-day month has genuinely different room. Below the day
+  tier a year also prints its photo count, which is the one thing a timeline
+  can still say when its files are 6px tall.
+- **Day labels drop out rather than fade** once a column is too narrow for
+  `DD/MM/YYYY`. They are drag handles for a whole day (above), and a 4px-wide
+  handle nobody can read is worse than none — the months and years below the
+  axis are the reading from there.
+- **Structure is drawn, not only labelled:** alternating year stripes and a
+  year boundary through the full content height, plus month boundaries once
+  months are the finest readable tier. This is what makes a zoomed-out
+  timeline legible as *periods* instead of as an even row of columns.
+- The ruler takes **no pointer events** and the layout reserves room for it
+  below the axis (`bounds.yb`), so it never eats a drag and a fit never cuts
+  it off.
+
+Consequences: `CloudDecor` no longer draws the axis — it would need the live
+zoom, and re-rendering the blobs and the tag web on every wheel tick to move a
+hairline is the wrong trade; `CloudLabels` takes a `scale` prop that only
+Timeline passes. A month or year label is centred on its span, so at a zoom
+where a span is wider than the viewport its label can sit off-screen; the day
+labels carry the full date at exactly those zooms, so nothing is unreadable —
+making the labels viewport-sticky would mean coupling this layer to the pan
+offset, and it is deliberately deferred until that gap is felt.
