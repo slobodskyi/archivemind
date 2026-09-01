@@ -90,3 +90,28 @@ export function missingLocationLabel(total: number, plotted: number): string | n
   // "1 of 2 files has" — the noun counts the set, the verb counts the subset.
   return `${formatCount(missing)} of ${formatCount(total)} files ${missing === 1 ? "has" : "have"} no location`;
 }
+
+/** How many photos one cluster marker shows: a cover plus the two prints
+ *  peeking out behind it. Three is what a 52–82 px marker can carry without
+ *  any of them shrinking below "recognisable photograph". */
+export const CLUSTER_COVER_LIMIT = 3;
+
+/** Merge two ascending index lists into the `CLUSTER_COVER_LIMIT` smallest.
+ *
+ *  A cluster carries INDICES into the newest-first point array rather than
+ *  thumbnail URLs: a presigned URL is ~500 bytes and the cluster tree holds a
+ *  node per zoom level, so copying URLs up the tree would duplicate the whole
+ *  archive's worth of them several times over. Smallest-index-wins is also what
+ *  makes the cover *meaningful* — the newest photo at that place, rather than
+ *  whichever leaf supercluster's spatially-sorted tree happened to reach
+ *  first. */
+export function mergeCoverIndices(a: readonly number[], b: readonly number[]): number[] {
+  const out: number[] = [];
+  let i = 0;
+  let j = 0;
+  while (out.length < CLUSTER_COVER_LIMIT && (i < a.length || j < b.length)) {
+    if (j >= b.length || (i < a.length && a[i] <= b[j])) out.push(a[i++]);
+    else out.push(b[j++]);
+  }
+  return out;
+}
