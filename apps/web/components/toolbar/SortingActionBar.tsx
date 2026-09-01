@@ -32,8 +32,6 @@ export type SortingTopicMembershipProps = Omit<TopicMembershipMenuProps, "select
  *  reserves 0–35 for canvas internals, and anything higher would paint over
  *  the chat and trash panels. */
 export interface SortingActionBarProps {
-  /** Topic gets Re-cluster; Timeline's day columns are not clustered. */
-  showRecluster: boolean;
   /** Regroup acts on an override bucket, and Map has none (its positions come
    *  from EXIF, not from drags) — nor does the read-only all-files grid. */
   showRegroup: boolean;
@@ -42,12 +40,9 @@ export interface SortingActionBarProps {
   aboveSwitcher: boolean;
   /** There is something to regroup — no drag overrides means no-op. */
   canRegroup: boolean;
-  /** A job is already in flight; the worker has one lane for all of them. */
-  busy: boolean;
   /** ≥ 2 selected regroups only those, matching Tidy up's selection-first rule. */
   selCount: number;
   onRegroup: () => void;
-  onRecluster: () => void;
   /** Explicit semantic grouping actions for Topic only. The canvas may call
    * the same mutations after an intentional dwell-and-drop target. */
   topicMembership?: SortingTopicMembershipProps;
@@ -83,18 +78,6 @@ const RegroupGlyph = () => (
     <rect x="13" y="4" width="8" height="6" rx="1" />
     <rect x="3" y="14" width="8" height="6" rx="1" />
     <rect x="13" y="14" width="8" height="6" rx="1" />
-  </svg>
-);
-
-/* Re-cluster: the counter-clockwise refresh glyph (lucide refresh-ccw). Drawn
-   30% smaller than the bar's other glyphs — the four arcs read as busier than a
-   single-shape icon at the same box, so it needs less room to feel equal. */
-const ReclusterGlyph = () => (
-  <svg {...gp} width={11} height={11}>
-    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-    <path d="M3 3v5h5" />
-    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-    <path d="M16 16h5v5" />
   </svg>
 );
 
@@ -145,14 +128,11 @@ const Divider = () => (
 );
 
 function SortingActionBar({
-  showRecluster,
   showRegroup,
   aboveSwitcher,
   canRegroup,
-  busy,
   selCount,
   onRegroup,
-  onRecluster,
   topicMembership,
   labelNames,
   labelMenuOpen,
@@ -221,31 +201,20 @@ function SortingActionBar({
           </Btn>
         </>
       )}
-      {/* The two membership controls share one group, and the divider before
-          them is what separates them from Regroup. They belong together and
-          apart from it: both change what a file BELONGS to, workspace-wide and
-          on the server, while Regroup only moves tiles in this one view. That
-          distinction is the whole of ADR 0042, and the bar used to bury it by
-          spacing all four controls identically — with two adjacent buttons
-          whose labels ("Regroup" / "Refresh AI grouping") read as synonyms. */}
-      {showRecluster && topicMembership && (
+      {/* The membership controls sit behind a divider because they are a
+          different kind of act from Regroup: they change what a file BELONGS
+          to, workspace-wide and on the server, while Regroup only moves tiles
+          in this one view. That distinction is the whole of ADR 0042, and the
+          bar used to bury it by spacing every control identically. */}
+      {topicMembership && (
         <>
           <Divider />
           {/* Rendered even with an empty selection, where it is genuinely
-              disabled and says so. Hiding it made the bar change width the
-              moment you selected something, which slid Re-cluster out from
-              under the cursor that was reaching for it. */}
+              disabled and says so — a control that appears the moment you
+              select something changes the bar's width under the cursor
+              reaching for it. */}
           <TopicMembershipMenu {...topicMembership} selectionCount={selCount} />
         </>
-      )}
-      {showRecluster && (
-        <Btn
-          title={busy ? "A job is already running" : "Rebuild topics — your manual moves stay (free)"}
-          disabled={busy}
-          onClick={onRecluster}
-        >
-          <ReclusterGlyph />
-        </Btn>
       )}
     </div>
   );

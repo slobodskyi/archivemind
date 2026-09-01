@@ -1116,17 +1116,14 @@ export default function ArchiveWorkspace({
           The all-files grid is in here too, and only for the colour control:
           the untriaged pile is usually exactly what you open all-files to find,
           so that is the one place a filter must not be missing. It gets no
-          Regroup (nothing there has an override bucket) and no Re-cluster. */}
+          Regroup — nothing there has an override bucket. */}
       {!workingBar && (
         <SortingActionBar
-          showRecluster={ws.isSenseView}
           showRegroup={ws.isSenseView || ws.isTimelineView || (ws.isNeural && ws.projectMode)}
           aboveSwitcher={ws.showViewTabs}
           canRegroup={ws.canRegroup}
-          busy={ws.proc.active}
           selCount={ws.selectedIds.size}
           onRegroup={ws.regroupClouds}
-          onRecluster={ws.recluster}
           labelNames={ws.labelNames}
           labelMenuOpen={ws.labelMenuOpen}
           selectionLabel={currentLabel}
