@@ -1295,6 +1295,17 @@ export interface MinimapLayout {
   offY: number;
 }
 
+export interface MinimapGeometry {
+  dots: { x: number; y: number }[];
+  originX: number;
+  originY: number;
+  width: number;
+  height: number;
+  mscale: number;
+  offX: number;
+  offY: number;
+}
+
 const EMPTY_MINIMAP: MinimapLayout = {
   show: false,
   dots: [],
@@ -1306,35 +1317,51 @@ const EMPTY_MINIMAP: MinimapLayout = {
   offY: 0,
 };
 
+export function minimapGeometry(points: { x: number; y: number }[]): MinimapGeometry | null {
+  if (!points.length) return null;
+  let xl = points[0].x;
+  let xr = points[0].x;
+  let yt = points[0].y;
+  let yb = points[0].y;
+  for (let i = 1; i < points.length; i += 1) {
+    const point = points[i];
+    xl = Math.min(xl, point.x);
+    xr = Math.max(xr, point.x);
+    yt = Math.min(yt, point.y);
+    yb = Math.max(yb, point.y);
+  }
+  const width = Math.max(xr - xl, 1);
+  const height = Math.max(yb - yt, 1);
+  const innerW = MB_W - MB_PAD * 2;
+  const innerH = MB_H - MB_PAD * 2;
+  const mscale = Math.min(innerW / width, innerH / height);
+  const offX = MB_PAD + (innerW - width * mscale) / 2;
+  const offY = MB_PAD + (innerH - height * mscale) / 2;
+  const dots = points.map((point) => ({
+    x: offX + (point.x - xl) * mscale,
+    y: offY + (point.y - yt) * mscale,
+  }));
+  return { dots, originX: xl, originY: yt, width, height, mscale, offX, offY };
+}
+
 export function minimapLayout(
-  points: { x: number; y: number }[],
+  geometry: MinimapGeometry | null,
   scale: number,
   tx: number,
   ty: number,
   rect: Rect,
 ): MinimapLayout {
-  if (!points.length) return EMPTY_MINIMAP;
-  const xl = Math.min(...points.map((p) => p.x)),
-    xr = Math.max(...points.map((p) => p.x));
-  const yt = Math.min(...points.map((p) => p.y)),
-    yb = Math.max(...points.map((p) => p.y));
-  const bw = Math.max(xr - xl, 1),
-    bh = Math.max(yb - yt, 1);
+  if (!geometry) return EMPTY_MINIMAP;
+  const { dots, originX, originY, width, height, mscale, offX, offY } = geometry;
   // Nothing off-screen → no minimap (Figma/tldraw): a "map" of content that
   // already fits the viewport is just noise. Uses the tile-center bbox, which
   // under-counts the true extent by ~half a tile each side, so it errs toward
   // keeping the map a touch longer than strictly necessary — the safe direction.
-  if (bw * scale <= rect.width && bh * scale <= rect.height) return EMPTY_MINIMAP;
-  const innerW = MB_W - MB_PAD * 2,
-    innerH = MB_H - MB_PAD * 2;
-  const mscale = Math.min(innerW / bw, innerH / bh);
-  const offX = MB_PAD + (innerW - bw * mscale) / 2,
-    offY = MB_PAD + (innerH - bh * mscale) / 2;
+  if (width * scale <= rect.width && height * scale <= rect.height) return EMPTY_MINIMAP;
   const toMini = (cx: number, cy: number) => ({
-    x: offX + (cx - xl) * mscale,
-    y: offY + (cy - yt) * mscale,
+    x: offX + (cx - originX) * mscale,
+    y: offY + (cy - originY) * mscale,
   });
-  const dots = points.map((p) => toMini(p.x, p.y));
   const vpX0 = -tx / scale,
     vpY0 = -ty / scale;
   const vpX1 = (rect.width - tx) / scale,
@@ -1350,5 +1377,5 @@ export function minimapLayout(
   const cx1 = Math.max(VP_BORDER, Math.min(MB_W - VP_BORDER, br.x)),
     cy1 = Math.max(VP_BORDER, Math.min(MB_H - VP_BORDER, br.y));
   const vp = { x: cx0, y: cy0, w: Math.max(2, cx1 - cx0), h: Math.max(2, cy1 - cy0) };
-  return { show: true, dots, vp, originX: xl, originY: yt, mscale, offX, offY };
+  return { show: true, dots, vp, originX, originY, mscale, offX, offY };
 }

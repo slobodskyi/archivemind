@@ -1159,7 +1159,9 @@ export default function ArchiveWorkspace({
       {/* Map is its own MapLibre surface (ADR 0027) — the canvas minimap would
           show/pan the hidden neural grid and physically cover MapLibre's own
           zoom control, so it (and the header zoom/Fit) is suppressed on Map. */}
-      {!ws.isMapView && <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />}
+      {!ws.isMapView && ws.canvasWidth > 760 && (
+        <Minimap minimap={ws.minimap} onDown={ws.onMinimapDown} />
+      )}
 
       {/* The canvas's one top-right action, floated rather than parked in the
           header. It began as a Workspace's outcome action, in exactly the scope

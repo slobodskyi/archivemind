@@ -63,7 +63,8 @@ body {
    without needing !important, so this stays a stylesheet-only fix.
    `.am-tb` covers the left toolbar and both bottom action bars. */
 @media (pointer: coarse) {
-  .am-tb {
+  .am-tb,
+  .am-touch-target {
     min-width: 44px;
     min-height: 44px;
   }
