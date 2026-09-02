@@ -28,7 +28,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
     <div
       onClick={onClose}
       style={{
-        position: "absolute",
+        position: "fixed",
         inset: 0,
         background: MODAL_BACKDROP,
         backdropFilter: MODAL_BLUR,
@@ -36,6 +36,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: 16,
       }}
     >
       <div
@@ -44,7 +45,18 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 490, background: "var(--bg-sf)", border: "1px solid var(--bdh)", borderRadius: 2, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,.7)" }}
+        style={{
+          width: 490,
+          maxWidth: "calc(100vw - 32px)",
+          maxHeight: "calc(100dvh - 32px)",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--bg-sf)",
+          border: "1px solid var(--bdh)",
+          borderRadius: 2,
+          overflow: "hidden",
+          boxShadow: "0 32px 80px rgba(0,0,0,.7)",
+        }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 15px", borderBottom: "1px solid var(--bd)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
@@ -54,6 +66,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
             <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>Help &amp; Support</span>
           </div>
           <button
+            className="am-touch-target"
             onClick={onClose}
             aria-label="Close"
             style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
@@ -61,7 +74,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
             <CloseIcon />
           </button>
         </div>
-        <div style={{ padding: "16px 20px 20px", overflowY: "auto", maxHeight: 520 }}>
+        <div style={{ flex: 1, minHeight: 0, padding: "16px 20px 20px", overflowY: "auto" }}>
           <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--tm)", marginBottom: 13 }}>
             Frequently asked
           </div>
@@ -93,6 +106,7 @@ export default function HelpModal({ open, onClose, onSend }: HelpModalProps) {
             }}
           />
           <button
+            className="am-touch-target"
             onClick={onSend}
             style={{
               display: "flex",

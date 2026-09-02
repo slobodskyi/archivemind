@@ -53,15 +53,28 @@ export default function DataSourcesModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: 16,
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 420, background: "var(--bg-sf)", border: "1px solid var(--bdh)", borderRadius: 2, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,.7)" }}
+        style={{
+          width: 420,
+          maxWidth: "calc(100vw - 32px)",
+          maxHeight: "calc(100dvh - 32px)",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--bg-sf)",
+          border: "1px solid var(--bdh)",
+          borderRadius: 2,
+          overflow: "hidden",
+          boxShadow: "0 32px 80px rgba(0,0,0,.7)",
+        }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px 15px", borderBottom: "1px solid var(--bd)" }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>Connect a data source</span>
           <button
+            className="am-touch-target"
             onClick={onClose}
             aria-label="Close"
             style={{ display: "flex", width: 26, height: 26, alignItems: "center", justifyContent: "center", border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
@@ -69,7 +82,7 @@ export default function DataSourcesModal({
             <CloseIcon />
           </button>
         </div>
-        <div style={{ padding: "16px 20px 20px" }}>
+        <div style={{ flex: 1, minHeight: 0, padding: "16px 20px 20px", overflowY: "auto" }}>
           {CONNECTABLE.map(({ key, label, desc, Icon }) => {
             // Dropbox is the odd one out: no connection to hold, so its row
             // points at Add files instead of toggling anything (ADR 0008).
@@ -100,6 +113,7 @@ export default function DataSourcesModal({
                   </div>
                 </div>
                 <button
+                  className="am-touch-target"
                   onClick={() => {
                     if (!state) return onConnect(label);
                     if (busy) return;

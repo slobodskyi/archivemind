@@ -6,6 +6,8 @@ import {
   droppedAssetCenters,
   fitBounds,
   hitTestTiles,
+  minimapGeometry,
+  minimapLayout,
   nudgeOffOverlap,
   packGrid,
   readingOrder,
@@ -74,6 +76,25 @@ function intersects(a: TilePos, b: TilePos): boolean {
 function allFinite(values: object): boolean {
   return Object.values(values).every((value) => typeof value === "number" && Number.isFinite(value));
 }
+
+describe("minimapLayout", () => {
+  const geometry = minimapGeometry([
+    { x: 0, y: 0 },
+    { x: 1000, y: 600 },
+  ]);
+
+  it("reuses content geometry while only the camera viewport changes", () => {
+    const first = minimapLayout(geometry, 1, 0, 0, { width: 500, height: 400 });
+    const panned = minimapLayout(geometry, 1, -100, -50, { width: 500, height: 400 });
+    expect(first.show).toBe(true);
+    expect(panned.dots).toBe(first.dots);
+    expect(panned.vp).not.toEqual(first.vp);
+  });
+
+  it("hides when all content fits in the viewport", () => {
+    expect(minimapLayout(geometry, 0.25, 0, 0, { width: 500, height: 400 }).show).toBe(false);
+  });
+});
 
 describe("assetGallery", () => {
   it("is deterministic for equivalent inputs", () => {
