@@ -93,6 +93,10 @@ export function posthogConfig(): Partial<PostHogConfig> {
     disable_surveys: true,
     capture_exceptions: false,
     enable_heatmaps: false,
+    // Console output is replayed as plain text, outside the DOM masking, and
+    // API errors print what they were asked about. Set here because the
+    // project setting defaults to ON and the client value wins over it.
+    enable_recording_console_log: false,
     session_recording: {
       maskAllInputs: true,
       maskTextSelector: "*",

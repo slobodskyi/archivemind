@@ -90,3 +90,18 @@ by `lib/analytics.test.ts`.
   first, and is a separate decision.
 - PostHog project settings (replay on, authorized domain, retention, the DPA)
   live in the PostHog dashboard, not in this repo.
+
+## Amendments
+
+### 2026-10-14 — console logs are off in code, not in the dashboard
+
+The live project's remote config came back with console-log recording **on**
+(PostHog's default for a new project). Console output replays as plain text,
+outside the DOM masking, and the app's error paths print what a request was
+about. `enable_recording_console_log: false` now sits in `posthogConfig()`. The
+client value wins over the project setting, the same precedence PostHog
+documents for masking, so turning the toggle back on in the dashboard cannot
+re-enable it. The same check confirmed that the client masking config
+(`maskAllInputs: true`, `maskTextSelector: '*'`) already overrides the
+dashboard's `maskAllInputs: false`.
+
