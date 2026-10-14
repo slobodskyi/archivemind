@@ -151,6 +151,7 @@ export default function Dialog({
             {closeButton ? (
               <button
                 type="button"
+                className="am-touch-target"
                 onClick={onClose}
                 disabled={busy}
                 aria-label="Close dialog"
@@ -222,7 +223,7 @@ interface DialogButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /** A footer button. Order convention: dismiss first (left), primary last. */
-export function DialogButton({ variant = "ghost", grow, disabled, style, ...props }: DialogButtonProps) {
+export function DialogButton({ variant = "ghost", grow, disabled, style, className, ...props }: DialogButtonProps) {
   const base: CSSProperties = {
     flex: grow ?? (variant === "ghost" ? 1 : 2),
     minWidth: 0,
@@ -243,5 +244,13 @@ export function DialogButton({ variant = "ghost", grow, disabled, style, ...prop
           ? { border: 0, background: "var(--bd)", color: "var(--tm)", fontWeight: 700 }
           : { border: 0, background: "#ff5c5c", color: "#fff", fontWeight: 700 }
         : { border: "1px solid var(--bd)", background: "transparent", color: "var(--t2b)", opacity: disabled ? 0.5 : 1 };
-  return <button type="button" disabled={disabled} style={{ ...base, ...skin, ...style }} {...props} />;
+  return (
+    <button
+      type="button"
+      className={["am-touch-target", className].filter(Boolean).join(" ")}
+      disabled={disabled}
+      style={{ ...base, ...skin, ...style }}
+      {...props}
+    />
+  );
 }

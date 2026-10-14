@@ -55,6 +55,7 @@ import {
   positionsBounds,
   readingOrder,
   tidyCanvasOverrides,
+  minimapGeometry as computeMinimapGeometry,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
   timelineAxisLayout as computeTimelineLayout,
@@ -71,6 +72,7 @@ import {
   type StickyNote,
   type TilePos,
 } from "@/lib/layout";
+import { latestPointerPosition, solvePinch } from "@/lib/pinch";
 import {
   canvasArrangement,
   canvasStoreKey,
@@ -1135,6 +1137,7 @@ export function useWorkspace(
     suppress: false,
     lastTap: null,
   });
+  const pinchFrameRef = useRef<number | null>(null);
   const canvasElRef = useRef<HTMLDivElement | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2245,36 +2248,48 @@ export function useWorkspace(
     if (!p) return;
     const [a, b] = Array.from(t.pointers.values());
     if (!a || !b) return;
-    const dist = Math.hypot(a.x - b.x, a.y - b.y);
-    if (dist < 1 || p.dist < 1) return;
     const r = rect();
-    const ns = Math.min(4, Math.max(0.05, (p.scale * dist) / p.dist));
-    // The pinned content point, from the state captured at pinch start.
-    const px = (p.cx - r.left - p.tx) / p.scale;
-    const py = (p.cy - r.top - p.ty) / p.scale;
-    const cx = (a.x + b.x) / 2 - r.left;
-    const cy = (a.y + b.y) / 2 - r.top;
-    setState({ scale: ns, tx: cx - px * ns, ty: cy - py * ns });
+    const camera = solvePinch(p, a, b, r);
+    if (camera) setState(camera);
   }, [rect, setState]);
+
+  const cancelPinchFrame = useCallback(() => {
+    if (pinchFrameRef.current === null) return;
+    cancelAnimationFrame(pinchFrameRef.current);
+    pinchFrameRef.current = null;
+  }, []);
+
+  /** Pointer events for each finger arrive separately. Updating the camera for
+   *  both events renders one fresh and one stale coordinate, which makes the
+   *  midpoint wobble. Collapse them into one camera update per paint so both
+   *  pointer positions are the freshest samples available for that frame. */
+  const schedulePinch = useCallback(() => {
+    if (pinchFrameRef.current !== null) return;
+    pinchFrameRef.current = requestAnimationFrame(() => {
+      pinchFrameRef.current = null;
+      applyPinch();
+    });
+  }, [applyPinch]);
 
   const move = useCallback(
     (e: PointerEvent) => {
       const t = touchRef.current;
       const tracked = t.pointers.get(e.pointerId);
       if (tracked) {
-        tracked.x = e.clientX;
-        tracked.y = e.clientY;
+        const latest = latestPointerPosition(e);
+        tracked.x = latest.x;
+        tracked.y = latest.y;
         // A hold that turns into a drag is a drag, not a menu.
         if (
           t.longPress &&
           t.longPressAt &&
-          Math.hypot(e.clientX - t.longPressAt.x, e.clientY - t.longPressAt.y) > LONG_PRESS_SLOP
+          Math.hypot(latest.x - t.longPressAt.x, latest.y - t.longPressAt.y) > LONG_PRESS_SLOP
         ) {
           clearTimeout(t.longPress);
           t.longPress = null;
         }
         if (t.pinch) {
-          applyPinch();
+          schedulePinch();
           return;
         }
         // A gesture already claimed by pinch/long-press, or a second finger that
@@ -2421,7 +2436,7 @@ export function useWorkspace(
       toContent,
       setState,
       pushHistory,
-      applyPinch,
+      schedulePinch,
       armTopicDropTarget,
       clearTopicDropTarget,
       armBoardDrop,
@@ -2483,6 +2498,19 @@ export function useWorkspace(
 
   const up = useCallback((e: PointerEvent) => {
     const t = touchRef.current;
+    const tracked = t.pointers.get(e.pointerId);
+    if (tracked && t.pinch) {
+      // Commit the last real sample before deleting this finger. A pending rAF
+      // would otherwise wake after pointerup, see only one pointer and silently
+      // drop the final few pixels of the gesture.
+      cancelPinchFrame();
+      if (e.type !== "pointercancel") {
+        const latest = latestPointerPosition(e);
+        tracked.x = latest.x;
+        tracked.y = latest.y;
+        applyPinch();
+      }
+    }
     if (t.pointers.delete(e.pointerId)) {
       if (t.longPress) {
         clearTimeout(t.longPress);
@@ -2645,6 +2673,8 @@ export function useWorkspace(
     persistTopicAssignment,
     armBoardDrop,
     commitBoardDrop,
+    applyPinch,
+    cancelPinchFrame,
   ]);
 
   // ── Simple actions ──────────────────────────────────────────────────────
@@ -4771,6 +4801,7 @@ export function useWorkspace(
       // OS took for a system gesture) would leave a phantom finger in the map
       // and turn the NEXT single press into a two-pointer pinch.
       if (e.isPrimary) {
+        cancelPinchFrame();
         clearTopicDropTarget();
         if (t.longPress) clearTimeout(t.longPress);
         t.pointers.clear();
@@ -4820,6 +4851,7 @@ export function useWorkspace(
           }, LONG_PRESS_MS);
         }
       } else if (t.pointers.size === 2) {
+        cancelPinchFrame();
         if (t.longPress) {
           clearTimeout(t.longPress);
           t.longPress = null;
@@ -4871,6 +4903,7 @@ export function useWorkspace(
         el.removeEventListener("pointerdown", onCaptureDown, true);
       }
       if (touch.longPress) clearTimeout(touch.longPress);
+      cancelPinchFrame();
       cancelAnimationFrame(raf);
       if (ro) ro.disconnect();
     };
@@ -5461,13 +5494,18 @@ export function useWorkspace(
     return pts;
   }, [activePositions, state.uploadPreviews, neuralGalleryPos]);
 
+  // Dot bounds and projections depend only on content. Keeping them out of the
+  // live camera calculation turns every pan/pinch frame from O(photo count) to
+  // O(1), and gives Minimap a stable dots array it does not have to redraw.
+  const minimapGeometry = useMemo(() => computeMinimapGeometry(minimapPoints), [minimapPoints]);
+
   const minimap = useMemo(
     () =>
-      computeMinimapLayout(minimapPoints, state.scale, state.tx, state.ty, {
+      computeMinimapLayout(minimapGeometry, state.scale, state.tx, state.ty, {
         width: canvasWidth,
         height: canvasHeight,
       }),
-    [minimapPoints, state.scale, state.tx, state.ty, canvasWidth, canvasHeight],
+    [minimapGeometry, state.scale, state.tx, state.ty, canvasWidth, canvasHeight],
   );
 
   const onMinimapDown = useCallback(

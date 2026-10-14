@@ -271,13 +271,13 @@ export default function PhotoDrawer({
                 backgroundPosition: "center",
               }}
             />
-            <button onClick={onPrev} aria-label="Previous photo" style={navBtn("left")}>
+            <button className="am-touch-target" onClick={onPrev} aria-label="Previous photo" style={navBtn("left")}>
               <ChevronLeftIcon />
             </button>
-            <button onClick={onNext} aria-label="Next photo" style={navBtn("right")}>
+            <button className="am-touch-target" onClick={onNext} aria-label="Next photo" style={navBtn("right")}>
               <ChevronRightIcon />
             </button>
-            <button onClick={onClose} aria-label="Close" style={navBtn("close")}>
+            <button className="am-touch-target" onClick={onClose} aria-label="Close" style={navBtn("close")}>
               <CloseIcon width={13} height={13} strokeWidth={1.8} />
             </button>
             {isRealSource(photo.source) && photo.src && (

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { MinimapLayout } from "@/lib/layout";
 
 interface MinimapProps {
@@ -34,20 +35,7 @@ export default function Minimap({ minimap, onDown }: MinimapProps) {
         touchAction: "none",
       }}
     >
-      {minimap.dots.map((d, i) => (
-        <div
-          key={i}
-          style={{
-            position: "absolute",
-            left: d.x - 2,
-            top: d.y - 2,
-            width: 4,
-            height: 4,
-            borderRadius: 1.5,
-            background: "var(--t2)",
-          }}
-        />
-      ))}
+      <MinimapDots dots={minimap.dots} />
       <div
         style={{
           position: "absolute",
@@ -63,3 +51,20 @@ export default function Minimap({ minimap, onDown }: MinimapProps) {
     </div>
   );
 }
+
+const MinimapDots = memo(function MinimapDots({ dots }: { dots: MinimapLayout["dots"] }) {
+  return dots.map((d, i) => (
+    <div
+      key={i}
+      style={{
+        position: "absolute",
+        left: d.x - 2,
+        top: d.y - 2,
+        width: 4,
+        height: 4,
+        borderRadius: 1.5,
+        background: "var(--t2)",
+      }}
+    />
+  ));
+});
