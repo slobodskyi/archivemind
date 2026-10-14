@@ -5,9 +5,11 @@ import { createServerClient } from "@supabase/ssr";
  *  Validates the JWT via getClaims(); expired sessions are refreshed and the
  *  new cookies are written onto whichever response we return. */
 
-const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/p"];
+// /api/replay-image is token-authorised, not session-authorised: PostHog's
+// replay player fetches it cross-site, with no cookie (ADR 0050 amendment).
+const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/p", "/api/replay-image"];
 
-function isPublic(pathname: string) {
+export function isPublicPath(pathname: string) {
   // "/" is public but must be matched exactly: anonymous visitors get the
   // marketing landing there, while every /projects/* route stays guarded.
   // app/page.tsx does the fork (landing vs. the signed-in project hub).
@@ -41,7 +43,7 @@ export async function proxy(request: NextRequest) {
   const authed = Boolean(data?.claims);
   const { pathname } = request.nextUrl;
 
-  if (!authed && !isPublic(pathname)) {
+  if (!authed && !isPublicPath(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";

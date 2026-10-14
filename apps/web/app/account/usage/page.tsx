@@ -3,6 +3,7 @@ import PostHogSession from "@/components/analytics/PostHogSession";
 import HomeClient from "@/components/home/HomeClient";
 import { ensureWorkspace } from "@/lib/bootstrap";
 import { getProjectCards } from "@/lib/projects";
+import { mintReplayImageToken } from "@/lib/replay-image";
 import { createClient } from "@/lib/supabase/server";
 import { getWorkspaceUsage } from "@/lib/usage";
 
@@ -29,7 +30,7 @@ export default async function UsagePage() {
   // wiped dev DB) — same escape hatch app/page.tsx uses.
   if (!user) redirect("/auth/reset");
 
-  await ensureWorkspace(supabase, user);
+  const workspaceId = await ensureWorkspace(supabase, user);
 
   // Parallel, like the homepage: the sidebar needs the project list whichever
   // view is showing, and the meters need the snapshot.
@@ -49,7 +50,7 @@ export default async function UsagePage() {
 
   return (
     <>
-      <PostHogSession userId={user.id} email={email} />
+      <PostHogSession userId={user.id} email={email} replayImageToken={mintReplayImageToken(workspaceId)} />
       <HomeClient
         account={{ initials, name, email }}
         projects={projects}

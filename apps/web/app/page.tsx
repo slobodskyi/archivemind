@@ -4,6 +4,7 @@ import HomeClient from "@/components/home/HomeClient";
 import LandingPage from "@/components/landing/LandingPage";
 import { ensureWorkspace } from "@/lib/bootstrap";
 import { getProjectCards } from "@/lib/projects";
+import { mintReplayImageToken } from "@/lib/replay-image";
 import { createClient } from "@/lib/supabase/server";
 
 /** "/" serves two audiences. Anonymous visitors get the marketing landing
@@ -28,7 +29,7 @@ export default async function Home() {
   // idempotent bootstrap; on the very first login the sibling selects may see
   // an empty workspace mid-creation, which renders the same (correct) empty
   // state a brand-new account has anyway.
-  const [, projects, { data: profile }] = await Promise.all([
+  const [workspaceId, projects, { data: profile }] = await Promise.all([
     ensureWorkspace(supabase, user),
     getProjectCards(supabase),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
@@ -40,7 +41,7 @@ export default async function Home() {
 
   return (
     <>
-      <PostHogSession userId={user.id} email={email} />
+      <PostHogSession userId={user.id} email={email} replayImageToken={mintReplayImageToken(workspaceId)} />
       <HomeClient account={{ initials, name, email }} projects={projects} />
     </>
   );

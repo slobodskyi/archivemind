@@ -264,6 +264,13 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                app has no settings page the export dialog is its
                                                only editor. RLS is the gate — read by any member,
                                                written only by the owner
+  app/api/replay-image                         GET: a photo for PostHog's replay player (ADR 0050
+                                               amendment, internal testing only). PUBLIC in proxy.ts —
+                                               the player is cross-site and sends no cookie, so a 30-day
+                                               HMAC token over one workspace id is the authorisation.
+                                               Opens {ws}/previews|edits/*.webp only, never originals or
+                                               exports, and 302s to a fresh presign. Off unless
+                                               REPLAY_IMAGE_SECRET is set; rotating it revokes every token
   app/api/search                               GET §8.4: parse → embed → search_assets()
                                                (hybrid: cosine + FTS on description/facts,
                                                tiered; date/place/EXIF filters — ADR 0029/0031)
