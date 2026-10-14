@@ -9,11 +9,12 @@ import { POSTHOG_KEY, posthogConfig } from "@/lib/analytics";
 let client: PostHog | null = null;
 let loading: Promise<PostHog | null> | null = null;
 
-function load(): Promise<PostHog | null> {
+function load(replayImageToken: string | null): Promise<PostHog | null> {
   // No key = analytics off (local dev, tests, previews without the env var).
   if (!POSTHOG_KEY) return Promise.resolve(null);
   loading ??= import("posthog-js").then(({ default: posthog }) => {
-    posthog.init(POSTHOG_KEY, posthogConfig());
+    const replayImages = replayImageToken ? { origin: window.location.origin, token: replayImageToken } : null;
+    posthog.init(POSTHOG_KEY, posthogConfig({ replayImages }));
     client = posthog;
     return posthog;
   });
@@ -22,8 +23,11 @@ function load(): Promise<PostHog | null> {
 
 /** Start (or continue) the signed-in user's session. Id and email only — the
  *  email is there so a recording can be matched to a person from support. */
-export async function startAnalyticsSession(user: { id: string; email: string }): Promise<void> {
-  const posthog = await load();
+export async function startAnalyticsSession(
+  user: { id: string; email: string },
+  replayImageToken: string | null = null,
+): Promise<void> {
+  const posthog = await load(replayImageToken);
   if (!posthog) return;
   // A different account in the same browser (sign-out skipped by a dead
   // session, or /auth/reset): never stitch two people into one person.

@@ -8,6 +8,7 @@ import { getBoards } from "@/lib/boards-server";
 import { getCanvasGroups } from "@/lib/canvas-groups";
 import { getLabelNames } from "@/lib/labels";
 import { getProjectCards } from "@/lib/projects";
+import { mintReplayImageToken } from "@/lib/replay-image";
 import { createClient } from "@/lib/supabase/server";
 
 /** Canvas route (issue #17): a project and its M:N assets. The legacy `all`
@@ -48,7 +49,11 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
 
   return (
     <>
-      <PostHogSession userId={user.id} email={account.email} />
+      <PostHogSession
+        userId={user.id}
+        email={account.email}
+        replayImageToken={mintReplayImageToken(workspaceId)}
+      />
       <ArchiveWorkspace
         key={`ws-${id}`}
         initialPhotos={photoWindow.photos}

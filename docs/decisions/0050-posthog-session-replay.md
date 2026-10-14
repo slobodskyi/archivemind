@@ -130,3 +130,32 @@ replay with masking off carries their filenames, captions, notes and EXIF
 places to PostHog. That flip also needs a privacy policy, which is already
 owed for consent (Decision 1).
 
+### 2026-10-14 — photos in replays, through a 30-day token (internal testing)
+
+With text readable, the photos were the last thing a replay could not show.
+Not scrubbing the presigned URL would not have fixed that: it dies 30–60 min
+after the page loaded, and the player runs on PostHog's origin with no
+ArchiveMind cookie, so a session-guarded route cannot serve it either.
+
+While `REPLAY_MASK_TEXT` is false, the recorder rewrites each presigned URL to
+`{origin}/api/replay-image?p=<R2 path>&t=<token>`, and that route 302s to a
+fresh presigned URL.
+
+- **The token** is `<exp>.<HMAC-SHA256(REPLAY_IMAGE_SECRET, workspace id + exp)>`,
+  minted server-side per page render (`lib/replay-image.ts`) and valid 30 days,
+  as long as PostHog keeps a recording. The secret never reaches the browser.
+- **The route opens previews only**: `{ws}/previews/…/*.webp` and
+  `{ws}/edits/…/*.webp` of the token's own workspace. Originals, exports and
+  any other key are refused by shape before the HMAC is checked. It redirects
+  rather than streams, so no image passes through the function.
+- **It is public in `proxy.ts`** because the player sends no cookie; the token is
+  the whole authorisation.
+
+**What this grants, accepted explicitly by the owner on 2026-10-14:** anyone who
+can open a recording in PostHog can open every preview photo of that workspace
+for 30 days. For internal testing on our own archives that is the point. It is
+also why the rewrite is tied to the text switch: when `REPLAY_MASK_TEXT` goes
+back to `true`, no token is used and URLs are blanked again. **Revoking:**
+rotate or unset `REPLAY_IMAGE_SECRET` in Vercel. Every token ever issued stops
+working, and an unset secret means none is minted.
+

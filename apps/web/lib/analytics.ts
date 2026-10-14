@@ -18,6 +18,8 @@ import type { PostHogConfig } from "posthog-js";
  *    would miss them. A presigned URL is a bearer credential — ADR 0035 took
  *    them out of `ai_jobs.payload` for exactly this — so every attribute
  *    (`style`, `src`, `href`) and every recorded network request is scrubbed.
+ *    While masking is off, attributes get a /api/replay-image link instead,
+ *    so replays show photos for 30 days (lib/replay-image.ts).
  *  - **Signed-in only.** Nothing initialises PostHog before a signed-in page
  *    mounts `PostHogSession`, so the landing, login and `/p/*` share pages
  *    (whose URL is itself a bearer token) never load it. */
@@ -52,6 +54,25 @@ export function redactSignedUrls(value: string): string {
   return value.replace(SIGNED_URL, REDACTED_URL);
 }
 
+/** Where a replay fetches photos from instead (internal testing only — see
+ *  lib/replay-image.ts). `origin` is ours, absolute, because the player
+ *  resolves URLs against PostHog's origin, not ours. */
+export interface ReplayImages {
+  origin: string;
+  token: string;
+}
+
+/** Point every presigned URL at /api/replay-image, which outlives the 1 h
+ *  presign; without `replay`, blank it. The signature is dropped either way —
+ *  only the R2 path travels, and the route re-signs it. */
+export function rewriteSignedUrls(value: string, replay?: ReplayImages | null): string {
+  if (!replay) return redactSignedUrls(value);
+  return value.replace(SIGNED_URL, (url) => {
+    const path = new URL(url).pathname;
+    return `${replay.origin}/api/replay-image?p=${encodeURIComponent(path)}&t=${encodeURIComponent(replay.token)}`;
+  });
+}
+
 /** The slice of `Element` the masking rule needs — lets tests pass a stub. */
 type Closest = Pick<Element, "closest" | "hasAttribute">;
 
@@ -79,8 +100,9 @@ export function maskAttribute(
   value: string,
   el?: Closest | null,
   maskTextOn: boolean = REPLAY_MASK_TEXT,
+  replay?: ReplayImages | null,
 ): string {
-  const scrubbed = redactSignedUrls(value);
+  const scrubbed = rewriteSignedUrls(value, replay);
   return maskTextOn && TEXT_ATTRS.has(name) ? maskText(scrubbed, el) : scrubbed;
 }
 
@@ -98,9 +120,13 @@ function textMasking(on: boolean) {
 
 /** The init options. `defaults` pins PostHog's behaviour set, so a library
  *  bump cannot change what is captured without this date changing too. */
-export function posthogConfig(
-  { maskTextOn = REPLAY_MASK_TEXT }: { maskTextOn?: boolean } = {},
-): Partial<PostHogConfig> {
+export function posthogConfig({
+  maskTextOn = REPLAY_MASK_TEXT,
+  replayImages = null,
+}: { maskTextOn?: boolean; replayImages?: ReplayImages | null } = {}): Partial<PostHogConfig> {
+  // Photos follow text: a build that masks text for external users must not
+  // hand PostHog a 30-day link to their photos.
+  const replay = maskTextOn ? null : replayImages;
   return {
     api_host: POSTHOG_API_HOST,
     ui_host: POSTHOG_UI_HOST,
@@ -124,9 +150,9 @@ export function posthogConfig(
     session_recording: {
       ...textMasking(maskTextOn),
       // Runs whether or not text is masked: a presigned URL is a credential,
-      // not content, and it expires in an hour so a replay could not show the
-      // photo later anyway.
-      maskAttributeFn: (name, value, el) => maskAttribute(name, value, el, maskTextOn),
+      // and it dies within the hour. It is either blanked or, in internal
+      // testing, pointed at /api/replay-image so the photo survives.
+      maskAttributeFn: (name, value, el) => maskAttribute(name, value, el, maskTextOn, replay),
       // Request headers/bodies stay out even if the project setting turns
       // network capture on; the URL list itself is scrubbed of signatures.
       recordHeaders: false,

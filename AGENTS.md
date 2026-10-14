@@ -300,8 +300,10 @@ when you touch `supabase/**`, not the only line of defence anymore.
   flipped to `true` before the first external user. With it on, text is masked
   by default and a surface opts in with `data-ph-unmask`, which goes only on a
   container that can never print user content. Keep those markers correct on
-  new UI even while masking is off. Presigned photo URLs are scrubbed in both
-  modes; never remove that.
+  new UI even while masking is off. Presigned photo URLs never reach PostHog in
+  either mode: with masking off they are rewritten to `/api/replay-image` (a
+  30-day token that opens previews only — revoke by rotating
+  `REPLAY_IMAGE_SECRET`), with it on they are blanked.
 - Several behaviors that look like bugs are intentional fidelity to the source
   design (or a deliberate, documented deviation from it) — see
   `docs/decisions/0003-preserve-source-quirks.md` and

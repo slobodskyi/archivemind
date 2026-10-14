@@ -9,6 +9,7 @@ import {
   maskText,
   posthogConfig,
   redactSignedUrls,
+  rewriteSignedUrls,
 } from "./analytics";
 import { config as proxyConfig } from "../proxy";
 
@@ -48,6 +49,23 @@ describe("redactSignedUrls", () => {
     for (const v of ["/projects/42", "https://www.archivemind.media/?q=1", "translateX(-50%)", "IMG_0042.HEIC"]) {
       expect(redactSignedUrls(v)).toBe(v);
     }
+  });
+});
+
+describe("rewriteSignedUrls", () => {
+  const replay = { origin: "https://www.archivemind.media", token: "1800000000.sig" };
+
+  it("points a presigned URL at /api/replay-image, with the path and no signature", () => {
+    const out = rewriteSignedUrls(`background-image: url("${SIGNED}")`, replay);
+    expect(out).toBe(
+      'background-image: url("https://www.archivemind.media/api/replay-image' +
+        "?p=%2Farchivemind%2Fws1%2Fpreviews%2Fa1%2Fthumb.webp&t=1800000000.sig\")",
+    );
+    expect(out).not.toContain("X-Amz-");
+  });
+
+  it("blanks the URL when no replay token was issued", () => {
+    expect(rewriteSignedUrls(SIGNED, null)).toBe(REDACTED_URL);
   });
 });
 
@@ -122,6 +140,14 @@ describe("posthogConfig", () => {
     expect(cfg.enable_recording_console_log).toBe(false);
   });
 
+  it("hands photos to the replay only while text masking is off", () => {
+    const replayImages = { origin: "https://www.archivemind.media", token: "t" };
+    const open = posthogConfig({ maskTextOn: false, replayImages }).session_recording!;
+    const shut = posthogConfig({ maskTextOn: true, replayImages }).session_recording!;
+    expect(open.maskAttributeFn!("src", SIGNED, undefined as never)).toContain("/api/replay-image?");
+    expect(shut.maskAttributeFn!("src", SIGNED, undefined as never)).toBe(REDACTED_URL);
+  });
+
   it("scrubs signatures from recorded network requests", () => {
     const req = rec.maskCapturedNetworkRequestFn!({ name: SIGNED } as never);
     expect(req?.name).toBe(REDACTED_URL);
@@ -134,6 +160,12 @@ describe("proxy matcher", () => {
   it("skips the PostHog reverse proxy", () => {
     expect(matcher.test("/ingest/e/")).toBe(false);
     expect(matcher.test("/ingest/static/recorder.js")).toBe(false);
+  });
+
+  it("leaves the token-guarded replay image route public", async () => {
+    const { isPublicPath } = await import("../proxy");
+    expect(isPublicPath("/api/replay-image")).toBe(true);
+    expect(isPublicPath("/api/assets/1/medium")).toBe(false);
   });
 
   it("still guards the app", () => {
