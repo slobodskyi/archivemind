@@ -94,6 +94,10 @@ describe("posthogConfig", () => {
     expect(cfg.autocapture).toBe(false);
   });
 
+  it("records no console output, whatever the project setting says", () => {
+    expect(cfg.enable_recording_console_log).toBe(false);
+  });
+
   it("scrubs signatures from recorded network requests", () => {
     const req = rec.maskCapturedNetworkRequestFn!({ name: SIGNED } as never);
     expect(req?.name).toBe(REDACTED_URL);
