@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MASK_ATTR,
   REDACTED_URL,
+  REPLAY_MASK_TEXT,
   UNMASK_ATTR,
   isUnmasked,
   maskAttribute,
@@ -66,11 +67,23 @@ describe("text masking", () => {
     expect(maskText("Regroup", el(UNMASK_ATTR, MASK_ATTR))).toBe("Regroup");
   });
 
-  it("masks text-bearing attributes by the same rule, and scrubs URLs from every attribute", () => {
-    expect(maskAttribute("title", "IMG_0042.HEIC", el(null))).toBe("*************");
-    expect(maskAttribute("aria-label", "Delete", el(UNMASK_ATTR))).toBe("Delete");
-    expect(maskAttribute("href", SIGNED, el(UNMASK_ATTR))).toBe(REDACTED_URL);
-    expect(maskAttribute("class", "am-bar am-bar-low", el(null))).toBe("am-bar am-bar-low");
+  it("masks text-bearing attributes by the same rule when masking is on", () => {
+    expect(maskAttribute("title", "IMG_0042.HEIC", el(null), true)).toBe("*************");
+    expect(maskAttribute("aria-label", "Delete", el(UNMASK_ATTR), true)).toBe("Delete");
+    expect(maskAttribute("class", "am-bar am-bar-low", el(null), true)).toBe("am-bar am-bar-low");
+  });
+
+  it("leaves text-bearing attributes readable when masking is off", () => {
+    expect(maskAttribute("title", "IMG_0042.HEIC", el(null), false)).toBe("IMG_0042.HEIC");
+  });
+
+  it("scrubs presigned URLs from every attribute in BOTH modes", () => {
+    for (const on of [true, false]) {
+      expect(maskAttribute("href", SIGNED, el(UNMASK_ATTR), on)).toBe(REDACTED_URL);
+      expect(maskAttribute("style", `background-image: url("${SIGNED}")`, el(null), on)).toBe(
+        `background-image: url("${REDACTED_URL}")`,
+      );
+    }
   });
 });
 
@@ -83,9 +96,20 @@ describe("posthogConfig", () => {
     expect(cfg.ui_host).toBe("https://eu.posthog.com");
   });
 
-  it("masks all text and inputs, and records no request headers or bodies", () => {
-    expect(rec.maskTextSelector).toBe("*");
-    expect(rec.maskAllInputs).toBe(true);
+  it("records text and inputs as-is during internal testing", () => {
+    // Flip REPLAY_MASK_TEXT before the first external user (ADR 0050 amendment).
+    expect(REPLAY_MASK_TEXT).toBe(false);
+    expect(rec.maskAllInputs).toBe(false);
+    expect(rec.maskTextSelector).toBeUndefined();
+  });
+
+  it("masks all text and inputs when the switch is on", () => {
+    const masked = posthogConfig({ maskTextOn: true }).session_recording!;
+    expect(masked.maskTextSelector).toBe("*");
+    expect(masked.maskAllInputs).toBe(true);
+  });
+
+  it("records no request headers or bodies", () => {
     expect(rec.recordHeaders).toBe(false);
     expect(rec.recordBody).toBe(false);
   });

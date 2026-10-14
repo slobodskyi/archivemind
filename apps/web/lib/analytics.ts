@@ -6,12 +6,13 @@ import type { PostHogConfig } from "posthog-js";
  *  without a browser. A recording is a copy of the DOM, so everything on
  *  screen would leave the building unless a rule here stops it:
  *
- *  - **Text is masked by default.** Captions, facts, filenames, note bodies,
- *    project and workspace names are all user content, and they render inside
- *    buttons as often as outside them, so "buttons stay readable" leaks. A
- *    container opts its text back in with `data-ph-unmask`, and only a surface
- *    that prints product copy alone may carry it; `data-ph-mask` re-masks a
- *    subtree inside one. The NEAREST marker wins.
+ *  - **Text and inputs are recorded as-is while only the team uses the app**
+ *    (`REPLAY_MASK_TEXT = false`, ADR 0050 amendment 2026-10-14). Filenames,
+ *    captions, notes and names are all readable in replays. Before external
+ *    users arrive, flip it to `true`: text is then masked by default, a
+ *    container opts back in with `data-ph-unmask` (product copy only), and
+ *    `data-ph-mask` re-masks a subtree inside one — the NEAREST marker wins.
+ *    The markers stay in the components so that switch is one line.
  *  - **Presigned R2 URLs never reach PostHog.** Photos render as inline
  *    `background-image: url(<presigned>)`, not `<img>`, so blocking images
  *    would miss them. A presigned URL is a bearer credential — ADR 0035 took
@@ -28,6 +29,10 @@ export const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "";
 export const POSTHOG_API_HOST = "/ingest";
 /** EU Cloud: the database is EU-only, and recordings are screens of it. */
 export const POSTHOG_UI_HOST = "https://eu.posthog.com";
+
+/** Internal testing only: everything readable. MUST be `true` before the
+ *  first external user — see the ADR 0050 amendment. */
+export const REPLAY_MASK_TEXT = false;
 
 export const UNMASK_ATTR = "data-ph-unmask";
 export const MASK_ATTR = "data-ph-mask";
@@ -69,14 +74,33 @@ export function maskText(text: string, el?: Closest | null): string {
 // caption in an `alt`. They follow the same rule as the text they describe.
 const TEXT_ATTRS = new Set(["title", "alt", "aria-label", "placeholder"]);
 
-export function maskAttribute(name: string, value: string, el?: Closest | null): string {
+export function maskAttribute(
+  name: string,
+  value: string,
+  el?: Closest | null,
+  maskTextOn: boolean = REPLAY_MASK_TEXT,
+): string {
   const scrubbed = redactSignedUrls(value);
-  return TEXT_ATTRS.has(name) ? maskText(scrubbed, el) : scrubbed;
+  return maskTextOn && TEXT_ATTRS.has(name) ? maskText(scrubbed, el) : scrubbed;
+}
+
+/** Text masking, or nothing. Set explicitly either way: the client value wins
+ *  over the project's dashboard setting, so the code stays the one source. */
+function textMasking(on: boolean) {
+  return on
+    ? {
+        maskAllInputs: true,
+        maskTextSelector: "*",
+        maskTextFn: (text: string, el?: HTMLElement | null) => maskText(text, el),
+      }
+    : { maskAllInputs: false };
 }
 
 /** The init options. `defaults` pins PostHog's behaviour set, so a library
  *  bump cannot change what is captured without this date changing too. */
-export function posthogConfig(): Partial<PostHogConfig> {
+export function posthogConfig(
+  { maskTextOn = REPLAY_MASK_TEXT }: { maskTextOn?: boolean } = {},
+): Partial<PostHogConfig> {
   return {
     api_host: POSTHOG_API_HOST,
     ui_host: POSTHOG_UI_HOST,
@@ -98,10 +122,11 @@ export function posthogConfig(): Partial<PostHogConfig> {
     // project setting defaults to ON and the client value wins over it.
     enable_recording_console_log: false,
     session_recording: {
-      maskAllInputs: true,
-      maskTextSelector: "*",
-      maskTextFn: (text, el) => maskText(text, el),
-      maskAttributeFn: (name, value, el) => maskAttribute(name, value, el),
+      ...textMasking(maskTextOn),
+      // Runs whether or not text is masked: a presigned URL is a credential,
+      // not content, and it expires in an hour so a replay could not show the
+      // photo later anyway.
+      maskAttributeFn: (name, value, el) => maskAttribute(name, value, el, maskTextOn),
       // Request headers/bodies stay out even if the project setting turns
       // network capture on; the URL list itself is scrubbed of signatures.
       recordHeaders: false,

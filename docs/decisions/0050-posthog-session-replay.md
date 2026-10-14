@@ -105,3 +105,28 @@ re-enable it. The same check confirmed that the client masking config
 (`maskAllInputs: true`, `maskTextSelector: '*'`) already overrides the
 dashboard's `maskAllInputs: false`.
 
+### 2026-10-14 — text masking OFF while only the team uses the app
+
+Decision 3 is suspended. The first real replay was all asterisks, which is
+what the decision says it should be, and useless for the job replay was
+brought in to do. While the signed-in users are the two of us plus internal
+testers, we want to see everything. `REPLAY_MASK_TEXT = false` in
+`lib/analytics.ts` turns text and input masking off. It is still set
+explicitly in code (`maskAllInputs: false`), so the dashboard's privacy toggle
+remains irrelevant either way.
+
+What did **not** change:
+
+- **Presigned URLs are still scrubbed.** A presigned URL is a credential, not
+  content. It also expires in an hour (`PRESIGN_GET_TTL_SECONDS`), so a replay
+  watched later could not show the photo anyway. Photos stay empty tiles.
+- **Autocapture stays off**, and so does console recording. Neither affects
+  what a replay shows.
+- **Signed-in only**, and the `data-ph-unmask` / `data-ph-mask` markers stay in
+  the components. Re-enabling masking is one line.
+
+**This must be flipped back to `true` before the first external user.** A
+replay with masking off carries their filenames, captions, notes and EXIF
+places to PostHog. That flip also needs a privacy policy, which is already
+owed for consent (Decision 1).
+
