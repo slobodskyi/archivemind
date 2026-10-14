@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import PostHogSession from "@/components/analytics/PostHogSession";
 import HomeClient from "@/components/home/HomeClient";
 import { ensureWorkspace } from "@/lib/bootstrap";
 import { getProjectCards } from "@/lib/projects";
@@ -47,11 +48,14 @@ export default async function UsagePage() {
   const initials = name.slice(0, 2).toUpperCase();
 
   return (
-    <HomeClient
-      account={{ initials, name, email }}
-      projects={projects}
-      initialView="usage"
-      initialUsage={usage}
-    />
+    <>
+      <PostHogSession userId={user.id} email={email} />
+      <HomeClient
+        account={{ initials, name, email }}
+        projects={projects}
+        initialView="usage"
+        initialUsage={usage}
+      />
+    </>
   );
 }

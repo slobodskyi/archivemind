@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import PostHogSession from "@/components/analytics/PostHogSession";
 import HomeClient from "@/components/home/HomeClient";
 import LandingPage from "@/components/landing/LandingPage";
 import { ensureWorkspace } from "@/lib/bootstrap";
@@ -37,5 +38,10 @@ export default async function Home() {
   const email = user.email ?? "";
   const initials = name.slice(0, 2).toUpperCase();
 
-  return <HomeClient account={{ initials, name, email }} projects={projects} />;
+  return (
+    <>
+      <PostHogSession userId={user.id} email={email} />
+      <HomeClient account={{ initials, name, email }} projects={projects} />
+    </>
+  );
 }

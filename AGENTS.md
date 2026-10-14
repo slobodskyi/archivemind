@@ -295,6 +295,10 @@ when you touch `supabase/**`, not the only line of defence anymore.
   sticky/scroll composition, media queries or `prefers-reduced-motion` fallbacks
   a marketing page is made of (ADR 0036). Keep that boundary; don't spread CSS
   Modules into the workspace UI.
+- Session replay (PostHog, ADR 0050) masks all text by default. A new UI
+  surface is private until opted in with `data-ph-unmask` — only on a container
+  that can never print user content (filenames, captions, names, notes). Never
+  turn on autocapture or unmask a content surface to make a replay readable.
 - Several behaviors that look like bugs are intentional fidelity to the source
   design (or a deliberate, documented deviation from it) — see
   `docs/decisions/0003-preserve-source-quirks.md` and

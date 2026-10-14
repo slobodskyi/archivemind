@@ -7,6 +7,8 @@ allowBuilds:
   # eslint-config-next's import resolution; esbuild powers tsup (worker build).
   # @google/genai + its protobufjs dep: official Google SDK postinstalls.
   '@google/genai': true
+  # core-js (via posthog-js): its postinstall only prints a funding banner.
+  core-js: false
   esbuild: true
   protobufjs: true
   sharp: true

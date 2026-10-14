@@ -11,6 +11,19 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingRoot: monorepoRoot,
   transpilePackages: ["@archivemind/shared"],
+  // PostHog's endpoints end in slashes (`/e/`, `/s/`); a 308 to the slashless
+  // path would turn every recording upload into a redirect (ADR 0050).
+  skipTrailingSlashRedirect: true,
+  // Same-origin reverse proxy to PostHog EU (ADR 0050): ad blockers drop
+  // requests to posthog.com, which would lose recordings without an error.
+  // proxy.ts excludes /ingest from its matcher — it runs BEFORE rewrites.
+  async rewrites() {
+    return [
+      { source: "/ingest/static/:path*", destination: "https://eu-assets.i.posthog.com/static/:path*" },
+      { source: "/ingest/array/:path*", destination: "https://eu-assets.i.posthog.com/array/:path*" },
+      { source: "/ingest/:path*", destination: "https://eu.i.posthog.com/:path*" },
+    ];
+  },
   async headers() {
     return [
       {

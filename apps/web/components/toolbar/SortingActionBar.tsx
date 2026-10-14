@@ -152,6 +152,9 @@ function SortingActionBar({
       // media query cannot read a prop — and on a phone both values also have
       // to clear the home indicator.
       className={`am-bar ${aboveSwitcher ? "am-bar-high" : "am-bar-low"}`}
+      // Product copy only — readable in session replays (ADR 0050). The Topic
+      // menu inside re-masks itself: its targets are cloud names.
+      data-ph-unmask=""
       style={{
         position: "absolute",
         left: "50%",

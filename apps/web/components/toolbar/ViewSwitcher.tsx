@@ -43,6 +43,8 @@ function ViewSwitcher({ show, view, onSelect }: ViewSwitcherProps) {
       // Below 760px it spans the width and wraps instead of centring on an
       // overflowing row; below 640px the labels go and the icons carry it.
       className="am-viewswitcher"
+      // Product copy only — readable in session replays (ADR 0050).
+      data-ph-unmask=""
       style={{
         position: "absolute",
         left: "50%",
