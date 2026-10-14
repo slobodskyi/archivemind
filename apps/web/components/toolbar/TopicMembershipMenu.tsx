@@ -124,7 +124,9 @@ export default function TopicMembershipMenu({
   const selectionLabel = selectionCount === 1 ? "1 file" : `${selectionCount} files`;
 
   return (
-    <div ref={rootRef} style={{ position: "relative", display: "flex" }}>
+    // Cloud names come from the user's own photos — masked in session replays
+    // even inside the (unmasked) sorting bar (ADR 0050).
+    <div ref={rootRef} data-ph-mask="" style={{ position: "relative", display: "flex" }}>
       <button
         type="button"
         disabled={selectionCount === 0 || busy}

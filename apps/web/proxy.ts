@@ -63,6 +63,8 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next internals and static assets.
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // Everything except Next internals, static assets and /ingest — the PostHog
+  // reverse proxy (ADR 0050). The proxy runs before rewrites, so without the
+  // exclusion every recording upload would pay a Supabase session check.
+  matcher: ["/((?!_next/static|_next/image|ingest/|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

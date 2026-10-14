@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { resetAnalytics } from "@/lib/analytics-client";
 import { Z } from "@/lib/ui";
 import { SettingsIcon, BillingIcon, UsageIcon, SignOutIcon } from "@/components/icons/icons";
 
@@ -113,6 +114,7 @@ export default function AccountDropdown({ open, account, onClose, onFlashToast }
               onClick={() => {
                 onClose();
                 if (it.label === "Sign out") {
+                  resetAnalytics();
                   void fetch("/auth/signout", { method: "POST" }).then(() => {
                     window.location.assign("/login");
                   });

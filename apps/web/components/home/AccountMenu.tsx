@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import Link from "next/link";
+import { resetAnalytics } from "@/lib/analytics-client";
 import { Z } from "@/lib/ui";
 import {
   ChevronDownIcon,
@@ -165,7 +166,7 @@ export default function AccountMenu({ account, open, onToggle, onClose, onFlashT
               );
             })}
             <div style={{ height: 1, background: "var(--bd)", margin: "4px 0" }} />
-            <form action="/auth/signout" method="post">
+            <form action="/auth/signout" method="post" onSubmit={resetAnalytics}>
               <button
                 type="submit"
                 style={{

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import PostHogSession from "@/components/analytics/PostHogSession";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotoWindow } from "@/lib/api";
 import { ensureWorkspace } from "@/lib/bootstrap";
@@ -46,18 +47,21 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
   const account = { initials: name.slice(0, 2).toUpperCase(), name, email: user.email ?? "" };
 
   return (
-    <ArchiveWorkspace
-      key={`ws-${id}`}
-      initialPhotos={photoWindow.photos}
-      initialPhotoTotal={photoWindow.total}
-      workspaceId={workspaceId}
-      projects={projects}
-      currentProjectId={id}
-      initialGroups={groups}
-      initialLabelNames={labelNames}
-      initialAnnotations={annotations}
-      initialBoards={boards}
-      account={account}
-    />
+    <>
+      <PostHogSession userId={user.id} email={account.email} />
+      <ArchiveWorkspace
+        key={`ws-${id}`}
+        initialPhotos={photoWindow.photos}
+        initialPhotoTotal={photoWindow.total}
+        workspaceId={workspaceId}
+        projects={projects}
+        currentProjectId={id}
+        initialGroups={groups}
+        initialLabelNames={labelNames}
+        initialAnnotations={annotations}
+        initialBoards={boards}
+        account={account}
+      />
+    </>
   );
 }

@@ -101,6 +101,8 @@ function LeftToolbar({
       // rail is taller than a phone viewport has to spare between the header
       // and the bottom bars.
       className="am-lefttoolbar"
+      // Product copy only — readable in session replays (ADR 0050).
+      data-ph-unmask=""
       style={{
         position: "absolute",
         left: 20,

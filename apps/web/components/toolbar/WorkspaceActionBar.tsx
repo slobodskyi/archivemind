@@ -130,6 +130,8 @@ function WorkspaceActionBar({
       // targets at the 44px touch minimum are wider than a phone, and centred
       // that put both ends off screen.
       className="am-bar am-bar-low"
+      // Product copy only — readable in session replays (ADR 0050).
+      data-ph-unmask=""
       style={{
         position: "absolute",
         left: "50%",
