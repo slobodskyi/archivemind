@@ -5,7 +5,8 @@ import { buildZip, uniqueEntryName, type ZipEntry } from "../services/zip";
 import { renderCaptionsCsv } from "./export-csv";
 import type { ExportRow } from "./export";
 
-/** ZIP bundle export — "pick some files, get a zip".
+/** ZIP bundle export — "pick some files, get a zip". One photo is the exception:
+ *  it downloads as the file itself (`renderSingleFile`), not a one-entry archive.
  *
  *  Two shapes (`options.zipContents`):
  *
@@ -101,6 +102,35 @@ export function planZip(rows: readonly ByteRow[], contents: ArtboardSettings["zi
   return { entries, knownBytes, missing };
 }
 
+/** Types a browser or an OS acts on. Everything else — camera RAW, documents —
+ *  goes out as `application/octet-stream`, which a download that carries its
+ *  filename handles fine. */
+const CONTENT_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  heic: "image/heic",
+  heif: "image/heif",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  dng: "image/x-adobe-dng",
+  pdf: "application/pdf",
+};
+
+/** How a one-photo download is stored: as the file, so its extension and type
+ *  come from its name. Null when the name carries no usable extension — the ZIP
+ *  still carries such a file, and a download named `.bin` would be worse than an
+ *  archive. The extension lands in the R2 key, so it is held to a short
+ *  alphanumeric run. */
+export function singleFileArtifact(name: string): { ext: string; contentType: string } | null {
+  const ext = /\.([A-Za-z0-9]{1,10})$/.exec(name.trim())?.[1]?.toLowerCase();
+  if (!ext) return null;
+  return { ext, contentType: CONTENT_TYPES[ext] ?? "application/octet-stream" };
+}
+
 /** Refuse a bundle over the ceiling with a message the user can act on. */
 export function assertUnderBudget(bytes: number): void {
   if (bytes > ZIP_MAX_TOTAL_BYTES) {
@@ -174,17 +204,12 @@ function rightsBlock(rights: WorkspaceRights | null | undefined): string[] {
   return [...set.map(([label, v]) => `${label}: ${(v ?? "").trim()}`), ""];
 }
 
-export async function renderZip(
-  pool: pg.Pool,
-  rows: ExportRow[],
-  options: ArtboardSettings,
-  rights: WorkspaceRights | null,
-  onProgress: (done: number, total: number) => Promise<void>,
-): Promise<{ body: Buffer; skipped: number }> {
+/** One original per asset (the durable one if several files exist), plus the
+ *  medium preview as the fallback / the 'web' payload — in the caller's order.
+ *  Shared by both shapes so there is one query for 009_export_queries.sql to
+ *  hold to the schema. */
+async function loadByteRows(pool: pg.Pool, rows: readonly ExportRow[]): Promise<ByteRow[]> {
   const assetIds = rows.map((r) => r.asset_id);
-
-  // One original per asset (the durable one if several files exist), plus the
-  // medium preview as the fallback / the 'web' payload.
   const byteRes = await pool.query<ByteRow>(
     `select a.id as asset_id, a.title,
             f.r2_key as original_key, f.byte_size,
@@ -204,9 +229,40 @@ export async function renderZip(
 
   // Preserve the page order the caller asked for.
   const byId = new Map(byteRes.rows.map((r) => [r.asset_id, r]));
-  const ordered = rows.map((r) => byId.get(r.asset_id)).filter((r): r is ByteRow => Boolean(r));
+  return rows.map((r) => byId.get(r.asset_id)).filter((r): r is ByteRow => Boolean(r));
+}
 
-  const plan = planZip(ordered, options.zipContents);
+/** One photo, "The files": the file itself rather than a one-entry archive
+ *  (ADR 0035, 2026-10-27). No README and no captions.csv — one photo downloads
+ *  as the plain file, and the rights block travels in the PDF and in a ZIP of
+ *  two or more. A Drive- or OneDrive-linked photo has no original in R2, so
+ *  `originals` gives its web-size preview, exactly as inside a ZIP. Returns null
+ *  when the file cannot be named (see singleFileArtifact); the caller then falls
+ *  back to the ZIP. */
+export async function renderSingleFile(
+  pool: pg.Pool,
+  row: ExportRow,
+  options: ArtboardSettings,
+): Promise<{ body: Buffer; ext: string; contentType: string } | null> {
+  const plan = planZip(await loadByteRows(pool, [row]), options.zipContents);
+  const entry = plan.entries[0];
+  if (!entry) throw new Error("export_empty");
+  const artifact = singleFileArtifact(entry.name);
+  if (!artifact) return null;
+  assertUnderBudget(plan.knownBytes);
+  const body = await getObjectBuffer(entry.key);
+  assertUnderBudget(body.length);
+  return { body, ...artifact };
+}
+
+export async function renderZip(
+  pool: pg.Pool,
+  rows: ExportRow[],
+  options: ArtboardSettings,
+  rights: WorkspaceRights | null,
+  onProgress: (done: number, total: number) => Promise<void>,
+): Promise<{ body: Buffer; skipped: number }> {
+  const plan = planZip(await loadByteRows(pool, rows), options.zipContents);
   if (plan.entries.length === 0) throw new Error("export_empty");
   // Cheap refusal first: a RAW selection is over the limit before a single GET.
   assertUnderBudget(plan.knownBytes);

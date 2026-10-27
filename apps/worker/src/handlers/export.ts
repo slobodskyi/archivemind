@@ -18,7 +18,7 @@ import { getObjectBuffer, putObject } from "../services/r2";
 import { loadPdfFont } from "../services/pdf-font";
 import { recordUsage } from "../services/usage";
 import { renderCaptionsCsv } from "./export-csv";
-import { renderZip } from "./export-zip";
+import { renderSingleFile, renderZip } from "./export-zip";
 import type { HandlerContext } from "./index";
 
 /** Export (ADR 0035 + its Amendments). Reads a group's ordered members (or an
@@ -353,6 +353,18 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
   // zip: no font and no page geometry either — just the stored bytes, plus the
   // captions CSV inside so the metadata travels with the pixels.
   if (options.format === "zip") {
+    // One photo is the file itself, stored under its own extension — unless its
+    // name has none to store it under, when the ZIP below carries it as before.
+    const [only] = rows;
+    if (total === 1 && only) {
+      await progress(8, "Fetching the file", 0, 1);
+      const single = await renderSingleFile(pool, only, options);
+      if (single) {
+        const fileKey = `${job.workspace_id}/exports/${job.id}.${single.ext}`;
+        await finishExport({ pool, job, progress }, fileKey, single.body, single.contentType, total, 0, renderedIds);
+        return;
+      }
+    }
     const { body, skipped } = await renderZip(pool, rows, options, ws, async (done, count) => {
       await progress(8 + Math.round((88 * done) / count), `Packing ${done}/${count}`, done, count);
     });

@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { ZIP_MAX_TOTAL_BYTES } from "@archivemind/shared";
-import { assertUnderBudget, buildReadme, planZip } from "./export-zip";
+import { describe, expect, it, vi } from "vitest";
+import type pg from "pg";
+import { ZIP_MAX_TOTAL_BYTES, artboardSettingsSchema } from "@archivemind/shared";
+import type { ExportRow } from "./export";
+
+const getObjectBuffer = vi.fn(async (key: string) => Buffer.from(`bytes of ${key}`));
+vi.mock("../services/r2", () => ({ getObjectBuffer: (key: string) => getObjectBuffer(key) }));
+
+const { assertUnderBudget, buildReadme, planZip, renderSingleFile, singleFileArtifact } = await import("./export-zip");
 
 /** Shapes the DB rows renderZip reads. `original_key: null` = a Drive-linked
  *  asset, whose original was never copied into R2 (ADR 0025). */
@@ -183,5 +189,61 @@ describe("assertUnderBudget", () => {
     // requeues the poison job every ~15 minutes forever.
     expect(() => assertUnderBudget(ZIP_MAX_TOTAL_BYTES + 1)).toThrow(/^export_too_large:/);
     expect(() => assertUnderBudget(3 * 1024 ** 3)).toThrow("export_too_large:3.0GB");
+  });
+});
+
+describe("singleFileArtifact", () => {
+  it("names the file by its own extension, lowercased, with a type a browser knows", () => {
+    expect(singleFileArtifact("IMG_2041.HEIC")).toEqual({ ext: "heic", contentType: "image/heic" });
+    expect(singleFileArtifact("portrait.jpeg")).toEqual({ ext: "jpeg", contentType: "image/jpeg" });
+    expect(singleFileArtifact("x.webp")).toEqual({ ext: "webp", contentType: "image/webp" });
+  });
+
+  it("ships camera RAW and anything unknown as octet-stream rather than guessing", () => {
+    expect(singleFileArtifact("DSC_0001.NEF")).toEqual({ ext: "nef", contentType: "application/octet-stream" });
+  });
+
+  it("refuses a name it cannot store under, so the ZIP carries that file instead", () => {
+    for (const name of ["IMG 2041", "photo.", "evil.jp/g", "notes.абв", "file.abcdefghijk"]) {
+      expect(singleFileArtifact(name)).toBeNull();
+    }
+  });
+});
+
+describe("renderSingleFile", () => {
+  /** The byte query's answer for one asset; `original_key: null` = Drive/OneDrive. */
+  const poolWith = (over: Partial<Parameters<typeof planZip>[0][number]> = {}) =>
+    ({ query: vi.fn(async () => ({ rows: [row(over)] })) }) as unknown as pg.Pool;
+  const only = { asset_id: "a1", title: "DSC_0001.NEF", medium_key: null } as ExportRow;
+  const opts = (zipContents: "originals" | "web") => artboardSettingsSchema.parse({ format: "zip", zipContents });
+
+  it("returns the original itself under its own extension — no archive, README or CSV", async () => {
+    getObjectBuffer.mockClear();
+    const out = await renderSingleFile(poolWith({ title: "IMG_2041.HEIC", original_key: "ws/originals/x/IMG_2041.HEIC" }), only, opts("originals"));
+    expect(out).toEqual({ body: Buffer.from("bytes of ws/originals/x/IMG_2041.HEIC"), ext: "heic", contentType: "image/heic" });
+    expect(getObjectBuffer).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a Drive-linked photo its web-size preview, as the ZIP would", async () => {
+    const out = await renderSingleFile(poolWith({ original_key: null }), only, opts("originals"));
+    expect(out).toMatchObject({ ext: "webp", contentType: "image/webp" });
+    expect(out?.body.toString()).toBe("bytes of ws/previews/x/medium.webp");
+  });
+
+  it("gives the preview for web-size even when an original exists", async () => {
+    const out = await renderSingleFile(poolWith(), only, opts("web"));
+    expect(out).toMatchObject({ ext: "webp", contentType: "image/webp" });
+  });
+
+  it("hands back to the ZIP, without fetching, when the file has no extension", async () => {
+    getObjectBuffer.mockClear();
+    expect(await renderSingleFile(poolWith({ title: "IMG 2041" }), only, opts("originals"))).toBeNull();
+    expect(getObjectBuffer).not.toHaveBeenCalled();
+  });
+
+  it("fails as export_empty when nothing is stored for the photo", async () => {
+    await expect(renderSingleFile(poolWith({ original_key: null, medium_key: null }), only, opts("originals"))).rejects.toThrow(
+      "export_empty",
+    );
   });
 });
