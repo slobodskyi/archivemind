@@ -476,3 +476,29 @@ hidden silently. Two things undid that reasoning: the summary line already
 names every value it hides, and once preferences were remembered a non-default
 was the normal case, so the group opened for every returning user with four
 rows of controls nobody had asked to see. `isNonDefaultPageSetup` and its test are deleted.
+
+### 2026-10-27 — one photo downloads as the file, not a one-entry ZIP
+
+Once one photo opened on *The files*, what it handed over was a `.zip` holding
+that photo, a one-row `captions.csv` and, if the workspace had a byline, a
+`README.txt`. That is an archive answer to a file question.
+
+A `zip` export of exactly one asset now stores the **file itself**
+(`renderSingleFile`): the original under its own extension, or its web-size
+`.webp` preview when the source has no original in R2 (Drive, OneDrive) or the
+user picked *Web-size*. The key is `{ws}/exports/{job_id}.{ext}`, and the
+download route already derives the filename's extension from the key, so
+nothing else changed for retention, purge or usage — they all key on
+`result_key`. The byte query is shared with `renderZip` (`loadByteRows`), so
+`009_export_queries.sql` still holds the one copy of it to the schema.
+
+**The rights block does not travel with a single file.** That was a deliberate
+choice over embedding Creator/Credit/Copyright/Usage terms as XMP/IPTC (which
+would rewrite the original's bytes) or falling back to the ZIP whenever a byline
+is set (which makes the result depend on a setting the user cannot see from the
+dialog). The PDF and a ZIP of two or more still carry it, and the dialog says
+"just the file: no README or captions.csv".
+
+One fallback is kept: a file whose name has no usable extension (`[A-Za-z0-9]{1,10}`)
+still ships as a ZIP, because the extension goes into the R2 key and a download
+named `.bin` would be worse than an archive.

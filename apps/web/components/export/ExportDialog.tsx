@@ -281,8 +281,11 @@ export default function ExportDialog({
   const isZip = format === "zip";
   /** Both non-PDF formats skip the page-layout controls entirely. */
   const isDoc = format === "pdf";
+  /** One photo as "The files" is the file itself — the worker stores no archive,
+   *  README or captions.csv around it (ADR 0035, 2026-10-27). */
+  const plainFile = single && isZip;
   /** One noun, four call sites — they used to disagree. */
-  const fmt = isCsv ? "CSV" : isZip ? "ZIP" : "PDF";
+  const fmt = isCsv ? "CSV" : plainFile ? "file" : isZip ? "ZIP" : "PDF";
 
   const captionState = useCallback(
     (photo: Photo | undefined): CaptionState =>
@@ -315,7 +318,11 @@ export default function ExportDialog({
     if (isZip) {
       // A zip ships bytes, so the only thing that can be missing is bytes.
       if (noPreviewCount > 0) {
-        out.push(`${noPreviewCount} of ${count} have nothing stored yet — those are listed in README.txt.`);
+        out.push(
+          plainFile
+            ? "Nothing is stored for this photo yet — try again once processing finishes."
+            : `${noPreviewCount} of ${count} have nothing stored yet — those are listed in README.txt.`,
+        );
       }
       return out;
     }
@@ -351,7 +358,7 @@ export default function ExportDialog({
       );
     }
     return out;
-  }, [items, count, isCsv, isZip, inc.caption, captionStyle, captionLang, captionState, noPreviewCount]);
+  }, [items, count, isCsv, isZip, plainFile, inc.caption, captionStyle, captionLang, captionState, noPreviewCount]);
 
   const options: ArtboardSettings = useMemo(
     () => ({ format, zipContents, cover, pageLayout: layout, pageSize, orientation, captionLang, captionStyle, include: inc }),
@@ -362,13 +369,14 @@ export default function ExportDialog({
 
   const subtitle = useMemo(() => {
     if (isCsv) return "one row each · captions in EN, UK and RU";
+    if (plainFile) return zipContents === "originals" ? "the original file" : "a web-size image";
     if (isZip) {
       return `${zipContents === "originals" ? "original files" : "web-size images"} · captions.csv included`;
     }
     const pages = pdfPageCount(count, cover, layout);
     if (pages === null) return `${under} · 2 per row${cover ? " · plus a cover page" : ""}`;
     return `${under} · ${pages} ${pages === 1 ? "page" : "pages"}${cover ? " incl. cover" : ""}`;
-  }, [isCsv, isZip, zipContents, layout, under, count, cover]);
+  }, [isCsv, isZip, plainFile, zipContents, layout, under, count, cover]);
 
   const start = useCallback(async () => {
     setPhase("working");
@@ -767,9 +775,13 @@ export default function ExportDialog({
                       </button>
                     </div>
                     <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
-                      {zipContents === "originals"
-                        ? "The files as uploaded. Photos imported from Google Drive have no copy here — those come as web-size previews, listed in README.txt."
-                        : "1024px previews of everything — small enough to email."}
+                      {plainFile
+                        ? zipContents === "originals"
+                          ? "The file as uploaded — or, for a photo imported from Google Drive or OneDrive, its web-size preview. Just the file: no README or captions.csv."
+                          : "A 1024px preview — small enough to email."
+                        : zipContents === "originals"
+                          ? "The files as uploaded. Photos imported from Google Drive have no copy here — those come as web-size previews, listed in README.txt."
+                          : "1024px previews of everything — small enough to email."}
                     </div>
                   </div>
                 )}
@@ -927,9 +939,10 @@ export default function ExportDialog({
                 </div>
               </div>
 
-              {/* CAPTIONS: the on/off chips come FIRST and the language and style
+              {/* CAPTIONS (none for a plain file — no captions.csv rides with it): the on/off chips come FIRST
                   are nested under them. They used to be the other way round, so
                   the lang buttons were greyed out by a toggle 32px BELOW them. */}
+              {!plainFile && (
               <div>
                 <div style={LABEL}>Captions</div>
                 {isDoc && (
@@ -1004,6 +1017,7 @@ export default function ExportDialog({
                   </>
                 )}
               </div>
+              )}
 
               {/* PAGE SETUP: four controls almost nobody changes twice, folded
                   behind a summary that NAMES their current values — so nothing
