@@ -40,7 +40,8 @@ const FADE = 18;
 
 /** The Workspace browser in the header (ADR 0044): "All files" (the sorting
  *  views over the whole project) then a chip per workspace — colour dot · name ·
- *  count — a ＋ to create one, and a "+N ▾" overflow. Selecting a chip opens that
+ *  count — a ＋ to create one (a dashed "New workspace" ghost chip while there
+ *  are none), and a "+N ▾" overflow. Selecting a chip opens that
  *  workspace's working canvas; "All files" returns to browsing the whole project.
  *
  *  Deleting is a two-step affair here, and deliberately: the × sits on the chip
@@ -362,7 +363,11 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
           alignItems: "center",
           gap: 4,
           minWidth: 0,
-          flex: "1 1 auto",
+          // Sized to its chips, not to the breadcrumb: the counter and ＋ follow
+          // the last chip, so the ＋ reads as "one more of these". Grown to fill,
+          // it parked the ＋ beside undo, where it read as a global "add". The
+          // wrapper still takes the room, so the rail shrinks and scrolls as before.
+          flex: "0 1 auto",
           overflowX: "auto",
           overflowY: "hidden",
           // No visible scrollbar: a 52px header has no room for one, and the
@@ -379,6 +384,40 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
         }}
       >
         {boards.map(chip)}
+        {/* The empty state sits exactly where the chips will: a project with no
+            workspace showed nothing here, so a lone round ＋ was the only clue
+            the feature exists, and nobody reads a bare ＋ as "workspace". The
+            ghost names the thing in the slot it will occupy.
+
+            Deliberately no `BOARD_CHIP_ATTR`: a photo drag finds chips by
+            `elementFromPoint`, and this one has no id to drop into. */}
+        {boards.length === 0 && (
+          <button
+            type="button"
+            onClick={onCreate}
+            title="Workspaces are named sets of this project's files — click to create one"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              height: 30,
+              padding: "0 11px",
+              flex: "0 0 auto",
+              border: "1px dashed var(--bdh)",
+              borderRadius: 2,
+              background: "transparent",
+              color: "var(--t3)",
+              fontFamily: "inherit",
+              fontSize: 12.5,
+              letterSpacing: "0.02em",
+              whiteSpace: "nowrap",
+              cursor: "pointer",
+            }}
+          >
+            <AddIcon width={12} height={12} />
+            New workspace
+          </button>
+        )}
       </div>
 
       {/* Not a menu any more — a readout. It says how many chips are off to the
@@ -398,14 +437,18 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
         </button>
       )}
 
-      <button
-        onClick={onCreate}
-        aria-label="New workspace"
-        title="New workspace"
-        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px dashed var(--bdh)", borderRadius: "50%", background: "transparent", color: "var(--t2)", cursor: "pointer", flex: "0 0 auto" }}
-      >
-        <AddIcon width={13} height={13} />
-      </button>
+      {/* Only once a workspace exists — before that the ghost chip IS this
+          control, and two buttons for one action is one too many. */}
+      {boards.length > 0 && (
+        <button
+          onClick={onCreate}
+          aria-label="New workspace"
+          title="New workspace"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "1px dashed var(--bdh)", borderRadius: "50%", background: "transparent", color: "var(--t2)", cursor: "pointer", flex: "0 0 auto" }}
+        >
+          <AddIcon width={13} height={13} />
+        </button>
+      )}
 
       {/* The workspace's colour, picked from the same seven-swatch row a photo's
           label and a sticky note's paper use (ADR 0040) — one object, one

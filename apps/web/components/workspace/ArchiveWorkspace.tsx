@@ -1462,6 +1462,30 @@ export default function ArchiveWorkspace({
         labelNames={ws.labelNames}
         currentLabel={currentLabel}
         onPickLabel={(label) => ws.labelSelection(label, ws.contextMenu?.targetId ?? null)}
+        // Same target as the label row: the selection, else the right-clicked tile.
+        boards={
+          ws.projectMode && ws.contextMenu
+            ? bd.boards.map((b) => {
+                const members = new Set(b.assetIds);
+                return {
+                  id: b.id,
+                  name: b.name,
+                  color: b.color,
+                  count: boardCounts[b.id] ?? b.assetIds.length,
+                  hasAll: labelTargetIds.length > 0 && labelTargetIds.every((id) => members.has(id)),
+                };
+              })
+            : undefined
+        }
+        onAddToBoard={(id) => {
+          const board = bd.boards.find((b) => b.id === id);
+          bd.addToBoard(id, labelTargetIds);
+          ws.flashToast(`Added ${labelTargetIds.length} to ${board?.name ?? "workspace"}`);
+        }}
+        onCreateBoardWithTargets={() => {
+          bd.createBoard(undefined, labelTargetIds);
+          ws.setView("neural");
+        }}
       />
 
       <PhotoDrawer

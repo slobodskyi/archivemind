@@ -20,6 +20,11 @@
   --t2b: rgba(236, 238, 232, 0.5);
   --ac: #39ff6a;
   --ac2: #22dd52;
+  /* AI actions (ANALYZE). The same value as the colour labels' purple, but its
+     own token: the meaning is "this spends AI", not "marked purple". Kept apart
+     from --ac so the canvas's top-right button changes colour with its scope —
+     ANALYZE outside a Workspace, the green EXPORT inside one. */
+  --ai: #c07bf5;
   --red: #ff4444;
   /* The app header's full height. A variable rather than a literal 52 because
      the bar grows by the notch inset on devices that have one, and everything
