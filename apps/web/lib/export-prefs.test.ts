@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { defaultPrefs, isNonDefaultPageSetup, loadPrefs, savePrefs } from "./export-prefs";
+import { defaultPrefs, loadPrefs, savePrefs } from "./export-prefs";
 
 const WS = "00000000-0000-0000-0000-00000000aaaa";
 const KEY = `archivemind:export:v1:${WS}`;
@@ -67,22 +67,5 @@ describe("loadPrefs", () => {
     savePrefs(WS, defaultPrefs());
     expect(store.get(KEY)).not.toContain("format");
     expect(store.get(KEY)).not.toContain("zipContents");
-  });
-});
-
-describe("isNonDefaultPageSetup", () => {
-  it("is false for the defaults, so the disclosure starts collapsed", () => {
-    expect(isNonDefaultPageSetup(defaultPrefs())).toBe(false);
-  });
-
-  it("is true for any changed value, so a configured run shows its configuration", () => {
-    for (const patch of [
-      { pageSize: "Letter" as const },
-      { orientation: "landscape" as const },
-      { pageLayout: "grid" as const },
-      { cover: true },
-    ]) {
-      expect(isNonDefaultPageSetup({ ...defaultPrefs(), ...patch })).toBe(true);
-    }
   });
 });

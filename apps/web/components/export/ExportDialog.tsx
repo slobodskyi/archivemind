@@ -12,7 +12,7 @@ import {
   underLabel,
   type CaptionState,
 } from "@/lib/export-plan";
-import { isNonDefaultPageSetup, loadPrefs, savePrefs } from "@/lib/export-prefs";
+import { loadPrefs, savePrefs } from "@/lib/export-prefs";
 import { photoSrc } from "@/lib/img";
 
 interface ExportDialogProps {
@@ -20,16 +20,9 @@ interface ExportDialogProps {
   assetIds: string[];
   /** The workspace's loaded photos — the dialog looks up the ones it exports. */
   photos: Photo[];
-  /** Suggested document name — the current project's label. */
+  /** Suggested document name — the current Workspace's or project's label. A
+   *  single photo ignores it and is named after its own file. */
   defaultTitle?: string;
-  /** Preselects the Format row. The Create hub's delivery cards are that row
-   *  promoted one level (ADR 0045), so they hand the choice down rather than
-   *  branching — the row stays, and changing your mind here needs no step back. */
-  initialFormat?: ArtboardSettings["format"];
-  /** Overrides the dismiss button's word. The hub passes "‹ Back", because from
-   *  there this dialog is a rung on the hub → format → file ladder, not a
-   *  free-standing modal. */
-  dismissLabel?: string;
   /** Scopes the remembered page/caption preferences (see lib/export-prefs). */
   workspaceId: string;
   onClose: () => void;
@@ -47,6 +40,43 @@ const STYLES: { key: ArtboardSettings["captionStyle"]; label: string }[] = [
   { key: "agency", label: "Agency" },
   { key: "archival", label: "Archival" },
 ];
+
+/** The three deliverables, as cards rather than bare chips: this row decides
+ *  which groups below exist at all, so each format carries a name and a sentence.
+ *  They used to be asked twice — as cards in the Create hub, then again as chips
+ *  here — until Download left the hub (ADR 0045, 2026-10-27). This is now the
+ *  only place a format is chosen. */
+const FORMATS: { key: ArtboardSettings["format"]; tag: string; label: string; help: string }[] = [
+  { key: "pdf", tag: "PDF", label: "PDF document", help: "Laid-out pages with captions and a cover" },
+  { key: "captions_csv", tag: "CSV", label: "Captions CSV", help: "One row per photo, for an agency's fields" },
+  { key: "zip", tag: "ZIP", label: "The files", help: "The photos themselves, original or web-size" },
+];
+
+/** A file extension, not a drawn shape — three letters say a format faster than
+ *  any icon of a page could. */
+function FormatTag({ label, active }: { label: string; active: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        flex: "0 0 auto",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 34,
+        height: 20,
+        border: `1px solid ${active ? "var(--ac)" : "var(--bdh)"}`,
+        borderRadius: 2,
+        color: active ? "var(--ac)" : "var(--t2)",
+        fontSize: 8.5,
+        fontWeight: 800,
+        letterSpacing: ".08em",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
 
 const POLL_MS = 1500;
 /** No status change for this long → offer Retry instead of spinning forever.
@@ -138,15 +168,19 @@ export default function ExportDialog({
   assetIds,
   photos,
   defaultTitle,
-  initialFormat,
-  dismissLabel,
   workspaceId,
   onClose,
 }: ExportDialogProps) {
   // Read once, lazily: the dialog is mount-gated so this runs on every open, and
   // localStorage in a render body would run on every render.
   const [{ prefs, stored }] = useState(() => loadPrefs(workspaceId));
-  const [title, setTitle] = useState(defaultTitle ?? "");
+  /** "Download" on one photo means that photo — from the drawer, a right-click
+   *  or a one-photo selection alike. */
+  const single = assetIds.length === 1;
+  const [title, setTitle] = useState(() => {
+    const name = single ? photos.find((p) => p.id === assetIds[0])?.filename : undefined;
+    return name ? name.replace(/\.[^.]+$/, "") : (defaultTitle ?? "");
+  });
   const [cover, setCover] = useState(prefs.cover);
   /** Workspace credit block — fetched lazily, edited here because the app has no
    *  settings page and this is the only place a byline matters. `null` means not
@@ -154,7 +188,10 @@ export default function ExportDialog({
   const [credit, setCredit] = useState<WorkspaceInfo | null>(null);
   const [creditFailed, setCreditFailed] = useState(false);
   const [creditOpen, setCreditOpen] = useState(false);
-  const [format, setFormat] = useState<ArtboardSettings["format"]>(initialFormat ?? "pdf");
+  // One photo opens on the file itself: a one-page PDF with a one-row page list
+  // was the heaviest possible answer to the simplest question. Still never
+  // remembered (ADR 0035) — the scope picks it, not the last run.
+  const [format, setFormat] = useState<ArtboardSettings["format"]>(single ? "zip" : "pdf");
   const [zipContents, setZipContents] = useState<ArtboardSettings["zipContents"]>("originals");
   const [layout, setLayout] = useState(prefs.pageLayout);
   const [pageSize, setPageSize] = useState(prefs.pageSize);
@@ -174,7 +211,10 @@ export default function ExportDialog({
   const [captionLang, setCaptionLang] = useState(seeded.lang);
   const [captionStyle, setCaptionStyle] = useState(seeded.style);
   const [inc, setInc] = useState(prefs.include);
-  const [setupOpen, setSetupOpen] = useState(() => isNonDefaultPageSetup(prefs));
+  // Collapsed until asked. Its summary line names every value it hides, and
+  // auto-opening on a non-default meant — with remembered prefs — opening on
+  // every visit after the first change.
+  const [setupOpen, setSetupOpen] = useState(false);
   const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("config");
   const [url, setUrl] = useState<string | null>(null);
@@ -447,17 +487,18 @@ export default function ExportDialog({
   // out of the dialog all rendered as the same accent-bordered segment. Every
   // treatment below is lifted from a pattern already shipping in this repo.
 
-  /** The mode switch. Deliberately the heaviest thing in the dialog — it decides
+  /** The format card. Deliberately the heaviest thing in the dialog — it decides
    *  which of the groups below exist at all. */
-  const modeChip = (active: boolean): React.CSSProperties => ({
-    flex: 1,
-    height: 32,
+  const formatCard = (active: boolean): React.CSSProperties => ({
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 7,
+    padding: "11px 12px",
+    textAlign: "left",
     border: `1px solid ${active ? "var(--ac)" : "var(--bd)"}`,
-    background: active ? "color-mix(in srgb, var(--ac) 14%, transparent)" : "transparent",
-    color: active ? "var(--ac)" : "var(--t2)",
+    background: active ? "color-mix(in srgb, var(--ac) 14%, transparent)" : "var(--bg-el)",
     borderRadius: 2,
-    fontSize: 11,
-    fontWeight: 700,
     cursor: "pointer",
     fontFamily: "inherit",
   });
@@ -563,7 +604,7 @@ export default function ExportDialog({
   const footer =
     phase === "ready" && url ? (
       <>
-        <DialogButton onClick={onClose}>{dismissLabel ?? "Close"}</DialogButton>
+        <DialogButton onClick={onClose}>Close</DialogButton>
         <a
           href={url}
           target="_blank"
@@ -589,7 +630,7 @@ export default function ExportDialog({
       </>
     ) : phase === "working" ? null : (
       <>
-        <DialogButton onClick={onClose}>{dismissLabel ?? "Cancel"}</DialogButton>
+        <DialogButton onClick={onClose}>Cancel</DialogButton>
         <DialogButton variant="primary" data-autofocus="" onClick={start} disabled={count === 0}>
           {phase === "error" ? "Try again" : `Download ${fmt}`}
         </DialogButton>
@@ -603,8 +644,10 @@ export default function ExportDialog({
       // export/create flow is the same width, so choosing a format doesn't snap
       // the window narrower than the hub it opened from.
       size="l"
-      title={`Download as ${fmt}`}
-      subtitle={`${count} ${count === 1 ? "photo" : "photos"} · ${subtitle}`}
+      // One word for the job, whichever format is picked — the title used to
+      // rewrite itself ("Download as ZIP") on every click of the row below.
+      title="Download"
+      subtitle={`${count === 1 && items[0]?.photo?.filename ? `1 photo · ${items[0].photo.filename}` : `${count} ${count === 1 ? "photo" : "photos"}`} · ${subtitle}`}
       busy={phase === "working"}
       refocusKey={phase}
       onClose={onClose}
@@ -674,16 +717,27 @@ export default function ExportDialog({
                 <div style={LABEL} id={`${groupId}-format`}>
                   Format
                 </div>
-                <div style={{ display: "flex", gap: 6 }} role="group" aria-labelledby={`${groupId}-format`}>
-                  <button style={modeChip(isDoc)} aria-pressed={isDoc} onClick={() => setFormat("pdf")}>
-                    PDF document
-                  </button>
-                  <button style={modeChip(isCsv)} aria-pressed={isCsv} onClick={() => setFormat("captions_csv")}>
-                    Captions CSV
-                  </button>
-                  <button style={modeChip(isZip)} aria-pressed={isZip} onClick={() => setFormat("zip")}>
-                    ZIP
-                  </button>
+                {/* Always three across: a wrapped 2 + 1 on a phone stops reading as
+                    one choice out of three. */}
+                <div
+                  style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}
+                  role="group"
+                  aria-labelledby={`${groupId}-format`}
+                >
+                  {FORMATS.map(({ key, tag, label, help }) => {
+                    const active = format === key;
+                    return (
+                      <button key={key} style={formatCard(active)} aria-pressed={active} onClick={() => setFormat(key)}>
+                        <FormatTag label={tag} active={active} />
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: "block", color: active ? "var(--ac)" : "var(--t1)", fontSize: 12, fontWeight: 700 }}>
+                            {label}
+                          </span>
+                          <span style={{ display: "block", marginTop: 3, color: "var(--t3)", fontSize: 10 }}>{help}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
                 {isCsv && (
                   <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6 }}>
@@ -721,108 +775,114 @@ export default function ExportDialog({
                 )}
               </div>
 
-              {assetIds.length > 0 && (
+              {/* One photo has no order to show and nothing to remove it from, so it
+                  gets the notes about it without the list. */}
+              {(!single || warnings.length > 0) && (
                 <div>
-                  <div style={LABEL}>{isDoc ? "Pages, in order" : "Rows, in order"}</div>
-                  <div
-                    style={{
-                      maxHeight: 148,
-                      overflowY: "auto",
-                      border: "1px solid var(--bd)",
-                      borderRadius: 2,
-                    }}
-                  >
-                    {items.length === 0 && (
-                      <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--t3)" }}>
-                        Every photo has been removed from this download.
+                  {!single && (
+                    <>
+                      <div style={LABEL}>{isDoc ? "Pages, in order" : "Rows, in order"}</div>
+                      <div
+                        style={{
+                          maxHeight: 148,
+                          overflowY: "auto",
+                          border: "1px solid var(--bd)",
+                          borderRadius: 2,
+                        }}
+                      >
+                        {items.length === 0 && (
+                          <div style={{ padding: "10px 8px", fontSize: 11, color: "var(--t3)" }}>
+                            Every photo has been removed from this download.
+                          </div>
+                        )}
+                        {items.map(({ id, photo }, i) => {
+                          const state = captionState(photo);
+                          const last = items.length === 1;
+                          return (
+                            <div
+                              key={id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "4px 6px",
+                                borderBottom: i === items.length - 1 ? "none" : "1px solid var(--bd)",
+                              }}
+                            >
+                              <span style={{ fontSize: 10, color: "var(--t3)", width: 20, flex: "0 0 auto", textAlign: "right" }}>
+                                {i + 1}
+                              </span>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={photo ? photoSrc(photo, 48, 48) : undefined}
+                                alt=""
+                                loading="lazy"
+                                style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 1, flex: "0 0 auto", background: "var(--bg-sf)" }}
+                              />
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  color: "var(--t2)",
+                                  flex: 1,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {photo?.filename ?? id}
+                              </span>
+                              {(inc.caption || !isDoc) && <span style={dot(state)} title={captionHint(state)} />}
+                              <button
+                                onClick={() => setDropped((prev) => new Set(prev).add(id))}
+                                disabled={last}
+                                title={last ? "A download needs at least one photo" : "Remove from this download"}
+                                aria-label={`Remove ${photo?.filename ?? id} from this download`}
+                                style={{
+                                  width: 18,
+                                  height: 18,
+                                  flex: "0 0 auto",
+                                  border: 0,
+                                  background: "transparent",
+                                  color: "var(--t3)",
+                                  cursor: last ? "not-allowed" : "pointer",
+                                  opacity: last ? 0.4 : 1,
+                                  fontSize: 13,
+                                  lineHeight: 1,
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
-                    )}
-                    {items.map(({ id, photo }, i) => {
-                      const state = captionState(photo);
-                      const last = items.length === 1;
-                      return (
-                        <div
-                          key={id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            padding: "4px 6px",
-                            borderBottom: i === items.length - 1 ? "none" : "1px solid var(--bd)",
-                          }}
-                        >
-                          <span style={{ fontSize: 10, color: "var(--t3)", width: 20, flex: "0 0 auto", textAlign: "right" }}>
-                            {i + 1}
-                          </span>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={photo ? photoSrc(photo, 48, 48) : undefined}
-                            alt=""
-                            loading="lazy"
-                            style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 1, flex: "0 0 auto", background: "var(--bg-sf)" }}
-                          />
-                          <span
-                            style={{
-                              fontSize: 11,
-                              color: "var(--t2)",
-                              flex: 1,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {photo?.filename ?? id}
-                          </span>
-                          {(inc.caption || !isDoc) && <span style={dot(state)} title={captionHint(state)} />}
-                          <button
-                            onClick={() => setDropped((prev) => new Set(prev).add(id))}
-                            disabled={last}
-                            title={last ? "A download needs at least one photo" : "Remove from this download"}
-                            aria-label={`Remove ${photo?.filename ?? id} from this download`}
-                            style={{
-                              width: 18,
-                              height: 18,
-                              flex: "0 0 auto",
-                              border: 0,
-                              background: "transparent",
-                              color: "var(--t3)",
-                              cursor: last ? "not-allowed" : "pointer",
-                              opacity: last ? 0.4 : 1,
-                              fontSize: 13,
-                              lineHeight: 1,
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            ×
-                          </button>
+                      {/* The same dots the rows carry, spelled out — their meaning
+                          used to live in a hover title nobody discovers. */}
+                      {(inc.caption || !isDoc) && items.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 6 }}>
+                          {(isDoc
+                            ? ([
+                                ["exact", `has ${LANG_UI[captionLang]} · ${STYLE_UI[captionStyle]}`],
+                                ["fallback", "closest used"],
+                                ["none", "prints without"],
+                              ] as const)
+                            : ([
+                                ["exact", `has ${STYLE_UI[captionStyle]}`],
+                                ["none", "empty cell"],
+                              ] as const)
+                          ).map(([state, label]) => (
+                            <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--t3)" }}>
+                              <span style={dot(state)} />
+                              {label}
+                            </span>
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
-                  {/* The same dots the rows carry, spelled out — their meaning
-                      used to live in a hover title nobody discovers. */}
-                  {(inc.caption || !isDoc) && items.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 6 }}>
-                      {(isDoc
-                        ? ([
-                            ["exact", `has ${LANG_UI[captionLang]} · ${STYLE_UI[captionStyle]}`],
-                            ["fallback", "closest used"],
-                            ["none", "prints without"],
-                          ] as const)
-                        : ([
-                            ["exact", `has ${STYLE_UI[captionStyle]}`],
-                            ["none", "empty cell"],
-                          ] as const)
-                      ).map(([state, label]) => (
-                        <span key={state} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10, color: "var(--t3)" }}>
-                          <span style={dot(state)} />
-                          {label}
-                        </span>
-                      ))}
-                    </div>
+                      )}
+                    </>
                   )}
                   {warnings.length > 0 && (
-                    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+                    <div style={{ marginTop: single ? 0 : 6, display: "flex", flexDirection: "column", gap: 2 }}>
                       {warnings.map((w) => (
                         <div key={w} style={{ fontSize: 10.5, color: "var(--t3)" }}>
                           {w}

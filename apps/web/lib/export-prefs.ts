@@ -11,9 +11,10 @@ import { artboardSettingsSchema, type ArtboardSettings } from "@archivemind/shar
  *  like canvasStoreKey — a shared browser must not hand one archive's page size
  *  to the next.
  *
- *  `format` and `zipContents` are deliberately NOT persisted: a sticky 'zip'
- *  would make the drawer's Export button open a dialog titled "Export as ZIP"
- *  for a single photo. Format is a per-export decision by definition. */
+ *  `format` and `zipContents` are deliberately NOT persisted: the format
+ *  follows the scope — one photo opens on its file, a set on the PDF — and a
+ *  remembered one would override that on every later run. Format is a
+ *  per-export decision by definition. */
 
 const PREFIX = "archivemind:export:v1:";
 const key = (workspaceId: string) => `${PREFIX}${workspaceId}`;
@@ -81,17 +82,4 @@ export function savePrefs(workspaceId: string, prefs: ExportPrefs): void {
     // Private mode / quota. A preference that cannot be saved is not an error
     // worth surfacing — the export itself is unaffected.
   }
-}
-
-/** True when anything differs from the contract's defaults — the Page setup
- *  disclosure auto-expands on that, so a configured run always shows its
- *  configuration instead of hiding it behind a summary line. */
-export function isNonDefaultPageSetup(prefs: Pick<ExportPrefs, "pageLayout" | "pageSize" | "orientation" | "cover">): boolean {
-  const d = defaultPrefs();
-  return (
-    prefs.pageLayout !== d.pageLayout ||
-    prefs.pageSize !== d.pageSize ||
-    prefs.orientation !== d.orientation ||
-    prefs.cover !== d.cover
-  );
 }
