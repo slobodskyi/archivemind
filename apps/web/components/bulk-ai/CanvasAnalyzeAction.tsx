@@ -1,3 +1,5 @@
+import { SparkleIcon } from "@/components/icons/icons";
+
 interface CanvasAnalyzeActionProps {
   /** Photos selected on the canvas — the set `BulkAiPanel` will plan its run
    *  over. Read from the same `selectedIds` that gates the panel opening, so
@@ -23,7 +25,12 @@ interface CanvasAnalyzeActionProps {
  *  costs a credit per photo, so the count, the operations and the call estimate
  *  have to be visible before the spend — the same rule every other AI entry
  *  point follows. The badge is the selection count, so the button says how big
- *  the batch is without opening it. */
+ *  the batch is without opening it.
+ *
+ *  Purple with a ✨, never EXPORT's green: the two share one slot and one
+ *  shape, and when they also shared a colour nobody noticed the slot had
+ *  changed jobs. Idle is a purple tint rather than the grey every other dead
+ *  control wears — this one is waiting for a selection, not unavailable. */
 export default function CanvasAnalyzeAction({ selectedCount, open, onOpen }: CanvasAnalyzeActionProps) {
   const live = selectedCount > 0;
   return (
@@ -49,9 +56,9 @@ export default function CanvasAnalyzeAction({ selectedCount, open, onOpen }: Can
         height: 30,
         borderRadius: 2,
         padding: "0 10px",
-        background: live ? "var(--ac)" : "var(--bd)",
+        background: live ? "var(--ai)" : "color-mix(in srgb,var(--ai) 14%,transparent)",
         border: 0,
-        color: live ? "#050505" : "var(--tm)",
+        color: live ? "#050505" : "var(--ai)",
         fontFamily: "inherit",
         fontSize: 11.5,
         fontWeight: 800,
@@ -64,6 +71,7 @@ export default function CanvasAnalyzeAction({ selectedCount, open, onOpen }: Can
         boxShadow: open && live ? "inset 0 0 0 2px rgba(5,5,5,.42)" : "none",
       }}
     >
+      <SparkleIcon width={12} height={12} strokeWidth={2} />
       ANALYZE
       {live && (
         <span style={{ padding: "1px 5px", background: "rgba(5,5,5,.18)", borderRadius: 2, fontSize: 9.5, fontWeight: 800 }}>

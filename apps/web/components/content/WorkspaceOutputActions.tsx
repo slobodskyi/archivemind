@@ -1,3 +1,5 @@
+import { DownloadIcon } from "@/components/icons/icons";
+
 interface WorkspaceOutputActionsProps {
   draftCount: number;
   photoCount: number;
@@ -22,7 +24,11 @@ interface WorkspaceOutputActionsProps {
  *  now owns the top-right slot with ANALYZE, and between the two the axis a
  *  reader needs is what the scope is FOR — bringing files in and understanding
  *  them, versus taking work out. The hub behind it is unchanged and still opens
- *  on "Make something" first; only the word on the door moved. */
+ *  on "Make something" first; only the word on the door moved.
+ *
+ *  The word alone was not enough: both buttons were green, the same shape, in
+ *  the same slot, so a change of scope went unnoticed. EXPORT keeps the green
+ *  and carries a ↓, ANALYZE went purple with a ✨ (`--ai`). */
 export default function WorkspaceOutputActions({
   draftCount,
   photoCount,
@@ -61,6 +67,7 @@ export default function WorkspaceOutputActions({
         cursor: live ? "pointer" : "default",
       }}
     >
+      <DownloadIcon width={12} height={12} strokeWidth={2} />
       EXPORT
       {draftCount > 0 && (
         <span style={{ padding: "1px 5px", background: "rgba(5,5,5,.18)", borderRadius: 2, fontSize: 9.5, fontWeight: 800 }}>
