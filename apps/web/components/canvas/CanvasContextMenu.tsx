@@ -135,6 +135,10 @@ export default function CanvasContextMenu({
   const canLayer = !allFilesMode && (selCount > 0 || menu.targetId != null);
   // One file is enough — unlike Group, a workspace of one is a real thing.
   const canAddToBoard = !allFilesMode && boards !== undefined && (selCount > 0 || menu.targetId != null);
+  // Downloading changes nothing, so — like labels — it works on one tile and on
+  // the read-only all-files grid. It used to live inside the Group block and
+  // inherit "two or more", which is why one photo had no Download here.
+  const downloadable = selCount > 0 || menu.targetId != null;
   const subOpen = sub?.menu === menu;
 
   const run = (fn: () => void) => () => {
@@ -177,7 +181,7 @@ export default function CanvasContextMenu({
       />,
     );
   }
-  if (canAddToBoard || canGroup) {
+  if (canAddToBoard || canGroup || downloadable) {
     sections.push(
       <>
         {canAddToBoard && (
@@ -258,8 +262,10 @@ export default function CanvasContextMenu({
               <MenuItem label={`Group ${selCount}`} onClick={run(onGroup)} />
             )}
             <MenuItem label="Put in folder" onClick={run(onFolder)} />
-            <MenuItem label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
           </>
+        )}
+        {downloadable && (
+          <MenuItem label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
         )}
       </>,
     );

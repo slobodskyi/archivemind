@@ -306,3 +306,52 @@ match would be untrue to that section, which is the half of the hub that is not
 export at all. The alternatives — a neutral kicker, or moving content creation
 out of the hub — are a product call, not a rename, and are deliberately left
 open rather than settled by a label.
+
+### 2026-10-27 — Download leaves the hub: one window per job
+
+The 2026-08-21 amendment folded Download into the hub because `Download` and
+`Create` seemed to ask one question. In use, that gave one job two first windows.
+From a photo (the drawer, the right-click menu), Download opened the download
+dialog straight away. From a Workspace, it opened the hub, then a card, then the
+*same* dialog with a `‹ Back`. With one photo selected and the drawer open,
+`EXPORT` and the drawer's `Download` sat on screen together for the same photo
+and reached the same dialog by different routes.
+
+The hub route also asked for the format twice — a card, then the dialog's own
+Format row, in different words ("The files" against "ZIP") — and it used four
+words for one action: `EXPORT` → `Create` → `Download` → "Download as PDF". The
+08-21 rename to `EXPORT` broke the 08-18 rule of one word per delivery job, and
+that amendment left the kicker mismatch open as a product call. This amendment
+settles it by splitting the jobs rather than renaming the door.
+
+What ships:
+
+- **Two doors, one per job.** `↓ DOWNLOAD` (green, the primary, badged with the
+  selection count like `ANALYZE`) opens the download dialog on the selection,
+  or on the whole Workspace when nothing is selected. `CREATE` (quiet, badged
+  with the draft count, live when there are drafts but no files) opens the hub.
+  The primary sits on the right edge, where `ANALYZE` sits outside a Workspace,
+  so the slot's coloured button never moves between scopes.
+- **The hub is content only.** It keeps *Make something* and *Continue
+  editing*, which is what its `Create` kicker always said. Its Download
+  section, the `download` rung of `outputUi`, `downloadFormat` and the dialog's
+  `initialFormat`/`dismissLabel` props are gone. The dialog closes to wherever
+  it was opened from, so a finished download no longer returns to a hub.
+- **No path got longer.** Through the hub, every format cost three clicks
+  (door, card, CTA). Now a set's PDF costs two, CSV and ZIP three, and one photo
+  two, because it opens on its file.
+- **The right-click `Download` follows the label row's rule**: the selection,
+  else the right-clicked tile, including on the all-files grid. It used to sit
+  inside the Group block and inherit "two or more", so one photo had no
+  Download in the menu at all.
+
+The dialog's own half — format cards, the scope-driven default, a fixed title —
+is ADR 0035's 2026-10-27 amendment.
+
+Consequences: there is one window for every delivery, opened the same way from
+four places (the Workspace's `DOWNLOAD`, the menu, the drawer, the studio's
+Download → Photos). `WorkspaceOutputActions` is two buttons again, as it was
+before 08-21; the difference is that `DOWNLOAD` now opens the dialog every other
+entry point opens, not a second hub. The ghost chip "Create a workspace to
+export" keeps its word, because it names what a Workspace is for, not a button.
+The export contract, the job types and `/api/exports` do not change.

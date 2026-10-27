@@ -447,3 +447,32 @@ layouts render all three blocks: no toggle is inert anywhere, so there is nothin
 left to explain in the UI. The dialog's subtitle now lists the enabled blocks
 instead of unconditionally promising "each with its caption underneath" — which
 it said even with Caption switched off.
+
+### 2026-10-27 — one title, format cards, and the scope picks the default
+
+Download left the Create hub (ADR 0045, 2026-10-27), so this dialog is now the
+only place a format is chosen. Four changes, no capability removed:
+
+**The title is `Download` whatever the format.** It used to rewrite itself
+("Download as ZIP") on every click of the row that sits under it. The subtitle
+carries the scope — `1 photo · <filename>` or `N photos` — followed by the
+format's summary.
+
+**The Format row is three cards**: a three-letter tag, a name and a sentence
+each (PDF document, Captions CSV, The files). These are the hub's cards, moved
+in. The bare chips they replace said less, and the hub had already shown that
+the extra sentence was worth the room.
+
+**The format is still not remembered, but it is no longer always PDF.** One
+photo opens on *The files* (Originals). It is named after its own file rather
+than the Workspace, and the "Pages, in order" list is hidden, since that list
+was one row with a disabled ×; the caption notes about the photo still show. A
+set still opens on the PDF. Remembering the format stays wrong for the reason
+given above, now with a better default in its place.
+
+**Page setup no longer opens by itself.** The "four questions" amendment
+expanded it whenever a value differed from the defaults, so that nothing was
+hidden silently. Two things undid that reasoning: the summary line already
+names every value it hides, and once preferences were remembered a non-default
+was the normal case, so the group opened for every returning user with four
+rows of controls nobody had asked to see. `isNonDefaultPageSetup` and its test are deleted.

@@ -687,7 +687,6 @@ export interface Workspace {
   pasteFiles: () => void;
   /** Files waiting on the clipboard — drives the Paste entry. */
   clipboardCount: number;
-  exportFiles: () => void;
   /** Open the Export-to-PDF dialog for an explicit asset set (ADR 0035). */
   openExportFor: (ids: string[]) => void;
   exportOpen: boolean;
@@ -3642,8 +3641,9 @@ export function useWorkspace(
   const sendToBack = useCallback(() => applyTileZ("back"), [applyTileZ]);
   const bringForward = useCallback(() => applyTileZ("forward"), [applyTileZ]);
   const sendBackward = useCallback(() => applyTileZ("backward"), [applyTileZ]);
-  /** Open the export dialog for an explicit set of assets (ADR 0035) — a folder
-   *  or the current selection. The dialog itself does
+  /** Open the export dialog for an explicit set of assets (ADR 0035) — the
+   *  selection, a right-clicked tile, the drawer's photo, a Workspace or a
+   *  draft's photos. The dialog itself does
    *  the POST /api/exports + poll + download.
    *
    *  Page order is decided HERE, once, so all four entry points agree: the ids
@@ -3664,9 +3664,6 @@ export function useWorkspace(
     },
     [activeTilePositions, flashToast, setState],
   );
-  const exportFiles = useCallback(() => {
-    openExportFor(stateRef.current.selectedIds.slice());
-  }, [openExportFor]);
   const closeExport = useCallback(() => setState({ exportOpen: false }), [setState]);
   // ── Folders (ADR 0034) — server-backed grouping, client-side geometry ──────
 
@@ -4696,7 +4693,7 @@ export function useWorkspace(
           if (!r.ok) return;
           const { url } = (await r.json()) as { url: string | null };
           if (!url) return;
-          flashToast("Your PDF is ready", { label: "Download", onAction: () => window.open(url, "_blank", "noopener") });
+          flashToast("Your download is ready", { label: "Download", onAction: () => window.open(url, "_blank", "noopener") });
         } catch {
           // no toast beats a broken one
         }
@@ -5639,7 +5636,6 @@ export function useWorkspace(
     copyFiles,
     pasteFiles,
     clipboardCount: state.clipboardCount,
-    exportFiles,
     openExportFor,
     exportOpen: state.exportOpen,
     exportIds: state.exportIds,
