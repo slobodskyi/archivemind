@@ -40,8 +40,8 @@ const FADE = 18;
 
 /** The Workspace browser in the header (ADR 0044): "All files" (the sorting
  *  views over the whole project) then a chip per workspace — colour dot · name ·
- *  count — a ＋ to create one (a dashed "New workspace" ghost chip while there
- *  are none), and a "+N ▾" overflow. Selecting a chip opens that
+ *  count — a ＋ to create one (a dashed "Create a workspace to export" ghost
+ *  chip while there are none), and a "+N ▾" overflow. Selecting a chip opens that
  *  workspace's working canvas; "All files" returns to browsing the whole project.
  *
  *  Deleting is a two-step affair here, and deliberately: the × sits on the chip
@@ -415,7 +415,7 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
             }}
           >
             <AddIcon width={12} height={12} />
-            New workspace
+            Create a workspace to export
           </button>
         )}
       </div>
