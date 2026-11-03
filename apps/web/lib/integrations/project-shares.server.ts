@@ -134,6 +134,13 @@ export async function listProjectShareAssets(
   if (error || !Array.isArray(data)) return null;
   const rows = z.array(assetRowSchema).max(PROJECT_SHARE_PAGE_SIZE).safeParse(data);
   if (!rows.success) return null;
+  // No rows is also how the SQL refuses — a dead link, or one that cannot
+  // download — so an empty page has to prove the link still lists files before
+  // it may say "no more files" instead of the uniform 404.
+  if (rows.data.length === 0) {
+    const share = await openProjectShare(token);
+    if (!share?.canDownload) return null;
+  }
   const last = rows.data.at(-1);
   return {
     files: rows.data.map((row) => ({

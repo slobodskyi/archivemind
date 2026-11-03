@@ -147,6 +147,32 @@ describe("project share public resolvers", () => {
     expect(await openProjectShare(token)).toBeNull();
   });
 
+  it("answers an empty page only while the link can still list files", async () => {
+    const { token } = await mintShareToken();
+    const opened = (canDownload: boolean) =>
+      answer({
+        data: {
+          share_id: assetId,
+          project_name: "Odesa 2026",
+          can_download: canDownload,
+          can_upload: !canDownload,
+          expires_at: "2026-11-10T00:00:00+00:00",
+          rights: { creator: null, credit: null, copyrightNotice: null, usageTerms: null },
+          file_count: canDownload ? 0 : null,
+        },
+      });
+
+    // A live download link past its last file: an honest empty page.
+    admin.rpc.mockReturnValueOnce(answer({ data: [] })).mockReturnValueOnce(opened(true));
+    expect(await listProjectShareAssets(token, null)).toEqual({ files: [], nextCursor: null });
+
+    // The SQL answers a dead link and an upload-only one with no rows too.
+    admin.rpc.mockReturnValueOnce(answer({ data: [] })).mockReturnValueOnce(answer({ data: null }));
+    expect(await listProjectShareAssets(token, null)).toBeNull();
+    admin.rpc.mockReturnValueOnce(answer({ data: [] })).mockReturnValueOnce(opened(false));
+    expect(await listProjectShareAssets(token, null)).toBeNull();
+  });
+
   it("pages by (sort_at, id) and offers a cursor only after a full page", async () => {
     const { token } = await mintShareToken();
     admin.rpc.mockReturnValue(answer({ data: [assetRow()] }));
