@@ -102,23 +102,105 @@ export type DedupAction = "merge" | "revive-merge" | "stand-alone" | "drop";
  *   - otherwise the survivor is a safe home: merge into it (drop the
  *     duplicate), reviving a soft-deleted survivor — "re-added to get it back".
  *
- *  `fromShare` (ADR 0051 §10): a file sent through a project share link by
- *  somebody with no account. "Re-added to get it back" is a member's right,
- *  not a stranger's — reviving would undo a member's decision to throw the
- *  photo away (or to erase it: a purged tombstone keeps its hash). So a
- *  trashed survivor DROPS the incoming copy instead, whatever either side's
- *  durability; it is checked before the durability rule, so that rule cannot
- *  bring it back as a fresh stand-alone asset either. An active survivor still merges as usual. */
+ *  `share` (ADR 0051 §10) is set for a file sent through a project share link
+ *  by somebody with no account. Two rules a member's own re-add does not have:
+ *   - The survivor must ALREADY be in the link's project, or the copy drops.
+ *     Merging moves project membership onto the survivor, so a stranger
+ *     holding the bytes of a photo filed in another (private) project would
+ *     otherwise pull it — with the member's title, corrected date and edits —
+ *     into the shared one, where every link holder and the listing see it.
+ *     That is also an oracle: "a tile with somebody else's name appeared".
+ *   - A trashed survivor is never revived ("re-added to get it back" is a
+ *     member's right, not a stranger's; a purged tombstone keeps its hash
+ *     too). It drops, whatever either side's durability, so the durability
+ *     rule cannot bring it back as a fresh stand-alone asset either.
+ *  An active survivor inside the project still merges as usual. */
+export interface ShareDedupContext {
+  /** The survivor is a member of the link's own project. */
+  survivorInProject: boolean;
+}
+
 export function dedupDecision(
   survivorStatus: string,
   survivorDurable: boolean,
   incomingDurable: boolean,
-  fromShare = false,
+  share: ShareDedupContext | null = null,
 ): DedupAction {
+  if (share && !share.survivorInProject) return "drop";
   if (survivorStatus === "source_missing") return "stand-alone";
-  if (fromShare && survivorStatus !== "active") return "drop";
+  if (share && survivorStatus !== "active") return "drop";
   if (incomingDurable && !survivorDurable) return "stand-alone";
   return survivorStatus === "active" ? "merge" : "revive-merge";
+}
+
+type Queryable = Pick<pg.Pool, "query">;
+
+/** The database and R2 side of a dedup decision for one incoming file, split
+ *  out of the handler so what each action writes — and what it must NOT
+ *  touch — is pinned by tests. Returns true when the incoming copy is gone
+ *  (merged or dropped) and the caller should move on to the next file. */
+export async function applyDedupAction(
+  pool: Queryable,
+  action: DedupAction,
+  row: { asset_id: string; file_id: string; r2_key: string | null },
+  survivor: { asset_id: string; file_id: string },
+  opts: { fromShare: boolean; removeObject: (key: string) => Promise<void> },
+): Promise<boolean> {
+  if (action === "stand-alone") {
+    // The survivor is a tombstone, or holds no durable bytes while the
+    // incoming file DOES — folding the copy in would either resurrect a
+    // broken record or destroy the only recoverable original the user just
+    // supplied. Release the survivor's claim on the hash (UNIQUE) and let the
+    // incoming file proceed as its own asset. A rare duplicate is strictly
+    // better than silent data loss.
+    await pool.query(`update files set content_hash = null where id = $1`, [survivor.file_id]);
+    return false;
+  }
+
+  if (opts.fromShare) {
+    // The link's ledger points at the file it duplicates, BEFORE the incoming
+    // asset goes (its FK would null asset_id). After a merge that is where the
+    // file now lives, so "Show on canvas" still finds it; after a drop it is a
+    // record that the sender delivered a copy of something the workspace
+    // already holds — counted in the link's "files received", never linked
+    // into the project, so list_project_share_received (project members only)
+    // does not show it.
+    await pool.query(`update project_share_uploads set asset_id = $2 where asset_id = $1`, [
+      row.asset_id,
+      survivor.asset_id,
+    ]);
+  }
+
+  if (action === "revive-merge") {
+    // Re-adding a soft-deleted photo means "get it back": revive the survivor
+    // rather than merging the fresh copy INTO a tombstone (which used to
+    // delete the re-added photo, #118). Safe only because the survivor has
+    // durable bytes (checked above). Never reached for a link upload.
+    await pool.query(`update assets set status='active' where id = $1`, [survivor.asset_id]);
+  }
+  if (action === "merge" || action === "revive-merge") {
+    // The doomed asset's project links move to the survivor FIRST — a
+    // re-imported copy was just added to a project, and "silently vanishes
+    // from that project" is not acceptable dedup UX (M:N, ADR 0011). For a
+    // link upload this only ever re-states a membership the survivor already
+    // has: dedupDecision drops anything outside the link's project.
+    await pool.query(
+      `insert into project_assets (project_id, asset_id)
+       select pa.project_id, $2 from project_assets pa where pa.asset_id = $1
+       on conflict do nothing`,
+      [row.asset_id, survivor.asset_id],
+    );
+  }
+  // "drop" ends here too: the incoming row, its asset (whose project link
+  // cascades away with it) and its bytes go; the survivor is not written.
+  await pool.query(`delete from files where id = $1`, [row.file_id]);
+  await pool.query(
+    `delete from assets a where a.id = $1
+       and not exists (select 1 from files f where f.asset_id = a.id)`,
+    [row.asset_id],
+  );
+  if (row.r2_key) await opts.removeObject(row.r2_key).catch(() => {}); // best-effort cleanup
+  return true;
 }
 
 /** #119: a run in which EVERY processed row failed is a FAILED job, not a
@@ -171,8 +253,6 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
   const payload = ingestJobPayloadSchema.parse(job.payload);
   const { asset_ids } = payload;
   const dropboxByAsset = new Map((payload.dropbox ?? []).map((d) => [d.asset_id, d]));
-  // Sent through a project share link (ADR 0051): never revive from Trash.
-  const fromShare = payload.share_id != null;
 
   const oneDriveTokens = new OneDriveTokenSource(pool);
   // One gate per job: a 429 anywhere holds every later OneDrive request,
@@ -439,80 +519,42 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
       );
       if (dupes.length > 0) {
         const survivor = dupes[0];
+        // A link upload may only fold into a file its own project already
+        // holds (ADR 0051 §10): ask once, only when there is a duplicate.
+        const share = payload.share_id
+          ? {
+              survivorInProject: (
+                await pool.query<{ inside: boolean }>(
+                  `select exists (
+                     select 1 from project_assets pa
+                       join project_shares ps on ps.project_id = pa.project_id
+                      where ps.id = $1 and pa.asset_id = $2
+                   ) as inside`,
+                  [payload.share_id, survivor.asset_id],
+                )
+              ).rows[0]?.inside === true,
+            }
+          : null;
         const action = dedupDecision(
           survivor.asset_status,
           survivor.r2_key != null, // survivor holds durable bytes in R2
           row.r2_key != null, // the incoming file holds durable bytes in R2
-          fromShare,
+          share,
         );
-        if (action === "drop") {
-          // A link's file matching a trashed one: the trash stays as the member
-          // left it and the sender's copy goes — row, asset (its project link
-          // cascades) and bytes. The reservation keeps its 'completed' status
-          // with asset_id nulled by the FK; the sender was only ever told
-          // "received".
-          await pool.query(`delete from files where id = $1`, [row.file_id]);
-          await pool.query(
-            `delete from assets a where a.id = $1
-               and not exists (select 1 from files f where f.asset_id = a.id)`,
-            [row.asset_id],
-          );
-          if (row.r2_key) await deleteObject(row.r2_key).catch(() => {}); // best-effort cleanup
-          console.log(`[ingest] ${label}: link upload matches ${survivor.asset_status} asset ${survivor.asset_id} — dropped, not revived`);
-          deduped += 1;
-          done += 1;
-          continue;
-        }
-        if (action === "stand-alone") {
-          // The survivor is a tombstone, or holds no durable bytes while the
-          // incoming file DOES — folding the copy in would either resurrect a
-          // broken record or destroy the only recoverable original the user
-          // just supplied. Release the survivor's claim on the hash (UNIQUE)
-          // and let the incoming file proceed as its own asset. A rare
-          // duplicate is strictly better than silent data loss.
-          await pool.query(`update files set content_hash = null where id = $1`, [survivor.file_id]);
-          console.log(
-            `[ingest] ${label}: matches ${survivor.asset_status} asset ${survivor.asset_id} that holds no durable copy — kept separately`,
-          );
-        } else {
-          if (action === "revive-merge") {
-            // Re-adding a soft-deleted photo means "get it back": revive the
-            // survivor rather than merging the fresh copy INTO a tombstone
-            // (which used to delete the re-added photo, #118). Safe only
-            // because the survivor has durable bytes (checked above).
-            await pool.query(`update assets set status='active' where id = $1`, [survivor.asset_id]);
-          }
-          // The doomed asset's project links move to the survivor FIRST — a
-          // re-imported copy was just added to a project, and "silently
-          // vanishes from that project" is not acceptable dedup UX (M:N,
-          // ADR 0011).
-          await pool.query(
-            `insert into project_assets (project_id, asset_id)
-             select pa.project_id, $2 from project_assets pa where pa.asset_id = $1
-             on conflict do nothing`,
-            [row.asset_id, survivor.asset_id],
-          );
-          if (fromShare) {
-            // The link's ledger follows the file to where it now lives, BEFORE
-            // the doomed asset goes (its FK would null asset_id): "Show on
-            // canvas" must still find what this link brought (ADR 0051 §10).
-            await pool.query(
-              `update project_share_uploads set asset_id = $2 where asset_id = $1`,
-              [row.asset_id, survivor.asset_id],
-            );
-          }
-          await pool.query(`delete from files where id = $1`, [row.file_id]);
-          await pool.query(
-            `delete from assets a where a.id = $1
-               and not exists (select 1 from files f where f.asset_id = a.id)`,
-            [row.asset_id],
-          );
-          if (row.r2_key) await deleteObject(row.r2_key).catch(() => {}); // best-effort cleanup
-          console.log(
-            action === "revive-merge"
-              ? `[ingest] ${label}: duplicate of ${survivor.asset_status} asset ${survivor.asset_id} — revived and merged`
-              : `[ingest] ${label}: duplicate of asset ${survivor.asset_id} — merged into it`,
-          );
+        const gone = await applyDedupAction(pool, action, row, survivor, {
+          fromShare: share !== null,
+          removeObject: deleteObject,
+        });
+        console.log(
+          action === "stand-alone"
+            ? `[ingest] ${label}: matches ${survivor.asset_status} asset ${survivor.asset_id} that holds no durable copy — kept separately`
+            : action === "drop"
+              ? `[ingest] ${label}: link upload duplicates ${survivor.asset_status} asset ${survivor.asset_id}${share?.survivorInProject ? "" : " outside the link's project"} — dropped, nothing linked or revived`
+              : action === "revive-merge"
+                ? `[ingest] ${label}: duplicate of ${survivor.asset_status} asset ${survivor.asset_id} — revived and merged`
+                : `[ingest] ${label}: duplicate of asset ${survivor.asset_id} — merged into it`,
+        );
+        if (gone) {
           deduped += 1;
           done += 1;
           continue;

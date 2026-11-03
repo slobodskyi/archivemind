@@ -393,8 +393,12 @@ PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /sett
                                      engine as the signed-in upload (lib/upload-client's
                                      runTransfers — 3 PUTs at a time, retries, chunks of 100)
                                      behind an UploadTransport adapter
-  Ingest of a share_id job never revives a trashed duplicate — it DROPS the sender's copy —
-  and repoints the reservation to the survivor on an ordinary merge. The worker's 6-hourly
+  Ingest of a share_id job merges a duplicate only into an ACTIVE file already in the link's
+  own project; a duplicate of a file filed elsewhere, or of a trashed one, DROPS the sender's
+  copy — nothing linked, nothing revived, the survivor untouched — or a stranger holding a
+  photo's bytes could pull a private project's file (title, date, edits) into the shared one.
+  Either way the reservation is repointed to the survivor, so the link's "files received"
+  still counts the delivery while "Show on canvas" lists project members only. The worker's 6-hourly
   tick deletes the R2 keys of expired/rejected reservations (and completed ones' staging
   copies) via project_share_uploads_to_sweep() → delete → mark_project_share_uploads_swept().
   Received files carry assets.received_share_id / received_from, which the drawer prints as
