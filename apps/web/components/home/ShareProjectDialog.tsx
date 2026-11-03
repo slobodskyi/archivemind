@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { z } from "zod";
 import { SINGLE_PUT_MAX_BYTES } from "@archivemind/shared";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
+import { REPLAY_BLOCK_CLASS } from "@/lib/analytics";
 import {
   PROJECT_SHARE_DEFAULT_EXPIRY_DAYS,
   PROJECT_SHARE_EXPIRY_DAYS,
@@ -279,7 +280,8 @@ function ShareRow({
       {copied === false && url && !fresh ? (
         <div style={{ marginTop: 8, paddingLeft: 15 }}>
           <div style={{ display: "flex" }}>
-            <input readOnly value={url} aria-label="Share link" onFocus={(event) => event.currentTarget.select()} style={linkInputStyle} />
+            {/* A live address is a key: never in a session replay. */}
+            <input className={REPLAY_BLOCK_CLASS} readOnly value={url} aria-label="Share link" onFocus={(event) => event.currentTarget.select()} style={linkInputStyle} />
           </div>
           <div role="alert" style={{ paddingTop: 5, color: "var(--red)", fontSize: 9.5 }}>Couldn’t access the clipboard. Select and copy the link above.</div>
         </div>
@@ -581,7 +583,8 @@ function ShareProjectDialogContent({
                 Link is live
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                <input data-autofocus="" readOnly value={createdLive.url} aria-label="Share link" onFocus={(event) => event.currentTarget.select()} style={linkInputStyle} />
+                {/* A live address is a key: never in a session replay. */}
+                <input className={REPLAY_BLOCK_CLASS} data-autofocus="" readOnly value={createdLive.url} aria-label="Share link" onFocus={(event) => event.currentTarget.select()} style={linkInputStyle} />
                 <button type="button" onClick={() => void copy(createdLive.id, createdLive.url)} disabled={busy} style={{ ...buttonStyle, minWidth: 86, background: "var(--ac)", border: 0, color: "#050505", fontWeight: 800, opacity: busy ? 0.55 : 1 }}>
                   {copiedFor(createdLive.id) ? "Copied" : "Copy link"}
                 </button>

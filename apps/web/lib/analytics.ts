@@ -38,6 +38,11 @@ export const REPLAY_MASK_TEXT = false;
 
 export const UNMASK_ATTR = "data-ph-unmask";
 export const MASK_ATTR = "data-ph-mask";
+/** A subtree replay never records at all — a same-size placeholder, in BOTH
+ *  masking modes. For a bearer credential on screen, such as a share link's
+ *  address (ADR 0051): while text masking is off, inputs are recorded exactly
+ *  as they read, and a live link is a key, not a filename. */
+export const REPLAY_BLOCK_CLASS = "ph-no-capture";
 
 /** What a redacted URL becomes: a valid, empty data URI, so the replay player
  *  neither requests anything nor resolves it against PostHog's own origin. */
@@ -149,6 +154,8 @@ export function posthogConfig({
     enable_recording_console_log: false,
     session_recording: {
       ...textMasking(maskTextOn),
+      // PostHog's own default today; set here so the code stays the one source.
+      blockClass: REPLAY_BLOCK_CLASS,
       // Runs whether or not text is masked: a presigned URL is a credential,
       // and it dies within the hour. It is either blanked or, in internal
       // testing, pointed at /api/replay-image so the photo survives.

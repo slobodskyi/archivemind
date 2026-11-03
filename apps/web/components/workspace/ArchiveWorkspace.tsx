@@ -39,6 +39,7 @@ import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
 // SearchModal retired — the magnifier now opens the real Smart Search panel (ChatPanel).
 import ConfirmModal from "@/components/modals/ConfirmModal";
+import ShareProjectDialog from "@/components/home/ShareProjectDialog";
 import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions";
 import CanvasAnalyzeAction from "@/components/bulk-ai/CanvasAnalyzeAction";
 import CreateOutputDialog from "@/components/content/CreateOutputDialog";
@@ -209,6 +210,9 @@ export default function ArchiveWorkspace({
   // modal because they are the same question at different stakes: `trash` is
   // reversible and says so, `purge` is not.
   const [boardConfirm, setBoardConfirm] = useState<{ id: string; mode: "trash" | "purge" } | null>(null);
+  // The project's Share dialog (ADR 0051) — not `shareOpen`, which belongs to
+  // a content draft's preview link (ADR 0046).
+  const [projectShareOpen, setProjectShareOpen] = useState(false);
   const confirmBoard = boardConfirm
     ? ([...bd.boards, ...bd.trashedBoards].find((b) => b.id === boardConfirm.id) ?? null)
     : null;
@@ -952,7 +956,9 @@ export default function ArchiveWorkspace({
         canRedo={ws.canRedo}
         onUndo={ws.undo}
         onRedo={ws.redo}
-        onFlashToast={ws.flashToast}
+        // The same Share dialog as the hub card's Share… (ADR 0051). The
+        // workspace-wide `all` canvas has no project to share.
+        onShare={ws.projectMode ? () => setProjectShareOpen(true) : undefined}
         onOpenAcct={ws.openAcct}
         accountInitials={account.initials}
         accountName={account.name}
@@ -975,6 +981,12 @@ export default function ArchiveWorkspace({
             />
           ) : undefined
         }
+      />
+
+      <ShareProjectDialog
+        open={projectShareOpen && ws.projectMode}
+        project={{ id: currentProjectId, name: ws.projLabel }}
+        onClose={() => setProjectShareOpen(false)}
       />
 
       {/* Persistent by design: this is archive-integrity information, not a

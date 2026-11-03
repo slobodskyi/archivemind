@@ -115,7 +115,9 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                into an archive you are not looking at
   app/api/projects/[id]/shares                 project share links (ADR 0051, migration
                                                20261103000001): GET lists the unrevoked links for the
-                                               hub card's Share… dialog; POST mints one. Rights are
+                                               Share dialog — the hub card's Share… and the canvas
+                                               header's SHARE (hidden on the `all` canvas, which has no
+                                               project); POST mints one. Rights are
                                                per link — view & download, send files only, or both —
                                                and every link expires (1/7/30/90 days, no "never").
                                                The token is minted HERE and leaves only inside the
@@ -124,8 +126,11 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                TOKEN_ENC_KEY (lib/integrations/project-shares.server,
                                                the one module that holds the key), which is what lets
                                                an editor copy a live link again from another device.
-                                               The digest and the ciphertext never reach a browser.
-                                               Editors only; the RPCs check, viewers get 403
+                                               The digest and the ciphertext never reach a browser,
+                                               and the address fields carry REPLAY_BLOCK_CLASS: replay
+                                               records inputs as-is while masking is off (ADR 0050),
+                                               and a live link is a key. Editors only; the RPCs
+                                               check, viewers get 403
   app/api/project-shares/[id]                  PATCH: extend (a new deadline counted from now, SAME
                                                URL — the link's creator or a workspace owner only) and/
                                                or relabel. DELETE: turn the link off — terminal, any
