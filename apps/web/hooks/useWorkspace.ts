@@ -4578,7 +4578,7 @@ export function useWorkspace(
    *  panel's checkboxes — a photo-level button must not change meaning because
    *  of a toggle the user set somewhere else. */
 
-  useJobProgress(workspaceId, (job) => {
+  useJobProgress(workspaceId, (job, own) => {
     if (job.type === "ingest") {
       if (job.status !== "done" && job.status !== "failed" && job.status !== "canceled") return;
       const terminalStatus = job.status;
@@ -4608,9 +4608,12 @@ export function useWorkspace(
       //   import would be completely silent. Toast the first-party copy.
       // - Partial 'done': some files landed, but the "N failed / N missing"
       //   the worker wrote to progress_label must surface too.
-      if (terminalStatus !== "done") {
+      // Only for the viewer's own import: the channel carries every ingest in
+      // the workspace, a teammate's or a share link's (ADR 0051) included.
+      // Those still refresh the canvas below, so received files appear.
+      if (own && terminalStatus !== "done") {
         flashToast(cloudErrorCopy(job.error) ?? "Some files couldn't be imported");
-      } else if (/\b(failed|missing)\b/.test(job.progress_label ?? "")) {
+      } else if (own && /\b(failed|missing)\b/.test(job.progress_label ?? "")) {
         flashToast(job.progress_label ?? "Some files couldn't be imported");
       }
       router.refresh();
@@ -4686,7 +4689,9 @@ export function useWorkspace(
     // closure and there is no export history. The broadcast is workspace-scoped,
     // so it still arrives after a reload; turn it into a toast that can download.
     if (job.type === "export") {
-      if (job.status !== "done" || stateRef.current.exportOpen) return;
+      // "Your download" means the viewer's: a teammate's export, or a ZIP a
+      // stranger asked for through a share link (ADR 0051), is not theirs.
+      if (!own || job.status !== "done" || stateRef.current.exportOpen) return;
       void (async () => {
         try {
           const r = await fetch(`/api/exports?jobId=${job.id}`);

@@ -261,6 +261,10 @@ export async function renderZip(
   options: ArtboardSettings,
   rights: WorkspaceRights | null,
   onProgress: (done: number, total: number) => Promise<void>,
+  /** False for a project share link's ZIP (ADR 0051 §8): AI captions and
+   *  unreviewed facts are the archive's working material, not the files the
+   *  link shares. The README and its rights block still ship. */
+  includeCaptions = true,
 ): Promise<{ body: Buffer; skipped: number }> {
   const plan = planZip(await loadByteRows(pool, rows), options.zipContents);
   if (plan.entries.length === 0) throw new Error("export_empty");
@@ -289,7 +293,9 @@ export async function renderZip(
     await onProgress(i + 1, plan.entries.length);
   }
 
-  files.push({ name: "captions.csv", body: await renderCaptionsCsv(pool, rows, options) });
+  if (includeCaptions) {
+    files.push({ name: "captions.csv", body: await renderCaptionsCsv(pool, rows, options) });
+  }
   const readme = buildReadme(plan, options.zipContents, rights);
   if (readme) files.push({ name: "README.txt", body: Buffer.from(readme, "utf8") });
 

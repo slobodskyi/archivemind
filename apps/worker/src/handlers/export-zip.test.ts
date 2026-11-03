@@ -6,7 +6,7 @@ import type { ExportRow } from "./export";
 const getObjectBuffer = vi.fn(async (key: string) => Buffer.from(`bytes of ${key}`));
 vi.mock("../services/r2", () => ({ getObjectBuffer: (key: string) => getObjectBuffer(key) }));
 
-const { assertUnderBudget, buildReadme, planZip, renderSingleFile, singleFileArtifact } = await import("./export-zip");
+const { assertUnderBudget, buildReadme, planZip, renderSingleFile, renderZip, singleFileArtifact } = await import("./export-zip");
 
 /** Shapes the DB rows renderZip reads. `original_key: null` = a Drive-linked
  *  asset, whose original was never copied into R2 (ADR 0025). */
@@ -245,5 +245,41 @@ describe("renderSingleFile", () => {
     await expect(renderSingleFile(poolWith({ original_key: null, medium_key: null }), only, opts("originals"))).rejects.toThrow(
       "export_empty",
     );
+  });
+});
+
+describe("renderZip — a project share link's ZIP (ADR 0051)", () => {
+  const rights = { creator: "Olena K.", credit: null, copyright_notice: null, usage_terms: null };
+  const opts = artboardSettingsSchema.parse({ format: "zip", zipContents: "originals" });
+  const rows = [
+    { asset_id: "a1", title: "a.jpg", medium_key: null },
+    { asset_id: "a2", title: "b.jpg", medium_key: null },
+  ] as ExportRow[];
+  // The byte query answers with both assets; any other query (the captions
+  // CSV's) would be a failure for a link ZIP, so it answers nothing.
+  const pool = () =>
+    ({
+      query: vi.fn(async (sql: string) =>
+        /from assets a\s+left join lateral/.test(sql)
+          ? {
+              rows: [
+                row({ asset_id: "a1", title: "a.jpg", original_key: "ws/originals/1/a.jpg" }),
+                row({ asset_id: "a2", title: "b.jpg", original_key: "ws/originals/2/b.jpg" }),
+              ],
+            }
+          : { rows: [] },
+      ),
+    }) as unknown as pg.Pool;
+
+  it("leaves captions.csv out and keeps the README's rights block", async () => {
+    const db = pool();
+    const { body } = await renderZip(db, rows, opts, rights, async () => {}, false);
+    const text = body.toString("latin1");
+    expect(text).toContain("a.jpg");
+    expect(text).toContain("README.txt");
+    expect(text).toContain("Creator: Olena K.");
+    expect(text).not.toContain("captions.csv");
+    // Only the byte query ran: nothing read captions or facts.
+    expect(db.query).toHaveBeenCalledTimes(1);
   });
 });

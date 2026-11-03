@@ -335,6 +335,39 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                token that is NOT the Graph token, and listChildren
                                                had to exist anyway for the folder walk
 
+PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /settings; ADR 0051):
+  READ  app/s/[token]/page.tsx       dynamic Server Component: open_project_share() → name, the
+                                     owner's byline (components/share/RightsFooter, shared with
+                                     /p) and, on a download link, the first 200 files server-
+                                     rendered (components/share/ProjectShareFiles). An upload-only
+                                     link gets the name, the byline and the send-form slot — no
+                                     file count. A LIVE window: every request re-resolves the
+                                     project, unlike a /p publication's snapshot
+        app/s/[token]/assets         GET ?cursor= — keyset page of 200, (sort_at, id) carried as
+                                     an opaque cursor; no-store
+        app/s/[token]/media/[assetId]/[thumb|medium|original]
+                                     re-resolves the token AND the asset's membership on every
+                                     request, then 302s to a 5-minute presign (private,
+                                     max-age=240). Bytes never cross Vercel — originals reach
+                                     100 MiB — and no signature is ever in the page. Originals
+                                     sign as attachments; a Drive/OneDrive file downloads as its
+                                     web-size preview, labelled so
+  WRITE app/s/[token]/downloads      POST { assetIds ≤500 } → enqueue_project_share_download():
+                                     the ordinary export job as a ZIP, ids intersected with the
+                                     project in SQL, share_id stamped, user_id null; per-link
+                                     (1 in flight, 20/day) and per-workspace (2 in flight)
+                                     guards, an identical finished ZIP reused. Refusals reach
+                                     the client as not-found / busy / limit / failed only
+        app/s/[token]/downloads/[jobId]
+                                     GET: that link's job only — status JSON, or a 302 to a
+                                     5-minute presign of result_key once done. The worker
+                                     leaves captions.csv out of a share_id ZIP
+  Every refusal (malformed, unknown, revoked, expired, wrong rights, another project's asset)
+  is one 404. All five resolvers are service_role-only SECURITY DEFINER functions, reached
+  through lib/integrations/project-shares.server (the admin-client fence), which validates
+  the token's shape and sends only its SHA-256. The owner's canvas still refreshes when a
+  link's job finishes, but toasts fire only for the viewer's own jobs (useJobProgress `own`)
+
 AUTH PATH (public — proxy.ts lets the whole /auth/* subtree through):
   components/auth/AuthForm.tsx   signInWithPassword · signUp · signInWithOAuth("google")
   app/auth/callback              PKCE exchange for BOTH email links and Google;

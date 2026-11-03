@@ -7,7 +7,10 @@ import { createServerClient } from "@supabase/ssr";
 
 // /api/replay-image is token-authorised, not session-authorised: PostHog's
 // replay player fetches it cross-site, with no cookie (ADR 0050 amendment).
-const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/p", "/api/replay-image"];
+// /p and /s are capability links for people without an account (ADR 0046,
+// 0051): the token in the path is the authorisation. The match is on the
+// segment, so "/s" opens "/s/…" and never "/settings".
+const PUBLIC_PATHS = ["/login", "/signup", "/auth", "/p", "/s", "/api/replay-image"];
 
 export function isPublicPath(pathname: string) {
   // "/" is public but must be matched exactly: anonymous visitors get the

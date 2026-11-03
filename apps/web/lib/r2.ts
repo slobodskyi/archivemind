@@ -63,17 +63,29 @@ const SIGNING_BUCKET_MS = 30 * 60 * 1000;
  *  ignored cross-origin, and a presigned URL is on the R2 host, so exports used
  *  to save as a job uuid. Passing it also opts out of the signing-date bucket —
  *  bucketing exists to keep preview URLs byte-identical for the browser cache,
- *  which does not apply to a one-off deliverable. */
-export async function presignGet(key: string, filename?: string): Promise<string> {
+ *  which does not apply to a one-off deliverable.
+ *
+ *  `ttlSeconds` shortens the URL's life — project share links (ADR 0051) hand
+ *  a stranger a 5-minute URL so turning a link off leaves only that tail. A
+ *  short TTL also opts out of the bucket: a 30-minute-old signing date would
+ *  already have expired. */
+export async function presignGet(
+  key: string,
+  filename?: string,
+  options: { ttlSeconds?: number } = {},
+): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: r2Bucket(),
     Key: key,
     ...(filename ? { ResponseContentDisposition: contentDisposition(filename) } : {}),
   });
-  const signingDate = filename
+  const signingDate = filename || options.ttlSeconds !== undefined
     ? undefined
     : new Date(Math.floor(Date.now() / SIGNING_BUCKET_MS) * SIGNING_BUCKET_MS);
-  return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_GET_TTL_SECONDS, signingDate });
+  return getSignedUrl(r2Client(), command, {
+    expiresIn: options.ttlSeconds ?? PRESIGN_GET_TTL_SECONDS,
+    signingDate,
+  });
 }
 
 export interface R2ObjectStream {
