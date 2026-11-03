@@ -30,7 +30,9 @@ import {
   LogsIcon,
   HelpIcon,
   PencilIcon,
+  ShareIcon,
 } from "@/components/icons/icons";
+import ShareProjectDialog from "@/components/home/ShareProjectDialog";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
  *  Opening a project navigates to its canvas at /projects/[id]. */
@@ -123,6 +125,7 @@ export default function HomeClient({
   const [archivedProjects, setArchivedProjects] = useState<ProjectCard[] | null>(null);
   const [renameTarget, setRenameTarget] = useState<ProjectCard | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<{ project: ProjectCard; action: "archive" | "delete" } | null>(null);
+  const [shareTarget, setShareTarget] = useState<ProjectCard | null>(null);
 
   /** Escape closes the drawer, the way it closes every other overlay here. The
    *  scrim is the discoverable way out and the nav items close it on their own;
@@ -258,6 +261,17 @@ export default function HomeClient({
     setActiveProjects((l) => l.filter((p) => p.id !== project.id));
     setArchivedProjects((l) => (l ? l.filter((p) => p.id !== project.id) : l));
     flash(`"${project.name}" moved to Trash`);
+  }
+
+  /** The Share dialog reports the live-link count as it closes; the card's
+   *  marker follows it. Unchanged lists keep their identity. */
+  function setLiveShares(projectId: string, liveShares: number) {
+    const apply = (list: ProjectCard[]) =>
+      list.some((p) => p.id === projectId && (p.liveShares ?? 0) !== liveShares)
+        ? list.map((p) => (p.id === projectId ? { ...p, liveShares } : p))
+        : list;
+    setActiveProjects(apply);
+    setArchivedProjects((l) => (l ? apply(l) : l));
   }
 
   async function restoreProject(project: ProjectCard) {
@@ -482,10 +496,12 @@ export default function HomeClient({
               onDisabledClick={() => flash("Restore this project to open it")}
               onOpen={() => recordRecentProject(p.id)}
               onRename={view === "archived" ? undefined : () => setRenameTarget(p)}
+              liveShares={p.liveShares ?? 0}
             >
               <CardMenu
                 restoreOnly={view === "archived"}
                 onOpen={() => openProject(p.id)}
+                onShare={() => setShareTarget(p)}
                 onRename={() => setRenameTarget(p)}
                 onArchive={() => setConfirmTarget({ project: p, action: "archive" })}
                 onDelete={() => setConfirmTarget({ project: p, action: "delete" })}
@@ -549,13 +565,24 @@ export default function HomeClient({
         onClose={() => setRenameTarget(null)}
       />
 
+      <ShareProjectDialog
+        open={!!shareTarget}
+        project={shareTarget}
+        onClose={() => setShareTarget(null)}
+        onLiveCountChange={setLiveShares}
+      />
+
       <ConfirmModal
         open={!!confirmTarget}
         title={confirmTarget?.action === "archive" ? "Archive project?" : "Delete project?"}
         body={
           confirmTarget?.action === "archive"
-            ? `"${confirmTarget.project.name}" will move to Archived. You can restore it anytime.`
-            : `"${confirmTarget?.project.name}" will move to Trash and be permanently removed after 30 days.`
+            ? `"${confirmTarget.project.name}" will move to Archived. You can restore it anytime.${
+                confirmTarget.project.liveShares ? " Its share links keep working — turn them off from Share…" : ""
+              }`
+            : `"${confirmTarget?.project.name}" will move to Trash and be permanently removed after 30 days.${
+                confirmTarget?.project.liveShares ? " Its share links stop working while it is there." : ""
+              }`
         }
         confirmLabel={confirmTarget?.action === "archive" ? "Archive" : "Delete"}
         danger={confirmTarget?.action === "delete"}
@@ -582,6 +609,7 @@ function ProjectCardView({
   onDisabledClick,
   onOpen,
   onRename,
+  liveShares = 0,
   children,
 }: {
   title: string;
@@ -600,6 +628,9 @@ function ProjectCardView({
   /** Rename in place — draws a pencil beside the name. Omitted for archived
    *  cards, which have no rename. */
   onRename?: () => void;
+  /** Live share links (ADR 0051). Anyone holding one can reach this project
+   *  without an account, so the card says so on its face. */
+  liveShares?: number;
   children?: React.ReactNode;
 }) {
   const extra = count - previews.length;
@@ -631,6 +662,15 @@ function ProjectCardView({
             </div>
           ))}
           <span style={{ position: "absolute", top: 8, left: 8, width: 8, height: 8, borderRadius: 999, background: accent }} />
+          {liveShares > 0 && (
+            <span
+              title={liveShares === 1 ? "Shared by link" : `Shared by ${liveShares} links`}
+              style={{ position: "absolute", left: 8, bottom: 8, display: "inline-flex", alignItems: "center", gap: 4, height: 20, padding: "0 7px", background: "rgba(10,10,10,.62)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 2, color: "#fff", fontSize: 10, fontWeight: 700 }}
+            >
+              <ShareIcon width={11} height={11} aria-hidden="true" />
+              {liveShares === 1 ? "Shared" : `Shared · ${liveShares}`}
+            </span>
+          )}
         </div>
         <div style={{ padding: "10px 12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -712,6 +752,7 @@ function ProjectCardView({
 function CardMenu({
   restoreOnly,
   onOpen,
+  onShare,
   onRename,
   onArchive,
   onDelete,
@@ -719,6 +760,7 @@ function CardMenu({
 }: {
   restoreOnly: boolean;
   onOpen: () => void;
+  onShare: () => void;
   onRename: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -754,9 +796,15 @@ function CardMenu({
           >
             <MenuBtn label="Open" onClick={() => { setOpen(false); onOpen(); }} />
             {restoreOnly ? (
-              <MenuBtn label="Restore" onClick={() => { setOpen(false); onRestore(); }} />
+              <>
+                <MenuBtn label="Restore" onClick={() => { setOpen(false); onRestore(); }} />
+                {/* Archiving doesn't stop a link — its project must still
+                    lead to the place that turns links off. */}
+                <MenuBtn label="Share…" onClick={() => { setOpen(false); onShare(); }} />
+              </>
             ) : (
               <>
+                <MenuBtn label="Share…" onClick={() => { setOpen(false); onShare(); }} />
                 <MenuBtn label="Rename" onClick={() => { setOpen(false); onRename(); }} />
                 <MenuBtn label="Archive" onClick={() => { setOpen(false); onArchive(); }} />
                 <MenuBtn label="Delete" danger onClick={() => { setOpen(false); onDelete(); }} />

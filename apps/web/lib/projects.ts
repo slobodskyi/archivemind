@@ -14,6 +14,10 @@ export interface ProjectCard {
   /** When the project entered the Trash — only populated for scope="trash",
    *  where it drives the "N days left" countdown (ADR 0033). */
   deletedAt?: string | null;
+  /** Live project share links (ADR 0051). The card marks a project anyone
+   *  outside the workspace can currently reach. Absent for scope="trash",
+   *  where no link is live. */
+  liveShares?: number;
 }
 
 const CARD_PREVIEWS = 4;
@@ -59,6 +63,9 @@ export async function getProjectCards(
   else if (scope === "archived") query = query.not("archived_at", "is", null).is("deleted_at", null);
   else query = query.not("deleted_at", "is", null);
 
+  // Live-link counts ride beside the card query rather than inside it: the
+  // RPC is scoped to the caller's memberships and needs no workspace id.
+  const shareCounts = scope === "trash" ? Promise.resolve(new Map<string, number>()) : liveShareCounts(supabase);
   let { data, error } = (await query) as CardQueryResult;
   if (error?.code === "42703") {
     // archived_at/deleted_at migration (20260713000001) not applied to this
@@ -73,6 +80,7 @@ export async function getProjectCards(
   if (error) throw error;
 
   const rows = (data ?? []) as unknown as ProjectRow[];
+  const liveShares = await shareCounts;
   return Promise.all(
     rows.map(async (p) => {
       const active = p.project_assets.map((pa) => pa.assets).filter((a): a is AssetRow => a?.status === "active");
@@ -86,10 +94,25 @@ export async function getProjectCards(
         name: p.name,
         count: active.length,
         previews,
-        ...(scope === "trash" ? { deletedAt: p.deleted_at ?? null } : {}),
+        ...(scope === "trash" ? { deletedAt: p.deleted_at ?? null } : { liveShares: liveShares.get(p.id) ?? 0 }),
       };
     }),
   );
+}
+
+/** Live share links per project (ADR 0051). A card without its count is still
+ *  a card: a failed or missing RPC (a database before migration
+ *  20261103000001) degrades to "not shared" instead of breaking the hub. */
+async function liveShareCounts(supabase: SupabaseClient): Promise<Map<string, number>> {
+  const { data, error } = await supabase.rpc("list_project_share_counts");
+  const counts = new Map<string, number>();
+  if (error || !Array.isArray(data)) return counts;
+  for (const row of data as { project_id?: unknown; live_count?: unknown }[]) {
+    if (typeof row.project_id === "string" && typeof row.live_count === "number") {
+      counts.set(row.project_id, row.live_count);
+    }
+  }
+  return counts;
 }
 
 /** Count of all active assets in the workspace — for the pinned "All my
