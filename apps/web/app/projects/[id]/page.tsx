@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { uuidSchema } from "@archivemind/shared";
 import PostHogSession from "@/components/analytics/PostHogSession";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotoWindow } from "@/lib/api";
@@ -13,8 +14,18 @@ import { createClient } from "@/lib/supabase/server";
 
 /** Canvas route (issue #17): a project and its M:N assets. The legacy `all`
  *  scope remains a read-only recovery grid for unassigned uploads. */
-export default async function ProjectCanvas({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProjectCanvas({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ received?: string | string[] }>;
+}) {
   const { id } = await params; // Next 16: params is a Promise
+  // "Show on canvas" from the Share dialog (ADR 0051 §12): the canvas selects
+  // what that link brought in. Only a uuid passes; the route checks the rest.
+  const { received } = await searchParams;
+  const receivedShareId = typeof received === "string" && uuidSchema.safeParse(received).success ? received : null;
 
   const supabase = await createClient();
   const {
@@ -66,6 +77,7 @@ export default async function ProjectCanvas({ params }: { params: Promise<{ id: 
         initialAnnotations={annotations}
         initialBoards={boards}
         account={account}
+        receivedShareId={id === "all" ? null : receivedShareId}
       />
     </>
   );

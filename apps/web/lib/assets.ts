@@ -89,6 +89,8 @@ interface AssetRow {
   ai_processed_at: string | null;
   created_at: string;
   label?: AssetLabel | null;
+  received_share_id?: string | null;
+  received_from?: string | null;
   cluster_id: string | null;
   topic_clusters: { label: string } | null;
   topic_cluster_overrides?: TopicClusterOverrideRow | null;
@@ -241,6 +243,9 @@ async function toPhoto(a: AssetRow, topic: TopicAssignment): Promise<Photo> {
     // loaded" further up where null means "not labelled".
     label: a.label ?? null,
     source: gdrive ? "gdrive" : dropbox ? "dropbox" : "upload",
+    // Provenance, not a source: a link upload is an ordinary upload into R2
+    // (files.origin stays 'upload', ADR 0051 §11) that the drawer names.
+    receivedVia: a.received_share_id ? { from: a.received_from ?? null } : null,
     edited,
     folder: gdrive ? (a.files[0]?.source_path ?? "Google Drive") : dropbox ? "Dropbox" : "Uploads",
     project: "",
@@ -251,6 +256,7 @@ async function toPhoto(a: AssetRow, topic: TopicAssignment): Promise<Photo> {
 
 /** Relations/columns that predate editable Topic. */
 const ASSET_SELECT_BASE = `id, title, status, ai_processed_at, created_at, cluster_id,
+       received_share_id, received_from,
        topic_clusters ( label ),
        files ( origin, source_path ),
        asset_previews ( size, r2_key, width, height ),

@@ -1,4 +1,11 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 /** R2 S3 client (server-only). Our buckets carry the EU jurisdiction, whose
@@ -39,12 +46,23 @@ export function r2Bucket(): string {
 }
 
 /** Presigned PUT for a browser-direct upload. Content-Type is part of the
- *  signature, so the browser must send exactly the MIME it declared. */
-export async function presignPut(key: string, mime: string): Promise<string> {
+ *  signature, so the browser must send exactly the MIME it declared.
+ *
+ *  `contentLength` signs the length too (it lands in X-Amz-SignedHeaders), so a
+ *  PUT of any other size fails at R2 rather than being stored. Project share
+ *  uploads (ADR 0051) pass it: an anonymous sender must not be able to park
+ *  5 GB under a reservation that declared 1 MB until the sweep finds it. The
+ *  size is still re-checked on the final object, which is the real guarantee. */
+export async function presignPut(
+  key: string,
+  mime: string,
+  options: { contentLength?: number } = {},
+): Promise<string> {
   const command = new PutObjectCommand({
     Bucket: r2Bucket(),
     Key: key,
     ContentType: mime,
+    ...(options.contentLength !== undefined ? { ContentLength: options.contentLength } : {}),
   });
   return getSignedUrl(r2Client(), command, { expiresIn: PRESIGN_PUT_TTL_SECONDS });
 }
@@ -119,6 +137,27 @@ export async function copyObject(sourceKey: string, destinationKey: string): Pro
     CopySource: encodedSource,
     Key: destinationKey,
   }));
+}
+
+/** The stored size of one object, or null when there is no such object. Any
+ *  other failure throws: "missing" and "could not ask" must not look alike to a
+ *  caller that rejects on the first and retries on the second. */
+export async function headObject(key: string): Promise<{ size: number } | null> {
+  try {
+    const head = await r2Client().send(new HeadObjectCommand({ Bucket: r2Bucket(), Key: key }));
+    return { size: head.ContentLength ?? 0 };
+  } catch (err) {
+    if (isMissingObject(err)) return null;
+    throw err;
+  }
+}
+
+/** S3's "no such key", whichever way the SDK reports it: a HEAD has no body,
+ *  so it surfaces as a bare 404 named NotFound; a GET or a COPY names NoSuchKey. */
+export function isMissingObject(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { name?: unknown; Code?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return e.name === "NotFound" || e.name === "NoSuchKey" || e.Code === "NoSuchKey" || e.$metadata?.httpStatusCode === 404;
 }
 
 /** RFC 6266 / 5987 attachment header. A Cyrillic filename cannot go in the plain

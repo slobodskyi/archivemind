@@ -92,6 +92,58 @@ export async function sweepExpiredExports(pool: pg.Pool): Promise<number> {
   return removed;
 }
 
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+type ShareUploadSweepRow = { id: string; staging_key: string; final_key: string | null };
+
+/** The only two shapes a reservation's objects can have (ADR 0051 §9):
+ *  `{ws}/incoming/{id}` and `{ws}/originals/{id}/{name}` in the same
+ *  workspace. Anything else is a corrupted row, and this loop deletes R2
+ *  objects — it must never be talked into an unrelated original. */
+export function shareUploadKeysValid(row: ShareUploadSweepRow): boolean {
+  const staging = new RegExp(`^(${UUID})/incoming/${UUID}$`).exec(row.staging_key);
+  if (!staging || !row.staging_key.endsWith(`/${row.id}`)) return false;
+  if (row.final_key === null) return true;
+  return new RegExp(`^${staging[1]}/originals/${row.id}/[A-Za-z0-9_.()+ -]{1,200}$`).test(row.final_key);
+}
+
+/** Delete the bytes project share uploads no longer need (ADR 0051 §9):
+ *  both objects of a reservation that expired unfinished or was rejected, and
+ *  the staging copy of a completed one once its PUT URL is dead. The SQL never
+ *  hands over a completed reservation's final key — that is an asset's
+ *  original now. Two-phase because Postgres cannot delete R2 bytes: delete
+ *  first, then mark the rows swept, so a failed delete retries next tick.
+ *  Until a row is swept it still counts against its link's quota, which is
+ *  why abandoned staging objects cannot let one link outgrow it. */
+export async function sweepProjectShareUploads(pool: pg.Pool): Promise<number> {
+  const { rows } = await pool.query<ShareUploadSweepRow>(
+    "select id, staging_key, final_key from project_share_uploads_to_sweep(500)",
+  );
+
+  const swept: string[] = [];
+  for (const row of rows) {
+    if (!shareUploadKeysValid(row)) {
+      // Left unmarked so it stays visible to whoever investigates.
+      console.log(`[share-upload-retention] ${row.id}: unexpected key shape; skipped`);
+      continue;
+    }
+    try {
+      await deleteObject(row.staging_key); // idempotent: a missing key succeeds
+      if (row.final_key) await deleteObject(row.final_key);
+      swept.push(row.id);
+    } catch (err) {
+      // One failed object must not strand the rest; this row retries next tick.
+      console.log(`[share-upload-retention] ${row.id}: delete failed — ${String(err)}`);
+    }
+  }
+  if (swept.length === 0) return 0;
+  const { rows: marked } = await pool.query<{ marked: number }>(
+    "select mark_project_share_uploads_swept($1::uuid[]) as marked",
+    [swept],
+  );
+  return marked[0]?.marked ?? 0;
+}
+
 type PublicationPreviewRow = {
   share_id: string;
   workspace_id: string;

@@ -535,6 +535,13 @@ export default function PhotoDrawer({
                 )}
               </div>
             </div>
+            {photo.receivedVia ? (
+              // Provenance (ADR 0051 §11): no member added this file. The name is
+              // the sender's own words — plain text, never a link or markup.
+              <div style={{ marginTop: 8, color: "var(--t2b)", fontSize: 11.5 }}>
+                Received via link{photo.receivedVia.from ? ` · from ${photo.receivedVia.from}` : ""}
+              </div>
+            ) : null}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "7px 14px", marginTop: 10, fontSize: 12, alignItems: "center" }}>
               {/* Labels use --t2b (4.72:1), not --t3 (2.96:1, WCAG fail) — this
                   is the readable label column, not decoration. */}

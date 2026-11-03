@@ -78,7 +78,7 @@ export function decodeRoute(mime: string | null, filename: string): "sharp" | "h
 
 /** Pure ingest decisions (exported for unit tests, like decodeRoute). */
 
-export type DedupAction = "merge" | "revive-merge" | "stand-alone";
+export type DedupAction = "merge" | "revive-merge" | "stand-alone" | "drop";
 
 /** #118: what to do when an incoming file's content hash already exists in the
  *  workspace. files_dedup_idx is UNIQUE (workspace_id, content_hash) — exactly
@@ -100,13 +100,23 @@ export type DedupAction = "merge" | "revive-merge" | "stand-alone";
  *   - incoming is durable but the survivor is NOT → stand-alone: protect the
  *     durable original (accepts a rare duplicate over destroying good bytes).
  *   - otherwise the survivor is a safe home: merge into it (drop the
- *     duplicate), reviving a soft-deleted survivor — "re-added to get it back". */
+ *     duplicate), reviving a soft-deleted survivor — "re-added to get it back".
+ *
+ *  `fromShare` (ADR 0051 §10): a file sent through a project share link by
+ *  somebody with no account. "Re-added to get it back" is a member's right,
+ *  not a stranger's — reviving would undo a member's decision to throw the
+ *  photo away (or to erase it: a purged tombstone keeps its hash). So a
+ *  trashed survivor DROPS the incoming copy instead, whatever either side's
+ *  durability; it is checked before the durability rule, so that rule cannot
+ *  bring it back as a fresh stand-alone asset either. An active survivor still merges as usual. */
 export function dedupDecision(
   survivorStatus: string,
   survivorDurable: boolean,
   incomingDurable: boolean,
+  fromShare = false,
 ): DedupAction {
   if (survivorStatus === "source_missing") return "stand-alone";
+  if (fromShare && survivorStatus !== "active") return "drop";
   if (incomingDurable && !survivorDurable) return "stand-alone";
   return survivorStatus === "active" ? "merge" : "revive-merge";
 }
@@ -161,6 +171,8 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
   const payload = ingestJobPayloadSchema.parse(job.payload);
   const { asset_ids } = payload;
   const dropboxByAsset = new Map((payload.dropbox ?? []).map((d) => [d.asset_id, d]));
+  // Sent through a project share link (ADR 0051): never revive from Trash.
+  const fromShare = payload.share_id != null;
 
   const oneDriveTokens = new OneDriveTokenSource(pool);
   // One gate per job: a 429 anywhere holds every later OneDrive request,
@@ -431,7 +443,26 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
           survivor.asset_status,
           survivor.r2_key != null, // survivor holds durable bytes in R2
           row.r2_key != null, // the incoming file holds durable bytes in R2
+          fromShare,
         );
+        if (action === "drop") {
+          // A link's file matching a trashed one: the trash stays as the member
+          // left it and the sender's copy goes — row, asset (its project link
+          // cascades) and bytes. The reservation keeps its 'completed' status
+          // with asset_id nulled by the FK; the sender was only ever told
+          // "received".
+          await pool.query(`delete from files where id = $1`, [row.file_id]);
+          await pool.query(
+            `delete from assets a where a.id = $1
+               and not exists (select 1 from files f where f.asset_id = a.id)`,
+            [row.asset_id],
+          );
+          if (row.r2_key) await deleteObject(row.r2_key).catch(() => {}); // best-effort cleanup
+          console.log(`[ingest] ${label}: link upload matches ${survivor.asset_status} asset ${survivor.asset_id} — dropped, not revived`);
+          deduped += 1;
+          done += 1;
+          continue;
+        }
         if (action === "stand-alone") {
           // The survivor is a tombstone, or holds no durable bytes while the
           // incoming file DOES — folding the copy in would either resurrect a
@@ -461,6 +492,15 @@ export async function ingestHandler({ pool, job, progress }: HandlerContext): Pr
              on conflict do nothing`,
             [row.asset_id, survivor.asset_id],
           );
+          if (fromShare) {
+            // The link's ledger follows the file to where it now lives, BEFORE
+            // the doomed asset goes (its FK would null asset_id): "Show on
+            // canvas" must still find what this link brought (ADR 0051 §10).
+            await pool.query(
+              `update project_share_uploads set asset_id = $2 where asset_id = $1`,
+              [row.asset_id, survivor.asset_id],
+            );
+          }
           await pool.query(`delete from files where id = $1`, [row.file_id]);
           await pool.query(
             `delete from assets a where a.id = $1

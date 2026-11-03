@@ -4,7 +4,7 @@ import type pg from "pg";
 const deleteObject = vi.fn<(key: string) => Promise<void>>(async () => {});
 vi.mock("./services/r2", () => ({ deleteObject: (key: string) => deleteObject(key) }));
 
-const { sweepExpiredExports, sweepPublicationShares } = await import("./retention");
+const { sweepExpiredExports, sweepProjectShareUploads, sweepPublicationShares, shareUploadKeysValid } = await import("./retention");
 
 /** Minimal pg.Pool stand-in: `selectRows` answers the one select, every other
  *  query is recorded. The sweep DELETES R2 objects, so what it targets and what
@@ -217,5 +217,76 @@ describe("sweepPublicationShares", () => {
     const { pool } = publicationPool([]);
     await expect(sweepPublicationShares(pool)).resolves.toBe(0);
     expect(deleteObject).not.toHaveBeenCalled();
+  });
+});
+
+describe("sweepProjectShareUploads (ADR 0051 §9)", () => {
+  const ws = "11111111-1111-4111-8111-111111111111";
+  const other = "22222222-2222-4222-8222-222222222222";
+  const r1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const r2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const r3 = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  function sweepPool(rows: { id: string; staging_key: string; final_key: string | null }[], marked = rows.length) {
+    const queries: { sql: string; params?: unknown[] }[] = [];
+    const pool = {
+      query: vi.fn(async (sql: string, params?: unknown[]) => {
+        queries.push({ sql, params });
+        if (sql.includes("project_share_uploads_to_sweep")) return { rows };
+        if (sql.includes("mark_project_share_uploads_swept")) return { rows: [{ marked }] };
+        return { rows: [] };
+      }),
+    };
+    return { pool: pool as unknown as pg.Pool, queries };
+  }
+
+  it("deletes both keys of a rejected/expired row, only staging of a completed one, then marks them swept", async () => {
+    const { pool, queries } = sweepPool([
+      { id: r1, staging_key: `${ws}/incoming/${r1}`, final_key: `${ws}/originals/${r1}/IMG_1.jpg` },
+      { id: r2, staging_key: `${ws}/incoming/${r2}`, final_key: null },
+    ]);
+
+    await expect(sweepProjectShareUploads(pool)).resolves.toBe(2);
+
+    expect(deleteObject.mock.calls.map(([k]) => k)).toEqual([
+      `${ws}/incoming/${r1}`,
+      `${ws}/originals/${r1}/IMG_1.jpg`,
+      `${ws}/incoming/${r2}`,
+    ]);
+    const mark = queries.find((q) => q.sql.includes("mark_project_share_uploads_swept"));
+    expect(mark?.params).toEqual([[r1, r2]]);
+  });
+
+  it("never touches a key outside the reservation's own layout, and leaves that row unmarked", async () => {
+    const { pool, queries } = sweepPool([
+      // final key in ANOTHER workspace
+      { id: r1, staging_key: `${ws}/incoming/${r1}`, final_key: `${other}/originals/${r1}/a.jpg` },
+      // final key of another reservation — an unrelated asset's original
+      { id: r2, staging_key: `${ws}/incoming/${r2}`, final_key: `${ws}/originals/${r3}/a.jpg` },
+      // staging key that is not this row's
+      { id: r3, staging_key: `${ws}/incoming/${r1}`, final_key: null },
+    ]);
+
+    await expect(sweepProjectShareUploads(pool)).resolves.toBe(0);
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(queries.some((q) => q.sql.includes("mark_project_share_uploads_swept"))).toBe(false);
+  });
+
+  it("leaves a row whose delete failed for the next tick without stranding the rest", async () => {
+    deleteObject.mockRejectedValueOnce(new Error("r2 down"));
+    const { pool, queries } = sweepPool([
+      { id: r1, staging_key: `${ws}/incoming/${r1}`, final_key: null },
+      { id: r2, staging_key: `${ws}/incoming/${r2}`, final_key: null },
+    ], 1);
+
+    await expect(sweepProjectShareUploads(pool)).resolves.toBe(1);
+    const mark = queries.find((q) => q.sql.includes("mark_project_share_uploads_swept"));
+    expect(mark?.params).toEqual([[r2]]);
+  });
+
+  it("accepts exactly the two key shapes the reserve RPC builds", () => {
+    expect(shareUploadKeysValid({ id: r1, staging_key: `${ws}/incoming/${r1}`, final_key: `${ws}/originals/${r1}/My photo (1).jpg` })).toBe(true);
+    expect(shareUploadKeysValid({ id: r1, staging_key: `${ws}/incoming/${r1}`, final_key: `${ws}/originals/${r1}/../x` })).toBe(false);
+    expect(shareUploadKeysValid({ id: r1, staging_key: `${ws}/originals/${r1}`, final_key: null })).toBe(false);
   });
 });

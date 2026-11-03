@@ -77,3 +77,23 @@ describe("ingestProgressLabel", () => {
     expect(ingestProgressLabel(10, 3, 2, 4)).toBe("Processed 10 file(s) (3 deduped, 2 failed, 4 missing)");
   });
 });
+
+describe("dedupDecision for a project share upload (ADR 0051 §10)", () => {
+  it("never revives a trashed survivor: the stranger's copy is dropped, whatever the durability", () => {
+    expect(dedupDecision("deleted", true, true, true)).toBe("drop");
+    expect(dedupDecision("deleted", false, true, true)).toBe("drop"); // a purged tombstone too
+    expect(dedupDecision("deleted", false, false, true)).toBe("drop");
+    expect(dedupDecision("some_new_status", true, true, true)).toBe("drop");
+  });
+
+  it("still merges into an active survivor, and still protects durable bytes from a non-durable one", () => {
+    expect(dedupDecision("active", true, true, true)).toBe("merge");
+    expect(dedupDecision("active", false, true, true)).toBe("stand-alone");
+    expect(dedupDecision("source_missing", true, true, true)).toBe("stand-alone");
+  });
+
+  it("leaves a member's re-add exactly as it was", () => {
+    expect(dedupDecision("deleted", true, true, false)).toBe("revive-merge");
+    expect(dedupDecision("deleted", true, true)).toBe("revive-merge");
+  });
+});

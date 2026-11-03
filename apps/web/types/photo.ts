@@ -127,6 +127,9 @@ export interface Photo {
    *  view groups by and what the label filter narrows to. Absent on mock rows. */
   label?: AssetLabel | null;
   source: PhotoSource;
+  /** Set when the file arrived through a project share link (ADR 0051 §11):
+   *  `from` is the sender's optional name. Absent/null for everything else. */
+  receivedVia?: { from: string | null } | null;
   /** True when a non-destructive edit (ADR 0030) is applied — `src`/`srcMedium`
    *  then point at the edited previews, and the drawer offers Reset. */
   edited?: boolean;
