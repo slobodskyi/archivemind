@@ -35,6 +35,19 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
         ],
       },
+      {
+        // Project share links (ADR 0051). No Cache-Control here, unlike /p:
+        // the media routes answer with a 302 cached for less than its 5-minute
+        // signature lives, and a blanket no-store would compete with that.
+        // Each /s route sets its own; the page is dynamic and never cached.
+        source: "/s/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+        ],
+      },
     ];
   },
 };

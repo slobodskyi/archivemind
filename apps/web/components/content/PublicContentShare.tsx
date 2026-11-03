@@ -6,13 +6,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react";
 import {
   serializePublicationText,
   type PublicationShareAsset,
   type PublicPublicationShare,
 } from "@/lib/publication-shares";
+import RightsFooter from "@/components/share/RightsFooter";
 
 interface PublicContentShareProps {
   share: PublicPublicationShare;
@@ -87,14 +87,6 @@ function CopyTextButton({ text }: { text: string }) {
       <span aria-hidden="true">{state === "copied" ? "✓" : "⧉"}</span>
     </button>
   );
-}
-
-function formatDate(value: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (!match) return value;
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const month = months[Number(match[2]) - 1];
-  return month ? `${Number(match[3])} ${month} ${match[1]}` : value;
 }
 
 function safeLink(value: string): string | null {
@@ -541,23 +533,6 @@ function FilesSection({
   );
 }
 
-function RightsFooter({ share }: { share: PublicPublicationShare }) {
-  const terms: ReactNode[] = [];
-  if (share.rights.creator) terms.push(<span key="creator">Created by {share.rights.creator}</span>);
-  if (share.rights.credit) terms.push(<span key="credit">Credit: {share.rights.credit}</span>);
-  if (share.rights.copyrightNotice) terms.push(<span key="copyright">{share.rights.copyrightNotice}</span>);
-  if (share.rights.usageTerms) terms.push(<span key="terms">Usage: {share.rights.usageTerms}</span>);
-  return (
-    <footer className="public-share-footer">
-      <div>
-        <span>Shared {formatDate(share.createdAt)}</span>
-        {share.expiresAt ? <span>Link available until {formatDate(share.expiresAt)}</span> : null}
-      </div>
-      {terms.length ? <div>{terms}</div> : null}
-    </footer>
-  );
-}
-
 export default function PublicContentShare({ share, rawToken }: PublicContentShareProps) {
   const assetsById = useMemo(
     () => new Map(share.assets.map((asset) => [asset.publicId, asset])),
@@ -599,7 +574,7 @@ export default function PublicContentShare({ share, rawToken }: PublicContentSha
           />
         )}
         {share.allowDownloads ? <FilesSection assets={share.assets} rawToken={rawToken} /> : null}
-        <RightsFooter share={share} />
+        <RightsFooter rights={share.rights} sharedAt={share.createdAt} expiresAt={share.expiresAt} />
       </main>
     </div>
   );

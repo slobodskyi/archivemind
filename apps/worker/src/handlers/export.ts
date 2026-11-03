@@ -365,9 +365,11 @@ export async function exportHandler({ pool, job, progress }: HandlerContext): Pr
         return;
       }
     }
+    // A link ZIP (share_id, ADR 0051) carries the files and the rights block,
+    // never the captions CSV.
     const { body, skipped } = await renderZip(pool, rows, options, ws, async (done, count) => {
       await progress(8 + Math.round((88 * done) / count), `Packing ${done}/${count}`, done, count);
-    });
+    }, payload.share_id === undefined);
     await finishExport({ pool, job, progress }, key, body, artifact.contentType, total, skipped, renderedIds);
     return;
   }
