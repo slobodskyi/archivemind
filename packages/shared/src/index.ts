@@ -280,6 +280,10 @@ export const ingestJobPayloadSchema = z
       )
       .optional(),
     onedrive_expand: oneDriveExpandSchema.optional(),
+    /** Set when the files arrived through a project share (ADR 0051). Ingest
+     *  then never revives a trashed duplicate: somebody with a link must not
+     *  be able to undo a member's decision to throw a file away. */
+    share_id: uuidSchema.optional(),
   })
   .refine((p) => p.asset_ids.length > 0 || p.onedrive_expand != null, {
     message: "ingest needs at least one asset or a folder to expand",
@@ -1401,6 +1405,12 @@ export const exportJobPayloadSchema = z
      *  per request by GET /api/exports; cleared by the retention sweep once the
      *  object is deleted, so a stale key never offers a dead download. */
     result_key: z.string().optional(),
+    /** Set when somebody with a project share link asked for this ZIP (ADR
+     *  0051). Stamped by enqueue_project_share_download, never by a client:
+     *  the worker leaves captions.csv out of such a ZIP, because AI captions
+     *  and unreviewed facts are the archive's working material, not the files
+     *  the link shares. */
+    share_id: uuidSchema.optional(),
   })
   .refine((v) => v.group_id !== undefined || (v.asset_ids !== undefined && v.asset_ids.length > 0), {
     message: "one of group_id, asset_ids is required",

@@ -282,14 +282,11 @@ export function deletePublicationShareLink(draftId: string): boolean {
   }
 }
 
-export const publicationShareTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
-
-export function publicationShareTokenHash(token: string): Promise<string> {
-  const bytes = new TextEncoder().encode(publicationShareTokenSchema.parse(token));
-  return crypto.subtle.digest("SHA-256", bytes).then((hash) =>
-    Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(""),
-  );
-}
+// One token format and digest for publications and project links (ADR 0051).
+export {
+  shareTokenSchema as publicationShareTokenSchema,
+  shareTokenHash as publicationShareTokenHash,
+} from "./share-token";
 
 /** Convert a private editor draft to the only shape an anonymous reader may
  * receive. Missing mappings are programming errors: publication must fail
