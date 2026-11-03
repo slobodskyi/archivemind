@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MASK_ATTR,
   REDACTED_URL,
+  REPLAY_BLOCK_CLASS,
   REPLAY_MASK_TEXT,
   UNMASK_ATTR,
   isUnmasked,
@@ -125,6 +126,12 @@ describe("posthogConfig", () => {
     const masked = posthogConfig({ maskTextOn: true }).session_recording!;
     expect(masked.maskTextSelector).toBe("*");
     expect(masked.maskAllInputs).toBe(true);
+  });
+
+  it("never records a blocked subtree, whichever masking mode is on", () => {
+    expect(REPLAY_BLOCK_CLASS).toBe("ph-no-capture");
+    expect(rec.blockClass).toBe(REPLAY_BLOCK_CLASS);
+    expect(posthogConfig({ maskTextOn: true }).session_recording!.blockClass).toBe(REPLAY_BLOCK_CLASS);
   });
 
   it("records no request headers or bodies", () => {

@@ -27,7 +27,10 @@ interface AppHeaderProps {
   canRedo?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
-  onFlashToast?: (text: string) => void;
+  /** Opens the project's Share dialog (ADR 0051). Omitted on the
+   *  workspace-wide `all` canvas, which has no project to share — and then
+   *  the button is not drawn. */
+  onShare?: () => void;
   onOpenAcct?: () => void;
   /** Real account initials/name for the avatar (replaces the old hardcoded "AM"). */
   accountInitials?: string;
@@ -49,7 +52,7 @@ export default function AppHeader({
   canRedo = false,
   onUndo,
   onRedo,
-  onFlashToast,
+  onShare,
   onOpenAcct,
   accountInitials = "",
   accountName,
@@ -293,32 +296,34 @@ export default function AppHeader({
           </button>
         )}
         <span style={{ width: 1, height: 20, background: "var(--bd)" }} />
-        <button
-          onClick={() => onFlashToast?.("Sharing coming soon")}
-          aria-label="Share"
-          title="Share"
-          // Below 760px the word goes and the icon stays — a labelled button is
-          // ~95px of a 390px header, and the icon is the half that identifies it.
-          className="am-hdr-share"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            height: 30,
-            padding: "0 12px",
-            background: "transparent",
-            border: "1px solid var(--bdh)",
-            borderRadius: 2,
-            color: "var(--t1)",
-            fontSize: 12,
-            fontWeight: 400,
-            fontFamily: "inherit",
-            cursor: "pointer",
-          }}
-        >
-          <ShareArrowIcon />
-          <span>SHARE</span>
-        </button>
+        {onShare && (
+          <button
+            onClick={onShare}
+            aria-label="Share project"
+            title="Share"
+            // Below 760px the word goes and the icon stays — a labelled button is
+            // ~95px of a 390px header, and the icon is the half that identifies it.
+            className="am-hdr-share"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              height: 30,
+              padding: "0 12px",
+              background: "transparent",
+              border: "1px solid var(--bdh)",
+              borderRadius: 2,
+              color: "var(--t1)",
+              fontSize: 12,
+              fontWeight: 400,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            <ShareArrowIcon />
+            <span>SHARE</span>
+          </button>
+        )}
         <button
           onClick={onOpenAcct}
           aria-label="Account menu"

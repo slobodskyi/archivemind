@@ -113,6 +113,29 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                button was removed: every other control on that bar
                                                edits the canvas in front of you, while Copy is a link
                                                into an archive you are not looking at
+  app/api/projects/[id]/shares                 project share links (ADR 0051, migration
+                                               20261103000001): GET lists the unrevoked links for the
+                                               Share dialog — the hub card's Share… and the canvas
+                                               header's SHARE (hidden on the `all` canvas, which has no
+                                               project); POST mints one. Rights are
+                                               per link — view & download, send files only, or both —
+                                               and every link expires (1/7/30/90 days, no "never").
+                                               The token is minted HERE and leaves only inside the
+                                               response's /s/{token} path: the database stores its
+                                               SHA-256 (the lookup) and an AES-GCM copy under
+                                               TOKEN_ENC_KEY (lib/integrations/project-shares.server,
+                                               the one module that holds the key), which is what lets
+                                               an editor copy a live link again from another device.
+                                               The digest and the ciphertext never reach a browser,
+                                               and the address fields carry REPLAY_BLOCK_CLASS: replay
+                                               records inputs as-is while masking is off (ADR 0050),
+                                               and a live link is a key. Editors only; the RPCs
+                                               check, viewers get 403
+  app/api/project-shares/[id]                  PATCH: extend (a new deadline counted from now, SAME
+                                               URL — the link's creator or a workspace owner only) and/
+                                               or relabel. DELETE: turn the link off — terminal, any
+                                               editor. Archiving a project does NOT stop its links, so
+                                               archived cards keep Share…; Trash pauses them
   app/api/assets/[id]                          soft delete (status='deleted'; DB trigger stamps deleted_at)
   app/api/assets/delete · restore · purge      bulk trash ops (ADR 0033): move a selection to
                                                Trash · undo/Restore it (purged excluded) ·
