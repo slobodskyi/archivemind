@@ -1,4 +1,3 @@
-import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { copyObject, deleteObject } from "@/lib/r2";
@@ -10,6 +9,7 @@ import {
   publicationPreviewDimensions,
 } from "@/lib/publication-shares";
 import { usedAssetIds } from "@/lib/content-package";
+import { mintShareToken } from "@/lib/share-token";
 import { createClient } from "@/lib/supabase/server";
 
 interface AssetRow {
@@ -198,8 +198,7 @@ export async function POST(request: Request) {
     };
   });
 
-  const token = randomBytes(32).toString("base64url");
-  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const { token, tokenHash } = await mintShareToken();
   const expiresAt = options.expiresInDays === null
     ? null
     : new Date(Date.now() + options.expiresInDays * 24 * 60 * 60 * 1000).toISOString();

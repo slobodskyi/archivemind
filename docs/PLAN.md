@@ -371,6 +371,18 @@ kept or removed on purpose.
    integration, expiry and asset-trash invalidation (pgTAP `017`). **Repository
    implementation is done; production migration apply remains the owner's
    PR-gated runbook.**
+7. **Project share links** ([ADR 0051](decisions/0051-project-share-links.md)) —
+   a project-level link for somebody with no account, carrying per-link rights:
+   download, upload (a file request that reveals nothing of the project) or both.
+   It is a live window, not a snapshot. Every link expires after 1, 7, 30 or 90
+   days, and an editor can copy a live link again because it is kept encrypted
+   beside its SHA-256 lookup digest. Bytes never pass through Vercel: downloads
+   302 to five-minute presigns, and anonymous uploads go to a staging key that
+   the server copies into the original's place. Migration `20261103000001` and
+   pgTAP `022` hold the whole backend: links, the upload reservation ledger,
+   asset provenance, service-role-only resolvers, ZIP guards and the sweep.
+   Landing as four PRs: database → owner dialog → public page and downloads →
+   uploads. Password-protected links follow separately.
 
 The original four-PR stack had no migrations; the dated ADR 0044 amendments and
 the paragraph above describe the backend that landed after it. Device/prod visual

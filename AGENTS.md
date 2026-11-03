@@ -240,6 +240,13 @@ design from this file:**
   the one ADR here whose backend is still a build list. **0049** makes the Trash
   one typed list over all four soft-deletable tables — read it before adding a
   fifth soft delete, because its rule is that none may exist outside the Trash.
+  **0051** is project share links: a LIVE, per-link-scoped capability
+  (download / upload / both) for somebody with no account, and the first public
+  surface that WRITES. Read it before touching `/s/*`, `project_shares` or
+  `project_share_uploads`. A link's liveness has exactly one definition,
+  `project_share_by_token()`. Downloads 302 to five-minute presigns rather than
+  streaming. An anonymous browser PUTs only to a staging key the server copies
+  from, never to an original. A link's ingest never revives a trashed duplicate.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.
