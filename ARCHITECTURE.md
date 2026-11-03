@@ -136,6 +136,12 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                or relabel. DELETE: turn the link off — terminal, any
                                                editor. Archiving a project does NOT stop its links, so
                                                archived cards keep Share…; Trash pauses them
+  app/api/project-shares/[id]/received         GET: what that link brought in and is still live in its
+                                               project — the Share dialog's "Show on canvas", which opens
+                                               /projects/{id}?received={shareId}; the canvas asks this
+                                               route itself (hooks/useReceivedSelection) and selects the
+                                               ids it has loaded. A turned-off link answers too. Editors
+                                               only (list_project_share_received checks is_editor)
   app/api/assets/[id]                          soft delete (status='deleted'; DB trigger stamps deleted_at)
   app/api/assets/delete · restore · purge      bulk trash ops (ADR 0033): move a selection to
                                                Trash · undo/Restore it (purged excluded) ·
@@ -339,9 +345,10 @@ PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /sett
   READ  app/s/[token]/page.tsx       dynamic Server Component: open_project_share() → name, the
                                      owner's byline (components/share/RightsFooter, shared with
                                      /p) and, on a download link, the first 200 files server-
-                                     rendered (components/share/ProjectShareFiles). An upload-only
-                                     link gets the name, the byline and the send-form slot — no
-                                     file count. A LIVE window: every request re-resolves the
+                                     rendered (components/share/ProjectShareFiles). A link with
+                                     upload rights adds the send form (ProjectShareSendForm); an
+                                     upload-only link gets the name, the byline and that form —
+                                     no file count. A LIVE window: every request re-resolves the
                                      project, unlike a /p publication's snapshot
         app/s/[token]/assets         GET ?cursor= — keyset page of 200, (sort_at, id) carried as
                                      an opaque cursor; no-store
@@ -362,8 +369,42 @@ PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /sett
                                      GET: that link's job only — status JSON, or a 302 to a
                                      5-minute presign of result_key once done. The worker
                                      leaves captions.csv out of a share_id ZIP
+        app/s/[token]/uploads/presign
+                                     POST { senderName?, files ≤100 } — anonymous upload, the
+                                     first public surface that WRITES (ADR 0051 §9). Names are
+                                     sanitised (lib/project-share-uploads: no path, control or
+                                     bidi chars; key-safe name for the final key), then
+                                     reserve_project_share_uploads() locks the link row and
+                                     checks its quota (2,000 files / 20 GiB; open reservations
+                                     count until swept). Answers a 15-minute PUT to each
+                                     reservation's STAGING key {ws}/incoming/{id} — never an
+                                     original — signed with the declared Content-Length
+        app/s/[token]/uploads/complete
+                                     POST { ids ≤100 } → claim (one winner per reservation) →
+                                     server-side copy staging → {ws}/originals/{id}/{name} →
+                                     HEAD the FINAL object (nobody else can write it) → one
+                                     transaction makes assets + files + project link and ONE
+                                     ingest job with share_id, user_id null. A size mismatch
+                                     is rejected and both objects deleted; staging goes last.
+                                     A retry learns the outcome from the ledger. The sender
+                                     hears received / rejected / pending and a count — never
+                                     an asset id or whether a file merged into an existing one.
+                                     The browser side is lib/share-upload-client: the same
+                                     engine as the signed-in upload (lib/upload-client's
+                                     runTransfers — 3 PUTs at a time, retries, chunks of 100)
+                                     behind an UploadTransport adapter
+  Ingest of a share_id job merges a duplicate only into an ACTIVE file already in the link's
+  own project; a duplicate of a file filed elsewhere, or of a trashed one, DROPS the sender's
+  copy — nothing linked, nothing revived, the survivor untouched — or a stranger holding a
+  photo's bytes could pull a private project's file (title, date, edits) into the shared one.
+  Either way the reservation is repointed to the survivor, so the link's "files received"
+  still counts the delivery while "Show on canvas" lists project members only. The worker's 6-hourly
+  tick deletes the R2 keys of expired/rejected reservations (and completed ones' staging
+  copies) via project_share_uploads_to_sweep() → delete → mark_project_share_uploads_swept().
+  Received files carry assets.received_share_id / received_from, which the drawer prints as
+  "Received via link · from …"; added_by stays null and files.origin stays 'upload'.
   Every refusal (malformed, unknown, revoked, expired, wrong rights, another project's asset)
-  is one 404. All five resolvers are service_role-only SECURITY DEFINER functions, reached
+  is one 404. All eight resolvers are service_role-only SECURITY DEFINER functions, reached
   through lib/integrations/project-shares.server (the admin-client fence), which validates
   the token's shape and sends only its SHA-256. The owner's canvas still refreshes when a
   link's job finishes, but toasts fire only for the viewer's own jobs (useJobProgress `own`)
@@ -451,10 +492,11 @@ binaries; Gemini (`gemini-3.1-flash-lite` + `gemini-embedding-2`) for AI.
 
 **All of this is real, not aspirational.** `apps/worker` runs all seven job handlers — ingest + analyze + caption + cluster
 + edit + purge + export, one per member of `jobTypeSchema`, so nothing can sit in
-the queue without one — plus six retention sweeps on the single 6-hourly tick,
+the queue without one — plus seven retention sweeps on the single 6-hourly tick,
 caught independently so a broken one cannot stall its neighbours: trashed
 projects, trashed Workspaces, trashed content drafts (ADR 0049), trashed assets,
-export artifacts past `EXPORT_RETENTION_DAYS`, and publication share previews; `packages/shared` holds live zod contracts both
+export artifacts past `EXPORT_RETENTION_DAYS`, publication share previews, and the R2 objects of
+project share upload reservations nobody finished (ADR 0051); `packages/shared` holds live zod contracts both
 sides parse; `apps/web` has real auth (`proxy.ts` guard + `lib/supabase/` + the
 `lib/safe-redirect.ts` / `lib/auth-errors.ts` guards on the callback), route handlers
 under `app/api/`, and RLS-scoped reads via `lib/assets.ts` / `lib/projects.ts`.

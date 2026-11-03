@@ -104,6 +104,10 @@ export const projectShareSummarySchema = z.object({
 export type ProjectShareSummary = z.infer<typeof projectShareSummarySchema>;
 
 export const listProjectSharesResponseSchema = z.object({ shares: z.array(projectShareSummarySchema) });
+
+/** GET /api/project-shares/[id]/received — what a link brought in that is
+ *  still live in its project. */
+export const receivedAssetsResponseSchema = z.object({ assetIds: z.array(z.string().uuid()) });
 export const projectShareResponseSchema = z.object({ share: projectShareSummarySchema });
 
 export function projectSharePath(token: string): string {

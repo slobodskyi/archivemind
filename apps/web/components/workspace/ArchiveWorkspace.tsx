@@ -6,6 +6,7 @@ import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } fro
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
+import { useReceivedSelection } from "@/hooks/useReceivedSelection";
 import { LABEL_COLORS } from "@/lib/labels";
 import BoardBrowser from "@/components/header/BoardBrowser";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
@@ -104,6 +105,9 @@ interface ArchiveWorkspaceProps {
    *  reads as a glitch. */
   initialBoards: Board[];
   account: Account;
+  /** `?received={shareId}` — the Share dialog's "Show on canvas": select what
+   *  that link brought in (ADR 0051 §12). */
+  receivedShareId?: string | null;
 }
 
 export default function ArchiveWorkspace({
@@ -117,6 +121,7 @@ export default function ArchiveWorkspace({
   initialAnnotations,
   initialBoards,
   account,
+  receivedShareId = null,
 }: ArchiveWorkspaceProps) {
   // Workspaces (boards) — a named, colour-coded set of the project's files
   // (ADR 0044). Additive on purpose: opening one narrows the canvas to its
@@ -154,6 +159,7 @@ export default function ArchiveWorkspace({
     bd.activeBoardId,
     dropOnBoard,
   );
+  useReceivedSelection(receivedShareId, ws.selectSearchResults);
 
   // A Workspace owns the notes and folders MADE in it, and hides the
   // rest — the same rule the photos follow (ADR 0044). With no Workspace open

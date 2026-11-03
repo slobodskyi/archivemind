@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { SINGLE_PUT_MAX_BYTES } from "@archivemind/shared";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
@@ -223,6 +224,8 @@ interface ShareRowProps {
   onStartRevoke: () => void;
   onRevoke: () => void;
   onCancel: () => void;
+  /** Open the project's canvas with what this link brought in selected. */
+  onShowOnCanvas: () => void;
 }
 
 function ShareRow({
@@ -238,6 +241,7 @@ function ShareRow({
   onStartRevoke,
   onRevoke,
   onCancel,
+  onShowOnCanvas,
 }: ShareRowProps) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const firstDaysRef = useRef<HTMLButtonElement>(null);
@@ -321,6 +325,13 @@ function ShareRow({
               {expired ? "Renew" : "Extend"}
             </button>
           ) : null}
+          {/* Files received stay after a link is turned off, so this shows on
+              every row that brought any — the count says whether it has. */}
+          {share.filesReceived > 0 ? (
+            <button type="button" onClick={onShowOnCanvas} disabled={busy} style={{ ...buttonStyle, minHeight: 30, opacity: busy ? 0.5 : 1 }}>
+              Show on canvas
+            </button>
+          ) : null}
           <button type="button" onClick={onStartRevoke} disabled={busy} style={{ ...buttonStyle, minHeight: 30, borderColor: "transparent", color: "var(--red)", opacity: busy ? 0.5 : 1 }}>
             {expired ? "Remove" : "Turn off"}
           </button>
@@ -347,6 +358,7 @@ function ShareProjectDialogContent({
   const [copied, setCopied] = useState<{ id: string; ok: boolean } | null>(null);
   const [extendingId, setExtendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     let live = true;
@@ -629,6 +641,13 @@ function ShareProjectDialogContent({
                 onCancel={() => {
                   setExtendingId(null);
                   setRevokingId(null);
+                }}
+                onShowOnCanvas={() => {
+                  // The canvas asks /api/project-shares/[id]/received itself
+                  // (useReceivedSelection), so a stale list here can't select
+                  // a file that has since moved to Trash.
+                  onClose();
+                  router.push(`/projects/${project.id}?received=${share.id}`);
                 }}
               />
             ))}

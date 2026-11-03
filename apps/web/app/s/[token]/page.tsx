@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import ProjectShareFiles from "@/components/share/ProjectShareFiles";
+import ProjectShareSendForm from "@/components/share/ProjectShareSendForm";
 import RightsFooter, { formatShareDate } from "@/components/share/RightsFooter";
 import { listProjectShareAssets, openProjectShare } from "@/lib/integrations/project-shares.server";
 
@@ -15,7 +16,8 @@ export const revalidate = 0;
  *  (ADR 0051). A live window: every load re-resolves the project's current
  *  files. A download link shows them, the first 200 server-rendered; an
  *  upload-only link learns the project's name and the owner's byline and
- *  nothing else. Every refusal is the same not-found page. */
+ *  nothing else, beside the send form. Every refusal is the same not-found
+ *  page. */
 export default async function ProjectSharePage({ params }: ProjectSharePageProps) {
   await connection();
   const { token } = await params;
@@ -58,24 +60,7 @@ export default async function ProjectSharePage({ params }: ProjectSharePageProps
           <ProjectShareFiles token={token} initialPage={firstPage} fileCount={share.fileCount ?? firstPage.files.length} />
         ) : null}
 
-        {share.canUpload ? (
-          // The send form lands here with anonymous uploads (ADR 0051 §9).
-          <section
-            id="send-files"
-            className="public-share-files"
-            aria-labelledby="send-files-title"
-            data-share-upload-slot=""
-            style={{ marginTop: 56 }}
-          >
-            <div className="public-share-files-lead">
-              <div>
-                <div className="public-share-kicker">Send files</div>
-                <h2 id="send-files-title">Add your files</h2>
-              </div>
-              <p>Sending files through this link is not available yet. Ask the person who shared it how to send them for now.</p>
-            </div>
-          </section>
-        ) : null}
+        {share.canUpload ? <ProjectShareSendForm token={token} /> : null}
 
         <RightsFooter rights={share.rights} expiresAt={share.expiresAt} />
       </main>

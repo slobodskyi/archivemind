@@ -15,6 +15,7 @@ import { backfillGeoLabels } from "./geo-backfill";
 import {
   sweepDeletedAssets,
   sweepExpiredExports,
+  sweepProjectShareUploads,
   sweepPublicationShares,
   sweepTrashedBoards,
   sweepTrashedDrafts,
@@ -84,7 +85,7 @@ async function main(): Promise<void> {
       .catch((e: unknown) => log(`reaper failed: ${String(e)}`));
   }, REAPER_EVERY_MS);
 
-  // Six sweeps, one cadence, independent failure domains — a broken project
+  // Seven sweeps, one cadence, independent failure domains — a broken project
   // sweep must not silently stall asset purging or vice versa.
   const runSweep = () => {
     sweepTrashedProjects(pool)
@@ -105,6 +106,9 @@ async function main(): Promise<void> {
     sweepPublicationShares(pool)
       .then((n) => n > 0 && log(`sweeper cleaned ${n} publication share(s)`))
       .catch((e: unknown) => log(`publication sweeper failed: ${String(e)}`));
+    sweepProjectShareUploads(pool)
+      .then((n) => n > 0 && log(`sweeper cleaned ${n} project share upload(s)`))
+      .catch((e: unknown) => log(`share upload sweeper failed: ${String(e)}`));
   };
   // Once on boot as well as on the timer: redeploys can be more frequent than
   // SWEEP_EVERY_MS, and a timer-only sweep would then never fire.

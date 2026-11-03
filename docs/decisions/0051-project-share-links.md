@@ -231,3 +231,29 @@ asset's original.
   could be applied to it later.
 - Out of scope: password-protected links (planned as a follow-up), email
   notifications when files arrive, comments, and stripping GPS from downloads.
+
+## Amendments
+
+### 2026-11-03 — a link's duplicate merges only inside its own project
+
+§10 as first written let an ordinary dedup merge run for a link upload. A merge
+moves the incoming file's project membership onto the surviving asset, wherever
+that asset lives in the workspace. So somebody holding the bytes of a photo filed
+in another, private project could send it through a link and pull that photo —
+with the member's title, corrected date and edits — into the shared project,
+where every link holder and the owner's canvas see it. On a link that can also
+download, the listing answered "is this exact file in the workspace?" too:
+§10's "no dedup outcome reaches the sender" held only for upload-only links.
+
+An ingest carrying `share_id` now merges only into an **active asset that is
+already a member of the link's project**. A duplicate of anything else — a file
+filed only in other projects, or a trashed or purged one — **drops** the
+sender's copy: its file row, asset and bytes go, no `project_assets` row is
+written and the survivor is not touched. The rule applies to every link with
+upload rights, not only those that can download.
+
+The reservation is still repointed to the survivor, so the delivery is recorded:
+it counts in the link's "files received", while `list_project_share_received`
+(project members only) does not show a file the project does not hold. The
+sender is told "received" either way. No schema change.
+

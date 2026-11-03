@@ -3,6 +3,7 @@ import {
   SINGLE_PUT_MAX_BYTES,
   completeUploadResponseSchema,
   presignUploadResponseSchema,
+  type CompleteUploadResponse,
 } from "@archivemind/shared";
 import type {
   IndexedUploadFile,
@@ -57,12 +58,57 @@ export interface RunUploadOptions {
   onProgress?: (p: UploadProgress) => void;
 }
 
-interface CompletedTransfer {
-  inputIndex: number;
-  upload: { r2Key: string; filename: string; mime: string; size: number };
+/** Where one file's bytes go: a presigned PUT and the key the completion
+ *  step names it by. `contentType` is what the PUT was signed with, when the
+ *  endpoint chose it rather than the browser. */
+export interface PresignedPut {
+  uploadUrl: string;
+  key: string;
+  contentType?: string;
 }
 
-class HttpUploadError extends Error {
+/** One file whose PUT R2 acknowledged, waiting for its completion request. */
+export interface TransferredFile {
+  inputIndex: number;
+  key: string;
+  filename: string;
+  mime: string;
+  size: number;
+}
+
+export interface UploadChunkContext {
+  batchId: string;
+  /** 1-based, for tracing headers. */
+  chunkIndex: number;
+  chunkCount: number;
+}
+
+/** The two endpoints an upload talks to. The signed-in app presigns each file
+ *  on its own and completes into assets; a project share link (ADR 0051)
+ *  reserves a whole chunk in one request and completes reservations. The
+ *  transfer engine — 3 PUTs at a time, retries, chunks of 100, staged
+ *  progress — is the same for both. */
+export interface UploadTransport<R> {
+  /** One thunk per file of the chunk, in order. Each runs inside that file's
+   *  worker slot, so a per-file transport presigns lazily while a batch
+   *  transport shares one request among the thunks. A rejected thunk fails
+   *  that file only. */
+  presign(chunk: readonly IndexedUploadFile[], batchId: string): Array<() => Promise<PresignedPut>>;
+  /** Finalize the chunk's transferred files. Throwing fails all of them. */
+  complete(transferred: readonly TransferredFile[], ctx: UploadChunkContext): Promise<R>;
+}
+
+export interface TransferRun<R> {
+  attemptedIndexes: number[];
+  skippedFiles: SkippedUploadFile[];
+  /** Files that never reached a completion response. */
+  failedIndexes: number[];
+  errors: string[];
+  /** One entry per chunk whose completion request answered. */
+  chunks: { transferred: TransferredFile[]; result: R }[];
+}
+
+export class HttpUploadError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
   }
@@ -225,14 +271,19 @@ function putTimeoutMs(size: number): number {
   return Math.min(15 * 60_000, Math.max(2 * 60_000, scaled));
 }
 
-function putOnce(url: string, file: File, onSent: (sent: number) => void): Promise<void> {
+function putOnce(
+  url: string,
+  file: File,
+  contentType: string,
+  onSent: (sent: number) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
     xhr.timeout = putTimeoutMs(file.size);
     // Content-Type is part of the presigned signature — must match exactly.
     // Do not add tracing headers here: they are not part of R2 CORS/signing.
-    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    xhr.setRequestHeader("content-type", contentType);
     xhr.upload.onprogress = (event) => onSent(event.loaded);
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve();
@@ -248,47 +299,114 @@ function putOnce(url: string, file: File, onSent: (sent: number) => void): Promi
 async function putWithRetry(
   url: string,
   file: File,
+  contentType: string,
   onSent: (sent: number) => void,
 ): Promise<void> {
   await withRetry(
     async (attempt) => {
       if (attempt > 1) onSent(0);
-      await putOnce(url, file, onSent);
+      await putOnce(url, file, contentType, onSent);
     },
     (error) => error instanceof PutUploadError && error.retryable,
   );
 }
 
-async function presignFile(file: File, inputIndex: number, batchId: string) {
+/** POST a JSON body and parse the JSON answer, retrying transient failures
+ *  (timeouts, network errors, 408/425/429/5xx) with the same body. Any other
+ *  status throws an HttpUploadError carrying it. */
+export async function postJsonWithRetry(
+  url: string,
+  body: string,
+  opts: {
+    timeoutMs: number;
+    /** Names the request in a timeout, and in an HTTP failure unless
+     *  `failureLabel` is given. */
+    label: string;
+    failureLabel?: string;
+    headers?: (attempt: number) => Record<string, string>;
+  },
+): Promise<unknown> {
   return withRetry(
     async (attempt) => {
       const response = await fetchWithTimeout(
-        "/api/uploads/presign",
+        url,
         {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...batchHeaders(batchId, {
-              "x-archivemind-upload-index": String(inputIndex),
-              "x-archivemind-upload-attempt": String(attempt),
-            }),
-          },
-          body: JSON.stringify({
-            filename: file.name,
-            mime: file.type || "application/octet-stream",
-            size: file.size,
-          }),
+          headers: { "content-type": "application/json", ...(opts.headers?.(attempt) ?? {}) },
+          body,
         },
-        PRESIGN_TIMEOUT_MS,
-        `${file.name}: presign`,
+        opts.timeoutMs,
+        opts.label,
       );
       if (!response.ok) {
-        throw new HttpUploadError(`${file.name}: presign failed (${response.status})`, response.status);
+        throw new HttpUploadError(`${opts.failureLabel ?? opts.label} failed (${response.status})`, response.status);
       }
-      return presignUploadResponseSchema.parse(await response.json());
+      return response.json();
     },
     isRetryableFetchError,
   );
+}
+
+async function presignFile(file: File, inputIndex: number, batchId: string): Promise<PresignedPut> {
+  const body = await postJsonWithRetry(
+    "/api/uploads/presign",
+    JSON.stringify({
+      filename: file.name,
+      mime: file.type || "application/octet-stream",
+      size: file.size,
+    }),
+    {
+      timeoutMs: PRESIGN_TIMEOUT_MS,
+      label: `${file.name}: presign`,
+      headers: (attempt) =>
+        batchHeaders(batchId, {
+          "x-archivemind-upload-index": String(inputIndex),
+          "x-archivemind-upload-attempt": String(attempt),
+        }),
+    },
+  );
+  const { uploadUrl, r2Key } = presignUploadResponseSchema.parse(body);
+  return { uploadUrl, key: r2Key };
+}
+
+/** The signed-in app's endpoints: one presign per file, completion into
+ *  assets (membership first when a project is named). */
+function appTransport(projectId: string | undefined): UploadTransport<CompleteUploadResponse> {
+  return {
+    presign: (chunk, batchId) =>
+      chunk.map((item) => () => presignFile(item.file, item.inputIndex, batchId)),
+    async complete(transferred, ctx) {
+      const completionId = createUploadCompletionId();
+      // Keep this byte-for-byte stable across automatic retries: the RPC
+      // compares the completion payload behind completionId.
+      const completionBody = JSON.stringify({
+        completionId,
+        uploads: transferred.map((item) => ({
+          r2Key: item.key,
+          filename: item.filename,
+          mime: item.mime,
+          size: item.size,
+        })),
+        ...(projectId ? { projectId } : {}),
+      });
+      const result = completeUploadResponseSchema.parse(
+        await postJsonWithRetry("/api/uploads/complete", completionBody, {
+          timeoutMs: UPLOAD_COMPLETE_TIMEOUT_MS,
+          label: `complete chunk ${ctx.chunkIndex}/${ctx.chunkCount}`,
+          failureLabel: "complete",
+          headers: (attempt) =>
+            batchHeaders(ctx.batchId, {
+              "x-archivemind-upload-chunk": `${ctx.chunkIndex}/${ctx.chunkCount}`,
+              "x-archivemind-upload-attempt": String(attempt),
+            }),
+        }),
+      );
+      if (result.assetIds.length !== transferred.length) {
+        throw new Error("complete returned an incomplete asset mapping");
+      }
+      return result;
+    },
+  };
 }
 
 async function linkProjectChunk(
@@ -360,36 +478,25 @@ export async function retryProjectLinks(
   };
 }
 
-export async function runUpload(
+/** The transfer engine every upload surface shares: select → per chunk of
+ *  100, presign + PUT three files at a time → one completion request. */
+export async function runTransfers<R>(
   files: readonly File[] | readonly IndexedUploadFile[],
-  opts: RunUploadOptions = {},
-): Promise<UploadResult> {
+  transport: UploadTransport<R>,
+  opts: { batchId?: string; onProgress?: (p: UploadProgress) => void } = {},
+): Promise<TransferRun<R>> {
   const batchId = opts.batchId ?? createUploadBatchId();
-  const scopedProjectId = opts.projectId && opts.projectId !== "all" ? opts.projectId : undefined;
   const { candidates: accepted, skippedFiles } = selectUploadFiles(files);
-  const skippedIndexes = skippedFiles.map((item) => item.inputIndex);
   const attemptedIndexes = accepted.map((item) => item.inputIndex);
-  const emptyResult = (): UploadResult => ({
-    attemptedIndexes,
-    assetIds: [],
-    uploaded: [],
-    failedIndexes: [],
-    skippedIndexes,
-    skippedFiles,
-    jobIds: [],
-    projectLink: "not-requested",
-    projectLinkFailedIndexes: [],
-    errors: [],
-    skipped: skippedFiles.length,
-  });
-  if (accepted.length === 0) return emptyResult();
+  const errors: string[] = [];
+  const failedIndexes: number[] = [];
+  const chunks: TransferRun<R>["chunks"] = [];
+  if (accepted.length === 0) return { attemptedIndexes, skippedFiles, failedIndexes, errors, chunks };
 
   const totalBytes = accepted.reduce((sum, item) => sum + item.file.size, 0) || 1;
   const sentPerFile = new Array<number>(accepted.length).fill(0);
   const presigned = new Array<boolean>(accepted.length).fill(false);
   const putAcked = new Array<boolean>(accepted.length).fill(false);
-  const errors: string[] = [];
-  const failedIndexes: number[] = [];
   let doneFiles = 0;
   /** 0 while transferring; bumped as completion chunks land or fail. */
   let tail = 0;
@@ -410,32 +517,23 @@ export async function runUpload(
   const uploadOne = async (
     item: IndexedUploadFile,
     acceptedIndex: number,
-  ): Promise<CompletedTransfer> => {
-    const { uploadUrl, r2Key } = await presignFile(item.file, item.inputIndex, batchId);
+    presign: () => Promise<PresignedPut>,
+  ): Promise<TransferredFile> => {
+    const slot = await presign();
     presigned[acceptedIndex] = true;
     emit();
-    await putWithRetry(uploadUrl, item.file, (sent) => {
+    const mime = slot.contentType ?? (item.file.type || "application/octet-stream");
+    await putWithRetry(slot.uploadUrl, item.file, mime, (sent) => {
       sentPerFile[acceptedIndex] = sent;
       emit();
     });
     sentPerFile[acceptedIndex] = item.file.size;
     putAcked[acceptedIndex] = true;
-    const completed = {
-      inputIndex: item.inputIndex,
-      upload: {
-        r2Key,
-        filename: item.file.name,
-        mime: item.file.type || "application/octet-stream",
-        size: item.file.size,
-      },
-    };
     doneFiles += 1;
     emit();
-    return completed;
+    return { inputIndex: item.inputIndex, key: slot.key, filename: item.file.name, mime, size: item.file.size };
   };
 
-  const uploaded: UploadResult["uploaded"] = [];
-  const jobIds: string[] = [];
   const candidateChunks = chunkUploadItems(
     accepted.map((item, acceptedIndex) => ({ item, acceptedIndex })),
   );
@@ -443,14 +541,15 @@ export async function runUpload(
 
   for (let chunkIndex = 0; chunkIndex < candidateChunks.length; chunkIndex += 1) {
     const candidateChunk = candidateChunks[chunkIndex];
-    const completed: CompletedTransfer[] = [];
-    const queue = [...candidateChunk];
+    const presigns = transport.presign(candidateChunk.map((entry) => entry.item), batchId);
+    const completed: TransferredFile[] = [];
+    const queue = candidateChunk.map((entry, position) => ({ ...entry, presign: presigns[position] }));
     emit("uploading");
     await Promise.all(
       Array.from({ length: Math.min(PARALLEL_UPLOADS, queue.length) }, async () => {
         for (let next = queue.shift(); next; next = queue.shift()) {
           try {
-            completed.push(await uploadOne(next.item, next.acceptedIndex));
+            completed.push(await uploadOne(next.item, next.acceptedIndex, next.presign));
           } catch (error) {
             failedIndexes.push(next.item.inputIndex);
             errors.push(error instanceof Error ? error.message : String(error));
@@ -462,51 +561,13 @@ export async function runUpload(
     if (completed.length > 0) {
       emit("finalizing");
       completed.sort((a, b) => a.inputIndex - b.inputIndex);
-      const completionId = createUploadCompletionId();
-      const completionBody = JSON.stringify({
-        completionId,
-        uploads: completed.map((item) => item.upload),
-        ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
-      });
       try {
-        const result = await withRetry(
-          async (attempt) => {
-            const response = await fetchWithTimeout(
-              "/api/uploads/complete",
-              {
-                method: "POST",
-                headers: {
-                  "content-type": "application/json",
-                  ...batchHeaders(batchId, {
-                    "x-archivemind-upload-chunk": `${chunkIndex + 1}/${candidateChunks.length}`,
-                    "x-archivemind-upload-attempt": String(attempt),
-                  }),
-                },
-                // Keep this byte-for-byte stable across automatic retries: the
-                // RPC compares the completion payload behind completionId.
-                body: completionBody,
-              },
-              UPLOAD_COMPLETE_TIMEOUT_MS,
-              `complete chunk ${chunkIndex + 1}/${candidateChunks.length}`,
-            );
-            if (!response.ok) {
-              throw new HttpUploadError(`complete failed (${response.status})`, response.status);
-            }
-            return completeUploadResponseSchema.parse(await response.json());
-          },
-          isRetryableFetchError,
-        );
-        if (result.assetIds.length !== completed.length) {
-          throw new Error("complete returned an incomplete asset mapping");
-        }
-        jobIds.push(result.jobId);
-        uploaded.push(
-          ...completed.map((item, index) => ({
-            inputIndex: item.inputIndex,
-            assetId: result.assetIds[index],
-            jobId: result.jobId,
-          })),
-        );
+        const result = await transport.complete(completed, {
+          batchId,
+          chunkIndex: chunkIndex + 1,
+          chunkCount: candidateChunks.length,
+        });
+        chunks.push({ transferred: completed, result });
       } catch (error) {
         failedIndexes.push(...completed.map((item) => item.inputIndex));
         errors.push(error instanceof Error ? error.message : "complete failed");
@@ -520,25 +581,53 @@ export async function runUpload(
     emit("finalizing");
   }
 
+  emit("done");
+  return {
+    attemptedIndexes,
+    skippedFiles,
+    failedIndexes: Array.from(new Set(failedIndexes)).sort((a, b) => a - b),
+    errors: Array.from(new Set(errors)),
+    chunks,
+  };
+}
+
+export async function runUpload(
+  files: readonly File[] | readonly IndexedUploadFile[],
+  opts: RunUploadOptions = {},
+): Promise<UploadResult> {
+  const scopedProjectId = opts.projectId && opts.projectId !== "all" ? opts.projectId : undefined;
+  const run = await runTransfers(files, appTransport(scopedProjectId), {
+    batchId: opts.batchId,
+    onProgress: opts.onProgress,
+  });
+
+  const uploaded: UploadedFileResult[] = run.chunks
+    .flatMap(({ transferred, result }) =>
+      transferred.map((item, index) => ({
+        inputIndex: item.inputIndex,
+        assetId: result.assetIds[index],
+        jobId: result.jobId,
+      })),
+    )
+    .sort((a, b) => a.inputIndex - b.inputIndex);
+
   // A successful completion response now guarantees that project membership
   // was inserted before its ingest job. The standalone helper remains only for
   // retrying link-only failures produced by older/in-flight clients.
   const projectLink: UploadResult["projectLink"] =
     scopedProjectId && uploaded.length > 0 ? "linked" : "not-requested";
 
-  emit("done");
-  const orderedUploaded = uploaded.sort((a, b) => a.inputIndex - b.inputIndex);
   return {
-    attemptedIndexes,
-    assetIds: orderedUploaded.map((item) => item.assetId),
-    uploaded: orderedUploaded,
-    failedIndexes: Array.from(new Set(failedIndexes)).sort((a, b) => a - b),
-    skippedIndexes,
-    skippedFiles,
-    jobIds,
+    attemptedIndexes: run.attemptedIndexes,
+    assetIds: uploaded.map((item) => item.assetId),
+    uploaded,
+    failedIndexes: run.failedIndexes,
+    skippedIndexes: run.skippedFiles.map((item) => item.inputIndex),
+    skippedFiles: run.skippedFiles,
+    jobIds: run.chunks.map((chunk) => chunk.result.jobId),
     projectLink,
     projectLinkFailedIndexes: [],
-    errors: Array.from(new Set(errors)),
-    skipped: skippedFiles.length,
+    errors: run.errors,
+    skipped: run.skippedFiles.length,
   };
 }
