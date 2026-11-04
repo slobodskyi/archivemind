@@ -2,8 +2,18 @@ import { memo, useMemo } from "react";
 import type { LabelNames } from "@archivemind/shared";
 import { photoSrc, isRealSource } from "@/lib/img";
 import type { TilePos } from "@/lib/layout";
-import type { CanvasPoint, CanvasUploadPreview, Photo } from "@/types";
+import type { CanvasPoint, CanvasUploadPreview, CanvasUploadStage, Photo } from "@/types";
 import PhotoTile from "./PhotoTile";
+
+/** Past this many tiles waiting for an image at once, their shimmer holds
+ *  still. Each moving shimmer repaints its tile every frame (it animates
+ *  background-position), and a few hundred of them kept an iPad's main thread
+ *  busy for the whole of a big upload. */
+const SHIMMER_TILE_LIMIT = 24;
+
+function isLoadingStage(stage: CanvasUploadStage): boolean {
+  return stage === "uploading" || stage === "processing";
+}
 
 interface ProjectAssetViewProps {
   photos: Photo[];
@@ -63,6 +73,11 @@ function ProjectAssetView({
   );
   const canonicalIds = useMemo(() => new Set(photos.map((photo) => photo.id)), [photos]);
   const pending = previews.filter((preview) => !preview.assetId || !canonicalIds.has(preview.assetId));
+  // Over every preview, pending or matched: one whose server preview has
+  // landed has already left `previews`.
+  const shimmer =
+    previews.filter((preview) => !preview.localUrl && isLoadingStage(preview.stage)).length <=
+    SHIMMER_TILE_LIMIT;
 
   return (
     <>
@@ -86,6 +101,7 @@ function ProjectAssetView({
             hovered={hoveredId === photo.id}
             interactive
             animating={animating}
+            shimmer={shimmer}
             z={zOrder[photo.id] ?? 0}
             dimmed={!!focusedCloudKey && tileCloud[photo.id] !== focusedCloudKey}
             onDown={(event) => onTileDown(event, photo.id, { x: pos.cx, y: pos.cy })}
@@ -134,6 +150,7 @@ function ProjectAssetView({
             hovered={false}
             interactive={false}
             animating={animating}
+            shimmer={shimmer}
           />
         );
       })}

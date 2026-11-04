@@ -803,6 +803,12 @@ textarea {
     background: var(--bg-el);
   }
 }
+/* Many tiles loading at once (ProjectAssetView's limit) hold still, as with
+   reduced motion: a moving shimmer repaints its tile every frame. */
+.am-tile-shimmer.am-tile-shimmer-still {
+  animation: none;
+  background: var(--bg-el);
+}
 
 /* The tile's AI badge while that photo is inside the running job — pulses so a
    long analyze reads as "working on THIS photo", not just the one global bar at

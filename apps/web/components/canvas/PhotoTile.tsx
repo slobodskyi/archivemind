@@ -16,6 +16,9 @@ interface PhotoTileProps {
   /** When true, the tile glides to a new position instead of snapping — used
    *  while a sort/view change reflows every tile at once (not during drag). */
   animating?: boolean;
+  /** Animate the loading placeholder (the default). ProjectAssetView turns it
+   *  off while many tiles are loading at once. */
+  shimmer?: boolean;
   /** Persistent stacking delta ("Bring to front / Send to back"), added to the
    *  tile's resting z-index so its layer order survives across renders. */
   z?: number;
@@ -73,6 +76,7 @@ export default function PhotoTile({
   hovered,
   interactive,
   animating,
+  shimmer = true,
   z = 0,
   dimmed,
   onDown,
@@ -168,7 +172,11 @@ export default function PhotoTile({
         }}
       >
         {!src && loading && (
-          <span aria-hidden="true" className="am-tile-shimmer" style={{ position: "absolute", inset: 0 }} />
+          <span
+            aria-hidden="true"
+            className={shimmer ? "am-tile-shimmer" : "am-tile-shimmer am-tile-shimmer-still"}
+            style={{ position: "absolute", inset: 0 }}
+          />
         )}
         {!src && (
           <span
