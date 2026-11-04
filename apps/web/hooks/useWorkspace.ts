@@ -87,6 +87,14 @@ import type { SearchResponse } from "@archivemind/shared";
 import { CHAT_GREETING } from "@/lib/chat";
 import { clusterTopicKey } from "@/lib/topics";
 import { committedTopicDropKey, topicDropTargetAt } from "@/lib/topic-drag";
+import { UPLOAD_SELECTION_LIMIT } from "@/lib/upload-client";
+import {
+  createThumbQueue,
+  renderUploadThumb,
+  type ThumbJob,
+  type ThumbQueue,
+  type UploadThumb,
+} from "@/lib/upload-thumbnails";
 
 const PROJECT_COLORS = ["#5b9bff", "#ff7a5c", "#4fd1c5", "#c084fc", "#ffd166", "#39ff6a"];
 /** Stable empty tile→cloud map (Canvas / all-files mode) so the value identity
@@ -557,10 +565,18 @@ function canPreviewLocally(file: File): boolean {
   return /\.(?:jpe?g|png|webp|gif|avif)$/i.test(file.name);
 }
 
-/** Keep a large drop from asking the browser to retain and decode hundreds of
- * full-size local blobs at once. Tiles beyond this cap still appear immediately
- * with their filename placeholder and reconcile to the server preview normally. */
-const MAX_LOCAL_UPLOAD_PREVIEWS_PER_BATCH = 50;
+/** Local previews alive at once, across every batch in flight. Each is a small
+ * thumbnail now (lib/upload-thumbnails), costing what the worker's thumb that
+ * replaces it costs, so one selection's worth fits. The old cap counted each
+ * batch on its own and its previews were the full-size originals: two drops in
+ * a row asked iPad Safari to hold a hundred of them, and iOS killed the tab.
+ * Tiles past the cap keep their filename placeholder until the server preview
+ * lands. */
+const MAX_LOCAL_UPLOAD_PREVIEWS = UPLOAD_SELECTION_LIMIT;
+/** Thumbnails reach state at most this often. A big drop finishes one every few
+ * tens of milliseconds, and each state change re-renders every tile on the
+ * canvas, so they land in groups rather than one render per file. */
+const THUMB_FLUSH_MS = 250;
 
 /** What a drop onto a Workspace chip carries. Photos come as a list because a
  *  drag can move a whole selection; a note or a folder is always one object. */
@@ -1163,6 +1179,13 @@ export function useWorkspace(
    *  job — this fires the caption leg when the analyze leg reports done. */
   const followUpCaption = useRef<CaptionJobSpec | null>(null);
   const objectUrlsRef = useRef(new Map<string, string>());
+  /** Draws upload tiles' local thumbnails one file at a time (onUploadBatchStart). */
+  const thumbQueueRef = useRef<ThumbQueue | null>(null);
+  /** Thumbnails drawn since the last flush to state (THUMB_FLUSH_MS). */
+  const readyThumbsRef = useRef<{
+    thumbs: Map<string, UploadThumb>;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({ thumbs: new Map(), timer: null });
 
   // Patch helper that also advances stateRef so sequential reads see fresh data.
   const setState = useCallback((
@@ -1175,6 +1198,45 @@ export function useWorkspace(
       return next;
     });
   }, []);
+
+  const thumbQueue = useCallback((): ThumbQueue => {
+    thumbQueueRef.current ??= createThumbQueue({
+      render: (file) => renderUploadThumb(file),
+      // A tile wants one until it has one (the map answers that synchronously,
+      // state does not) or its upload failed. A tile missing from state still
+      // counts: a batch's first job can ask before its previews reach stateRef,
+      // and a thumbnail for a tile that really is gone is revoked by the
+      // object-URL cleanup effect once uploadPreviews changes.
+      isWanted: (clientId) => {
+        if (objectUrlsRef.current.has(clientId)) return false;
+        const preview = stateRef.current.uploadPreviews.find((item) => item.clientId === clientId);
+        return preview?.stage !== "error";
+      },
+      onThumb: (clientId, thumb) => {
+        objectUrlsRef.current.set(clientId, thumb.url);
+        const ready = readyThumbsRef.current;
+        ready.thumbs.set(clientId, thumb);
+        ready.timer ??= setTimeout(() => {
+          const thumbs = ready.thumbs;
+          ready.thumbs = new Map();
+          ready.timer = null;
+          setState((previous) => ({
+            uploadPreviews: previous.uploadPreviews.map((preview) => {
+              const thumb = thumbs.get(preview.clientId);
+              // Still the tile's own: a retry in the meantime revoked it and
+              // queued a fresh one, and a failed upload drops its image.
+              return thumb &&
+                preview.stage !== "error" &&
+                objectUrlsRef.current.get(preview.clientId) === thumb.url
+                ? { ...preview, localUrl: thumb.url, width: thumb.width, height: thumb.height }
+                : preview;
+            }),
+          }));
+        }, THUMB_FLUSH_MS);
+      },
+    });
+    return thumbQueueRef.current;
+  }, [setState]);
 
   // Fresh server data (router.refresh after an upload / analyze / add-to-project)
   // syncs in place. The page key used to include photo counts, so every refresh
@@ -4330,30 +4392,25 @@ export function useWorkspace(
       );
       const newClientIds = newFiles.map((item) => `${batch.batchId}:${item.inputIndex}`);
 
-      // A retry reuses the original batch/id pair. Revoke any stale URL before
-      // replacing it, and count the other live URLs so this batch never retains
-      // more than the local-preview cap at once.
-      const retainedPreviewCount = s.uploadPreviews.filter(
-        (preview) =>
-          preview.batchId === batch.batchId &&
-          preview.localUrl !== null &&
-          !incomingClientIds.has(preview.clientId),
-      ).length;
-      let previewSlots = Math.max(0, MAX_LOCAL_UPLOAD_PREVIEWS_PER_BATCH - retainedPreviewCount);
-      const localUrls = new Map<string, string | null>();
-      for (const item of batch.files) {
-        const clientId = `${batch.batchId}:${item.inputIndex}`;
+      // A retry reuses the original batch/id pair: drop its old thumbnail and
+      // queue a fresh one. Every tile starts as its filename placeholder and
+      // gets its thumbnail when the queue reaches it, one file at a time — the
+      // live thumbnails plus the ones still queued stay under the global cap.
+      for (const clientId of incomingClientIds) {
         const previousUrl = objectUrlsRef.current.get(clientId);
         if (previousUrl) URL.revokeObjectURL(previousUrl);
         objectUrlsRef.current.delete(clientId);
-        const localUrl = previewSlots > 0 && canPreviewLocally(item.file)
-          ? URL.createObjectURL(item.file)
-          : null;
-        if (localUrl) {
-          previewSlots -= 1;
-          objectUrlsRef.current.set(clientId, localUrl);
-        }
-        localUrls.set(clientId, localUrl);
+      }
+      let previewSlots = Math.max(
+        0,
+        MAX_LOCAL_UPLOAD_PREVIEWS - objectUrlsRef.current.size - thumbQueue().pending(),
+      );
+      const thumbJobs: ThumbJob[] = [];
+      for (const item of batch.files) {
+        if (previewSlots === 0) break;
+        if (!canPreviewLocally(item.file)) continue;
+        thumbJobs.push({ id: `${batch.batchId}:${item.inputIndex}`, file: item.file });
+        previewSlots -= 1;
       }
 
       // A freshly dropped file has no capture date / topic to sort by, so it can
@@ -4384,7 +4441,7 @@ export function useWorkspace(
           jobId: null,
           filename: item.file.name,
           mime: item.file.type || "application/octet-stream",
-          localUrl: localUrls.get(clientId) ?? null,
+          localUrl: null,
           center: centers[clientId],
           width: 4,
           height: 3,
@@ -4402,7 +4459,7 @@ export function useWorkspace(
               ...preview,
               filename: item.file.name,
               mime: item.file.type || "application/octet-stream",
-              localUrl: localUrls.get(preview.clientId) ?? null,
+              localUrl: null,
               stage: "uploading",
               message: null,
             };
@@ -4418,42 +4475,13 @@ export function useWorkspace(
       // above already committed the previews to stateRef, so setView's re-fit
       // includes them and frames the new batch.
       if (droppedIntoSortedView) setView("neural");
-      // Seed the real aspect ASAP: previews start at a 4:3 placeholder, so without
-      // this the tile visibly jumps to the photo's true shape only when the
-      // processed asset lands (seconds later). Measuring the already-loaded local
-      // bytes now settles the tile to its real aspect within a frame or two, and
-      // the canonical asset (same dimensions) then arrives with no further reflow.
-      const previewsToProbe = [
-        ...previews,
-        ...s.uploadPreviews
-          .filter(
-            (preview) =>
-              incomingClientIds.has(preview.clientId) &&
-              preview.width === 4 &&
-              preview.height === 3,
-          )
-          .map((preview) => ({ ...preview, localUrl: localUrls.get(preview.clientId) ?? null })),
-      ];
-      for (const preview of previewsToProbe) {
-        const localUrl = preview.localUrl;
-        if (!localUrl) continue;
-        const clientId = preview.clientId;
-        const probe = new window.Image();
-        probe.onload = () => {
-          const w = probe.naturalWidth,
-            h = probe.naturalHeight;
-          if (w > 0 && h > 0) {
-            setState((prev) => ({
-              uploadPreviews: prev.uploadPreviews.map((p) =>
-                p.clientId === clientId ? { ...p, width: w, height: h } : p,
-              ),
-            }));
-          }
-        };
-        probe.src = localUrl;
-      }
+      // The thumbnail also seeds the tile's real aspect: previews start at a 4:3
+      // placeholder, and without it the tile would jump to the photo's true
+      // shape only when the processed asset lands (seconds later). The canonical
+      // asset (same dimensions) then arrives with no further reflow.
+      thumbQueue().enqueue(thumbJobs);
     },
-    [rect, setState, toContent, neuralGalleryFor, setView],
+    [rect, setState, toContent, neuralGalleryFor, setView, thumbQueue],
   );
 
   const onUploadBatchSettled = useCallback(
@@ -5188,11 +5216,16 @@ export function useWorkspace(
 
   useEffect(() => {
     const objectUrls = objectUrlsRef.current;
+    const readyThumbs = readyThumbsRef.current;
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (copyTimer.current) clearTimeout(copyTimer.current);
       if (animTimer.current) clearTimeout(animTimer.current);
       if (topicDropRef.current.timer) clearTimeout(topicDropRef.current.timer);
+      // Before the revokes: a thumbnail still decoding is revoked by the queue
+      // instead of landing in a map nobody will clean again.
+      thumbQueueRef.current?.clear();
+      if (readyThumbs.timer) clearTimeout(readyThumbs.timer);
       for (const url of objectUrls.values()) URL.revokeObjectURL(url);
       objectUrls.clear();
     };
