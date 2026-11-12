@@ -219,8 +219,17 @@ export type ProjectShareSummary = z.infer<typeof projectShareSummarySchema>;
 export const listProjectSharesResponseSchema = z.object({ shares: z.array(projectShareSummarySchema) });
 
 /** GET /api/project-shares/[id]/received — what a link brought in that is
- *  still live in its project. */
+ *  still live in its project — and GET /api/project-shares/[id]/scope, what
+ *  it carries right now (ADR 0053 §6). One answer shape: a list of ids. */
 export const receivedAssetsResponseSchema = z.object({ assetIds: z.array(z.string().uuid()) });
+export const shareAssetIdsResponseSchema = receivedAssetsResponseSchema;
+
+/** GET /api/projects/[id]/board-shares — live Workspace links per Workspace
+ *  (ADR 0053 §6). A Workspace with none is absent, not zero. */
+export const boardShareCountsResponseSchema = z.object({
+  counts: z.record(uuidSchema, z.number().int().positive()),
+});
+export type BoardShareCounts = Record<string, number>;
 export const projectShareResponseSchema = z.object({ share: projectShareSummarySchema });
 
 export function projectSharePath(token: string): string {

@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AssetLabel, Board, LabelNames } from "@archivemind/shared";
 import { LABEL_COLORS } from "@/lib/labels";
 import { POPOVER_SURFACE } from "@/lib/ui";
-import { AddIcon, ChevronRightIcon } from "@/components/icons/icons";
+import { AddIcon, ChevronRightIcon, ShareIcon } from "@/components/icons/icons";
 import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import { BOARD_CHIP_ATTR } from "@/lib/board-drop";
 
@@ -28,6 +28,15 @@ interface BoardBrowserProps {
   /** Share this workspace by link (ADR 0053) — offered in the chip's popover,
    *  beside its colour, since right-click is the chip's menu. */
   onShare?: (id: string) => void;
+  /** Live share links per Workspace (ADR 0053 §6) — a chip with any carries
+   *  the "reachable from outside" marker, as a shared project's hub card does
+   *  (ADR 0051 §12). Absent means none. */
+  sharedCounts?: Record<string, number>;
+}
+
+/** The marker's words, shared by its tooltip and its accessible name. */
+function boardSharedTitle(count: number): string {
+  return count === 1 ? "Shared by link" : `Shared by ${count} links`;
 }
 
 /** How close to an edge the pointer has to be, mid-drag, for the rail to start
@@ -53,7 +62,7 @@ const FADE = 18;
  *  on that delete's own toast and in the Trash panel — deliberately NOT as a
  *  second ↺ in the header, which read as a broken duplicate of the canvas
  *  undo sitting a few hundred pixels away. */
-export default function BoardBrowser({ boards, activeBoardId, counts, labelNames, onSelect, onCreate, onRename, onRecolor, onDelete, dropTargetId = null, onShare }: BoardBrowserProps) {
+export default function BoardBrowser({ boards, activeBoardId, counts, labelNames, onSelect, onCreate, onRename, onRecolor, onDelete, dropTargetId = null, onShare, sharedCounts }: BoardBrowserProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** The chip whose colour picker is open, and where to draw it. Local, like the
@@ -103,7 +112,7 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
       row.removeEventListener("scroll", read);
       ro.disconnect();
     };
-  }, [boards, counts, activeBoardId]);
+  }, [boards, counts, activeBoardId, sharedCounts]);
 
   /** A wheel mouse has no horizontal axis, and this rail has no vertical one, so
    *  without translating the two a desktop user without a trackpad simply cannot
@@ -225,6 +234,7 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
   const chip = (b: Board) => {
     const active = b.id === activeBoardId;
     const armed = b.id === dropTargetId;
+    const shared = sharedCounts?.[b.id] ?? 0;
     return (
       <div
         key={b.id}
@@ -271,7 +281,7 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
           e.stopPropagation();
           openColorPicker(e.currentTarget, b.id);
         }}
-        title={active ? `${b.name} — double-click to rename, right-click for colour and sharing` : b.name}
+        title={`${active ? `${b.name} — double-click to rename, right-click for colour and sharing` : b.name}${shared ? ` · ${boardSharedTitle(shared)}` : ""}`}
       >
         {/* The dot IS the colour, so clicking it opens the picker — the
             discoverable half of the gesture, since nobody guesses right-click.
@@ -320,6 +330,21 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
         )}
         {/* Bracketed so the count reads as a count, not as part of the name. */}
         <span style={{ fontSize: 11, color: "var(--t3)" }}>[{counts[b.id] ?? b.assetIds.length}]</span>
+        {/* Reachable from outside: the hub card's marker, at chip size. The
+            count only when there is more than one link — one is the case
+            worth noticing, several is the case worth counting. */}
+        {shared > 0 && (
+          <span
+            data-board-shared=""
+            role="img"
+            aria-label={boardSharedTitle(shared)}
+            title={boardSharedTitle(shared)}
+            style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 2, height: 16, padding: "0 4px", border: "1px solid var(--bd)", borderRadius: 2, color: active ? "var(--t1)" : "var(--t2)", fontSize: 9.5, fontWeight: 700 }}
+          >
+            <ShareIcon width={10} height={10} aria-hidden="true" />
+            {shared > 1 ? shared : null}
+          </span>
+        )}
         {active && (
           <button
             onClick={(e) => {

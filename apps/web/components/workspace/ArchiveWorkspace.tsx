@@ -6,7 +6,9 @@ import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } fro
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
-import { useReceivedSelection } from "@/hooks/useReceivedSelection";
+import { useShareCanvasSelection } from "@/hooks/useShareCanvasSelection";
+import { useBoardShareCounts } from "@/hooks/useBoardShareCounts";
+import type { ShareCanvasRequest } from "@/lib/share-canvas";
 import { LABEL_COLORS } from "@/lib/labels";
 import { uploadAnalyzeStatus } from "@/lib/upload-pill";
 import BoardBrowser from "@/components/header/BoardBrowser";
@@ -109,9 +111,10 @@ interface ArchiveWorkspaceProps {
    *  reads as a glitch. */
   initialBoards: Board[];
   account: Account;
-  /** `?received={shareId}` — the Share dialog's "Show on canvas": select what
-   *  that link brought in (ADR 0051 §12). */
-  receivedShareId?: string | null;
+  /** The Share dialog's "Show on canvas" (`lib/share-canvas.ts`): select what
+   *  a link carries (`?share=`, opening its Workspace first) or what it
+   *  brought in (`?received=`) — ADR 0051 §12, ADR 0053 §6. */
+  shareCanvas?: ShareCanvasRequest | null;
 }
 
 export default function ArchiveWorkspace({
@@ -125,7 +128,7 @@ export default function ArchiveWorkspace({
   initialAnnotations,
   initialBoards,
   account,
-  receivedShareId = null,
+  shareCanvas = null,
 }: ArchiveWorkspaceProps) {
   // Workspaces (boards) — a named, colour-coded set of the project's files
   // (ADR 0044). Additive on purpose: opening one narrows the canvas to its
@@ -163,7 +166,6 @@ export default function ArchiveWorkspace({
     bd.activeBoardId,
     dropOnBoard,
   );
-  useReceivedSelection(receivedShareId, ws.selectSearchResults);
 
   // A Workspace owns the notes and folders MADE in it, and hides the
   // rest — the same rule the photos follow (ADR 0044). With no Workspace open
@@ -357,6 +359,12 @@ export default function ArchiveWorkspace({
     },
     [activeDraft, bd, draftSaveState, refreshDrafts, ws],
   );
+
+  const liveBoardIds = useMemo(() => bd.boards.map((b) => b.id), [bd.boards]);
+  useShareCanvasSelection(shareCanvas, ws.selectSearchResults, openBoard, liveBoardIds);
+  // Which chips are reachable from outside (ADR 0053 §6). Re-read when the
+  // set of live Workspaces changes: Trash pauses a Workspace's links.
+  const boardShares = useBoardShareCounts(ws.projectMode ? currentProjectId : null, liveBoardIds.join(","));
 
   const drafts = useMemo(
     () => bd.activeBoardId
@@ -1042,6 +1050,7 @@ export default function ArchiveWorkspace({
               boards={bd.boards}
               activeBoardId={bd.activeBoardId}
               counts={boardCounts}
+              sharedCounts={boardShares.counts}
               labelNames={ws.labelNames}
               onRecolor={bd.recolorBoard}
               dropTargetId={ws.boardDropTargetId ?? folderDropTarget}
@@ -1063,6 +1072,7 @@ export default function ArchiveWorkspace({
         project={{ id: currentProjectId, name: ws.projLabel }}
         scopes={shareRequest ?? undefined}
         onClose={() => setShareRequest(null)}
+        onSharesChange={boardShares.refresh}
       />
 
       {/* Persistent by design: this is archive-integrity information, not a

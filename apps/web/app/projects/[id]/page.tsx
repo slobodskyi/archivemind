@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { uuidSchema } from "@archivemind/shared";
+import { parseShareCanvasParams } from "@/lib/share-canvas";
 import PostHogSession from "@/components/analytics/PostHogSession";
 import ArchiveWorkspace from "@/components/workspace/ArchiveWorkspace";
 import { getPhotoWindow } from "@/lib/api";
@@ -19,13 +19,13 @@ export default async function ProjectCanvas({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ received?: string | string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params; // Next 16: params is a Promise
-  // "Show on canvas" from the Share dialog (ADR 0051 §12): the canvas selects
-  // what that link brought in. Only a uuid passes; the route checks the rest.
-  const { received } = await searchParams;
-  const receivedShareId = typeof received === "string" && uuidSchema.safeParse(received).success ? received : null;
+  // "Show on canvas" from the Share dialog (ADR 0051 §12, ADR 0053 §6): the
+  // canvas selects what a link carries or brought in. Only uuids pass; the
+  // routes check the rest.
+  const shareCanvas = parseShareCanvasParams(await searchParams);
 
   const supabase = await createClient();
   const {
@@ -77,7 +77,7 @@ export default async function ProjectCanvas({
         initialAnnotations={annotations}
         initialBoards={boards}
         account={account}
-        receivedShareId={id === "all" ? null : receivedShareId}
+        shareCanvas={id === "all" ? null : shareCanvas}
       />
     </>
   );
