@@ -173,3 +173,17 @@ The edit has its own 2048 px render, so the line about an edit existing only
 as 1024 px previews no longer holds. On a desktop the viewer skips `large`
 when the original is about to load anyway; on touch it is the fit step before
 the first zoom. The rules and the backfill are in ADR 0055.
+
+### 2026-11-12 — the drawer's preview and arrows
+
+Two follow-ups from using the drawer beside the viewer:
+
+- **The drawer's preview no longer crops.** It is `contain` in a fixed 280 px
+  box (it was a 220 px `cover`). A fixed height keeps ←/→ from shifting the
+  panel below on every step; the photo's shape shows as dark bars.
+- **The drawer's ←/→ move the canvas selection with them.** Until now the
+  green outline stayed on the photo the drawer had left, which made the arrows
+  read as broken. They now follow the rule the viewer applies on close
+  (`drawerStep` in `lib/viewer.ts`): a selection of two or more that holds the
+  drawer's photo is walked as a set, in reading order, and kept whole.
+  Anything else becomes the single photo stepped to.

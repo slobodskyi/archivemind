@@ -202,6 +202,27 @@ export function viewerSequence(
   return { ids: order.includes(start) ? [...order] : [start, ...order], start };
 }
 
+/** The drawer's ←/→: the photo `dir` steps to, and the selection the canvas
+ *  shows after it (null = leave it as it is). The rule the viewer applies when
+ *  it closes: two or more selected photos that include the drawer's are walked
+ *  as a set, in reading order, and kept whole — the set someone built is not
+ *  theirs to lose to an arrow. Anything else walks the whole order and the
+ *  selection moves with the drawer, so the green outline on the canvas is
+ *  always on the photo the drawer is showing. `order` must contain `current`. */
+export function drawerStep(
+  order: readonly string[],
+  selected: readonly string[],
+  current: string,
+  dir: number,
+): { id: string; selectedIds: string[] | null } | null {
+  const chosen = new Set(selected);
+  const set = order.filter((id) => chosen.has(id));
+  const walkingSet = set.length >= 2 && chosen.has(current);
+  const id = stepSequence(walkingSet ? set : order, current, dir);
+  if (!id) return null;
+  return { id, selectedIds: walkingSet ? null : [id] };
+}
+
 /** The next id `dir` steps away, wrapping like the drawer's ←/→ does, skipping
  *  ids that no longer exist. Null when nothing else is left. */
 export function stepSequence(

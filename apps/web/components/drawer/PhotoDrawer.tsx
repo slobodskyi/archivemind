@@ -267,8 +267,10 @@ export default function PhotoDrawer({
       {photo && (
         <div style={{ padding: 14 }}>
           <div style={{ position: "relative", borderRadius: 3, overflow: "hidden", border: "1px solid var(--bd)" }}>
-            {/* A 220 px `cover` crop — fine as a recogniser, useless for detail,
-                so the whole preview is the door to the fullscreen viewer. */}
+            {/* The whole photo, never cropped: `contain` in a box of FIXED
+                height, so its shape shows as dark bars rather than a cut, and
+                stepping with ←/→ never shifts the panel below. Still too small
+                for detail, so the whole preview is the door to the viewer. */}
             <button
               type="button"
               onClick={onOpenViewer}
@@ -277,14 +279,15 @@ export default function PhotoDrawer({
               style={{
                 display: "block",
                 width: "100%",
-                height: 220,
+                height: PREVIEW_HEIGHT,
                 padding: 0,
                 border: 0,
                 borderRadius: 0,
                 cursor: "zoom-in",
-                backgroundColor: "var(--bg-el)",
+                backgroundColor: "var(--bg)",
                 backgroundImage: `url(${photoSrcMedium({ ...photo, srcMedium: photo.srcMedium ?? mediumSrc }, 840, 480)})`,
-                backgroundSize: "cover",
+                backgroundSize: "contain",
+                backgroundRepeat: "no-repeat",
                 backgroundPosition: "center",
               }}
             />
@@ -834,6 +837,11 @@ const deletePill: React.CSSProperties = {
   padding: "0 9px",
   color: "var(--red)",
 };
+
+/** Tall enough that a portrait frame is still readable once contained (a 2:3
+ *  photo is ~187 px wide in it), short enough that the facts start above the
+ *  fold on a laptop. */
+const PREVIEW_HEIGHT = 280;
 
 function navBtn(kind: "left" | "right" | "close" | "expand"): React.CSSProperties {
   const small = kind === "close" || kind === "expand";
