@@ -92,11 +92,13 @@ select ok(not has_table_privilege('authenticated', 'public.project_shares', 'INS
   'signed-in clients cannot mint a link around the RPC');
 select ok(not has_table_privilege('authenticated', 'public.project_share_uploads', 'SELECT'),
   'the upload ledger is private infrastructure');
+-- The signature grew in 20261112000001 (ADR 0053 appended scope + details
+-- parameters, all defaulted); the 7-argument calls below still resolve to it.
 select ok(not has_function_privilege('anon',
-  'public.create_project_share(uuid,boolean,boolean,integer,text,text,text)', 'EXECUTE'),
+  'public.create_project_share(uuid,boolean,boolean,integer,text,text,text,text,uuid,uuid[],boolean,boolean,boolean,text,text)', 'EXECUTE'),
   'anon cannot mint links');
 select ok(has_function_privilege('authenticated',
-  'public.create_project_share(uuid,boolean,boolean,integer,text,text,text)', 'EXECUTE'),
+  'public.create_project_share(uuid,boolean,boolean,integer,text,text,text,text,uuid,uuid[],boolean,boolean,boolean,text,text)', 'EXECUTE'),
   'editors reach creation, which checks its own role');
 select ok(not has_function_privilege('anon', 'public.list_project_shares(uuid)', 'EXECUTE'),
   'anon cannot enumerate a project''s links');

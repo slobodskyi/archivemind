@@ -257,3 +257,23 @@ it counts in the link's "files received", while `list_project_share_received`
 (project members only) does not show a file the project does not hold. The
 sender is told "received" either way. No schema change.
 
+### 2026-11-12 — scopes and opt-in details (ADR 0053)
+
+Read ADR 0053 before relying on §1, §4, §6, §10 or §12 above:
+
+- **§1** — a link now has a scope inside its project: the whole project (as
+  here), one Workspace, or a fixed list of files. A list cannot receive files.
+- **§4** — liveness is now the function `project_share_is_live()`, which every
+  resolver and both editor listings call, and it adds one clause: a Workspace
+  link lives only while its Workspace is out of Trash. What a link carries is
+  likewise one function, `project_share_scope_assets()`.
+- **§6** — the projection is still the default, but each link may turn on
+  Workspaces (as a filter), colour labels, tags and one caption. Off means null
+  from SQL, and a filter on a detail that is off is refused. Facts, location,
+  notes and member names still never cross.
+- **§10** — a file sent through a Workspace link also joins that Workspace; the
+  dedup rule above needs no change for it.
+- **§12** — `ShareProjectDialog` becomes one Share dialog opened from four
+  places, starting from the selection, else the open Workspace, else the
+  project.
+
