@@ -163,3 +163,13 @@ where it is sharper than the scope:
 
 Not verified: a real iPad decoding a 48 MP original. The 40 MiB cap and the
 touch-only-on-zoom rule are the guard. The first device run is the test.
+
+### 2026-11-12 — a 2048 px step (ADR 0055)
+
+The "later decision" above is made: a `large` preview, 2048 px on the long
+edge, sits between medium and the original. It is what a Drive or OneDrive
+file, a RAW or TIFF, HEIC outside WebKit and an edited photo now show at fit.
+The edit has its own 2048 px render, so the line about an edit existing only
+as 1024 px previews no longer holds. On a desktop the viewer skips `large`
+when the original is about to load anyway; on touch it is the fit step before
+the first zoom. The rules and the backfill are in ADR 0055.

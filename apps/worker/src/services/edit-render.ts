@@ -1,17 +1,19 @@
 import sharp from "sharp";
 import { inscribedCropForStraighten, resolveCropRect, type EditRecipe } from "@archivemind/shared";
-import { PREVIEW_SIZES } from "./previews";
+import { PREVIEW_SIZES, previewSizesFor, type PreviewSize } from "./previews";
 
 /** Tier-0 non-destructive render (ADR 0030). Applies the recipe to the asset's
- *  ORIGINAL medium preview (in R2 for every source) in the fixed order
- *  flip -> rotate90 -> straighten -> crop, then emits fresh thumb(256)/medium(1024)
- *  webp previews. asset_previews (the originals) are never touched; these land
+ *  best UNEDITED preview — `large` (2048) when it has one, else medium (1024);
+ *  both are in R2 for every source (ADR 0055) — in the fixed order
+ *  flip -> rotate90 -> straighten -> crop, then emits fresh webp previews: thumb
+ *  and medium always, large only when the cropped result is still bigger than
+ *  medium (`previewSizesFor`, the rule ingest applies to an original). asset_previews (the originals) are never touched; these land
  *  under asset_edits' own R2 keys. The quarter-turn and the straighten are one
  *  combined rotate() (sharp keeps only the last rotate() call). Sizes/quality
  *  reuse previews.ts so an edited preview can never drift from a fresh one. */
 
 export interface RenderedEditPreview {
-  size: (typeof PREVIEW_SIZES)[number]["size"];
+  size: PreviewSize;
   data: Buffer;
   width: number;
   height: number;
@@ -42,8 +44,10 @@ export async function renderEditedPreviews(src: Buffer, recipe: EditRecipe): Pro
     raw: { width: worked.info.width, height: worked.info.height, channels: worked.info.channels },
   }).extract(rect);
 
+  const earned = previewSizesFor(rect.width, rect.height);
   const out: RenderedEditPreview[] = [];
   for (const { size, edge } of PREVIEW_SIZES) {
+    if (!earned.includes(size)) continue;
     const { data, info } = await cropped
       .clone()
       .resize(edge, edge, { fit: "inside", withoutEnlargement: true })

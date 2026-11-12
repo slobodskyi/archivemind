@@ -12,6 +12,7 @@ import {
   type Job,
 } from "./queue";
 import { backfillGeoLabels } from "./geo-backfill";
+import { backfillLargePreviews } from "./large-backfill";
 import {
   sweepDeletedAssets,
   sweepExpiredExports,
@@ -125,6 +126,23 @@ async function main(): Promise<void> {
   void runGeoBackfill();
   const geoBackfiller = setInterval(() => void runGeoBackfill(), SWEEP_EVERY_MS);
 
+  // And the 2048 px preview backfill (ADR 0055): R2-held originals ingested
+  // before `large` existed, a few hundred per pass, newest first. Unlike the
+  // geo pass this downloads and decodes originals, so it is bounded per run
+  // (LARGE_BACKFILL_PER_RUN, 0 = off) and stops when the worker is told to.
+  const runLargeBackfill = () =>
+    backfillLargePreviews(pool, { shouldStop: () => shuttingDown, log })
+      .then((r) => {
+        if (r.written + r.skipped + r.failed > 0) {
+          log(
+            `large backfill: ${r.written} written, ${r.skipped} skipped, ${r.failed} failed, ${r.rerenders} edit re-render(s) queued`,
+          );
+        }
+      })
+      .catch((e: unknown) => log(`large backfill failed: ${String(e)}`));
+  void runLargeBackfill();
+  const largeBackfiller = setInterval(() => void runLargeBackfill(), SWEEP_EVERY_MS);
+
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -153,6 +171,7 @@ async function main(): Promise<void> {
   clearInterval(reaper);
   clearInterval(sweeper);
   clearInterval(geoBackfiller);
+  clearInterval(largeBackfiller);
   if (currentJob) {
     await releaseJob(pool, currentJob.id);
     log(`released in-flight job ${currentJob.id} back to queue`);

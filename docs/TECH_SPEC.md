@@ -202,7 +202,7 @@ create unique index files_dedup_idx on files (workspace_id, content_hash)
 -- Previews + EXIF describe the SHOT, so they hang off the ASSET, not a byte blob.
 create table asset_previews (
   asset_id uuid not null references assets(id) on delete cascade,
-  size text not null,                -- 'thumb'(256) | 'medium'(1024)
+  size text not null,                -- 'thumb'(256) | 'medium'(1024) | 'large'(2048, ADR 0055)
   r2_key text not null,
   width int, height int,
   primary key (asset_id, size)
@@ -465,6 +465,8 @@ create policy assets_write  on assets for all
                                                   --  before the files row exists — NOT files.id)
 {workspace_id}/previews/{asset_id}/thumb.webp     -- per ASSET; 256px long edge
 {workspace_id}/previews/{asset_id}/medium.webp    -- per ASSET; 1024px long edge
+{workspace_id}/previews/{asset_id}/large.webp     -- per ASSET; 2048px, only when the source is bigger
+                                                  -- than medium (ADR 0055)
 {workspace_id}/exports/{job_id}.{pdf|csv|zip}     -- extension per options.format; only the KEY is
                                                   -- stored (payload.result_key), presigned per request;
                                                   -- swept after EXPORT_RETENTION_DAYS
@@ -514,7 +516,7 @@ returning *;
 
 ### 8.1 Ingest (`type='ingest'`, payload: asset_ids)
 Per file: stream bytes → sha256 (dedup check) → EXIF (`exifr`, falling back to `exiftool-vendored` whenever `exifr` yields nothing storable — RAW, **and** real iPhone HEIC, on which `exifr` throws "Unknown file format"; #113) → reverse-geocode GPS to `gps_label` offline ([ADR 0026](decisions/0026-offline-reverse-geocoding.md)) → decode:
-- JPEG/PNG/TIFF/WebP → `sharp` previews (thumb 256 / medium 1024, webp).
+- JPEG/PNG/TIFF/WebP → `sharp` previews (thumb 256 / medium 1024 / large 2048 when the source is bigger than 1024, webp — [ADR 0055](decisions/0055-large-preview-tier.md)).
 - **HEIC:** `sharp` prebuilt binaries exclude HEIC (patents) → decode via **`heic-decode`** (maintained) to raw RGBA → `sharp(buf, {raw})`. ~1–3 s / up to ~200 MB per iPhone HEIC → cap decode concurrency to 1–2. Native fallback if throughput hurts: `@myunisoft/heif-converter`.
 - **RAW (NEF/CR2/ARW):** extract embedded JPEG via `exiftool-vendored` cascade `extractJpgFromRaw → extractPreview → extractThumbnail` (no full RAW decode in MVP) → sharp. NEF/CR2 give full-res; **Sony ARW usually only ~1616×1080** (fine for grid, not full-res display). If extraction fails → mark file `kind='other'`, skip AI.
 - **PDF:** `pdf-parse` v2 (pure Node — text + tables + page screenshots; may remove the poppler system dep; `pdftoppm` kept only as a fallback for malformed PDFs; `mupdf` npm is AGPL — avoid). If empty text (scanned) → send first pages to the analyze model for extraction.

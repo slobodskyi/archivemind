@@ -61,7 +61,7 @@ const MAX_IMPORT_BYTES = Number(process.env.MAX_IMPORT_BYTES ?? 200 * 1024 * 102
 const SHARP_MIMES = /^image\/(jpeg|png|webp|tiff|gif|avif)$/;
 const HEIC_MIMES = /^image\/(heic|heif)$/;
 
-type Decoded =
+export type Decoded =
   | { ok: true; input: PreviewInput }
   | { ok: false; reason: string };
 
@@ -228,7 +228,10 @@ export function ingestProgressLabel(
   return `Processed ${done} file(s)${tail ? ` (${tail})` : ""}`;
 }
 
-async function decodeBytes(buf: Buffer, mime: string | null, filename: string): Promise<Decoded> {
+/** Bytes → something sharp can resize. Exported for the large backfill
+ *  (ADR 0055), which re-reads R2-held originals and must decode them exactly
+ *  the way ingest did — HEIC, RAW's embedded JPEG and all. */
+export async function decodeBytes(buf: Buffer, mime: string | null, filename: string): Promise<Decoded> {
   switch (decodeRoute(mime, filename)) {
     case "heic": {
       const raw = await heicToRaw(buf);

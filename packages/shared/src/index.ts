@@ -1653,10 +1653,15 @@ export type EditRecipe = z.infer<typeof editRecipeSchema>;
 export const editAssetRequestSchema = z.object({ recipe: editRecipeSchema });
 export type EditAssetRequest = z.infer<typeof editAssetRequestSchema>;
 
-/** ai_jobs.payload for type='edit' (single asset). */
+/** ai_jobs.payload for type='edit' (single asset). With no `recipe` the job
+ *  RE-RENDERS the asset's stored edit from its current best preview — what the
+ *  worker's large backfill enqueues once an edited photo gains its 2048 px
+ *  preview (ADR 0055). Reading the recipe when the job runs, not when it is
+ *  queued, is what keeps a re-render from ever reinstating an older edit. The
+ *  web route always sends one (`editAssetRequestSchema`). */
 export const editJobPayloadSchema = z.object({
   asset_id: uuidSchema,
-  recipe: editRecipeSchema,
+  recipe: editRecipeSchema.optional(),
 });
 export type EditJobPayload = z.infer<typeof editJobPayloadSchema>;
 

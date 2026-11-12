@@ -108,3 +108,13 @@ the cost is concrete: `edit-render` renders from the 1024px medium with
 against the ~300 ppi photographers treat as the print baseline. A `large` (2048px)
 preview tier plus a backfill is the fix; full-resolution re-render from `files.r2_key`
 stays out of reach for Drive-linked assets either way (ADR 0025).
+
+## Amendment — 2026-11-12: edits render from the 2048 px preview (ADR 0055)
+
+The edit is now rendered from the photo's `large` preview (2048 px) when it has
+one, and from medium only when it does not. It also gets a third render,
+`asset_edits.edited_large_key`, whenever the cropped result is still bigger
+than medium. A queued `edit` job with no recipe re-renders the stored one: the
+worker's large backfill sends that once an edited photo gains its `large`. The
+non-destructive model is unchanged: `asset_previews` are still never touched,
+and a reset still just drops the row (and now its large render too).
