@@ -325,6 +325,29 @@ export function FitIcon({ width = 16, height = 16, ...props }: IconProps) {
   );
 }
 
+/** Open a photo full screen (ADR 0054): arrows out to two corners — distinct
+ *  from FitIcon's four brackets, which the viewer uses for browser fullscreen. */
+export function ExpandIcon({ width = 13, height = 13, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M14 4h6v6" />
+      <path d="M20 4l-6.5 6.5" />
+      <path d="M10 20H4v-6" />
+      <path d="M4 20l6.5-6.5" />
+    </svg>
+  );
+}
+
+export function InfoIcon({ width = 14, height = 14, ...props }: IconProps) {
+  return (
+    <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5.5" />
+      <path d="M12 7.5h.01" />
+    </svg>
+  );
+}
+
 export function OpenIcon({ width = 13, height = 13, ...props }: IconProps) {
   return (
     <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" {...props}>

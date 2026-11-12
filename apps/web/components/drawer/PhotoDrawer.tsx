@@ -5,12 +5,14 @@ import type { AssetLabel, LabelNames, PatchAssetExifRequest } from "@archivemind
 import type { CaptionStyle, Language, Photo } from "@/types";
 import { FACT_STATUS_COLOR, formatGps, getCaptionText, statusMeta } from "@/lib/format";
 import { photoSrcMedium, isRealSource } from "@/lib/img";
+import { mediumPreviewUrls, previewVersion } from "@/lib/preview-url-cache";
 import LabelSwatchRow from "@/components/labels/LabelSwatchRow";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CheckIcon,
   CloseIcon,
+  ExpandIcon,
   SparkleIcon,
   CopyIcon,
   AddIcon,
@@ -33,6 +35,9 @@ interface PhotoDrawerProps {
   onCopy: (text: string) => void;
   onGenSingle: () => void;
   onSaveCaption: (text: string) => void;
+  /** Open this photo in the fullscreen viewer (ADR 0054) — the preview above
+   *  is a crop, and this is where the whole photo and its detail live. */
+  onOpenViewer: () => void;
   onEditImage: () => void;
   /** Move to Trash (ADR 0033) — the drawer used to have no delete at all, so
    *  deletion intent formed here forced the user back out to the tile. */
@@ -75,6 +80,7 @@ export default function PhotoDrawer({
   onCopy,
   onGenSingle,
   onSaveCaption,
+  onOpenViewer,
   onEditImage,
   onDelete,
   onSetFactStatus,
@@ -87,18 +93,17 @@ export default function PhotoDrawer({
 }: PhotoDrawerProps) {
   // The asset list presigns thumbs only; the sharper medium is fetched lazily
   // here. The thumb renders as an instant placeholder and the medium swaps in
-  // when its URL lands (stale responses are ignored by id).
+  // when its URL lands (stale responses are ignored by id). The URL goes
+  // through the tab-wide cache the fullscreen viewer shares (ADR 0054), so
+  // opening the viewer from here is not a second round trip.
   const [medium, setMedium] = useState<{ id: string; url: string } | null>(null);
   useEffect(() => {
     if (!photo || !isRealSource(photo.source) || photo.srcMedium) return;
     const id = photo.id;
     let alive = true;
-    fetch(`/api/assets/${id}/medium`)
-      .then((r) => (r.ok ? (r.json() as Promise<{ url: string | null }>) : null))
-      .then((j) => {
-        if (alive && j?.url) setMedium({ id, url: j.url });
-      })
-      .catch(() => {});
+    void mediumPreviewUrls.get(id, previewVersion(photo.src)).then((url) => {
+      if (alive && url) setMedium({ id, url });
+    });
     return () => {
       alive = false;
     };
@@ -262,15 +267,36 @@ export default function PhotoDrawer({
       {photo && (
         <div style={{ padding: 14 }}>
           <div style={{ position: "relative", borderRadius: 3, overflow: "hidden", border: "1px solid var(--bd)" }}>
-            <div
+            {/* A 220 px `cover` crop — fine as a recogniser, useless for detail,
+                so the whole preview is the door to the fullscreen viewer. */}
+            <button
+              type="button"
+              onClick={onOpenViewer}
+              aria-label="Open full screen"
+              title="Open full screen (F)"
               style={{
+                display: "block",
                 width: "100%",
                 height: 220,
+                padding: 0,
+                border: 0,
+                borderRadius: 0,
+                cursor: "zoom-in",
+                backgroundColor: "var(--bg-el)",
                 backgroundImage: `url(${photoSrcMedium({ ...photo, srcMedium: photo.srcMedium ?? mediumSrc }, 840, 480)})`,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
               }}
             />
+            <button
+              className="am-touch-target"
+              onClick={onOpenViewer}
+              aria-label="Open full screen"
+              title="Open full screen (F)"
+              style={navBtn("expand")}
+            >
+              <ExpandIcon width={12} height={12} />
+            </button>
             <button className="am-touch-target" onClick={onPrev} aria-label="Previous photo" style={navBtn("left")}>
               <ChevronLeftIcon />
             </button>
@@ -809,12 +835,13 @@ const deletePill: React.CSSProperties = {
   color: "var(--red)",
 };
 
-function navBtn(kind: "left" | "right" | "close"): React.CSSProperties {
+function navBtn(kind: "left" | "right" | "close" | "expand"): React.CSSProperties {
+  const small = kind === "close" || kind === "expand";
   const base: React.CSSProperties = {
     position: "absolute",
     display: "flex",
-    width: kind === "close" ? 26 : 28,
-    height: kind === "close" ? 26 : 28,
+    width: small ? 26 : 28,
+    height: small ? 26 : 28,
     alignItems: "center",
     justifyContent: "center",
     border: "1px solid var(--bd)",
@@ -826,6 +853,8 @@ function navBtn(kind: "left" | "right" | "close"): React.CSSProperties {
   };
   if (kind === "left") return { ...base, left: 8, top: "50%", transform: "translateY(-50%)" };
   if (kind === "right") return { ...base, right: 8, top: "50%", transform: "translateY(-50%)" };
+  // Opposite Close, so a reach for one never lands on the other.
+  if (kind === "expand") return { ...base, left: 8, top: 8 };
   return { ...base, right: 8, top: 8 };
 }
 

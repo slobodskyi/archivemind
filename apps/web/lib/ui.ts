@@ -12,6 +12,10 @@ export const Z = {
   /** Dropdowns + popovers; their click-away backdrop sits one below. */
   menu: 60,
   menuBackdrop: 59,
+  /** The fullscreen photo viewer (ADR 0054): over every piece of workspace
+   *  chrome, UNDER modals and toasts — Download opens its dialog over the
+   *  viewer, and a delete's undo toast has to be visible from inside it. */
+  viewer: 65,
   modal: 70,
   toast: 80,
   tooltip: 85,

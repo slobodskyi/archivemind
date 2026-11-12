@@ -83,6 +83,7 @@ import {
   type Transform,
 } from "@/lib/layout";
 import { latestPointerPosition, solvePinch } from "@/lib/pinch";
+import { stepSequence, viewerAfterRemoval, viewerSequence } from "@/lib/viewer";
 import {
   canvasArrangement,
   canvasStoreKey,
@@ -338,6 +339,13 @@ interface WorkspaceState {
   drawerId: string | null;
   /** Asset id being edited in the image editor (ADR 0030), or null. */
   editorId: string | null;
+  /** Fullscreen viewer (ADR 0054): the photo on screen, or null. While it is
+   *  set the viewer owns the keyboard. */
+  viewerId: string | null;
+  /** What ←/→ walks in the viewer — a snapshot of the reading order (or of the
+   *  selection) taken on open, so a photo re-labelled under an active filter
+   *  does not vanish from under the viewer while you are looking at it. */
+  viewerIds: string[];
   drawerLang: Language;
   drawerStyle: CaptionStyle;
   copyLabel: string;
@@ -774,6 +782,16 @@ export interface Workspace {
   /** Right-click "Move to Trash" — the selection when one exists, else the
    *  tile under the cursor. */
   deleteFromContext: () => void;
+  /** Fullscreen viewer (ADR 0054). */
+  viewerPhoto: Photo | null;
+  /** 0-based position of `viewerPhoto` in the sequence ←/→ walks, and its length. */
+  viewerIndex: number;
+  viewerCount: number;
+  viewerNeighbors: Photo[];
+  openViewer: (startId?: string | null) => void;
+  closeViewer: () => void;
+  navViewer: (dir: number) => void;
+  viewerInfo: () => void;
   /** Image editor (ADR 0030). */
   editorOpen: boolean;
   editorPhoto: Photo | null;
@@ -1176,6 +1194,8 @@ export function useWorkspace(
     marquee: null,
     drawerId: null,
     editorId: null,
+    viewerId: null,
+    viewerIds: [],
     drawerLang: "EN",
     drawerStyle: "Agency",
     copyLabel: "Copy",
@@ -1439,6 +1459,8 @@ export function useWorkspace(
       selectedIds: state.selectedIds.filter((id) => ids.has(id)),
       sidebarSelectedIds: state.sidebarSelectedIds.filter((id) => ids.has(id)),
       drawerId: state.drawerId && ids.has(state.drawerId) ? state.drawerId : null,
+      viewerId: state.viewerId && ids.has(state.viewerId) ? state.viewerId : null,
+      viewerIds: state.viewerIds.filter((id) => ids.has(id)),
       hoveredId: state.hoveredId && ids.has(state.hoveredId) ? state.hoveredId : null,
     });
   }
@@ -2921,15 +2943,94 @@ export function useWorkspace(
   const toolHand = useCallback(() => setState({ tool: "hand" }), [setState]);
   const clearSelection = useCallback(() => setState({ selectedIds: [] }), [setState]);
 
+  /** The order ←/→ means, shared by the drawer and the viewer (ADR 0054): the
+   *  current view's reading order over what is actually drawn — the label
+   *  filter and an open Workspace both respected. The drawer used to walk
+   *  `s.photos` (newest first, every photo), so its arrows stepped onto photos
+   *  the canvas was hiding, in an order the canvas did not show; with the
+   *  viewer beside it the two would have disagreed about "next". The Map has
+   *  no tile geometry, so there it is the filtered set, newest first. */
+  const navOrder = useCallback(
+    (s: WorkspaceState): string[] => {
+      const known = new Set(s.photos.map((p) => p.id));
+      // All-files renders the Canvas whatever `view` still says.
+      const view = s.projCurrent === "all" ? "neural" : s.view;
+      if (view === "map") {
+        return filterByLabel(canvasPhotos(s.photos, s.boardScope), s.labelFilter).map((p) => p.id);
+      }
+      const pos = visibleTilePositions(activeTilePositions({ ...s, view }), s.photos, s.labelFilter);
+      const ids = Object.keys(pos).filter((id) => known.has(id));
+      return readingOrder(ids, pos, view === "timeline" ? Infinity : undefined);
+    },
+    [activeTilePositions],
+  );
+
   const navDrawer = useCallback(
     (dir: number) => {
       const s = stateRef.current;
-      const i = s.photos.findIndex((p) => p.id === s.drawerId);
-      if (i < 0) return;
-      openDrawer(s.photos[(i + dir + s.photos.length) % s.photos.length].id);
+      if (!s.drawerId) return;
+      const order = navOrder(s);
+      // A drawer opened on a photo the canvas is not drawing (a search hit
+      // outside the open Workspace) still steps, through every photo.
+      const ids = order.includes(s.drawerId) ? order : s.photos.map((p) => p.id);
+      const next = stepSequence(ids, s.drawerId, dir);
+      if (next) openDrawer(next);
     },
-    [openDrawer],
+    [openDrawer, navOrder],
   );
+
+  // ── Fullscreen viewer (ADR 0054) ─────────────────────────────────────────
+
+  /** Open the viewer on `startId`, else on the drawer's photo, else on the
+   *  selection. Two or more selected photos opened on one of them walk just
+   *  the selection; anything else walks the whole reading order. */
+  const openViewer = useCallback(
+    (startId?: string | null) => {
+      const s = stateRef.current;
+      const seq = viewerSequence(navOrder(s), s.selectedIds, startId ?? s.drawerId ?? null);
+      if (!seq || !s.photos.some((p) => p.id === seq.start)) return;
+      setState({ viewerId: seq.start, viewerIds: seq.ids, labelMenuOpen: false });
+    },
+    [navOrder, setState],
+  );
+
+  /** Close, leaving the canvas pointing at where you got to: the last photo
+   *  viewed becomes the selection — unless you were walking a selection, which
+   *  is kept whole (collapsing a culling set to one photo would lose it). An
+   *  open drawer has been following the viewer all along. */
+  const closeViewer = useCallback(() => {
+    const s = stateRef.current;
+    const id = s.viewerId;
+    if (!id) return;
+    const keepSelection = s.selectedIds.length > 1 && s.selectedIds.includes(id);
+    const alive = s.photos.some((p) => p.id === id);
+    setState({
+      viewerId: null,
+      viewerIds: [],
+      ...(alive && !keepSelection ? { selectedIds: [id] } : {}),
+    });
+  }, [setState]);
+
+  const navViewer = useCallback(
+    (dir: number) => {
+      const s = stateRef.current;
+      if (!s.viewerId) return;
+      const next = stepSequence(s.viewerIds, s.viewerId, dir, new Set(s.photos.map((p) => p.id)));
+      if (!next) return;
+      setState({ viewerId: next });
+      if (s.drawerId) openDrawer(next);
+    },
+    [openDrawer, setState],
+  );
+
+  /** `I` / the Info button: leave the viewer for the drawer on the same photo —
+   *  captions, EXIF and facts live there, and stay one panel. */
+  const viewerInfo = useCallback(() => {
+    const id = stateRef.current.viewerId;
+    if (!id) return;
+    closeViewer();
+    openDrawer(id);
+  }, [closeViewer, openDrawer]);
 
   // ── AI runner ─────────────────────────────────────────────────────────────
   // Every AI entry point in the app (tile badge, action bar, bulk panel, drawer,
@@ -3391,14 +3492,24 @@ export function useWorkspace(
         if (tile) frozen[p.id] = { x: tile.cx, y: tile.cy };
       }
       const frozenKeys = Object.keys(frozen);
-      setState((prev) => ({
+      setState((prev) => {
+        // Deleting inside the viewer (ADR 0054) steps on to the next photo
+        // rather than closing it — culling is a run of decisions — and a
+        // drawer that was showing the deleted photo follows the viewer.
+        const viewer = viewerAfterRemoval(prev.viewerIds, prev.viewerId, idSet);
+        const drawerFollows = prev.drawerId != null && prev.drawerId === prev.viewerId;
+        return {
         photos: prev.photos.filter((p) => !idSet.has(p.id)),
         selectedIds: prev.selectedIds.filter((x) => !idSet.has(x)),
-        drawerId: prev.drawerId && idSet.has(prev.drawerId) ? null : prev.drawerId,
+        drawerId:
+          prev.drawerId && idSet.has(prev.drawerId) ? (drawerFollows ? viewer.current : null) : prev.drawerId,
+        viewerId: viewer.current,
+        viewerIds: viewer.ids,
         galleryOverrides: frozenKeys.length
           ? { ...prev.galleryOverrides, asset: { ...prev.galleryOverrides.asset, ...frozen } }
           : prev.galleryOverrides,
-      }));
+        };
+      });
       const undo = () => {
         setState((prev) => {
           const photos = [...prev.photos];
@@ -5510,6 +5621,22 @@ export function useWorkspace(
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // The fullscreen viewer (ADR 0054) owns the keyboard while it is open:
+      // its digits label the photo ON SCREEN and its Delete trashes that one,
+      // so none of the canvas bindings below may also fire on the selection
+      // hidden behind it.
+      if (stateRef.current.viewerId) return;
+      // F — open the viewer on the drawer's photo, else on the selection.
+      if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat) {
+        const t = e.target as HTMLElement | null;
+        const isTyping = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+        const s = stateRef.current;
+        if (isTyping || s.exportOpen || s.editorId || s.imp.open || s.bulkIntroOpen) return;
+        if (!s.drawerId && s.selectedIds.length === 0) return;
+        e.preventDefault();
+        openViewer();
+        return;
+      }
       // Cmd/Ctrl+C / +V. A canvas that offers Copy only from a menu is a canvas
       // people will assume is broken, so both live on the keyboard too — but
       // never while typing, where they must stay the browser's own text
@@ -5589,6 +5716,7 @@ export function useWorkspace(
     applyLabel,
     closeLabelMenu,
     closeBulkIntro,
+    openViewer,
   ]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
@@ -5602,8 +5730,9 @@ export function useWorkspace(
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       // Space is preventDefault'ed for canvas pan, which also stops it
-      // activating a focused button inside a modal dialog.
-      if (stateRef.current.exportOpen) return;
+      // activating a focused button inside a modal dialog. The viewer is not
+      // the canvas: a held Space there must not leave pan mode armed behind it.
+      if (stateRef.current.exportOpen || stateRef.current.viewerId) return;
       e.preventDefault();
       if (!stateRef.current.spacePan) setState({ spacePan: true });
     };
@@ -5717,6 +5846,20 @@ export function useWorkspace(
   const editorPhoto = state.editorId
     ? state.photos.find((p) => p.id === state.editorId) ?? null
     : null;
+
+  const viewerPhoto = state.viewerId
+    ? state.photos.find((p) => p.id === state.viewerId) ?? null
+    : null;
+  // The two photos either side, so the viewer can warm their previews.
+  const viewerNeighbors: Photo[] = [];
+  if (viewerPhoto && state.viewerIds.length > 1) {
+    const alive = new Set(state.photos.map((p) => p.id));
+    for (const dir of [1, -1]) {
+      const id = stepSequence(state.viewerIds, viewerPhoto.id, dir, alive);
+      const p = id && id !== viewerPhoto.id ? state.photos.find((x) => x.id === id) : undefined;
+      if (p && !viewerNeighbors.includes(p)) viewerNeighbors.push(p);
+    }
+  }
 
   const isNeural = state.view === "neural";
   const isTimelineView = state.view === "timeline" && state.projCurrent !== "all";
@@ -6057,6 +6200,14 @@ export function useWorkspace(
     confirmDeleteNow,
     cancelConfirmDelete,
     deleteFromContext,
+    viewerPhoto,
+    viewerIndex: viewerPhoto ? state.viewerIds.indexOf(viewerPhoto.id) : -1,
+    viewerCount: state.viewerIds.length,
+    viewerNeighbors,
+    openViewer,
+    closeViewer,
+    navViewer,
+    viewerInfo,
     editorOpen: state.editorId != null,
     editorPhoto,
     editBusy: state.proc.active,

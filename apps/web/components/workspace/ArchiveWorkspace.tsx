@@ -35,6 +35,7 @@ import SourceBrowserSidebar from "@/components/sidebar/SourceBrowserSidebar";
 import BulkAiPanel from "@/components/bulk-ai/BulkAiPanel";
 import PhotoDrawer from "@/components/drawer/PhotoDrawer";
 import ImageEditor from "@/components/editor/ImageEditor";
+import PhotoViewer from "@/components/viewer/PhotoViewer";
 import ExportDialog from "@/components/export/ExportDialog";
 import ImportModal from "@/components/import/ImportModal";
 import UploadManager from "@/components/upload/UploadManager";
@@ -1525,6 +1526,7 @@ export default function ArchiveWorkspace({
         // The selection, else the right-clicked tile — the label row's rule, so
         // one photo can be downloaded from the menu too, not only from two up.
         onExport={() => ws.openExportFor(labelTargetIds)}
+        onOpenViewer={() => ws.openViewer(ws.contextMenu?.targetId ?? null)}
         onUngroup={ws.ungroupSelection}
         hasGroup={ws.selectionHasGroup}
         onBringToFront={ws.bringToFront}
@@ -1577,6 +1579,7 @@ export default function ArchiveWorkspace({
         onCopy={ws.copyCap}
         onGenSingle={() => ws.drawerPhoto && ws.genSingle(ws.drawerPhoto.id)}
         onSaveCaption={ws.saveCaption}
+        onOpenViewer={() => ws.drawerPhoto && ws.openViewer(ws.drawerPhoto.id)}
         onSaveExif={ws.saveExif}
         onRevertExif={ws.revertExif}
         onEditImage={() => ws.drawerPhoto && ws.openEditor(ws.drawerPhoto.id)}
@@ -1589,6 +1592,25 @@ export default function ArchiveWorkspace({
         // selection is live — passing its id as the fallback would let a
         // stale canvas selection swallow the click.
         onPickLabel={(label) => ws.drawerPhoto && ws.labelOne(ws.drawerPhoto.id, label)}
+      />
+
+      {/* Fullscreen viewer (ADR 0054) — over all workspace chrome, under the
+          modals and toasts its own Download and Delete raise. */}
+      <PhotoViewer
+        photo={ws.viewerPhoto}
+        index={ws.viewerIndex}
+        count={ws.viewerCount}
+        neighbors={ws.viewerNeighbors}
+        suspended={ws.exportOpen || ws.confirmDeleteCount > 0}
+        labelNames={ws.labelNames}
+        onNav={ws.navViewer}
+        onClose={ws.closeViewer}
+        // Through applyLabel, the function the canvas's own digit keys use, so
+        // a key means the same thing on a tile and in the viewer.
+        onLabel={(label) => ws.viewerPhoto && ws.labelOne(ws.viewerPhoto.id, label)}
+        onDelete={() => ws.viewerPhoto && ws.deletePhoto(ws.viewerPhoto.id)}
+        onInfo={ws.viewerInfo}
+        onDownload={() => ws.viewerPhoto && ws.openExportFor([ws.viewerPhoto.id])}
       />
 
       <ImageEditor
