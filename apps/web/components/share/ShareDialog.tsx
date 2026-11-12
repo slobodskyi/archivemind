@@ -6,6 +6,7 @@ import { z } from "zod";
 import { SINGLE_PUT_MAX_BYTES } from "@archivemind/shared";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
 import { REPLAY_BLOCK_CLASS } from "@/lib/analytics";
+import { LABEL_COLORS } from "@/lib/labels";
 import {
   PROJECT_SHARE_DEFAULT_EXPIRY_DAYS,
   PROJECT_SHARE_EXPIRY_DAYS,
@@ -20,15 +21,29 @@ import {
   type ProjectShareMode,
   type ProjectShareSummary,
 } from "@/lib/project-shares";
+import {
+  countedFiles,
+  resolveShareScopes,
+  shareScopeHeading,
+  shareScopeLabel,
+  shareScopeReach,
+  type ShareScopeOption,
+  type ShareScopes,
+} from "@/lib/share-scope";
 import { formatBytes, formatCount } from "@/lib/usage-format";
 
-/** Share a project by link (ADR 0051): make one, then copy, extend or turn
- *  off the links it already has. The dialog talks to /api/projects/[id]/shares
- *  and /api/project-shares/[id] itself, so the hub only says which project. */
+/** Share by link (ADR 0051, scopes ADR 0053): make one — of the whole
+ *  project, one Workspace, or a fixed list of files — then copy, extend or
+ *  turn off every link the project already has. The dialog talks to
+ *  /api/projects/[id]/shares and /api/project-shares/[id] itself, so a caller
+ *  only says which project and what it could share from where it stands. */
 
-export interface ShareProjectDialogProps {
+export interface ShareDialogProps {
   open: boolean;
   project: { id: string; name: string } | null;
+  /** What this Share can carry, narrowest first (`resolveShareScopes`). Left
+   *  out, the dialog shares the project alone — the hub card's case. */
+  scopes?: ShareScopes;
   onClose: () => void;
   /** The project's live-link count as the dialog closes, so the card's
    *  marker follows without a reload. */
@@ -43,17 +58,30 @@ const MODE_TITLE: Record<ProjectShareMode, string> = {
   both: "View, download & send",
 };
 
-const MODE_DETAIL: Record<ProjectShareMode, string> = {
-  download: "Browse the project’s files and download them.",
-  upload: "Add files to this project without seeing anything already in it.",
-  both: "Browse and download the files, and add new ones.",
-};
+/** "this project" / "this Workspace" / "these files" — what a mode acts on. */
+function scopeNoun(scope: ShareScopeOption["scope"]): string {
+  return scope === "board" ? "this Workspace" : scope === "selection" ? "these files" : "this project";
+}
 
-const MODE_REACH: Record<ProjectShareMode, string> = {
-  download: "Anyone with this link can browse and download this project’s files.",
-  upload: "Anyone with this link can send files into this project — and sees nothing in it.",
-  both: "Anyone with this link can browse, download and send files.",
-};
+function modeDetail(mode: ProjectShareMode, scope: ShareScopeOption["scope"]): string {
+  if (scope === "selection" && mode !== "download") return "A list of files can’t receive new ones — share a Workspace for that.";
+  const noun = scopeNoun(scope);
+  if (mode === "download") return scope === "selection" ? "Browse these files and download them." : `Browse ${noun}’s files and download them.`;
+  if (mode === "upload") return `Add files to ${noun} without seeing anything already in it.`;
+  return "Browse and download the files, and add new ones.";
+}
+
+function modeReach(mode: ProjectShareMode, scope: ShareScopeOption["scope"]): string {
+  const noun = scopeNoun(scope);
+  if (mode === "download") return scope === "selection" ? "Anyone with this link can browse and download these files." : `Anyone with this link can browse and download ${noun}’s files.`;
+  if (mode === "upload") return `Anyone with this link can send files into ${noun} — and sees nothing in it.`;
+  return "Anyone with this link can browse, download and send files.";
+}
+
+function ColorDot({ color }: { color: keyof typeof LABEL_COLORS | null }) {
+  if (!color) return null;
+  return <span aria-hidden="true" style={{ display: "inline-block", flex: "0 0 auto", width: 7, height: 7, borderRadius: "50%", background: LABEL_COLORS[color] }} />;
+}
 
 const buttonStyle: CSSProperties = {
   minHeight: 36,
@@ -129,6 +157,14 @@ function errorCopy(code: string | null): string {
       return `This project already has ${PROJECT_SHARE_LIVE_LIMIT} live links. Turn one off to make another.`;
     case "share_revoked":
       return "That link was already turned off.";
+    case "board_unavailable":
+      return "That Workspace can’t be shared any more — it may have been moved to Trash.";
+    case "selection_empty":
+      return "None of those files are in this project any more.";
+    case "invalid_selection":
+      return "That list can’t be shared. Pick up to 2,000 files from this project.";
+    case "invalid_rights":
+      return "A list of files can only be viewed and downloaded.";
     case "unauthorized":
       return "Your session has ended. Sign in again to manage links.";
     default:
@@ -182,7 +218,40 @@ function dayLabel(days: ProjectShareExpiryDays): string {
 function statusLine(share: ProjectShareSummary): string {
   if (share.status === "live") return `Live · expires ${formatMoment(share.expiresAt)}`;
   if (share.status === "expired") return `Expired ${formatMoment(share.expiresAt)}`;
+  if (share.scope === "board") {
+    return share.boardName
+      ? "Paused — its Workspace is in Trash, or the person who made it no longer has editor access"
+      : "Off — its Workspace was deleted";
+  }
   return "Paused — the person who made it no longer has editor access";
+}
+
+/** What a link carries, as a chip: the scope and how many files it holds
+ *  right now (a Workspace link follows its Workspace, so this moves). */
+function ScopeChip({ share }: { share: ProjectShareSummary }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        maxWidth: "100%",
+        padding: "2px 6px",
+        border: "1px solid var(--bd)",
+        borderRadius: 2,
+        color: "var(--t2)",
+        fontSize: 9.5,
+        letterSpacing: ".02em",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
+      {share.scope === "board" ? <ColorDot color={share.boardColor} /> : null}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{shareScopeLabel(share)}</span>
+      {share.fileCount !== null ? <span style={{ color: "var(--t3)" }}>· {countedFiles(share.fileCount)}</span> : null}
+    </span>
+  );
 }
 
 function activityLine(share: ProjectShareSummary): string {
@@ -269,6 +338,9 @@ function ShareRow({
           </button>
         ) : null}
       </div>
+      <div style={{ marginTop: 5, paddingLeft: 15, display: "flex" }}>
+        <ScopeChip share={share} />
+      </div>
       <div style={{ marginTop: 4, paddingLeft: 15, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.5 }}>
         {share.label ? `${MODE_TITLE[share.mode]} · ` : ""}
         {statusLine(share)}
@@ -341,18 +413,38 @@ function ShareRow({
   );
 }
 
-function ShareProjectDialogContent({
+const PROJECT_ONLY: ShareScopes = resolveShareScopes({ selectionIds: [], activeBoard: null, projectCount: null });
+
+function optionTitle(option: ShareScopeOption): string {
+  if (option.scope === "selection") return `${countedFiles(option.count)} selected`;
+  if (option.scope === "board") return `Workspace “${option.name}”`;
+  return "Whole project";
+}
+
+function optionDetail(option: ShareScopeOption, projectName: string): string {
+  if (option.unavailable) return option.unavailable;
+  if (option.scope === "selection") return "A fixed list: it never grows. View & download only.";
+  if (option.scope === "board") return `${countedFiles(option.count)} · follows the Workspace as files are added or removed`;
+  const count = option.count !== null ? `${countedFiles(option.count)} · ` : "";
+  return `${count}everything in “${projectName}”, now and later`;
+}
+
+function ShareDialogContent({
   project,
+  scopes = PROJECT_ONLY,
   onClose,
   onLiveCountChange,
-}: Omit<ShareProjectDialogProps, "open" | "project"> & { project: { id: string; name: string } }) {
+}: Omit<ShareDialogProps, "open" | "project"> & { project: { id: string; name: string } }) {
   const [shares, setShares] = useState<ProjectShareSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [wantsForm, setWantsForm] = useState(false);
-  const [mode, setMode] = useState<ProjectShareMode>("download");
+  // Opened on something narrower than the project, the owner came to share
+  // THAT: start on the form, with the existing links one Back away.
+  const [wantsForm, setWantsForm] = useState(scopes.initial !== "project");
+  const [scope, setScope] = useState(scopes.initial);
+  const [chosenMode, setMode] = useState<ProjectShareMode>("download");
   const [expiresInDays, setExpiresInDays] = useState<ProjectShareExpiryDays>(PROJECT_SHARE_DEFAULT_EXPIRY_DAYS);
   const [label, setLabel] = useState("");
-  const [created, setCreated] = useState<{ id: string; url: string; mode: ProjectShareMode } | null>(null);
+  const [created, setCreated] = useState<{ id: string; url: string; mode: ProjectShareMode; scope: ShareScopeOption["scope"] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<{ id: string; ok: boolean } | null>(null);
@@ -373,6 +465,12 @@ function ShareProjectDialogContent({
     };
   }, [project.id]);
 
+  const option = scopes.options.find((candidate) => candidate.scope === scope) ?? scopes.options[scopes.options.length - 1];
+  // A list never grows, so it cannot receive files (ADR 0053 §1): the mode
+  // falls back to download for as long as a list is the scope.
+  const listOnly = option.scope === "selection";
+  const mode: ProjectShareMode = listOnly ? "download" : chosenMode;
+  const unavailable = option.unavailable !== null;
   const loading = shares === null && loadError === null;
   const hasShares = Boolean(shares?.length);
   // A project with no links opens straight on the form: there is nothing to
@@ -401,7 +499,14 @@ function ShareProjectDialogContent({
       const resp = await fetch(`/api/projects/${project.id}/shares`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode, expiresInDays, ...(trimmed ? { label: trimmed } : {}) }),
+        body: JSON.stringify({
+          mode,
+          expiresInDays,
+          ...(trimmed ? { label: trimmed } : {}),
+          scope: option.scope,
+          ...(option.scope === "board" ? { boardId: option.boardId } : {}),
+          ...(option.scope === "selection" ? { assetIds: option.assetIds } : {}),
+        }),
       });
       if (!resp.ok) {
         setError(await failureCopy(resp));
@@ -416,7 +521,7 @@ function ShareProjectDialogContent({
         return;
       }
       setShares((list) => [share, ...(list ?? []).filter((item) => item.id !== share.id)]);
-      setCreated({ id: share.id, url: shareUrl(share.path), mode: share.mode });
+      setCreated({ id: share.id, url: shareUrl(share.path), mode: share.mode, scope: share.scope });
       setCopied(null);
       setLabel("");
       setWantsForm(false);
@@ -486,7 +591,7 @@ function ShareProjectDialogContent({
       >
         {hasShares ? "Back" : "Cancel"}
       </DialogButton>
-      <DialogButton key="create" type="submit" form="share-project-form" variant="primary" disabled={busy || atLimit}>
+      <DialogButton key="create" type="submit" form="share-project-form" variant="primary" disabled={busy || atLimit || unavailable}>
         {busy ? "Creating link…" : "Create link"}
       </DialogButton>
     </>
@@ -494,12 +599,25 @@ function ShareProjectDialogContent({
     <DialogButton key="done" data-autofocus={createdLive ? undefined : ""} onClick={close} disabled={busy}>Done</DialogButton>
   );
 
+  // The form is titled by what it is about to share; the list by the project
+  // whose links it shows — every scope's links live there.
+  const heading = creating
+    ? option.scope === "selection"
+      ? `Share ${countedFiles(option.count)}`
+      : `Share “${shareScopeHeading({ scope: option.scope, projectName: project.name, boardName: option.scope === "board" ? option.name : null })}”`
+    : `Share “${project.name}”`;
+  const kicker = creating && option.scope === "board"
+    ? `Share workspace · ${project.name}`
+    : creating && option.scope === "selection"
+      ? `Share files · ${project.name}`
+      : "Share project";
+
   return (
     <Dialog
       open
       size="m"
-      kicker="Share project"
-      title={`Share “${project.name}”`}
+      kicker={kicker}
+      title={heading}
       subtitle="Anyone with a link can use it — no ArchiveMind account needed. Every link expires, and you can turn it off at any time."
       headerAction={headerAction}
       busy={busy}
@@ -517,29 +635,70 @@ function ShareProjectDialogContent({
           id="share-project-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!busy && !atLimit) void create();
+            if (!busy && !atLimit && !unavailable) void create();
           }}
         >
+          {/* Only when there is a choice: from the hub the project is all
+              there is, and the title already names it. */}
+          {scopes.options.length > 1 ? (
+            <fieldset disabled={busy} style={{ margin: "0 0 18px", padding: 0, border: 0 }}>
+              <legend style={legendStyle}>What</legend>
+              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                {scopes.options.map((candidate) => {
+                  const active = candidate.scope === option.scope;
+                  const off = candidate.unavailable !== null;
+                  return (
+                    <label key={candidate.scope} style={optionStyle(active, busy || off)}>
+                      <input
+                        type="radio"
+                        name="share-scope"
+                        value={candidate.scope}
+                        checked={active}
+                        disabled={off}
+                        onChange={() => setScope(candidate.scope)}
+                        data-autofocus={active ? "" : undefined}
+                        style={{ width: 16, height: 16, margin: "1px 0 0", flex: "0 0 auto", accentColor: "var(--ac)" }}
+                      />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--t1)", fontSize: 11.5, fontWeight: 700 }}>
+                          {candidate.scope === "board" ? <ColorDot color={candidate.color} /> : null}
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{optionTitle(candidate)}</span>
+                        </span>
+                        <span style={{ display: "block", marginTop: 3, color: off ? "var(--red)" : "var(--t2)", fontSize: 10.5, lineHeight: 1.45 }}>
+                          {optionDetail(candidate, project.name)}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          ) : null}
+
           <fieldset disabled={busy} style={{ margin: 0, padding: 0, border: 0 }}>
             <legend style={legendStyle}>People with the link can</legend>
             <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-              {MODE_ORDER.map((value, index) => (
-                <label key={value} style={optionStyle(mode === value, busy)}>
-                  <input
-                    type="radio"
-                    name="share-mode"
-                    value={value}
-                    checked={mode === value}
-                    onChange={() => setMode(value)}
-                    data-autofocus={index === 0 ? "" : undefined}
-                    style={{ width: 16, height: 16, margin: "1px 0 0", flex: "0 0 auto", accentColor: "var(--ac)" }}
-                  />
-                  <span>
-                    <span style={{ display: "block", color: "var(--t1)", fontSize: 11.5, fontWeight: 700 }}>{MODE_TITLE[value]}</span>
-                    <span style={{ display: "block", marginTop: 3, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.45 }}>{MODE_DETAIL[value]}</span>
-                  </span>
-                </label>
-              ))}
+              {MODE_ORDER.map((value, index) => {
+                const blocked = listOnly && value !== "download";
+                return (
+                  <label key={value} style={optionStyle(mode === value, busy || blocked)}>
+                    <input
+                      type="radio"
+                      name="share-mode"
+                      value={value}
+                      checked={mode === value}
+                      disabled={blocked}
+                      onChange={() => setMode(value)}
+                      data-autofocus={index === 0 && scopes.options.length === 1 ? "" : undefined}
+                      style={{ width: 16, height: 16, margin: "1px 0 0", flex: "0 0 auto", accentColor: "var(--ac)" }}
+                    />
+                    <span>
+                      <span style={{ display: "block", color: "var(--t1)", fontSize: 11.5, fontWeight: 700 }}>{MODE_TITLE[value]}</span>
+                      <span style={{ display: "block", marginTop: 3, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.45 }}>{modeDetail(value, option.scope)}</span>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </fieldset>
 
@@ -569,6 +728,9 @@ function ShareProjectDialogContent({
 
           <div style={{ marginTop: 18, padding: "12px 13px", background: "var(--bg-el)", border: "1px solid var(--bd)", borderRadius: 2, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.55 }}>
             {mode !== "upload" ? (
+              <div style={{ marginBottom: 8, color: "var(--t1)" }}>{shareScopeReach(option, project.name)}</div>
+            ) : null}
+            {mode !== "upload" ? (
               <div>
                 Downloads are the original files where the project holds them — camera details and GPS location
                 included — and a high-quality web-size copy otherwise. Tags, AI descriptions, captions, labels and
@@ -577,7 +739,8 @@ function ShareProjectDialogContent({
             ) : null}
             {mode !== "download" ? (
               <div style={{ marginTop: mode === "both" ? 8 : 0 }}>
-                Files people send land in this project and count toward your storage: up to{" "}
+                Files people send land in this project
+                {option.scope === "board" ? ` and in the Workspace “${option.name}”` : ""} and count toward your storage: up to{" "}
                 {formatBytes(SINGLE_PUT_MAX_BYTES)} each, {formatCount(PROJECT_SHARE_MAX_FILES)} files and{" "}
                 {formatBytes(PROJECT_SHARE_MAX_BYTES)} per link.
               </div>
@@ -606,7 +769,7 @@ function ShareProjectDialogContent({
                   ? "Couldn’t access the clipboard. Select and copy the link above."
                   : copiedFor(createdLive.id)
                     ? "Link copied to clipboard"
-                    : MODE_REACH[createdLive.mode]}
+                    : modeReach(createdLive.mode, createdLive.scope)}
               </div>
             </div>
           ) : null}
@@ -658,8 +821,8 @@ function ShareProjectDialogContent({
   );
 }
 
-export default function ShareProjectDialog({ open, project, ...props }: ShareProjectDialogProps) {
+export default function ShareDialog({ open, project, ...props }: ShareDialogProps) {
   if (!open || !project) return null;
   // Keyed by project, so another card's dialog never flashes this one's links.
-  return <ShareProjectDialogContent key={project.id} project={project} {...props} />;
+  return <ShareDialogContent key={project.id} project={project} {...props} />;
 }

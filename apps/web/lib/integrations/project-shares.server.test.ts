@@ -19,6 +19,7 @@ const admin = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock("@/lib/share-token", async () => import("../share-token"));
 vi.mock("@/lib/project-share-public", async () => import("../project-share-public"));
 vi.mock("@/lib/publication-shares", async () => import("../publication-shares"));
+vi.mock("@/lib/project-shares", async () => import("../project-shares"));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ rpc: admin.rpc }) }));
 
 const key = randomBytes(32).toString("base64");
@@ -138,7 +139,29 @@ describe("project share public resolvers", () => {
       expiresAt: "2026-11-10T00:00:00+00:00",
       rights: { creator: "Olena", credit: null, copyrightNotice: null, usageTerms: null },
       fileCount: null,
+      scope: "project",
+      boardName: null,
     });
+  });
+
+  it("reads a Workspace link's scope and the Workspace's name", async () => {
+    const { token } = await mintShareToken();
+    admin.rpc.mockReturnValue(answer({
+      data: {
+        share_id: assetId,
+        project_name: "Odesa 2026",
+        can_download: true,
+        can_upload: false,
+        expires_at: "2026-11-10T00:00:00+00:00",
+        rights: { creator: null, credit: null, copyrightNotice: null, usageTerms: null },
+        file_count: 4,
+        scope: "board",
+        board_name: "Port",
+        board_color: "blue",
+        show_boards: false,
+      },
+    }));
+    expect(await openProjectShare(token)).toMatchObject({ scope: "board", boardName: "Port", fileCount: 4 });
   });
 
   it("drops a row that does not parse rather than rendering half of it", async () => {

@@ -34,7 +34,7 @@ import {
   AddIcon,
 } from "@/components/icons/icons";
 import { hubCreateChrome } from "@/lib/home-hub";
-import ShareProjectDialog from "@/components/home/ShareProjectDialog";
+import ShareDialog from "@/components/share/ShareDialog";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
  *  Opening a project navigates to its canvas at /projects/[id]. */
@@ -584,7 +584,7 @@ export default function HomeClient({
         onClose={() => setRenameTarget(null)}
       />
 
-      <ShareProjectDialog
+      <ShareDialog
         open={!!shareTarget}
         project={shareTarget}
         onClose={() => setShareTarget(null)}

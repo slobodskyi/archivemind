@@ -26,7 +26,8 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   return NextResponse.json({ shares: result.shares }, { headers: SHARE_NO_STORE });
 }
 
-/** POST /api/projects/[id]/shares — make a link (ADR 0051). The token is
+/** POST /api/projects/[id]/shares — make a link (ADR 0051) of any scope
+ *  (ADR 0053): the project, one of its Workspaces, or a list of its files. The token is
  *  minted here and leaves only inside this response's `path`; the database
  *  receives its SHA-256 and an AES-GCM copy. */
 export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -61,6 +62,11 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       p_label: parsed.data.label ?? null,
       p_token_hash: tokenHash,
       p_token_ciphertext: sealShareToken(token),
+      // ADR 0053. Ids not live in the project are dropped by the RPC, never
+      // stored; a list that drops to nothing is refused there.
+      p_scope: parsed.data.scope,
+      p_board_id: parsed.data.boardId ?? null,
+      p_asset_ids: parsed.data.assetIds ?? null,
     })
     .single();
   if (error) return projectShareRpcFailure(error);

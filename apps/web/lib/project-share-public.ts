@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ShareScope } from "@/lib/project-shares";
 import type { PublicationRights } from "@/lib/publication-shares";
 
 /** What a project share link's holder may see (ADR 0051 §6) — the shapes the
@@ -22,6 +23,10 @@ export interface ProjectShareView {
   /** Live files in the project; null on an upload-only link, which is told
    *  nothing about what the project already holds. */
   fileCount: number | null;
+  /** What the link carries inside the project (ADR 0053). */
+  scope: ShareScope;
+  /** A Workspace link's Workspace — the one place its name crosses. */
+  boardName: string | null;
 }
 
 export interface ProjectShareFile {

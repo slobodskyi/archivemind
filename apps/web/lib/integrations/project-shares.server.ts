@@ -9,6 +9,7 @@ import {
   type ProjectSharePage,
   type ProjectShareView,
 } from "@/lib/project-share-public";
+import { shareScopeSchema } from "@/lib/project-shares";
 import { publicationRightsSchema } from "@/lib/publication-shares";
 import { shareTokenHash, shareTokenSchema } from "@/lib/share-token";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -88,6 +89,9 @@ const openRowSchema = z.object({
   expires_at: timestampSchema,
   rights: publicationRightsSchema,
   file_count: z.number().int().nonnegative().nullable(),
+  // ADR 0053. Defaulted, so the page keeps working against an older resolver.
+  scope: shareScopeSchema.default("project"),
+  board_name: z.string().nullable().default(null),
 });
 
 /** The page's head: name, rights, byline. Null for every refusal. */
@@ -105,6 +109,8 @@ export async function openProjectShare(token: string): Promise<ProjectShareView 
     expiresAt: row.data.expires_at,
     rights: row.data.rights,
     fileCount: row.data.can_download ? row.data.file_count : null,
+    scope: row.data.scope,
+    boardName: row.data.scope === "board" ? row.data.board_name : null,
   };
 }
 

@@ -25,6 +25,9 @@ interface BoardBrowserProps {
    *  the canvas's own pointer drag, not HTML5 DnD, so the header is told which
    *  chip is armed rather than receiving a `dragover`. */
   dropTargetId?: string | null;
+  /** Share this workspace by link (ADR 0053) — offered in the chip's popover,
+   *  beside its colour, since right-click is the chip's menu. */
+  onShare?: (id: string) => void;
 }
 
 /** How close to an edge the pointer has to be, mid-drag, for the rail to start
@@ -50,7 +53,7 @@ const FADE = 18;
  *  on that delete's own toast and in the Trash panel — deliberately NOT as a
  *  second ↺ in the header, which read as a broken duplicate of the canvas
  *  undo sitting a few hundred pixels away. */
-export default function BoardBrowser({ boards, activeBoardId, counts, labelNames, onSelect, onCreate, onRename, onRecolor, onDelete, dropTargetId = null }: BoardBrowserProps) {
+export default function BoardBrowser({ boards, activeBoardId, counts, labelNames, onSelect, onCreate, onRename, onRecolor, onDelete, dropTargetId = null, onShare }: BoardBrowserProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** The chip whose colour picker is open, and where to draw it. Local, like the
@@ -268,7 +271,7 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
           e.stopPropagation();
           openColorPicker(e.currentTarget, b.id);
         }}
-        title={active ? `${b.name} — double-click to rename, right-click for colour` : b.name}
+        title={active ? `${b.name} — double-click to rename, right-click for colour and sharing` : b.name}
       >
         {/* The dot IS the colour, so clicking it opens the picker — the
             discoverable half of the gesture, since nobody guesses right-click.
@@ -468,6 +471,32 @@ export default function BoardBrowser({ boards, activeBoardId, counts, labelNames
               setColorFor(null);
             }}
           />
+          {onShare ? (
+            <button
+              type="button"
+              onClick={() => {
+                const id = colorFor.id;
+                setColorFor(null);
+                onShare(id);
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                marginTop: 3,
+                padding: "8px 10px",
+                border: 0,
+                borderTop: "1px solid var(--bd)",
+                background: "transparent",
+                color: "var(--t1)",
+                fontFamily: "inherit",
+                fontSize: 12,
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              Share workspace…
+            </button>
+          ) : null}
         </div>
       )}
     </div>

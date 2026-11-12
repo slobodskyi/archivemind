@@ -64,6 +64,9 @@ interface CanvasContextMenuProps {
   /** Open the fullscreen viewer (ADR 0054) on the right-clicked tile — walking
    *  just the selection when it is two or more. */
   onOpenViewer: () => void;
+  /** Share the same target by link (ADR 0053) — the selection, else the tile
+   *  under the pointer. Left out on the `all` canvas, which has no project. */
+  onShare?: () => void;
   /** Dissolve the bound group(s) the selection touches. */
   onUngroup: () => void;
   /** The selection overlaps a bound group — show Ungroup instead of Group. */
@@ -110,6 +113,7 @@ export default function CanvasContextMenu({
   onFolder,
   onExport,
   onOpenViewer,
+  onShare,
   onUngroup,
   hasGroup,
   onBringToFront,
@@ -275,6 +279,9 @@ export default function CanvasContextMenu({
         )}
         {downloadable && (
           <MenuItem label={selCount > 1 ? `Download ${selCount}` : "Download"} onClick={run(onExport)} />
+        )}
+        {downloadable && !allFilesMode && onShare && (
+          <MenuItem label={selCount > 1 ? `Share ${selCount}…` : "Share…"} onClick={run(onShare)} />
         )}
       </>,
     );

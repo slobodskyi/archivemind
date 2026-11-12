@@ -407,7 +407,8 @@ textarea {
     display: none !important;
   }
 
-  .am-hdr-share span {
+  /* The word goes; the selection badge stays — it says what SHARE will send. */
+  .am-hdr-share span:not(.am-hdr-badge) {
     display: none;
   }
 
