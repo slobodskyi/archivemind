@@ -1,4 +1,4 @@
-import { uuidSchema } from "@archivemind/shared";
+import { toOfferedCaptionLang, uuidSchema, type OfferedCaptionLang } from "@archivemind/shared";
 import { z } from "zod";
 import {
   createArticleDraft,
@@ -50,7 +50,7 @@ export type CreateOutputInput =
       prompt: string;
       audience: string;
       additionalInstructions: string;
-      language: "en" | "uk" | "ru";
+      language: OfferedCaptionLang;
       tone: "editorial" | "personal" | "social";
       length: "short" | "medium" | "long";
       imageCount: number;
@@ -61,7 +61,7 @@ export type CreateOutputInput =
       prompt: string;
       audience: string;
       additionalInstructions: string;
-      language: "en" | "uk" | "ru";
+      language: OfferedCaptionLang;
       tone: "editorial" | "personal" | "social";
       aspectRatio: "4:5" | "1:1";
       slideCount: number;
@@ -160,7 +160,8 @@ export function regenerationSeed(draft: ContentDraft): CreateOutputInput {
     prompt: draft.brief.prompt,
     audience: draft.brief.audience,
     additionalInstructions: draft.brief.additionalInstructions,
-    language: draft.brief.language,
+    // A draft may carry a retired language ("ru"); the form only offers en | uk.
+    language: toOfferedCaptionLang(draft.brief.language),
     tone,
   };
   return draft.kind === "article"

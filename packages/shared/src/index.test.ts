@@ -24,6 +24,8 @@ import {
   resolveCaptionText,
   captionJobPayloadSchema,
   captionLangSchema,
+  offeredCaptionLangSchema,
+  toOfferedCaptionLang,
   captionStyleSchema,
   clusterJobPayloadSchema,
   completeUploadRequestSchema,
@@ -925,5 +927,40 @@ describe("exportFilename", () => {
     expect(exportFilename("a  //  b", "pdf", date)).toBe("a-b-2026-07-27.pdf");
     const long = exportFilename("x".repeat(200), "pdf", date);
     expect(long.startsWith(`${"x".repeat(60)}-`)).toBe(true);
+  });
+});
+
+describe("Russian is retired: stored, no longer offered", () => {
+  const assetId = "550e8400-e29b-41d4-a716-446655440000";
+
+  it("the stored enum still holds ru, the offered one does not", () => {
+    expect(captionLangSchema.options).toContain("ru");
+    expect(offeredCaptionLangSchema.options).toEqual(["en", "uk"]);
+    expect(toOfferedCaptionLang("ru")).toBe("en");
+    expect(toOfferedCaptionLang("uk")).toBe("uk");
+  });
+
+  it("a new caption job request rejects ru, but the worker's payload still parses it", () => {
+    expect(
+      createJobRequestSchema.safeParse({ type: "caption", assetIds: [assetId], langs: ["ru"], style: "agency" }).success,
+    ).toBe(false);
+    expect(
+      createJobRequestSchema.safeParse({ type: "caption", assetIds: [assetId], langs: ["en", "uk"], style: "agency" })
+        .success,
+    ).toBe(true);
+    // A job queued before the deploy must not fail to parse in the worker.
+    expect(captionJobPayloadSchema.safeParse({ asset_ids: [assetId], langs: ["ru"], style: "agency" }).success).toBe(true);
+  });
+
+  it("a new export request rejects captionLang ru, but the queued payload still parses it", () => {
+    const body = (captionLang: string) => ({ assetIds: [assetId], options: { captionLang } });
+    expect(createExportRequestSchema.safeParse(body("ru")).success).toBe(false);
+    expect(createExportRequestSchema.safeParse(body("uk")).success).toBe(true);
+    expect(createExportRequestSchema.parse({ assetIds: [assetId], options: {} }).options.captionLang).toBe("en");
+    expect(
+      exportJobPayloadSchema.safeParse({ asset_ids: [assetId], options: { captionLang: "ru" } }).success,
+    ).toBe(true);
+    // Saved artboard settings stay permissive too.
+    expect(artboardSettingsSchema.parse({ captionLang: "ru" }).captionLang).toBe("ru");
   });
 });

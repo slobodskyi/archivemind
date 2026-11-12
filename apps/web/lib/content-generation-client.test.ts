@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { contentGenerationResultSchema, draftFromGeneration, generationRequestBody, type CreateOutputInput } from "./content-generation-client";
+import { createArticleDraft } from "./content-drafts";
+import { contentGenerationResultSchema, draftFromGeneration, generationRequestBody, regenerationSeed, type CreateOutputInput } from "./content-generation-client";
 
 const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 
@@ -59,5 +60,19 @@ describe("content generation client bridge", () => {
     expect(draft.sourceSnapshot.assetIds).toEqual([id(1), id(2)]);
     if (draft.kind === "article") expect(draft.content.sections.map((section) => section.id)).toEqual([id(29), id(30)]);
     vi.unstubAllGlobals();
+  });
+
+  it("seeds a stored Russian draft's regeneration in an offered language", () => {
+    // The draft keeps "ru" (it is what its text is written in), but the Create
+    // form only offers en | uk, so new work starts from the narrowed value.
+    const draft = createArticleDraft({
+      boardId: id(9),
+      sourceAssetIds: [id(1)],
+      now: "2026-08-13T10:00:00.000Z",
+      brief: { language: "ru" },
+    });
+    expect(draft.brief.language).toBe("ru");
+    expect(regenerationSeed(draft).language).toBe("en");
+    expect(regenerationSeed(createArticleDraft({ boardId: id(9), sourceAssetIds: [id(1)], brief: { language: "uk" } })).language).toBe("uk");
   });
 });

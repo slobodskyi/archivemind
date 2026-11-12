@@ -1,4 +1,4 @@
-import { creditsFor } from "@archivemind/shared";
+import { creditsFor, type OfferedCaptionLang } from "@archivemind/shared";
 import { CAPTION_LANG_DB, CAPTION_STYLE_DB } from "./format";
 import type { CaptionStyle, Language } from "@/types";
 
@@ -14,7 +14,7 @@ export interface AiOps {
 
 export interface CaptionJobSpec {
   assetIds: string[];
-  langs: ("en" | "uk" | "ru")[];
+  langs: OfferedCaptionLang[];
   style: "social" | "agency" | "archival";
 }
 

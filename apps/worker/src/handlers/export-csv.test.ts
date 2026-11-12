@@ -52,7 +52,8 @@ describe("CSV_HEADER", () => {
   it("gives every caption language its own column", () => {
     expect(CSV_HEADER).toContain("caption_en");
     expect(CSV_HEADER).toContain("caption_uk");
-    expect(CSV_HEADER).toContain("caption_ru");
+    // Russian is no longer offered: no column for it.
+    expect(CSV_HEADER).not.toContain("caption_ru");
     expect(CSV_HEADER).toContain("caption_style");
   });
 

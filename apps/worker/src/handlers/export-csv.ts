@@ -19,10 +19,12 @@ import type { ExportRow } from "./export";
  *  No zip library, no image decode, no font: one text artifact through the same
  *  putObject the PDF path uses. */
 
-const LANGS: CaptionLang[] = ["en", "uk", "ru"];
+// Offered languages only: Russian is no longer offered, so the CSV has no
+// caption_ru column. Stored "ru" caption rows are untouched, just not exported.
+const LANGS: CaptionLang[] = ["en", "uk"];
 
 /** RFC 4180 serialization. CRLF line endings and a UTF-8 BOM, both for Excel:
- *  without the BOM it decodes uk/ru captions as mojibake, and it is lenient
+ *  without the BOM it decodes Ukrainian captions as mojibake, and it is lenient
  *  about CRLF but other consumers are not. A field is quoted when it contains a
  *  quote, a comma or a newline; embedded quotes double. */
 export function toCsv(rows: readonly (readonly string[])[]): string {
@@ -53,7 +55,6 @@ export const CSV_HEADER = [
   "caption_style",
   "caption_en",
   "caption_uk",
-  "caption_ru",
   "ai_description",
   "facts_confirmed",
   "facts_unreviewed",

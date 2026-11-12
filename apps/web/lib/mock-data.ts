@@ -28,22 +28,18 @@ export const CAPTIONS: Record<CaptionKey, Caption> = {
   a: {
     EN: "Medical workers treat a wounded civilian in an underground clinic during shelling in Kyiv, Ukraine, 18 June 2026.",
     UK: "Медики надають допомогу пораненому цивільному в підземній клініці під час обстрілу. Київ, 18 червня 2026.",
-    RU: "Медики оказывают помощь раненому в подземной клинике во время обстрела. Киев, 18 июня 2026.",
   },
   b: {
     EN: "Rescue workers clear rubble from a residential building after a missile strike in the Solomianskyi district of Kyiv, 17 June 2026.",
     UK: "Рятувальники розбирають завали житлового будинку після ракетного удару в Солом'янському районі Києва, 17 червня 2026.",
-    RU: "Спасатели разбирают завалы жилого дома после ракетного удара в Соломенском районе Киева, 17 июня 2026.",
   },
   c: {
     EN: "Portrait of a volunteer at a humanitarian aid distribution point. Identity withheld pending consent. Kyiv region, June 2026.",
     UK: "Портрет волонтера на пункті видачі гуманітарної допомоги. Особу не розкрито до згоди. Київська область, 2026.",
-    RU: "Портрет волонтёра на пункте выдачи помощи. Личность не раскрыта до согласия. Киевская область, 2026.",
   },
   gen: {
     EN: "Scene from the Kyiv frontline archive documenting civilian life and emergency response, June 2026.",
     UK: "Сцена з київського фронтового архіву, червень 2026.",
-    RU: "Сцена из киевского фронтового архива, июнь 2026.",
   },
 };
 

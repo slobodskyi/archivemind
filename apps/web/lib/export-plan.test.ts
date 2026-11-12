@@ -72,7 +72,10 @@ describe("captionStateFor — CSV and ZIP", () => {
   });
 
   it("ignores the language entirely", () => {
-    expect(captionStateFor(UK_AGENCY, { ...csv, lang: "ru" })).toBe("exact");
+    // The requested language differs from the only one the photo has: a CSV
+    // still reports exact, because every language is its own column.
+    expect(captionStateFor(EN_AGENCY, { ...csv, lang: "uk" })).toBe("exact");
+    expect(captionStateFor(UK_AGENCY, { ...csv, lang: "en" })).toBe("exact");
   });
 });
 

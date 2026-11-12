@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, type Schema } from "@google/genai";
-import { uuidSchema } from "@archivemind/shared";
+import { offeredCaptionLangSchema, uuidSchema } from "@archivemind/shared";
 import { z } from "zod";
 import { analyzeModel } from "./gemini";
 
@@ -22,7 +22,7 @@ const requestBase = {
   boardId: uuidSchema,
   sourceAssetIds: sourceAssetIdsSchema,
   brief: z.string().trim().min(1).max(4_000),
-  language: z.enum(["en", "uk", "ru"]),
+  language: offeredCaptionLangSchema,
   tone: z.enum(["editorial", "personal", "social"]),
 };
 
@@ -132,7 +132,7 @@ export const sourceAssetContextSchema = z
       .array(
         z
           .object({
-            language: z.enum(["en", "uk", "ru"]),
+            language: offeredCaptionLangSchema,
             style: z.enum(["social", "agency", "archival"]),
             text: z.string().max(1_500),
           })
@@ -217,7 +217,6 @@ export function buildContentResponseSchema(request: ContentGenerationRequest): S
 const LANGUAGE_NAMES: Record<ContentGenerationRequest["language"], string> = {
   en: "English",
   uk: "Ukrainian",
-  ru: "Russian",
 };
 
 const ARTICLE_LENGTHS: Record<"short" | "medium" | "long", string> = {

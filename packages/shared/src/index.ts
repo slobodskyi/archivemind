@@ -596,6 +596,22 @@ export type LabelNames = Record<AssetLabel, string>;
 export const captionLangSchema = z.enum(["en", "uk", "ru"]);
 export type CaptionLang = z.infer<typeof captionLangSchema>;
 
+/** The languages a person can START work in. `captionLangSchema` stays
+ *  ["en","uk","ru"] because it is the STORED enum (the `caption_lang` DB type,
+ *  the worker's job-payload parsers, drafts and publications written before
+ *  Russian was retired) and those rows and queued jobs must keep parsing. Every
+ *  REQUEST that begins new work (caption generation, export, content
+ *  generation) parses this narrower schema instead, so "ru" is no longer
+ *  accepted going in while everything already stored keeps loading. */
+export const offeredCaptionLangSchema = z.enum(["en", "uk"]);
+export type OfferedCaptionLang = z.infer<typeof offeredCaptionLangSchema>;
+export const OFFERED_CAPTION_LANGS = offeredCaptionLangSchema.options;
+
+/** Stored lang -> offered lang; a retired "ru" falls back to "en". */
+export function toOfferedCaptionLang(lang: CaptionLang | string | null | undefined): OfferedCaptionLang {
+  return lang === "uk" ? "uk" : "en";
+}
+
 export const captionStyleSchema = z.enum(["social", "agency", "archival"]);
 export type CaptionStyleKey = z.infer<typeof captionStyleSchema>;
 
@@ -731,9 +747,12 @@ export const createJobRequestSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("caption"),
     assetIds: z.array(uuidSchema).min(1).max(500),
-    // dedupe mirrors captionJobPayloadSchema: dupes = paid calls + billed rows
+    // dedupe mirrors captionJobPayloadSchema: dupes = paid calls + billed rows.
+    // Offered languages only: a new request may not start work in "ru", while
+    // captionJobPayloadSchema (what the worker parses) still accepts it so a job
+    // queued before the deploy cannot fail to parse.
     langs: z
-      .array(captionLangSchema)
+      .array(offeredCaptionLangSchema)
       .min(1)
       .transform((l) => [...new Set(l)]),
     style: captionStyleSchema,
@@ -949,6 +968,14 @@ export const artboardSettingsSchema = z.object({
     .default({ caption: true, title: true, exif: false }),
 });
 export type ArtboardSettings = z.infer<typeof artboardSettingsSchema>;
+
+/** The settings a NEW export request may carry: identical, but the caption
+ *  language is an offered one. `artboardSettingsSchema` itself stays permissive
+ *  because it also parses saved artboard settings and the worker's queued
+ *  `export` payloads, which may say "ru". */
+export const exportRequestSettingsSchema = artboardSettingsSchema.extend({
+  captionLang: offeredCaptionLangSchema.default("en"),
+});
 
 /** POST /api/canvas-groups. `assetIds` seeds membership; for a folder the route
  *  also removes those assets from any other folder in the same scope
@@ -1382,7 +1409,7 @@ export const createExportRequestSchema = z
      *  project/artboard the run came from) because the route resolves a
      *  project_id only in the groupId branch, which no client reaches. */
     title: z.string().trim().max(120).optional(),
-    options: artboardSettingsSchema,
+    options: exportRequestSettingsSchema,
   })
   .refine((v) => v.groupId !== undefined || (v.assetIds !== undefined && v.assetIds.length > 0), {
     message: "one of groupId, assetIds is required",

@@ -5,8 +5,9 @@ import {
   workingDimensions,
   type AssetLabel,
 } from "@archivemind/shared";
-import type { ExifData, Photo, PhotoCaptions } from "../types";
+import type { ExifData, Photo } from "../types";
 import { presignGet } from "./r2";
+import { toCaptions, type CaptionDbRow } from "./caption-rows";
 import {
   deriveTopicAssignments,
   heuristicTopicKey,
@@ -54,13 +55,6 @@ interface FactRow {
   status: "confirmed" | "likely" | "needs_check";
 }
 
-interface CaptionDbRow {
-  id: string;
-  lang: "en" | "uk" | "ru";
-  style: "social" | "agency" | "archival";
-  text: string;
-  is_edited: boolean;
-}
 
 interface FileOriginRow {
   origin: string;
@@ -112,21 +106,6 @@ export interface PhotoWindow {
 }
 
 export const CANVAS_ASSET_LIMIT = 500;
-
-/** DB caption enums → the mockup's UI labels. */
-const CAPTION_LANG_UP = { en: "EN", uk: "UK", ru: "RU" } as const;
-const CAPTION_STYLE_UP = { social: "Social", agency: "Agency", archival: "Archival" } as const;
-
-function toCaptions(rows: CaptionDbRow[]): PhotoCaptions {
-  const captions: PhotoCaptions = {};
-  for (const c of rows) {
-    const lang = CAPTION_LANG_UP[c.lang];
-    const style = CAPTION_STYLE_UP[c.style];
-    if (!lang || !style) continue; // unknown enum value from a future migration
-    (captions[lang] ??= {})[style] = { id: c.id, text: c.text, edited: c.is_edited };
-  }
-  return captions;
-}
 
 /** DB fact_status → the mockup's 3-dot FactStatus. */
 const FACT_STATUS_MAP = { confirmed: "confirmed", likely: "pending", needs_check: "unknown" } as const;
