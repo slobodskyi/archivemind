@@ -1031,8 +1031,9 @@ export interface Workspace {
   /** AI ANALYZE's no-selection intro is open (see WorkspaceState). */
   bulkIntroOpen: boolean;
   /** The intro's "Select N unanalyzed": select these ids and open the normal
-   *  panel. Only selects — AI runs from the panel's Run button alone. */
-  selectUnanalyzed: (ids: readonly string[]) => void;
+   *  panel. Only selects — AI runs from the panel's Run button alone. False
+   *  when none of the ids is still loaded (nothing changed). */
+  selectUnanalyzed: (ids: readonly string[]) => boolean;
   closeBulkIntro: () => void;
   toggleBulkPanel: () => void;
   /** The upload pill's "Analyze N with AI": select exactly these ids that this
@@ -4932,12 +4933,24 @@ export function useWorkspace(
   /** The intro's "Select N unanalyzed". It only SELECTS: the normal panel then
    *  shows the count and the call estimate above Run, and AI never runs from
    *  here. `ids` come from `unanalyzedInScope` over what the canvas draws, so
-   *  nothing hidden is selected; ids that left the canvas since are dropped. */
-  const selectUnanalyzed = useCallback((ids: readonly string[]) => {
-    const loaded = new Set(stateRef.current.photos.map((p) => p.id));
+   *  nothing hidden is selected; ids that left the canvas since are dropped.
+   *  Returns whether the panel switched to the selection — the caller moves
+   *  focus into it then, since the button pressed has just unmounted. */
+  const selectUnanalyzed = useCallback((ids: readonly string[]): boolean => {
+    const s = stateRef.current;
+    const loaded = new Set(s.photos.map((p) => p.id));
     const found = ids.filter((id) => loaded.has(id));
-    if (!found.length) return;
-    setState({ selectedIds: found, drawerId: null, bulkPanelOpen: true, bulkIntroOpen: false });
+    if (!found.length) return false;
+    setState({
+      selectedIds: found,
+      drawerId: null,
+      bulkPanelOpen: true,
+      bulkIntroOpen: false,
+      // Never-analyzed photos must not land on a caption-only plan — the same
+      // rule as openBulkFor; captions keep the user's last choice.
+      bulkOps: s.bulkOps.tags ? s.bulkOps : { ...s.bulkOps, tags: true },
+    });
+    return true;
   }, [setState]);
 
   // A selection made on the canvas (or a job started from a tile) ends the

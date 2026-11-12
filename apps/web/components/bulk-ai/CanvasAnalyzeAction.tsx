@@ -14,6 +14,9 @@ interface CanvasAnalyzeActionProps {
    *  open: the explainer lives in the floated shell's stacking context, so
    *  those panels would cover it anyway. */
   explain?: boolean;
+  /** Where focus goes back to when the intro this button opened closes itself
+   *  (its Close / "Select on canvas" unmount the button that was pressed). */
+  buttonRef?: React.Ref<HTMLButtonElement>;
 }
 
 /** AI ANALYZE — the project canvas's AI action, in the slot a Workspace gives
@@ -43,12 +46,13 @@ interface CanvasAnalyzeActionProps {
  *  shape, and when they also shared a colour nobody noticed the slot had
  *  changed jobs. Idle is a purple tint rather than the grey every other dead
  *  control wears — this one is waiting for a selection, not unavailable. */
-export default function CanvasAnalyzeAction({ selectedCount, open, onOpen, explain = true }: CanvasAnalyzeActionProps) {
+export default function CanvasAnalyzeAction({ selectedCount, open, onOpen, explain = true, buttonRef }: CanvasAnalyzeActionProps) {
   const live = selectedCount > 0;
   const tipId = useId();
   const name = live ? `Analyze ${selectedCount} selected with AI` : "Analyze with AI";
   return (
     <button
+      ref={buttonRef}
       onClick={onOpen}
       className="am-ai-explain-host"
       // Static copy and a count only.

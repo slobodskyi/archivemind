@@ -26,8 +26,9 @@ interface BulkAiPanelProps {
    *  page. The container, not Run — a second Enter must not spend credits. */
   focusRequest?: number;
   /** The no-selection intro (AI ANALYZE with nothing selected): counts from
-   *  `unanalyzedInScope`. null → the normal panel over the selection. */
-  intro?: { count: number; hidden: number; pending: number; total: number } | null;
+   *  `unanalyzedInScope`; `filtered` = a colour filter is narrowing what they
+   *  count. null → the normal panel over the selection. */
+  intro?: { count: number; hidden: number; pending: number; total: number; filtered: boolean } | null;
   onSelectUnanalyzed?: () => void;
   onCloseIntro?: () => void;
 }
@@ -365,7 +366,11 @@ export default function BulkAiPanel({
           </button>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 9, fontSize: 10.5, color: "var(--tm)" }}>
             <span>
-              {blocked ? "Nothing to run" : `${plan.calls} AI ${plan.calls === 1 ? "call" : "calls"}`}
+              {/* Credits first: that is the unit the intro and the AI ANALYZE
+                  explainer promise, and the one the Usage view meters. */}
+              {blocked
+                ? "Nothing to run"
+                : `${plan.credits} ${plan.credits === 1 ? "credit" : "credits"} · ${plan.calls} AI ${plan.calls === 1 ? "call" : "calls"}`}
             </span>
             <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--tm)" }} />
             <span>Gemini Flash-Lite</span>
@@ -384,7 +389,13 @@ export default function BulkAiPanel({
             Pick the photos first — the count and the credits are shown before anything runs.
           </p>
           {intro.total === 0 ? (
-            <div style={{ fontSize: 11.5, color: "var(--t2)" }}>Nothing to analyze yet — add photos to this canvas first.</div>
+            // The counts run over what the canvas draws, so a colour filter
+            // that matches nothing reads as an empty canvas — say which it is.
+            <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
+              {intro.filtered
+                ? "The colour filter hides every photo here — clear it on the bottom bar to see what can be analyzed."
+                : "Nothing to analyze yet — add photos to this canvas first."}
+            </div>
           ) : intro.count === 0 ? (
             <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
               {intro.hidden > 0 || intro.pending > 0

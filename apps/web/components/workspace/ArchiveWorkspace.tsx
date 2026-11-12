@@ -250,6 +250,16 @@ export default function ArchiveWorkspace({
   // The CTA unmounts the button it was activated from, so the panel it opens
   // takes focus (BulkAiPanel.focusRequest) or a keyboard user lands on <body>.
   const [bulkFocusRequest, setBulkFocusRequest] = useState(0);
+  // The two bulk AI buttons (AI ANALYZE outside a Workspace, the action bar's
+  // ✨ inside one — never both on screen). The intro's Close and "Select on
+  // canvas" unmount the panel they sit in, so focus returns to the opener.
+  const aiButtonRef = useRef<HTMLButtonElement>(null);
+  const closeAiIntro = ws.closeBulkIntro;
+  const closeAiIntroAndRefocus = useCallback(() => {
+    closeAiIntro();
+    aiButtonRef.current?.focus({ preventScroll: true });
+  }, [closeAiIntro]);
+  const selectUnanalyzedIds = ws.selectUnanalyzed;
   const openBulkFor = ws.openBulkFor;
   const analyzeUploaded = useCallback((ids: readonly string[]) => {
     const opened = openBulkFor(ids);
@@ -1139,7 +1149,8 @@ export default function ArchiveWorkspace({
       {workingBar && (
         <WorkspaceActionBar
           selCount={ws.selectedIds.size}
-          aiOpen={ws.bulkPanelOpen}
+          aiOpen={ws.bulkPanelOpen || ws.bulkIntroOpen}
+          aiButtonRef={aiButtonRef}
           onAddStickyNote={ws.addStickyNote}
           onTidy={ws.tidyUp}
           onAi={ws.toggleBulkPanel}
@@ -1282,6 +1293,7 @@ export default function ArchiveWorkspace({
             // The chat and Trash panels stack above this shell and would cover
             // its hover explainer, so it is not drawn under them.
             explain={!ws.chatOpen && !ws.trashOpen}
+            buttonRef={aiButtonRef}
           />
         )}
       </div>
@@ -1352,11 +1364,14 @@ export default function ArchiveWorkspace({
           hidden: unanalyzed.hidden,
           pending: unanalyzed.pending,
           total: unanalyzed.total,
+          filtered: ws.labelFilter !== null,
         }}
         onSelectUnanalyzed={() => {
-          if (unanalyzed) ws.selectUnanalyzed(unanalyzed.ids);
+          // The intro's button unmounts as the panel turns into the normal
+          // state, so the panel takes focus — the analyzeUploaded rule.
+          if (unanalyzed && selectUnanalyzedIds(unanalyzed.ids)) setBulkFocusRequest((n) => n + 1);
         }}
-        onCloseIntro={ws.closeBulkIntro}
+        onCloseIntro={closeAiIntroAndRefocus}
       />
 
       {ws.projectMode && (

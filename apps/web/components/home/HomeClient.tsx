@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import type { UsageSnapshot } from "@/lib/usage";
@@ -233,6 +233,19 @@ export default function HomeClient({
     creating,
     visibleCount: visibleProjects.length,
   });
+  // A cancelled create unmounts the input that held focus. Hand it back to
+  // the door the form was opened from — the ghost card on the empty hub, the
+  // header "+ New project" otherwise — once the cancel has rendered, since
+  // the header button only remounts then (lib/home-hub hides it while the
+  // form is open on an otherwise-empty hub).
+  const headerNewRef = useRef<HTMLButtonElement>(null);
+  const newCardRef = useRef<HTMLButtonElement>(null);
+  const refocusOpener = useRef(false);
+  useEffect(() => {
+    if (creating || !refocusOpener.current) return;
+    refocusOpener.current = false;
+    (newCardRef.current ?? headerNewRef.current)?.focus({ preventScroll: true });
+  }, [creating]);
   async function patchProject(id: string, patch: { name?: string; archived?: boolean; deleted?: boolean }): Promise<boolean> {
     try {
       const resp = await fetch(`/api/projects/${id}`, {
@@ -309,6 +322,7 @@ export default function HomeClient({
   function cancelCreate() {
     setCreating(false);
     setName("");
+    refocusOpener.current = true;
   }
 
   async function createProject() {
@@ -447,6 +461,7 @@ export default function HomeClient({
           {view === "usage" && <UsagePlanPill plan={usage?.plan ?? null} />}
           {chrome.headerButton && (
             <button
+              ref={headerNewRef}
               onClick={startCreate}
               // "+ New project" is 15 characters of a 390px row that also holds
               // the title and the drawer handle; on a phone the glyph carries it.
@@ -482,6 +497,7 @@ export default function HomeClient({
               name={name}
               busy={busy}
               onStart={() => setCreating(true)}
+              idleRef={newCardRef}
               onNameChange={setName}
               onSubmit={() => void createProject()}
               onCancel={cancelCreate}
@@ -768,17 +784,29 @@ function NewProjectCard({
   onNameChange,
   onSubmit,
   onCancel,
+  idleRef,
 }: {
   first: boolean;
   creating: boolean;
   name: string;
   busy: boolean;
   onStart: () => void;
+  /** The idle ghost button — where focus returns after a cancel. */
+  idleRef?: React.Ref<HTMLButtonElement>;
   onNameChange: (name: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
 }) {
   const [hot, setHot] = useState(false);
+  // This instance survives the swap between the idle button and the form, and
+  // the button that would send mouseleave/blur is gone by then — so `hot` is
+  // reset on every swap (during render, React's pattern for state that follows
+  // a prop), or a cancelled form came back with the hover highlight stuck on.
+  const [hotFor, setHotFor] = useState(creating);
+  if (hotFor !== creating) {
+    setHotFor(creating);
+    setHot(false);
+  }
   const title = first ? "Create your first project" : "New project";
   const root: React.CSSProperties = {
     display: "flex",
@@ -845,6 +873,7 @@ function NewProjectCard({
 
   return (
     <button
+      ref={idleRef}
       type="button"
       onClick={onStart}
       onMouseEnter={() => setHot(true)}
