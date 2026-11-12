@@ -38,7 +38,12 @@ insert into public.files (asset_id, workspace_id, origin, r2_key, mime_type, byt
   ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-00000000aaaa', 'upload', 'k1', 'image/jpeg', 1000),
   ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-00000000aaaa', 'upload', 'k2', 'application/pdf', 5000);
 insert into public.asset_previews (asset_id, size, r2_key, byte_size) values
-  ('00000000-0000-0000-0000-0000000000f1', 'thumb', 'k1-thumb', 100);
+  ('00000000-0000-0000-0000-0000000000f1', 'thumb', 'k1-thumb', 100),
+  ('00000000-0000-0000-0000-0000000000f1', 'large', 'k1-large', 300);
+-- An edit's renders are reclaimable bytes too, its 2048 px one included (ADR 0055).
+insert into public.asset_edits
+  (asset_id, recipe, edited_thumb_key, edited_medium_key, thumb_bytes, medium_bytes, edited_large_key, large_bytes)
+values ('00000000-0000-0000-0000-0000000000f1', '{}'::jsonb, 'k1-et', 'k1-em', 10, 20, 'k1-el', 50);
 -- The photo lives in both of A's projects; one of them is about to be trashed,
 -- which is the case `location` has to get right.
 insert into public.project_assets (project_id, asset_id) values
@@ -95,12 +100,12 @@ select is((trash_items(p_types => array['photo'])->>'total')::int, 1,
   'the type filter narrows the list');
 select is((trash_items(p_types => array['photo'])->'counts'->>'pdf')::int, 1,
   'but NOT the counts — the chips must still say what picking them would find');
-select is((trash_items(p_types => array['photo'])->>'total_bytes')::bigint, 1100::bigint,
-  'bytes follow the filter and include previews, so "Delete all" can quote them');
+select is((trash_items(p_types => array['photo'])->>'total_bytes')::bigint, 1480::bigint,
+  'bytes follow the filter and include previews and edits, so "Delete all" can quote them');
 
 select is(
   (trash_items(p_sort => 'largest')->'items'->0->>'name'), 'A-brief',
-  'sorting by size puts the 5 KB brief ahead of the 1.1 KB photo');
+  'sorting by size puts the 5 KB brief ahead of the 1.5 KB photo');
 select is(
   jsonb_array_length(trash_items(p_limit => 2)->'items'), 2,
   'the page respects p_limit');

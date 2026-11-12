@@ -10,7 +10,7 @@
 -- cross-workspace call that must come back empty.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(17);
+select plan(19);
 
 -- ── fixtures (as superuser) ─────────────────────────────────────────────
 insert into auth.users (id, email) values
@@ -47,12 +47,19 @@ insert into public.files (asset_id, workspace_id, origin, r2_key, byte_size) val
 insert into public.asset_previews (asset_id, size, r2_key, byte_size) values
   ('00000000-0000-0000-0000-0000000a0001', 'thumb',  'ws-a/p/1t', 100),
   ('00000000-0000-0000-0000-0000000a0001', 'medium', 'ws-a/p/1m', 200),
+  -- The 2048 px tier (ADR 0055) is one more asset_previews row, counted like the rest.
+  ('00000000-0000-0000-0000-0000000a0001', 'large',  'ws-a/p/1l', 400),
   ('00000000-0000-0000-0000-0000000a0002', 'thumb',  'ws-a/p/2t', 50),
   ('00000000-0000-0000-0000-0000000a0002', 'medium', 'ws-a/p/2m', 150),
   ('00000000-0000-0000-0000-0000000a0003', 'thumb',  'ws-a/p/3t', 30);
 
-insert into public.asset_edits (asset_id, recipe, edited_thumb_key, edited_medium_key, thumb_bytes, medium_bytes)
-values ('00000000-0000-0000-0000-0000000a0001', '{}'::jsonb, 'ws-a/e/1t', 'ws-a/e/1m', 10, 20);
+insert into public.asset_edits
+  (asset_id, recipe, edited_thumb_key, edited_medium_key, thumb_bytes, medium_bytes, edited_large_key, large_bytes)
+values
+  ('00000000-0000-0000-0000-0000000a0001', '{}'::jsonb, 'ws-a/e/1t', 'ws-a/e/1m', 10, 20, 'ws-a/e/1l', 40),
+  -- An edit rendered before ADR 0055 has no large render at all: its null
+  -- large_bytes is "no such file", never "unmeasured".
+  ('00000000-0000-0000-0000-0000000a0002', '{}'::jsonb, 'ws-a/e/2t', 'ws-a/e/2m', 1, 2, null, null);
 
 -- A finished export whose artifact is still in R2 (`result_key` present — the
 -- sweeper strips that key when it deletes the object).
@@ -95,13 +102,20 @@ select is(
 
 select is(
   (public.workspace_usage('00000000-0000-0000-0000-00000000aaaa')->'storage'->>'previews')::bigint,
-  500::bigint,
-  'previews = active assets only (the trashed one is counted as trash)');
+  900::bigint,
+  'previews = active assets only (the trashed one is counted as trash), large tier included');
 
 select is(
   (public.workspace_usage('00000000-0000-0000-0000-00000000aaaa')->'storage'->>'edits')::bigint,
-  30::bigint,
-  'edits = the third copy in R2, finally measured');
+  73::bigint,
+  'edits = the third copy in R2, finally measured — its 2048 px render included');
+
+select is(
+  (public.workspace_usage('00000000-0000-0000-0000-00000000aaaa')->'storage'->'unmeasured'->>'edits')::int,
+  0,
+  'an edit with no large render is fully measured');
+
+select has_column('public', 'asset_edits', 'large_bytes', 'asset_edits records its large render''s size');
 
 select is(
   (public.workspace_usage('00000000-0000-0000-0000-00000000aaaa')->'storage'->>'trash')::bigint,
@@ -115,7 +129,7 @@ select is(
 
 select is(
   (public.workspace_usage('00000000-0000-0000-0000-00000000aaaa')->'storage'->>'total')::bigint,
-  6260::bigint,
+  6703::bigint,
   'total = originals + previews + edits + exports + trash, and nothing else');
 
 select is(
