@@ -64,13 +64,17 @@ interface Options {
   onSwipe: (dir: 1 | -1) => void;
   /** A single tap that turned out not to be half of a double tap (touch only). */
   onTap: () => void;
+  /** The photo just left fit — the moment detail is wanted, which on touch is
+   *  when the viewer reaches for the original. Fired from the gesture, never
+   *  from a render. */
+  onZoomIn?: () => void;
 }
 
 /** Pan / zoom / pinch / swipe for the fullscreen viewer (ADR 0054). The math is
  *  `lib/viewer.ts` and `lib/pinch.ts`; this is only the event plumbing. Writes
  *  are synchronous — pointer and wheel events already arrive at frame rate, and
  *  a rAF hop would freeze in a background tab for no gain. */
-export function usePanZoom({ stageRef, boxRef, labelRef, content, resetKey, onSwipe, onTap }: Options) {
+export function usePanZoom({ stageRef, boxRef, labelRef, content, resetKey, onSwipe, onTap, onZoomIn }: Options) {
   const cam = useRef<ViewerCam>({ z: 1, tx: 0, ty: 0 });
   const geo = useRef<Geometry | null>(null);
   const contentRef = useRef(content);
@@ -83,9 +87,9 @@ export function usePanZoom({ stageRef, boxRef, labelRef, content, resetKey, onSw
   const gesture = useRef<Gesture | null>(null);
   const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
   const tapTimer = useRef<number | null>(null);
-  const callbacks = useRef({ onSwipe, onTap });
+  const callbacks = useRef({ onSwipe, onTap, onZoomIn });
   useEffect(() => {
-    callbacks.current = { onSwipe, onTap };
+    callbacks.current = { onSwipe, onTap, onZoomIn };
   });
 
   const apply = useCallback(
@@ -106,6 +110,7 @@ export function usePanZoom({ stageRef, boxRef, labelRef, content, resetKey, onSw
       if (z !== zoomedRef.current) {
         zoomedRef.current = z;
         setZoomed(z);
+        if (z) callbacks.current.onZoomIn?.();
       }
     },
     [boxRef, labelRef],

@@ -116,3 +116,50 @@ is a worker + backfill change and a later decision.
   simply absent there.
 - Not verified on a real device: pinch, swipe and double-tap were exercised
   with synthetic pointer events in a harness, the geometry by unit tests.
+
+## Amendments
+
+### 2026-11-12 — originals shipped
+
+The route scoped above is live: `app/api/assets/[id]/original/route.ts`, with
+the rules both sides share in `lib/viewer-originals.ts`. What shipped, and
+where it is sharper than the scope:
+
+- **The route** answers `{ url, mime, bytes }` or `{ url: null, reason }`:
+  - it returns 404 for a malformed id, an asset RLS hides, and a trashed or
+    purged one, and 401 when signed out. Every response is
+    `Cache-Control: private, no-store`;
+  - the file it picks is the oldest `files` row with an `r2_key`, which is the
+    ZIP export's own order (`loadByteRows`), so the viewer and a download never
+    disagree about which file is "the original";
+  - a key outside `{files.workspace_id}/originals/` answers `not_stored`, so no
+    row can point it at a preview, an export or another workspace;
+  - a format no browser draws answers `format` and is never signed. That covers
+    TIFF, RAW, PDF, and also SVG and HTML, because the URL is inline.
+- **The format is read from the key's extension** when the client declared
+  nothing or `application/octet-stream`. `files.mime_type` is never sniffed,
+  and the key carries the original filename. A declared, specific type wins:
+  a file declared `image/tiff` and named `.jpg` is TIFF.
+- **When the viewer asks:**
+  - on a desktop, after a 350 ms dwell, so arrowing through a burst pulls no
+    originals;
+  - on touch, at the first zoom only;
+  - on an edited photo, only when its **Original** toggle is pressed. The edit
+    exists only as 1024 px previews, and swapping in the unedited original
+    unasked would quietly undo it on screen.
+- **When the viewer loads:** automatically up to 40 MiB, and a size nobody
+  recorded counts as over. Anything over waits behind an `Original · 62 MB`
+  button.
+- **HEIC is fetched only where it can be drawn**: Safari, and every browser on
+  iOS. Desktop Chrome, Firefox and Edge would download the bytes only to fail.
+  A decode that fails anyway falls back to the preview, and the chip says why.
+- **One original is alive at a time.** It is keyed per photo, so stepping away
+  unmounts it. The answer, a bare URL or a reason, sits in the same tab-wide
+  cache as the medium (`originalUrls`, version `""`), because an original does
+  not change when an edit lands.
+- **The chip** reads `Original 3000×2000`, `Original · unedited …`, or
+  `Preview … · no original` / `· original not viewable`, and its tooltip
+  carries the reason. "100%" is now measured against the original's own pixels.
+
+Not verified: a real iPad decoding a 48 MP original. The 40 MiB cap and the
+touch-only-on-zoom rule are the guard. The first device run is the test.
