@@ -4,6 +4,7 @@ import {
   appendClusterAnchor,
   assetGallery,
   boxesBounds,
+  defaultSlotCenters,
   droppedAssetCenters,
   EMPTY_GALLERY_OVERRIDES,
   fitBounds,
@@ -460,6 +461,44 @@ describe("pinCrowdedArrivals", () => {
     // A collapsed folder's member sitting on the slot is not drawn — not an obstacle.
     const covered = assetGallery(photos, { a: { x: slot.cx, y: slot.cy } }).pos;
     expect(pinCrowdedArrivals(covered, new Set(["new"]), [], new Set(["a"]))).toEqual({});
+  });
+});
+
+describe("defaultSlotCenters", () => {
+  // Newest first, as the API returns them: p0 is the oldest and takes cell 0.
+  const tenNewestFirst = ids(10, "p").reverse().map((id) => asset(id));
+
+  it("returns each listed tile's default centre, ignoring overrides", () => {
+    const defaults = assetGallery(tenNewestFirst, {}).pos;
+    const out = defaultSlotCenters(tenNewestFirst, new Set(["p0", "p9"]));
+    expect(out).toEqual({
+      p0: { x: defaults.p0.cx, y: defaults.p0.cy },
+      p9: { x: defaults.p9.cx, y: defaults.p9.cy },
+    });
+  });
+
+  it("keeps a placed block clear when OLDER files join the list (Paste)", () => {
+    // Row 0 full, row 1 holds cols 0-3; the viewport sits on cell (4, 1).
+    for (const k of [1, 2, 4]) {
+      const before = assetGallery(tenNewestFirst, {}).pos;
+      const pasted = ids(k, "old");
+      const placed = placeInFreeSpace(pasted, { x: CX0 + 4 * CELL_W, y: CY0 + CELL_H }, tileObstacles(before));
+      // The pasted files are older than every tile, so they sort LAST in the
+      // newest-first list and take the first default indexes after the refresh.
+      const after = [...tenNewestFirst, ...pasted.map((id) => asset(id))];
+      const clashes = (overrides: Record<string, { x: number; y: number }>) => {
+        const tiles = assetGallery(after, overrides).pos;
+        const others = tileObstacles(tiles, new Set(pasted));
+        return pasted.some((id) => !footprintClear(placed[id], others));
+      };
+      // Unpinned, the shift pushes the newest tiles into the reserved cells…
+      expect(clashes(placed)).toBe(true);
+      // …pinned before the list changes, nothing already drawn moves.
+      const freeze = defaultSlotCenters(tenNewestFirst, new Set(ids(10, "p")));
+      expect(clashes({ ...freeze, ...placed })).toBe(false);
+      const tiles = assetGallery(after, { ...freeze, ...placed }).pos;
+      for (const id of ids(10, "p")) expect([tiles[id].cx, tiles[id].cy]).toEqual([before[id].cx, before[id].cy]);
+    }
   });
 });
 

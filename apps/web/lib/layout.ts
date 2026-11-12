@@ -589,6 +589,26 @@ export function withAssetOverrides<T extends { galleryOverrides: GalleryOverride
   };
 }
 
+/** The default-grid centre each of `ids` is drawn at in the layout of `items`
+ *  when it carries no override (ADR 0052). assetGallery hands default slots out
+ *  by list index, and the list is newest-first by `created_at`, so a file OLDER
+ *  than the newest ones — a Paste, a deduplicated import or upload — joins the
+ *  middle of it and pushes every later un-dragged tile on by one slot, into
+ *  cells a placement had every reason to think were free. Folding these in
+ *  (withAssetOverrides: an existing entry wins) before the list changes pins
+ *  everything already drawn where it is; deletePhotos' freeze is the same rule
+ *  for the opposite edit. */
+export function defaultSlotCenters(
+  items: readonly Pick<Photo, "id" | "w" | "h">[],
+  ids: ReadonlySet<string>,
+): Record<string, CanvasPoint> {
+  const out: Record<string, CanvasPoint> = {};
+  for (const [id, tile] of Object.entries(assetGallery(items, {}).pos)) {
+    if (ids.has(id)) out[id] = { x: tile.cx, y: tile.cy };
+  }
+  return out;
+}
+
 /** The camera that brings `bounds` into view at the SAME zoom, or null when it is
  *  already inside the viewport's safe area (fitBounds' insets: the toolbar on the
  *  left, the header on top, the bottom bars). Only an axis the block is outside

@@ -32,10 +32,15 @@ so on the project canvas it also fell back to an unchecked default slot.
   active scope from the unfiltered layout — label-hidden tiles (a filter hides,
   never moves — ADR 0040) and pending upload tiles included — plus the sticky
   notes and folder boxes drawn in that scope, plus reservations whose photo has
-  not arrived yet. Members of a collapsed folder are not drawn and do not count.
+  not arrived yet, plus wherever an undo/redo snapshot would put a tile or a note
+  back (a tile dragged out of a cell returns to it on Cmd+Z). Members of a
+  collapsed folder are not drawn and do not count.
 - **Anchors.** A drop: the drop point. Add files: the viewport centre. A drop in
   Timeline/Topic: below the Canvas content, snapping to Canvas as before. When the
-  placed block is off-screen the camera pans to it at the **same zoom**.
+  placed block is off-screen the camera pans to it at the **same zoom** — unless
+  a colour label filter is on, which hides new (unlabelled, still uploading)
+  files: the pan would land on canvas that looks empty, so the camera stays (a
+  sorted-view drop keeps its plain re-fit).
 - **Imports and Paste reserve as soon as their ids are known** — an import on its
   response (`ImportModal`'s `onImported`), a Paste only **after the server
   confirms** the link (the route answers a count, not ids, so a reservation made
@@ -44,13 +49,26 @@ so on the project canvas it also fell back to an unchecked default slot.
   the view does not snap** — a finished import is not a gesture on the canvas.
 - **While a Workspace is open**, files joining the project (imports, Paste, and
   uploads at settle) are reserved in the project canvas's stored arrangement,
-  below its content. Nothing else writes that key while a Workspace is open.
+  below its content, with that canvas's in-flight drops as obstacles. Nothing
+  else writes that key while a Workspace is open. A file dropped on the project
+  canvas that settles after a Workspace was opened keeps its drop point: its
+  centre is re-keyed from the clientId to the asset id inside that blob.
+- **Default slots are pinned before the list changes.** `assetGallery` hands
+  default slots out by list index over the newest-first (`created_at`) list, so
+  a file older than the newest ones — a Paste, a deduplicated import or upload —
+  joins the middle and pushes every later un-dragged tile on by one slot, into
+  cells a placement saw as free. Every reservation therefore also pins the
+  scope's drawn tiles at their current default centres (`defaultSlotCenters`),
+  and so does the render-phase sync whenever photos arrive — the delete-time
+  freeze in `deletePhotos`, applied to the opposite edit. Nothing visibly moves;
+  Tidy up still clears it all back to the default grid.
 - A **safety net** in the render-phase sync pins arrivals that are new (absent
   from the previous server list and from `state.photos`), carry no override, and
   whose default slot is crowded — as one block below the content, no camera move.
 - Reservations and pins are **folded into every undo/redo snapshot**
   (`withAssetOverrides`, existing entries win) and are never an undoable step, so
-  Cmd+Z cannot put an arrival back on top of something.
+  Cmd+Z never takes an arrival away; and because placement also avoids every
+  snapshot's own tiles and notes, it cannot bring anything back onto one.
 
 ## Consequences
 
