@@ -173,6 +173,11 @@ describe("POST /api/projects/[id]/shares", () => {
       p_scope: "project",
       p_board_id: null,
       p_asset_ids: null,
+      p_show_boards: false,
+      p_show_labels: false,
+      p_show_tags: false,
+      p_caption_lang: null,
+      p_caption_style: null,
     });
     expect(mocks.sealShareToken).toHaveBeenCalledWith(token);
   });
@@ -189,6 +194,46 @@ describe("POST /api/projects/[id]/shares", () => {
     rpc.mockClear();
     expect((await POST(post({ mode: "download", expiresInDays: 7, scope: "selection", assetIds: [assetId] }), ctx())).status).toBe(201);
     expect((rpc.mock.calls[0] as unknown as [string, object])[1]).toMatchObject({ p_scope: "selection", p_board_id: null, p_asset_ids: [assetId], p_can_upload: false });
+  });
+
+  it("passes the details a link shows through to the RPC (ADR 0053 §3)", async () => {
+    const { rpc } = arrange();
+
+    const response = await POST(
+      post({
+        mode: "download",
+        expiresInDays: 7,
+        showBoards: true,
+        showLabels: true,
+        showTags: true,
+        caption: { lang: "uk", style: "agency" },
+      }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(201);
+    expect((rpc.mock.calls[0] as unknown as [string, object])[1]).toMatchObject({
+      p_show_boards: true,
+      p_show_labels: true,
+      p_show_tags: true,
+      p_caption_lang: "uk",
+      p_caption_style: "agency",
+    });
+  });
+
+  it.each([
+    ["details on an upload-only link", { mode: "upload", showLabels: true }],
+    ["Workspaces on a Workspace link", { mode: "download", scope: "board", boardId: "66666666-6666-4666-8666-666666666666", showBoards: true }],
+    ["a caption language without a style", { mode: "download", caption: { lang: "en" } }],
+    ["a Russian caption", { mode: "download", caption: { lang: "ru", style: "agency" } }],
+    ["an unknown detail", { mode: "download", showFacts: true }],
+  ])("refuses %s before reaching the database", async (_name, body) => {
+    const { rpc } = arrange();
+
+    const response = await POST(post({ expiresInDays: 7, ...body }), ctx());
+
+    expect(response.status).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("refuses a list with upload rights before reaching the database", async () => {

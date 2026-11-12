@@ -3,6 +3,7 @@ import {
   assetLabelSchema,
   captionLangSchema,
   captionStyleSchema,
+  offeredCaptionLangSchema,
   uuidSchema,
   type CaptionLang,
   type CaptionStyleKey,
@@ -44,6 +45,13 @@ export type ShareScope = z.infer<typeof shareScopeSchema>;
  *  as a link's upload quota. */
 export const PROJECT_SHARE_SELECTION_MAX = 2000;
 
+/** The one caption a link may carry (ADR 0053 §3): exactly this language and
+ *  style, no fallback. An object, so "both or neither" is the shape itself.
+ *  New links are offered `en`/`uk` only; `ru` stays parseable on a stored row. */
+export const shareCaptionRequestSchema = z
+  .object({ lang: offeredCaptionLangSchema, style: captionStyleSchema })
+  .strict();
+
 export const createProjectShareRequestSchema = z
   .object({
     mode: projectShareModeSchema,
@@ -53,6 +61,12 @@ export const createProjectShareRequestSchema = z
     scope: shareScopeSchema.default("project"),
     boardId: uuidSchema.optional(),
     assetIds: z.array(uuidSchema).min(1).max(PROJECT_SHARE_SELECTION_MAX).optional(),
+    // ADR 0053 §3: what the recipient sees beside the files. All off by
+    // default, so a request without them makes the ADR 0051 link.
+    showBoards: z.boolean().default(false),
+    showLabels: z.boolean().default(false),
+    showTags: z.boolean().default(false),
+    caption: shareCaptionRequestSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -70,8 +84,46 @@ export const createProjectShareRequestSchema = z
     if (wantsList && value.mode !== "download") {
       ctx.addIssue({ code: "custom", path: ["mode"], message: "a selection link is download-only" });
     }
+    // The same three rules create_project_share() enforces, so a bad request
+    // is a 400 here rather than a 22023 from the database.
+    if (value.showBoards && value.scope !== "project") {
+      ctx.addIssue({ code: "custom", path: ["showBoards"], message: "Workspaces are a filter on a project link only" });
+    }
+    if (value.mode === "upload" && hasShareDetails(requestDetails(value))) {
+      ctx.addIssue({ code: "custom", path: ["mode"], message: "details need download rights" });
+    }
   });
 export type CreateProjectShareRequest = z.infer<typeof createProjectShareRequestSchema>;
+
+/** What a link shows beside its files (ADR 0053 §3) — the summary's
+ *  `details`, and the recipient page's. */
+export interface ShareDetails {
+  boards: boolean;
+  labels: boolean;
+  tags: boolean;
+  caption: { lang: CaptionLang; style: CaptionStyleKey } | null;
+}
+
+export const NO_SHARE_DETAILS: ShareDetails = { boards: false, labels: false, tags: false, caption: null };
+
+export function hasShareDetails(details: ShareDetails): boolean {
+  return details.boards || details.labels || details.tags || details.caption !== null;
+}
+
+/** A create request's details, in the summary's shape. */
+export function requestDetails(request: {
+  showBoards: boolean;
+  showLabels: boolean;
+  showTags: boolean;
+  caption?: { lang: CaptionLang; style: CaptionStyleKey };
+}): ShareDetails {
+  return {
+    boards: request.showBoards,
+    labels: request.showLabels,
+    tags: request.showTags,
+    caption: request.caption ?? null,
+  };
+}
 
 /** Extend (a new deadline counted from now; the URL does not change) and/or
  *  relabel. An empty label clears it. */
@@ -211,7 +263,7 @@ function narrow<T>(schema: z.ZodType<T>, value: string | null): T | null {
   return parsed.success ? parsed.data : null;
 }
 
-function shareCaption(
+export function shareCaption(
   lang: string | null,
   style: string | null,
 ): { lang: CaptionLang; style: CaptionStyleKey } | null {

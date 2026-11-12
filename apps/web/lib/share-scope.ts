@@ -1,5 +1,5 @@
-import type { AssetLabel } from "@archivemind/shared";
-import { PROJECT_SHARE_SELECTION_MAX, type ShareScope } from "./project-shares";
+import { CAPTION_LANG_NAMES, type AssetLabel, type CaptionStyleKey } from "@archivemind/shared";
+import { PROJECT_SHARE_SELECTION_MAX, type ShareDetails, type ShareScope } from "./project-shares";
 
 /** Which scopes a Share can start from (ADR 0053 §7). Pure, so every entry
  *  point — the header's SHARE, the canvas menu's Share N…, a Workspace chip's
@@ -115,4 +115,27 @@ export function shareScopeReach(option: ShareScopeOption, projectName: string): 
     case "selection":
       return `This link shows these ${countedFiles(option.count)} only — files added later never join it, and one moved to Trash leaves it.`;
   }
+}
+
+export const CAPTION_STYLE_TITLES: Record<CaptionStyleKey, string> = {
+  social: "Social",
+  agency: "Agency",
+  archival: "Archival",
+};
+
+/** The chosen caption as it reads in a sentence: "English agency caption". */
+export function shareCaptionLabel(caption: NonNullable<ShareDetails["caption"]>): string {
+  return `${CAPTION_LANG_NAMES[caption.lang]} ${CAPTION_STYLE_TITLES[caption.style].toLowerCase()} caption`;
+}
+
+/** Which details a link shows, as one line for its row in the dialog (ADR 0053
+ *  §6) — or null for a link that shows files and nothing else, the default
+ *  that needs no saying. */
+export function shareDetailsLabel(details: ShareDetails): string | null {
+  const parts: string[] = [];
+  if (details.boards) parts.push("Workspaces");
+  if (details.labels) parts.push("colour labels");
+  if (details.tags) parts.push("tags");
+  if (details.caption) parts.push(shareCaptionLabel(details.caption));
+  return parts.length ? `Shows ${parts.join(" · ")}` : null;
 }

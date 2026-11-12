@@ -6,6 +6,7 @@ import { mintShareToken, shareTokenHash } from "../share-token";
 import {
   enqueueProjectShareDownload,
   listProjectShareAssets,
+  listProjectShareFacets,
   openProjectShare,
   openShareToken,
   projectShareDownloadStatus,
@@ -141,7 +142,46 @@ describe("project share public resolvers", () => {
       fileCount: null,
       scope: "project",
       boardName: null,
+      details: { boards: false, labels: false, tags: false, caption: null },
     });
+  });
+
+  it("reads the details a link shows, and none on an upload-only link (ADR 0053 §3)", async () => {
+    const { token } = await mintShareToken();
+    const row = (overrides: Record<string, unknown>) =>
+      answer({
+        data: {
+          share_id: assetId,
+          project_name: "Odesa 2026",
+          can_download: true,
+          can_upload: false,
+          expires_at: "2026-11-10T00:00:00+00:00",
+          rights: { creator: null, credit: null, copyrightNotice: null, usageTerms: null },
+          file_count: 4,
+          scope: "project",
+          show_boards: true,
+          show_labels: true,
+          show_tags: false,
+          caption_lang: "uk",
+          caption_style: "archival",
+          ...overrides,
+        },
+      });
+
+    admin.rpc.mockReturnValueOnce(row({}));
+    expect((await openProjectShare(token))?.details).toEqual({
+      boards: true,
+      labels: true,
+      tags: false,
+      caption: { lang: "uk", style: "archival" },
+    });
+
+    // Half a caption is no caption; Workspaces mean nothing on a list.
+    admin.rpc.mockReturnValueOnce(row({ scope: "selection", caption_style: null }));
+    expect((await openProjectShare(token))?.details).toEqual({ boards: false, labels: true, tags: false, caption: null });
+
+    admin.rpc.mockReturnValueOnce(row({ can_download: false, can_upload: true }));
+    expect((await openProjectShare(token))?.details).toEqual({ boards: false, labels: false, tags: false, caption: null });
   });
 
   it("reads a Workspace link's scope and the Workspace's name", async () => {
@@ -211,6 +251,9 @@ describe("project share public resolvers", () => {
       takenAt: null,
       hasPreview: true,
       hasOriginal: true,
+      label: null,
+      tags: null,
+      caption: null,
     });
 
     const full = Array.from({ length: 200 }, (_, i) =>
@@ -224,7 +267,86 @@ describe("project share public resolvers", () => {
       p_before_sort_at: "2026-10-02T00:00:00+00:00",
       p_before_id: assetId,
       p_limit: 200,
+      p_board_id: null,
+      p_label: null,
+      p_tag: null,
     });
+  });
+
+  it("filters by the recipient's choice and reads each detail's column", async () => {
+    const { token } = await mintShareToken();
+    const board = "66666666-6666-4666-8666-666666666666";
+    admin.rpc.mockReturnValue(answer({
+      data: [
+        assetRow({ label: "red", tags: ["harbour", "river"], caption: "Порт уранці." }),
+        assetRow({ id: jobId, label: "magenta", tags: null, caption: "   " }),
+      ],
+    }));
+
+    const page = await listProjectShareAssets(token, null, { board, label: "red", tag: "river" });
+
+    expect(admin.rpc).toHaveBeenCalledWith("list_project_share_assets", expect.objectContaining({
+      p_board_id: board,
+      p_label: "red",
+      p_tag: "river",
+    }));
+    expect(page?.files.map(({ label, tags, caption }) => ({ label, tags, caption }))).toEqual([
+      { label: "red", tags: ["harbour", "river"], caption: "Порт уранці." },
+      // A colour this build does not know blanks the dot, not the page.
+      { label: null, tags: null, caption: null },
+    ]);
+  });
+
+  it("turns the resolver's refusal of a filter into the same null as a dead link", async () => {
+    const { token } = await mintShareToken();
+    admin.rpc.mockReturnValue(answer({ data: null, error: { message: "invalid_project_share_filter" } }));
+    expect(await listProjectShareAssets(token, null, { tag: "river" })).toBeNull();
+  });
+
+  it("groups the facets by detail and drops a row it cannot read", async () => {
+    const { token } = await mintShareToken();
+    const board = "66666666-6666-4666-8666-666666666666";
+    admin.rpc.mockReturnValue(answer({
+      data: [
+        { facet: "board", value: board, name: "Port", color: "blue", file_count: 12 },
+        { facet: "board", value: "not-a-uuid", name: "Bad", color: null, file_count: 1 },
+        { facet: "label", value: "red", name: null, color: "red", file_count: 5 },
+        { facet: "label", value: "magenta", name: null, color: "magenta", file_count: 2 },
+        { facet: "tag", value: "harbour", name: "harbour", color: null, file_count: 9 },
+      ],
+    }));
+
+    expect(await listProjectShareFacets(token)).toEqual({
+      boards: [{ id: board, name: "Port", color: "blue", count: 12 }],
+      labels: [{ label: "red", count: 5 }],
+      tags: [{ name: "harbour", count: 9 }],
+    });
+    expect(admin.rpc).toHaveBeenCalledWith("list_project_share_facets", { p_token_hash: await shareTokenHash(token) });
+  });
+
+  it("answers empty facets only while the link can still list files", async () => {
+    const { token } = await mintShareToken();
+    const opened = answer({
+      data: {
+        share_id: assetId,
+        project_name: "Odesa 2026",
+        can_download: true,
+        can_upload: false,
+        expires_at: "2026-11-10T00:00:00+00:00",
+        rights: { creator: null, credit: null, copyrightNotice: null, usageTerms: null },
+        file_count: 0,
+      },
+    });
+
+    admin.rpc.mockReturnValueOnce(answer({ data: [] })).mockReturnValueOnce(opened);
+    expect(await listProjectShareFacets(token)).toEqual({ boards: [], labels: [], tags: [] });
+
+    admin.rpc.mockReturnValueOnce(answer({ data: [] })).mockReturnValueOnce(answer({ data: null }));
+    expect(await listProjectShareFacets(token)).toBeNull();
+
+    admin.rpc.mockReturnValueOnce(answer({ data: null, error: { message: "boom" } }));
+    expect(await listProjectShareFacets(token)).toBeNull();
+    expect(await listProjectShareFacets("not-a-token")).toBeNull();
   });
 
   it("refuses a media request for a non-uuid asset without asking", async () => {
