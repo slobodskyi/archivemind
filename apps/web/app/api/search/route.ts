@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import { costUsdFor, searchResponseSchema, uuidSchema, type SearchParse } from "@archivemind/shared";
-import { analyzeModel, embedText, parseSearchQuery } from "@/lib/gemini";
-import { assignTiers } from "@/lib/search-tiers";
+import { searchResponseSchema, uuidSchema, type SearchParse } from "@archivemind/shared";
+import { parseSearchQuery } from "@/lib/gemini";
+import { runSearch, semanticOnlyParse } from "@/lib/search-server";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentWorkspaceId } from "@/lib/workspace";
 
-interface SearchRow {
-  asset_id: string;
-  similarity: number;
-  matched_tags: string[];
-  matched_place: string | null;
-  matched_text: boolean;
-  taken_at: string | null;
-}
-
-/** GET /api/search?q=&projectId= (spec §8.4, issue #15): Gemini parses the
+/** No UI caller since the chat moved to `POST /api/assistant` (ADR 0056's
+ *  amendment), which runs this same pipeline with an intent attached. Kept as
+ *  the spec's search endpoint.
+ *
+ *  GET /api/search?q=&projectId= (spec §8.4, issue #15): Gemini parses the
  *  query into filters, the query text is embedded into the worker's image
  *  space (cross-modal — verified against official docs, issue #35), and
  *  search_assets() ranks by cosine + tag boost under the caller's RLS. */
@@ -42,71 +37,12 @@ export async function GET(request: Request) {
   try {
     parsed = await parseSearchQuery(q, today);
   } catch {
-    parsed = {
-      semantic_text: q,
-      date_from: null,
-      date_to: null,
-      place_terms: [],
-      tag_terms: [],
-      camera_terms: [],
-      iso_min: null,
-      iso_max: null,
-      aperture: null,
-      kinds: [],
-    };
+    parsed = semanticOnlyParse(q);
   }
 
-  let embedding: number[];
-  try {
-    embedding = await embedText(parsed.semantic_text.trim() || q);
-  } catch {
-    return NextResponse.json({ error: "embedding unavailable — try again" }, { status: 502 });
-  }
-
-  const { data, error } = await supabase.rpc("search_assets", {
-    query_embedding: JSON.stringify(embedding),
-    ws: workspaceId,
-    proj: projectId ?? undefined,
-    date_from: parsed.date_from ?? undefined,
-    date_to: parsed.date_to ?? undefined,
-    place_terms: parsed.place_terms.length ? parsed.place_terms.map((t) => t.toLowerCase()) : undefined,
-    tag_terms: parsed.tag_terms.length ? parsed.tag_terms.map((t) => t.toLowerCase()) : undefined,
-    // Lexical hybrid (ADR 0031): the same text we embed is also matched against
-    // each asset's AI description + facts. EXIF filters narrow the set.
-    text_query: parsed.semantic_text.trim() || q,
-    camera_terms: parsed.camera_terms.length ? parsed.camera_terms.map((t) => t.toLowerCase()) : undefined,
-    iso_min: parsed.iso_min ?? undefined,
-    iso_max: parsed.iso_max ?? undefined,
-    aperture_term: parsed.aperture ?? undefined,
-  });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // Spec §8.4: every search logs usage. Non-fatal — a metering hiccup must
-  // not fail the search itself.
-  await supabase.from("usage_events").insert({
-    workspace_id: workspaceId,
-    user_id: user.id,
-    event_type: "search_query",
-    units: 1,
-    model: analyzeModel(),
-    // Costs us two model calls (parse + embed) and the user 0 credits —
-    // search is the core loop (packages/shared CREDIT_COST).
-    cost_usd: costUsdFor("search_query", 1),
-  });
-
-  // The RPC returns a ranked list with no cutoff; the tier annotation (ADR
-  // 0029) is what keeps a small archive from answering every query with all
-  // of itself. Order is preserved — tag-matched rows already rank first.
-  const rows = (data ?? []) as SearchRow[];
-  const results = assignTiers(
-    rows.map((r) => ({
-      assetId: r.asset_id,
-      similarity: r.similarity,
-      matchedTags: r.matched_tags ?? [],
-      matchedPlace: r.matched_place,
-      matchedText: r.matched_text ?? false,
-      takenAt: r.taken_at,
-    })),
-  );
-  return NextResponse.json(searchResponseSchema.parse({ parsed, results }));
+  // Embed → search_assets() → usage event → tiers: lib/search-server, shared
+  // with POST /api/assistant.
+  const outcome = await runSearch(supabase, { workspaceId, userId: user.id, projectId, parsed, q });
+  if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+  return NextResponse.json(searchResponseSchema.parse({ parsed, results: outcome.results }));
 }

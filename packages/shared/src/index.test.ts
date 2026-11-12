@@ -57,6 +57,12 @@ import {
   presignUploadRequestSchema,
   searchParseSchema,
   searchResponseSchema,
+  ASSISTANT_PARSE_PROMPT,
+  SEARCH_PARSE_PROMPT,
+  assistantIntentSchema,
+  assistantNeedsSearch,
+  assistantRequestSchema,
+  assistantResponseSchema,
   searchResultSchema,
   assignTopicAssetsRequestSchema,
   topicMutationResponseSchema,
@@ -962,5 +968,68 @@ describe("Russian is retired: stored, no longer offered", () => {
     ).toBe(true);
     // Saved artboard settings stay permissive too.
     expect(artboardSettingsSchema.parse({ captionLang: "ru" }).captionLang).toBe("ru");
+  });
+});
+
+describe("assistant contracts (ADR 0056)", () => {
+  it("degrades an unclassifiable answer to a plain search, never to a guessed action", () => {
+    const intent = assistantIntentSchema.parse({ action: "delete_everything", target: 7, label: "pink", view: "grid" });
+    expect(intent).toEqual({ action: "search", target: "new_search", label: null, view: null });
+    expect(assistantIntentSchema.parse({})).toEqual({ action: "search", target: "new_search" });
+  });
+
+  it("keeps a well-formed intent as it is", () => {
+    const intent = assistantIntentSchema.parse({
+      action: "add_to_workspace",
+      target: "last_results",
+      workspace_name: "Wedding",
+      label: null,
+      view: null,
+    });
+    expect(intent.action).toBe("add_to_workspace");
+    expect(intent.workspace_name).toBe("Wedding");
+    expect(assistantIntentSchema.parse({ action: "filter_label", label: "none" }).label).toBe("none");
+  });
+
+  it("searches only when the photos are described by the message itself", () => {
+    const of = (action: string, target: string) => assistantIntentSchema.parse({ action, target });
+    expect(assistantNeedsSearch(of("search", "new_search"))).toBe(true);
+    // The parser may pair "search" with any target; a search is still a search.
+    expect(assistantNeedsSearch(of("search", "selection"))).toBe(true);
+    expect(assistantNeedsSearch(of("add_to_workspace", "new_search"))).toBe(true);
+    expect(assistantNeedsSearch(of("trash", "new_search"))).toBe(true);
+    expect(assistantNeedsSearch(of("add_to_workspace", "last_results"))).toBe(false);
+    expect(assistantNeedsSearch(of("open_view", "new_search"))).toBe(false);
+    expect(assistantNeedsSearch(of("help", "new_search"))).toBe(false);
+    // Search returns analyzed photos only, so it cannot find what to analyze.
+    expect(assistantNeedsSearch(of("analyze", "new_search"))).toBe(false);
+  });
+
+  it("bounds what a request may carry and defaults the context", () => {
+    const min = assistantRequestSchema.parse({ message: "  dogs  " });
+    expect(min.message).toBe("dogs");
+    expect(min.context).toEqual({ workspaces: [], hasResults: false, selectionCount: 0 });
+    expect(assistantRequestSchema.safeParse({ message: "a" }).success).toBe(false);
+    expect(assistantRequestSchema.safeParse({ message: "x".repeat(501) }).success).toBe(false);
+    expect(assistantRequestSchema.safeParse({ message: "dogs", projectId: "nope" }).success).toBe(false);
+    expect(
+      assistantRequestSchema.safeParse({ message: "dogs", context: { workspaces: Array.from({ length: 61 }, () => "w") } }).success,
+    ).toBe(false);
+  });
+
+  it("answers with results only when a search ran", () => {
+    const parsed = searchParseSchema.parse({ semantic_text: "" });
+    const intent = assistantIntentSchema.parse({ action: "open_view", view: "map" });
+    expect(assistantResponseSchema.parse({ intent, parsed, results: null }).results).toBeNull();
+    expect(assistantResponseSchema.safeParse({ intent, parsed }).success).toBe(false);
+  });
+
+  it("describes the search fields once, in both prompts", () => {
+    const fields = SEARCH_PARSE_PROMPT.slice(
+      SEARCH_PARSE_PROMPT.indexOf("- semantic_text:"),
+      SEARCH_PARSE_PROMPT.indexOf("\nNever invent"),
+    );
+    expect(fields.length).toBeGreaterThan(200);
+    expect(ASSISTANT_PARSE_PROMPT).toContain(fields);
   });
 });

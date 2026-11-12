@@ -115,5 +115,63 @@ and Escape read it. What decides *which* actions exist for a set of results is
   assistant actions: both have no UI entry point on purpose (ADR 0038, 0040),
   and the assistant is a UI entry point.
 - The conversation is still in memory and still English, like the rest of the
-  UI. Typed commands ("add these to Wedding") are the next step and change none
-  of the above: a parsed intent becomes a `ChatAction` and takes the same road.
+  UI. Typed commands ("add these to Wedding") change none of the above: a
+  parsed intent becomes a `ChatAction` and takes the same road — see the
+  amendment below.
+
+## Amendments
+
+### 2026-11-12 — typed commands
+
+The chat now understands commands as well as searches. Nothing in the Decision
+moves; this adds the step in front of it.
+
+**The model names an intent and does nothing else.** `POST /api/assistant`
+makes the one model call `GET /api/search` already made — the query parse —
+with an intent attached (`assistantIntentSchema` in `packages/shared`): an
+`action` out of a closed list, a `target` (the last answer, the selection, the
+unanalyzed pile, everything, or "the photos this message describes"), and at
+most a Workspace name, a colour and a view. The route contains no write. Its
+answer goes to `resolveIntent` (`lib/assistant-intent.ts`, pure), which turns
+it into a `ChatAction` over real ids, a question, or a refusal — against the
+same snapshot and the same gates as the buttons.
+
+**An action runs only over photos the user has already seen.** "Add these to
+Wedding" after an answer runs. "Add the dog photos to Pets" does not: the
+search runs, the results are shown, and the action is the first button under
+them, because nobody has looked at that set yet. This is the whole of the
+auto-run rule, and it holds for every action alike — including Trash, which on
+a fresh search is an offered button and, once clicked, still a confirm.
+"Runs" keeps the meaning the table above gives it: a credit-spending command
+opens the AI panel, Share and Download open their dialogs, Trash asks.
+
+**No guessing.** Every intent field is `.catch()`-guarded, so an answer the
+parser cannot classify is a search — what every message was before. A Workspace
+name matches exactly, else by the only prefix, else by the only fragment; two
+candidates is no match and the assistant asks. A name that matches nothing
+offers `Create “X” with these N`; it is never created unasked. A missing colour
+or Workspace is a question with the choices as buttons.
+
+**What a manipulated intent can do.** The message and the Workspace names are
+user text and go to the model as content, JSON-quoted, with the instructions
+in the system slot. Suppose they steer it anyway: the worst a wrong intent can
+do is what a wrong click can do. It picks from a closed enum; it cannot name an
+asset id; reversible actions carry their Undo; and everything else stops at a
+panel or a dialog that states the count. That is the reason the model was kept
+on the proposing side of the line rather than given tools.
+
+**Cost.** One model call per message, as before, and the embedding plus
+`search_assets()` only when the intent needs a search
+(`assistantNeedsSearch`) — so a command is cheaper than the search every
+message used to be. Zero credits either way. A search logs its `search_query`
+usage event exactly as it did; a pure command logs nothing, because there is no
+event type for it and counting it as a search would inflate that number. The
+parse call of a command is therefore the one model cost `usage_events` does
+not see.
+
+**Not done, on purpose.** No multi-step tool loop: one message, one intent. The
+model sees no conversation history — only whether results are shown and how
+many photos are selected — so "the second one" or "not those" mean nothing to
+it. `GET /api/search` stays as the spec §8.4 search endpoint and shares the
+pipeline in `lib/search-server.ts`, but the chat was its only caller: since
+this amendment nothing in the UI calls it.

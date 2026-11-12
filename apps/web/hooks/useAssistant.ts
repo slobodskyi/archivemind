@@ -1,22 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Board, SearchResponse } from "@archivemind/shared";
+import type { AssistantRequest, AssistantResponse, Board } from "@archivemind/shared";
 import type { ChatAction, ChatMessage, ChatOffer, ChatResult } from "@/types";
 import {
   buildAssistantContext,
   resultActions,
-  searchReply,
   starterSuggestions,
   type AssistantContext,
   type ResultActions,
 } from "@/lib/assistant";
+import { resolveIntent } from "@/lib/assistant-intent";
 import { CHAT_GREETING } from "@/lib/chat";
 import { photoSrc } from "@/lib/img";
 import type { Workspace } from "./useWorkspace";
 
 /** The assistant: the conversation, and the one place a `ChatAction` becomes
  *  something happening.
+ *
+ *  A message goes to `POST /api/assistant`, which answers with an INTENT — a
+ *  search, or a command naming an action and the photos it is about — and
+ *  never with a deed. lib/assistant-intent turns that into a reply and,
+ *  when the photos are ones the user has already seen, a `ChatAction` to run.
  *
  *  It owns no capability of its own. `runAction` forwards each action to the
  *  handler a button elsewhere already calls — the board hook, the Share and
@@ -47,6 +52,7 @@ type Ws = Pick<
   | "selectedIds"
   | "proc"
   | "labelFilter"
+  | "labelNames"
   | "flashToast"
   | "openExportFor"
   | "selectIds"
@@ -104,6 +110,7 @@ function contextOf(d: AssistantDeps): AssistantContext {
     // every photo they are given (the AI panel intro's own rule).
     drawn: d.ws.view === "neural" ? d.ws.activePositions : null,
     busy: d.ws.aiBusyIds,
+    jobActive: d.ws.proc.active,
     boards: d.boards,
     activeBoardId: d.activeBoardId,
     labelFilter: d.ws.labelFilter,
@@ -129,6 +136,12 @@ export function useAssistant(deps: AssistantDeps): Assistant {
   const [input, setInput] = useState("");
   const inputRef = useRef("");
   const busy = useRef(false);
+  // "These" — the strong tier of the last answer that showed results. What a
+  // typed "add these to Wedding" means when nothing else is named.
+  const lastResults = useRef<string[]>([]);
+  // `send` runs an action it resolved; `runAction` sends a search. A ref
+  // breaks the circle, the same way ArchiveWorkspace ties `ws` to `bd`.
+  const runRef = useRef<(action: ChatAction) => void>(() => {});
 
   const say = useCallback(
     (text: string, offers: ChatOffer[] = []) =>
@@ -139,32 +152,46 @@ export function useAssistant(deps: AssistantDeps): Assistant {
   const send = useCallback(
     async (text?: string) => {
       const t = (typeof text === "string" ? text : inputRef.current).trim();
-      if (!t || busy.current) return;
+      // Under two characters the route refuses; there is nothing to ask yet.
+      if (t.length < 2 || busy.current) return;
       busy.current = true;
       const userId = nextId();
       const replyId = nextId();
       setMsgs((m) => [
         ...m,
         { id: userId, role: "user", text: t },
-        { id: replyId, role: "assistant", text: "Searching your archive…" },
+        { id: replyId, role: "assistant", text: "Working on it…" },
       ]);
       inputRef.current = "";
       setInput("");
       // Patch by id: something else (a finished analysis) may have been
-      // appended while the search was in flight.
+      // appended while the request was in flight.
       const answer = (next: Pick<ChatMessage, "text" | "results" | "note" | "offers">) =>
         setMsgs((m) => m.map((x) => (x.id === replyId ? { id: replyId, role: "assistant", ...next } : x)));
       try {
-        const qs = new URLSearchParams({ q: t });
-        const projectId = latest.current.currentProjectId;
-        if (projectId !== "all") qs.set("projectId", projectId);
-        const resp = await fetch(`/api/search?${qs.toString()}`);
+        const asked = latest.current;
+        const body: AssistantRequest = {
+          message: t.slice(0, 500),
+          ...(asked.currentProjectId !== "all" ? { projectId: asked.currentProjectId } : {}),
+          // What the model cannot see and needs: Workspace NAMES (so it can
+          // spell one), and whether "these" has anything to point at.
+          context: {
+            workspaces: asked.ws.projectMode ? asked.boards.slice(0, 60).map((b) => b.name.slice(0, 200)) : [],
+            hasResults: lastResults.current.length > 0,
+            selectionCount: asked.ws.selectedIds.size,
+          },
+        };
+        const resp = await fetch("/api/assistant", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
         if (!resp.ok) throw new Error(String(resp.status));
-        const data = (await resp.json()) as SearchResponse;
+        const data = (await resp.json()) as AssistantResponse;
 
         const now = latest.current;
         const byId = new Map(now.ws.photos.map((p) => [p.id, p]));
-        const results: ChatResult[] = data.results.map((r) => {
+        const results: ChatResult[] = (data.results ?? []).map((r) => {
           const p = byId.get(r.assetId);
           return {
             assetId: r.assetId,
@@ -176,15 +203,26 @@ export function useAssistant(deps: AssistantDeps): Assistant {
             matchedText: r.matchedText,
           };
         });
-        const reply = searchReply(data.parsed, results, contextOf(now));
-        answer({
-          text: reply.text,
-          ...(results.length ? { results } : {}),
-          ...(reply.note ? { note: reply.note } : {}),
-          ...(reply.offers.length ? { offers: reply.offers } : {}),
+        const outcome = resolveIntent(data.intent, {
+          ctx: contextOf(now),
+          lastResultIds: lastResults.current,
+          found: data.results ? results : null,
+          parsed: data.parsed,
+          labelNames: now.ws.labelNames,
         });
+        const shown = outcome.showResults && results.length > 0;
+        answer({
+          text: outcome.text,
+          ...(shown ? { results } : {}),
+          ...(outcome.note ? { note: outcome.note } : {}),
+          ...(outcome.offers.length ? { offers: outcome.offers } : {}),
+        });
+        if (shown) lastResults.current = results.filter((r) => r.tier === "strong").map((r) => r.assetId);
+        // Set only for photos already seen (lib/assistant-intent); a
+        // credit-spending or outward action still stops at its own panel.
+        if (outcome.run) runRef.current(outcome.run);
       } catch {
-        answer({ text: "Search is unavailable right now — try again in a moment." });
+        answer({ text: "I couldn't reach the assistant just now — try again in a moment." });
       } finally {
         busy.current = false;
       }
@@ -292,6 +330,10 @@ export function useAssistant(deps: AssistantDeps): Assistant {
     [send],
   );
 
+  useEffect(() => {
+    runRef.current = runAction;
+  }, [runAction]);
+
   const onInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     inputRef.current = e.target.value;
     setInput(e.target.value);
@@ -322,13 +364,14 @@ export function useAssistant(deps: AssistantDeps): Assistant {
             visiblePhotos,
             drawn: view === "neural" ? activePositions : null,
             busy: aiBusyIds,
+            jobActive: procActive,
             boards,
             activeBoardId,
             labelFilter,
             selectedIds,
           })
         : null,
-    [open, projectMode, view, showViewTabs, photos, visiblePhotos, activePositions, aiBusyIds, boards, activeBoardId, labelFilter, selectedIds],
+    [open, projectMode, view, showViewTabs, photos, visiblePhotos, activePositions, aiBusyIds, procActive, boards, activeBoardId, labelFilter, selectedIds],
   );
 
   const actionsFor = useCallback(
