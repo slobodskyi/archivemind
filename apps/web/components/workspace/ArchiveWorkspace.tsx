@@ -1336,6 +1336,7 @@ export default function ArchiveWorkspace({
           projectName={ws.projLabel}
           onBatchStart={ws.onUploadBatchStart}
           onBatchSettled={ws.onUploadBatchSettled}
+          onImported={ws.placeArrivals}
         />
       )}
 

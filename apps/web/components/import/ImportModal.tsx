@@ -147,6 +147,7 @@ export default function ImportModal({
   projectName,
   onBatchStart,
   onBatchSettled,
+  onImported,
 }: {
   open: boolean;
   onClose: () => void;
@@ -154,6 +155,9 @@ export default function ImportModal({
   projectName: string;
   onBatchStart?: (batch: UploadBatchStart) => void;
   onBatchSettled?: (result: UploadBatchResult) => void;
+  /** New asset ids a cloud import created — the canvas reserves free space for
+   *  them before the refresh brings them in (ADR 0052). */
+  onImported?: (assetIds: string[]) => void;
 }) {
   const router = useRouter();
   const [source, setSource] = useState<Source>("local");
@@ -280,6 +284,7 @@ export default function ImportModal({
       });
       setDriveResult(res);
       if (res.failedChunks.length > 0) notifyDrive(driveErrorMessage(res.failedChunks[0]));
+      if (res.assetIds.length > 0) onImported?.(res.assetIds);
       if (res.assetIds.length > 0 || res.linkedExisting > 0) router.refresh();
       setDrivePhase("done");
     } catch (err) {
@@ -308,6 +313,7 @@ export default function ImportModal({
       });
       setDbxResult(res);
       if (res.failedChunks.length > 0) setDbxMsg({ text: driveErrorMessage(res.failedChunks[0]), kind: "error" });
+      if (res.assetIds.length > 0) onImported?.(res.assetIds);
       if (res.assetIds.length > 0 || res.linkedExisting > 0) router.refresh();
       setDbxPhase("done");
     } catch (err) {
@@ -335,6 +341,7 @@ export default function ImportModal({
       });
       setOdResult(res);
       if (res.failedChunks.length > 0) notifyOneDrive(driveErrorMessage(res.failedChunks[0]));
+      if (res.assetIds.length > 0) onImported?.(res.assetIds);
       if (res.assetIds.length > 0 || res.linkedExisting > 0) router.refresh();
       setOdPhase("done");
     } catch {

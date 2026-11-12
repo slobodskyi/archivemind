@@ -48,13 +48,21 @@ import {
   centerAtScale,
   fitBounds,
   DEFAULT_ZOOM,
+  defaultSlotCenters,
   droppedAssetCenters,
+  footprintBox,
   EMPTY_GALLERY_OVERRIDES,
   hitTestTiles,
   nudgeOffOverlap,
+  pinCrowdedArrivals,
+  placeInFreeSpace,
+  placementBounds,
   positionsBounds,
   readingOrder,
+  revealBounds,
   tidyCanvasOverrides,
+  tileObstacles,
+  withAssetOverrides,
   minimapGeometry as computeMinimapGeometry,
   minimapLayout as computeMinimapLayout,
   STICKY_NOTE_COLORS,
@@ -62,6 +70,7 @@ import {
   topicAnchorOf,
   topicCloudLayout as computeTopicLayout,
   type Bounds,
+  type CanvasBox,
   type CanvasOverride,
   type CloudLayout,
   type Frame,
@@ -71,6 +80,7 @@ import {
   type Rect,
   type StickyNote,
   type TilePos,
+  type Transform,
 } from "@/lib/layout";
 import { latestPointerPosition, solvePinch } from "@/lib/pinch";
 import {
@@ -561,6 +571,110 @@ function projectCanvasItems(
   return [...pending, ...photos];
 }
 
+type CanvasFurnitureSource = Pick<WorkspaceState, "groups" | "groupGeom" | "stickyNotes">;
+
+/** What the Canvas draws besides tiles, as placement obstacles (ADR 0052): the
+ *  folder boxes and sticky notes of the given scope (all of them on the project
+ *  canvas, a Workspace's own inside one — ArchiveWorkspace's scopedNotes and
+ *  scopedFolders), plus the members of every collapsed folder, which are NOT
+ *  drawn (foldedNeuralPos) and so must not count as obstacles either. */
+function canvasFurniture(
+  canvas: CanvasFurnitureSource,
+  boardId: string | null,
+): { boxes: CanvasBox[]; hidden: Set<string> } {
+  const boxes: CanvasBox[] = [];
+  const hidden = new Set<string>();
+  for (const g of canvas.groups) {
+    if (g.kind !== "folder") continue;
+    const geom = canvas.groupGeom[g.id] ?? defaultFolderGeom(g.id);
+    if (geom.collapsed) for (const m of g.members) hidden.add(m);
+    if (!boardId || g.boardId === boardId) boxes.push(folderHitRect(geom));
+  }
+  for (const n of canvas.stickyNotes) if (!boardId || n.boardId === boardId) boxes.push(n);
+  return { boxes, hidden };
+}
+
+/** Reservations whose photo has not arrived yet (ADR 0052): an override with no
+ *  tile to draw it, held as the footprint the photo will take. Without these two
+ *  imports in a row — or an import then a drop — before the refresh would both
+ *  see the same empty space and land on each other. */
+function reservationObstacles(
+  reserved: ReadonlySet<string>,
+  overrides: Readonly<Record<string, CanvasPoint>>,
+  laidOut: Readonly<Record<string, TilePos>>,
+): CanvasBox[] {
+  const out: CanvasBox[] = [];
+  for (const id of reserved) {
+    const center = overrides[id];
+    if (center && !laidOut[id]) out.push(footprintBox(center));
+  }
+  return out;
+}
+
+/** Everything a new file must not land on: the drawn tiles plus the furniture. */
+function placementObstacles(
+  tiles: Readonly<Record<string, TilePos>>,
+  canvas: CanvasFurnitureSource,
+  boardId: string | null,
+): CanvasBox[] {
+  const f = canvasFurniture(canvas, boardId);
+  return [...tileObstacles(tiles, f.hidden), ...f.boxes];
+}
+
+/** Where the undo/redo snapshots would put this scope's tiles and notes (ADR
+ *  0052). A reservation is folded into every snapshot, but the snapshot's own
+ *  geometry comes back with it: a tile dragged out of a cell returns to it on
+ *  Cmd+Z, and so does a deleted note. A placement that only looked at the live
+ *  canvas could take exactly that cell, so it must miss these too. `skip` are
+ *  ids that are not obstacles in any snapshot (the arrivals being placed). */
+function undoObstacles(
+  snapshots: readonly Snapshot[],
+  items: ReadonlyArray<Pick<Photo, "id" | "w" | "h">>,
+  canvas: CanvasFurnitureSource,
+  boardId: string | null,
+  skip: ReadonlySet<string> = new Set(),
+): CanvasBox[] {
+  if (snapshots.length === 0) return [];
+  const hidden = new Set([...canvasFurniture(canvas, boardId).hidden, ...skip]);
+  const seen = new Set<string>();
+  const out: CanvasBox[] = [];
+  const add = (b: CanvasBox) => {
+    const key = `${b.x}|${b.y}|${b.w}|${b.h}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(b);
+  };
+  // Consecutive snapshots usually share one asset bucket (a note edit leaves it
+  // alone), so each distinct bucket is laid out once.
+  const laidOut = new Set<Readonly<Record<string, CanvasPoint>>>();
+  for (const h of snapshots) {
+    if (!laidOut.has(h.galleryOverrides.asset)) {
+      laidOut.add(h.galleryOverrides.asset);
+      for (const b of tileObstacles(assetGallery(items, h.galleryOverrides.asset).pos, hidden)) add(b);
+    }
+    for (const n of h.stickyNotes) if (!boardId || n.boardId === boardId) add(n);
+  }
+  return out;
+}
+
+/** Fold `add` into an arrangement AND its undo/redo history (existing entries
+ *  win everywhere — withAssetOverrides), so no snapshot can drop a reservation
+ *  or a pin. */
+function foldAssetOverrides<T extends Pick<WorkspaceState, "galleryOverrides" | "history" | "future">>(
+  s: T,
+  add: Readonly<Record<string, CanvasPoint>>,
+): Pick<WorkspaceState, "galleryOverrides" | "history" | "future"> {
+  return {
+    galleryOverrides: withAssetOverrides(s, add).galleryOverrides,
+    history: s.history.map((h) => withAssetOverrides(h, add)),
+    future: s.future.map((h) => withAssetOverrides(h, add)),
+  };
+}
+
+/** A label filter that hides new files: a colour. "none" keeps unlabelled tiles
+ *  and pending uploads (visibleTilePositions), so it does not. */
+const filterHidesArrivals = (filter: LabelFilter) => filter !== null && filter !== "none";
+
 function canPreviewLocally(file: File): boolean {
   if (["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"].includes(file.type)) return true;
   return /\.(?:jpe?g|png|webp|gif|avif)$/i.test(file.name);
@@ -867,6 +981,9 @@ export interface Workspace {
   closeImport: () => void;
   onUploadBatchStart: (batch: UploadBatchStart) => void;
   onUploadBatchSettled: (result: UploadBatchResult) => void;
+  /** Reserve free Canvas space for new asset ids from a cloud import or a
+   *  Paste, before the refresh brings them in (ADR 0052). */
+  placeArrivals: (assetIds: readonly string[]) => void;
 
   // Trash panel (ADR 0033)
   trashOpen: boolean;
@@ -1265,9 +1382,48 @@ export function useWorkspace(
       }
       return [{ ...preview, stage: "error", message: `Processing ${terminal}` }];
     });
+    // ADR 0052 safety net: a photo that arrived with no placement of its own
+    // (linked from elsewhere, an import whose ids we never saw) takes the next
+    // default slot, which an earlier batch or a dragged tile may already hold.
+    // Only those are moved, as one block below the content, and only when their
+    // slot is actually crowded. "New" means absent from the previous server
+    // list AND from `state.photos` — a delete-undo puts its tiles back there
+    // before this refresh lands — and carrying no override, so a tile somebody
+    // placed is never moved. No camera move: nobody just placed these. Props,
+    // not refs: this runs during render.
+    //
+    // Before any of that, every tile already drawn is pinned where it is
+    // (defaultSlotCenters): a new photo older than the newest ones joins the
+    // middle of the newest-first list and would push every later un-dragged
+    // tile on by a slot — onto a block an earlier placement reserved there.
+    let arrivalPins: Record<string, CanvasPoint> = {};
+    if (currentProjectId !== "all") {
+      const known = new Set([...syncedPhotos.map((p) => p.id), ...state.photos.map((p) => p.id)]);
+      const scoped = canvasPhotos(initialPhotos, state.boardScope);
+      const incoming = scoped.filter((p) => !known.has(p.id));
+      if (incoming.length > 0) {
+        const before = canvasPhotos(state.photos, state.boardScope);
+        const freeze = defaultSlotCenters(
+          projectCanvasItems(before, state.uploadPreviews),
+          new Set(before.map((p) => p.id)),
+        );
+        const frozen = foldAssetOverrides(state, freeze);
+        const arrivals = new Set(incoming.filter((p) => !frozen.galleryOverrides.asset[p.id]).map((p) => p.id));
+        const items = projectCanvasItems(scoped, uploadPreviews);
+        const tiles = assetGallery(items, frozen.galleryOverrides.asset).pos;
+        const f = canvasFurniture(state, activeBoardId);
+        const undone = undoObstacles([...frozen.history, ...frozen.future], items, state, activeBoardId, arrivals);
+        arrivalPins = {
+          ...freeze,
+          ...(arrivals.size > 0 ? pinCrowdedArrivals(tiles, arrivals, [...f.boxes, ...undone], f.hidden) : {}),
+        };
+      }
+    }
+    const pinned = Object.keys(arrivalPins).length > 0;
     setState({
       photos: initialPhotos,
       uploadPreviews,
+      ...(pinned ? foldAssetOverrides(state, arrivalPins) : {}),
       selectedIds: state.selectedIds.filter((id) => ids.has(id)),
       sidebarSelectedIds: state.sidebarSelectedIds.filter((id) => ids.has(id)),
       drawerId: state.drawerId && ids.has(state.drawerId) ? state.drawerId : null,
@@ -3502,7 +3658,11 @@ export function useWorkspace(
   );
 
   const setView = useCallback(
-    (v: ViewMode) => {
+    /** `camera` replaces the re-fit for a caller that already knows where the
+     *  view must land (an upload dropped into a sorted view, ADR 0052): a second
+     *  setState in one tick is not computed eagerly, so a pan issued AFTER this
+     *  call would still read the old view and transform from stateRef. */
+    (v: ViewMode, camera?: Transform) => {
       const s = stateRef.current;
       if (v === s.view) return;
       // Turn on the glide, then re-fit and re-sort in the same commit so the
@@ -3522,7 +3682,7 @@ export function useWorkspace(
         sidebarSelectedIds: [],
         sidebarSearchText: "",
         sidebarAddOpen: false,
-        ...computeFit(v, canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews),
+        ...(camera ?? computeFit(v, canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews)),
       });
       if (animTimer.current) clearTimeout(animTimer.current);
       animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
@@ -3578,6 +3738,113 @@ export function useWorkspace(
     flashToast(`Copied ${ids.length} ${ids.length === 1 ? "file" : "files"} — open another archive and paste`);
   }, [flashToast, setState]);
 
+  /** Pan, at the same zoom, to a block that was just placed when it is not
+   *  already on screen (ADR 0052). Canvas only — every other view lays the new
+   *  files out by date or topic, not where they were placed. */
+  const revealContent = useCallback(
+    (bounds: Bounds) => {
+      const s = stateRef.current;
+      if (s.view !== "neural") return;
+      // A colour filter hides new files (unlabelled, or still uploading), so
+      // following them would pan onto canvas that looks empty.
+      if (filterHidesArrivals(s.labelFilter)) return;
+      const next = revealBounds(bounds, { scale: s.scale, tx: s.tx, ty: s.ty }, rect());
+      if (!next) return;
+      setState({ ...next, tilesAnimating: true });
+      if (animTimer.current) clearTimeout(animTimer.current);
+      animTimer.current = setTimeout(() => setState({ tilesAnimating: false }), 470);
+    },
+    [rect, setState],
+  );
+
+  /** Ids reserved in this session whose photo has not reached `state.photos`
+   *  yet — held as obstacles by the next placement (reservationObstacles). */
+  const reservedRef = useRef(new Set<string>());
+  const pruneReserved = useCallback((onCanvas: ReadonlySet<string>) => {
+    for (const id of reservedRef.current) if (onCanvas.has(id)) reservedRef.current.delete(id);
+  }, []);
+
+  /** Reserve free space on the PROJECT canvas while a Workspace is open (ADR
+   *  0052). The files joined the project, not the Workspace, so they belong in
+   *  the project's stored arrangement — which nothing else writes while a
+   *  Workspace is open (switchCanvasScope flushed it on the way in and re-reads
+   *  it on the way out), so a read-modify-write here cannot race. Placed below
+   *  the project's content: nobody is looking at that canvas to aim at. No
+   *  state, no camera and no history — none of it belongs to that canvas.
+   *  Uploads dropped on the project canvas and still in flight are drawn there,
+   *  keyed by clientId exactly as the blob holds them, so they are obstacles;
+   *  and the project's tiles are pinned (defaultSlotCenters) so an older
+   *  arrival cannot shift them onto the block. */
+  const reserveInProjectBlob = useCallback(
+    (assetIds: readonly string[]) => {
+      if (currentProjectId === "all") return;
+      const s = stateRef.current;
+      const projectKey = canvasStoreKey(currentProjectId, null);
+      const onCanvas = new Set(s.photos.map((p) => p.id));
+      pruneReserved(onCanvas);
+      const arr = canvasArrangement(readCanvasStore(projectKey));
+      const fresh = [...new Set(assetIds)].filter((id) => !onCanvas.has(id) && !arr.galleryOverrides.asset[id]);
+      if (fresh.length === 0) return;
+      const items = projectCanvasItems(
+        s.photos,
+        s.uploadPreviews.filter((preview) => preview.scope === projectKey),
+      );
+      const freeze = defaultSlotCenters(items, onCanvas);
+      const tiles = assetGallery(items, arr.galleryOverrides.asset);
+      const obstacles = [
+        ...placementObstacles(tiles.pos, { groups: s.groups, groupGeom: arr.groupGeom, stickyNotes: s.stickyNotes }, null),
+        ...reservationObstacles(reservedRef.current, arr.galleryOverrides.asset, tiles.pos),
+      ];
+      const centers = placeInFreeSpace(fresh, appendClusterAnchor(tiles.bounds, fresh.length), obstacles);
+      for (const id of fresh) reservedRef.current.add(id);
+      writeCanvasStore(projectKey, withAssetOverrides(arr, { ...freeze, ...centers }));
+    },
+    [currentProjectId, pruneReserved],
+  );
+
+  /** Reserve free space for files that joined this project from somewhere other
+   *  than a drop — a cloud import, a Paste — as soon as their ids are known, so
+   *  they land there even if nobody is watching when ingest finishes (ADR 0052).
+   *  On the Canvas the block goes as near the middle of the viewport as it can,
+   *  and the camera follows it if it is off-screen; in a sorted view it goes
+   *  below the Canvas content and the view stays put — a finished import is not
+   *  a gesture on the canvas. Folded into every undo snapshot, never an undoable
+   *  step of its own, and placed clear of where those snapshots would put a tile
+   *  or note back (undoObstacles), so Cmd+Z cannot drop something onto it. The
+   *  tiles already drawn are pinned in the same fold (defaultSlotCenters): a
+   *  pasted file is usually older than the newest ones, and joining the middle
+   *  of the list would push the un-dragged tiles after it onto the block. */
+  const placeArrivals = useCallback(
+    (assetIds: readonly string[]) => {
+      if (currentProjectId === "all") return;
+      const s = stateRef.current;
+      if (s.canvasScope !== canvasStoreKey(currentProjectId, null)) return reserveInProjectBlob(assetIds);
+      const onCanvas = new Set(s.photos.map((p) => p.id));
+      pruneReserved(onCanvas);
+      const fresh = [...new Set(assetIds)].filter((id) => !onCanvas.has(id) && !s.galleryOverrides.asset[id]);
+      if (fresh.length === 0) return;
+      const scoped = canvasPhotos(s.photos, s.boardScope);
+      const items = projectCanvasItems(scoped, s.uploadPreviews);
+      const freeze = defaultSlotCenters(items, new Set(scoped.map((p) => p.id)));
+      const gallery = assetGallery(items, s.galleryOverrides.asset);
+      const r = rect();
+      const anchor =
+        s.view === "neural"
+          ? toContent(r.left + r.width / 2, r.top + r.height / 2)
+          : appendClusterAnchor(gallery.bounds, fresh.length);
+      const obstacles = [
+        ...placementObstacles(gallery.pos, s, null),
+        ...reservationObstacles(reservedRef.current, s.galleryOverrides.asset, gallery.pos),
+        ...undoObstacles([...s.history, ...s.future], items, s, null),
+      ];
+      const centers = placeInFreeSpace(fresh, anchor, obstacles);
+      for (const id of fresh) reservedRef.current.add(id);
+      setState((prev) => foldAssetOverrides(prev, { ...freeze, ...centers }));
+      revealContent(placementBounds(centers));
+    },
+    [currentProjectId, reserveInProjectBlob, pruneReserved, rect, toContent, setState, revealContent],
+  );
+
   /** Paste: link the clipboard's assets into the project being viewed. The
    *  route is idempotent (on-conflict ignore), so pasting twice is harmless and
    *  pasting a file that is already here is a no-op rather than an error. */
@@ -3608,10 +3875,14 @@ export function useWorkspace(
             ? "Those files are already in this archive"
             : `Pasted ${added} ${added === 1 ? "file" : "files"}`,
         );
+        // Reserved only once the server confirms: the route answers a count,
+        // not ids, so a reservation made before a failed paste would sit on
+        // the spot and a later re-paste would skip it as already placed.
+        if (added > 0) placeArrivals(ids);
         if (added > 0) router.refresh();
       })
       .catch(() => flashToast("Couldn't paste — try again"));
-  }, [flashToast, router]);
+  }, [flashToast, router, placeArrivals]);
 
   // ── Bound tile groups (the "Group" action) — no folder, no server ──────────
 
@@ -4422,19 +4693,24 @@ export function useWorkspace(
       // only live on the Canvas. If the drop landed in a sorted view the pointer
       // was over the Timeline/Topic layout — a meaningless grid anchor — so append
       // the batch as a neat cluster just below the existing Canvas content and
-      // snap to Canvas (below). In Canvas, cluster around the real drop point.
+      // snap to Canvas (below). In Canvas, the batch takes the nearest free block
+      // to the drop point, or to the viewport centre for Add files (ADR 0052).
       const droppedIntoSortedView = newFiles.length > 0 && s.view !== "neural";
       let centers: Record<string, CanvasPoint> = {};
       if (newFiles.length > 0) {
         const r = rect();
         const clientPoint = batch.clientPoint ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        const items = projectCanvasItems(canvasPhotos(s.photos, s.boardScope), s.uploadPreviews);
+        const gallery = assetGallery(items, s.galleryOverrides.asset);
         const anchor = droppedIntoSortedView
-          ? appendClusterAnchor(
-            neuralGalleryFor(canvasPhotos(s.photos, s.boardScope), s.galleryOverrides, s.uploadPreviews).bounds,
-            newClientIds.length,
-          )
+          ? appendClusterAnchor(gallery.bounds, newClientIds.length)
           : toContent(clientPoint.x, clientPoint.y);
-        centers = droppedAssetCenters(newClientIds, anchor);
+        const obstacles = [
+          ...placementObstacles(gallery.pos, s, boardIdRef.current),
+          ...reservationObstacles(reservedRef.current, s.galleryOverrides.asset, gallery.pos),
+          ...undoObstacles([...s.history, ...s.future], items, s, boardIdRef.current),
+        ];
+        centers = placeInFreeSpace(newClientIds, anchor, obstacles);
       }
       const previews = newFiles.map((item): CanvasUploadPreview => {
         const clientId = `${batch.batchId}:${item.inputIndex}`;
@@ -4448,6 +4724,7 @@ export function useWorkspace(
           mime: item.file.type || "application/octet-stream",
           localUrl: null,
           center: centers[clientId],
+          scope: s.canvasScope,
           width: 4,
           height: 3,
           stage: "uploading",
@@ -4476,17 +4753,33 @@ export function useWorkspace(
           asset: { ...previous.galleryOverrides.asset, ...centers },
         },
       }));
-      // Snap to Canvas so the dropped cluster is what the user sees; the setState
-      // above already committed the previews to stateRef, so setView's re-fit
-      // includes them and frames the new batch.
-      if (droppedIntoSortedView) setView("neural");
+      // Snap to Canvas so the dropped cluster is what the user sees. The camera
+      // is solved HERE, over the arrangement the setState above produces, and
+      // handed to setView: that setState is not guaranteed to have reached
+      // stateRef yet, and setView's own setState is the second in this tick, so
+      // neither its re-fit nor a pan issued after it could see the new batch.
+      // On the Canvas the camera only follows a block that landed off-screen,
+      // and never one a colour filter is hiding (revealContent) — there the
+      // sorted-view drop keeps the plain re-fit it always had.
+      if (droppedIntoSortedView) {
+        const fit = computeFit(
+          "neural",
+          canvasPhotos(s.photos, s.boardScope),
+          { ...s.galleryOverrides, asset: { ...s.galleryOverrides.asset, ...centers } },
+          [...s.uploadPreviews, ...previews],
+        );
+        const reveal = filterHidesArrivals(s.labelFilter) ? null : revealBounds(placementBounds(centers), fit, rect());
+        setView("neural", reveal ?? fit);
+      } else if (newFiles.length > 0) {
+        revealContent(placementBounds(centers));
+      }
       // The thumbnail also seeds the tile's real aspect: previews start at a 4:3
       // placeholder, and without it the tile would jump to the photo's true
       // shape only when the processed asset lands (seconds later). The canonical
       // asset (same dimensions) then arrives with no further reflow.
       thumbQueue().enqueue(thumbJobs);
     },
-    [rect, setState, toContent, neuralGalleryFor, setView, thumbQueue],
+    [rect, setState, toContent, computeFit, setView, revealContent, thumbQueue],
   );
 
   const onUploadBatchSettled = useCallback(
@@ -4510,6 +4803,39 @@ export function useWorkspace(
         if (url) URL.revokeObjectURL(url);
         objectUrlsRef.current.delete(clientId);
       }
+      // An upload joins the PROJECT, never the open Workspace. A file placed
+      // while a Workspace was open (or settling after the canvas switched scope)
+      // has a centre that means nothing on the project canvas, where it would
+      // otherwise take an unchecked default slot — so it gets a project
+      // reservation of its own (ADR 0052). A file both placed and settled on the
+      // project canvas is left to the re-key below. One dropped on the project
+      // canvas that settles while a Workspace is open keeps its drop point: the
+      // project blob holds that centre under the clientId (switchCanvasScope
+      // flushed it), so the same re-key is done there, in the blob.
+      const projectKey = canvasStoreKey(currentProjectId, null);
+      const scopeNow = stateRef.current.canvasScope;
+      const blobRekeys: Array<{ clientId: string; assetId: string }> = [];
+      const needsProjectPlace = stateRef.current.uploadPreviews.flatMap((preview) => {
+        if (preview.batchId !== result.batchId || !attempted.has(preview.inputIndex)) return [];
+        const uploadedFile = uploaded.get(preview.inputIndex);
+        if (!uploadedFile || failed.has(preview.inputIndex) || linkFailed.has(preview.inputIndex)) return [];
+        if (preview.scope !== projectKey) return [uploadedFile.assetId];
+        if (scopeNow !== projectKey) blobRekeys.push({ clientId: preview.clientId, assetId: uploadedFile.assetId });
+        return [];
+      });
+      if (blobRekeys.length > 0) {
+        const arr = canvasArrangement(readCanvasStore(projectKey));
+        const asset = { ...arr.galleryOverrides.asset };
+        for (const { clientId, assetId } of blobRekeys) {
+          const center = asset[clientId];
+          delete asset[clientId];
+          if (asset[assetId]) continue;
+          if (center) asset[assetId] = center;
+          // Lost its centre (a Tidy up before the switch): placed like any arrival.
+          else needsProjectPlace.push(assetId);
+        }
+        writeCanvasStore(projectKey, { ...arr, galleryOverrides: { ...arr.galleryOverrides, asset } });
+      }
       setState((previous) => {
         const assetOverrides = { ...previous.galleryOverrides.asset };
         const uploadPreviews = previous.uploadPreviews.map((preview): CanvasUploadPreview => {
@@ -4518,15 +4844,17 @@ export function useWorkspace(
           if (!uploadedFile || failed.has(preview.inputIndex)) {
             return { ...preview, localUrl: null, stage: "error", message: "Upload failed" };
           }
-          const center = assetOverrides[preview.clientId] ?? preview.center;
+          // The fallback centre only counts in the scope it was chosen in.
+          const center =
+            assetOverrides[preview.clientId] ?? (preview.scope === previous.canvasScope ? preview.center : undefined);
           delete assetOverrides[preview.clientId];
-          assetOverrides[uploadedFile.assetId] = center;
+          if (center) assetOverrides[uploadedFile.assetId] = center;
           const couldNotLink = linkFailed.has(preview.inputIndex);
           return {
             ...preview,
             assetId: uploadedFile.assetId,
             jobId: uploadedFile.jobId,
-            center,
+            center: center ?? preview.center,
             localUrl: couldNotLink ? null : preview.localUrl,
             stage: couldNotLink ? "error" : "processing",
             message: couldNotLink ? "Uploaded, but couldn’t add to this project" : null,
@@ -4539,8 +4867,9 @@ export function useWorkspace(
           future: [],
         };
       });
+      if (needsProjectPlace.length > 0) placeArrivals(needsProjectPlace);
     },
-    [setState],
+    [setState, currentProjectId, placeArrivals],
   );
 
   // ── Misc toolbar actions ────────────────────────────────────────────────
@@ -5829,6 +6158,7 @@ export function useWorkspace(
     closeImport,
     onUploadBatchStart,
     onUploadBatchSettled,
+    placeArrivals,
 
     trashOpen: state.trashOpen,
     openTrash,

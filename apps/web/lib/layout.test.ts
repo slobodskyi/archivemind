@@ -3,21 +3,33 @@ import type { Photo } from "@/types";
 import {
   appendClusterAnchor,
   assetGallery,
+  boxesBounds,
+  defaultSlotCenters,
   droppedAssetCenters,
+  EMPTY_GALLERY_OVERRIDES,
   fitBounds,
   hitTestTiles,
   minimapGeometry,
   minimapLayout,
   nudgeOffOverlap,
   packGrid,
+  pinCrowdedArrivals,
+  placeInFreeSpace,
+  placementBounds,
+  PLACEMENT_GAP,
   readingOrder,
+  revealBounds,
   SAME_CLOUD_LINKS_PER_FILE,
   TAG_LINK_MEMBER_CAP,
   timelineAxisLayout,
   tidyCanvasOverrides,
+  tileObstacles,
   topicCloudLayout,
   topicKeyOf,
+  withAssetOverrides,
   type Bounds,
+  type CanvasBox,
+  type GalleryOverrides,
   type TilePos,
 } from "./layout";
 import { heuristicTopicKey } from "./topics";
@@ -253,6 +265,288 @@ describe("appendClusterAnchor", () => {
     // (ASSET_CELL_H = 176) below the content's bottom edge — no overlap.
     const topY = Math.min(...Object.values(droppedAssetCenters(["a", "b", "c", "d"], anchor)).map((p) => p.y));
     expect(topY).toBe(600 + 176);
+  });
+});
+
+// ── Free placement for new files (ADR 0052) ─────────────────────────────────
+
+const CELL_W = 184;
+const CELL_H = 176;
+const CX0 = 172;
+const CY0 = 178;
+const HALF = 74;
+
+/** A placed centre's 148×148 footprint misses every obstacle grown by the gap. */
+function footprintClear(center: { x: number; y: number }, obstacles: readonly CanvasBox[]): boolean {
+  return obstacles.every(
+    (o) =>
+      !(
+        center.x - HALF < o.x + o.w + PLACEMENT_GAP &&
+        center.x + HALF > o.x - PLACEMENT_GAP &&
+        center.y - HALF < o.y + o.h + PLACEMENT_GAP &&
+        center.y + HALF > o.y - PLACEMENT_GAP
+      ),
+  );
+}
+
+const onLattice = (p: { x: number; y: number }) =>
+  Number.isInteger((p.x - CX0) / CELL_W) && Number.isInteger((p.y - CY0) / CELL_H);
+
+const ids = (n: number, prefix = "n") => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+
+describe("placeInFreeSpace", () => {
+  it("returns nothing for an empty batch", () => {
+    expect(placeInFreeSpace([], { x: 0, y: 0 }, [])).toEqual({});
+  });
+
+  it("puts one file on the lattice cell nearest the anchor", () => {
+    const cell = { x: CX0 + CELL_W * 3, y: CY0 + CELL_H * 2 };
+    expect(cell).toEqual({ x: 724, y: 530 });
+    expect(placeInFreeSpace(["a"], cell, [])).toEqual({ a: cell });
+    expect(placeInFreeSpace(["a"], { x: cell.x + 40, y: cell.y - 40 }, [])).toEqual({ a: cell });
+  });
+
+  it("packs a batch as a lattice-aligned block around the anchor", () => {
+    for (const anchor of [{ x: 724, y: 530 }, { x: -2300, y: -1700 }]) {
+      const points = Object.values(placeInFreeSpace(ids(4), anchor, []));
+      expect(points).toHaveLength(4);
+      expect(points.every(onLattice)).toBe(true);
+      expect(new Set(points.map((p) => p.x)).size).toBe(2);
+      expect(new Set(points.map((p) => p.y)).size).toBe(2);
+      const midX = (Math.min(...points.map((p) => p.x)) + Math.max(...points.map((p) => p.x))) / 2;
+      const midY = (Math.min(...points.map((p) => p.y)) + Math.max(...points.map((p) => p.y))) / 2;
+      expect(Math.abs(midX - anchor.x)).toBeLessThanOrEqual(CELL_W / 2);
+      expect(Math.abs(midY - anchor.y)).toBeLessThanOrEqual(CELL_H / 2);
+    }
+  });
+
+  it("left-aligns a partial last row so it stays on the lattice", () => {
+    const out = placeInFreeSpace(ids(5), { x: 724, y: 530 }, []);
+    const xs = [0, 1, 2].map((k) => out[`n${k}`].x);
+    expect(new Set(xs).size).toBe(3);
+    expect(out.n3.x).toBe(xs[0]);
+    expect(out.n4.x).toBe(xs[1]);
+    expect(out.n3.y).toBe(out.n0.y + CELL_H);
+    expect(Object.values(out).every(onLattice)).toBe(true);
+  });
+
+  it("moves to the nearest free cell, preferring below on a tie", () => {
+    // One default tile in cell (0, 0), jitter and all.
+    const tiles = assetGallery([asset("a")], {}).pos;
+    const out = placeInFreeSpace(["new"], { x: CX0, y: CY0 }, tileObstacles(tiles));
+    // Vertical neighbours (176) are nearer than horizontal ones (184); of the
+    // two, below wins.
+    expect(out).toEqual({ new: { x: CX0, y: CY0 + CELL_H } });
+  });
+
+  it("drops straight into the empty cell under a full default row", () => {
+    const tiles = assetGallery(ids(6, "row").map((id) => asset(id)), {}).pos;
+    const target = { x: CX0 + 2 * CELL_W, y: CY0 + CELL_H };
+    expect(placeInFreeSpace(["new"], target, tileObstacles(tiles))).toEqual({ new: target });
+  });
+
+  it("never lands on a tile, note or folder box", () => {
+    const note: CanvasBox = { x: 300, y: 500, w: 180, h: 160 };
+    const folder: CanvasBox = { x: 1300, y: 140, w: 152, h: 118 };
+    for (const count of [0, 7, 36, 200]) {
+      const photos = ids(count, "p").map((id, i) => asset(id, i % 3 === 0 ? 300 : 400, i % 3 === 0 ? 400 : 300));
+      const overrides: Record<string, { x: number; y: number }> =
+        count > 0 ? { p0: { x: 610, y: 260 }, [`p${count - 1}`]: { x: 1000, y: 900 } } : {};
+      const tiles = assetGallery(photos, overrides).pos;
+      const obstacles = [...tileObstacles(tiles), note, folder];
+      for (const anchor of [{ x: 400, y: 300 }, { x: 390, y: 580 }, { x: 9000, y: 9000 }, { x: -800, y: -600 }]) {
+        for (const n of [1, 5, 36]) {
+          const out = placeInFreeSpace(ids(n), anchor, obstacles);
+          const points = Object.values(out);
+          expect(points).toHaveLength(n);
+          expect(new Set(points.map((p) => `${p.x}:${p.y}`)).size).toBe(n);
+          expect(points.every((p) => footprintClear(p, obstacles))).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("is deterministic", () => {
+    const tiles = assetGallery(ids(20, "p").map((id) => asset(id)), {}).pos;
+    const obstacles = tileObstacles(tiles);
+    const first = placeInFreeSpace(ids(9), { x: 400, y: 300 }, obstacles);
+    const second = placeInFreeSpace([...ids(9)], { x: 400, y: 300 }, obstacles.map((o) => ({ ...o })));
+    expect(second).toEqual(first);
+  });
+
+  it("places 500 files among 2000 tiles without touching any", () => {
+    const tiles = assetGallery(ids(2000, "p").map((id) => asset(id)), {}).pos;
+    const obstacles = tileObstacles(tiles);
+    const points = Object.values(placeInFreeSpace(ids(500), { x: 600, y: 20000 }, obstacles));
+    expect(points).toHaveLength(500);
+    expect(new Set(points.map((p) => `${p.x}:${p.y}`)).size).toBe(500);
+    expect(points.every((p) => footprintClear(p, obstacles))).toBe(true);
+  });
+
+  it("steps off a huge note to its nearest side", () => {
+    const note: CanvasBox = { x: -2000, y: -2000, w: 4000, h: 4000 };
+    const out = placeInFreeSpace(["new"], { x: 0, y: 0 }, [note]);
+    // Below and above are equally near (12 rows); below wins the tie.
+    expect(out).toEqual({ new: { x: CX0 - CELL_W, y: CY0 + 11 * CELL_H } });
+    expect(footprintClear(out.new, [note])).toBe(true);
+  });
+
+  it("handles a far negative anchor on an empty canvas", () => {
+    expect(placeInFreeSpace(["a"], { x: -5000, y: -3000 }, [])).toEqual({
+      a: { x: CX0 - 28 * CELL_W, y: CY0 - 18 * CELL_H },
+    });
+  });
+
+  it("falls back to below all content when nothing near the anchor is free", () => {
+    const wall: CanvasBox = { x: -6000, y: -6000, w: 12000, h: 12000 };
+    const points = Object.values(placeInFreeSpace(ids(4), { x: 0, y: 0 }, [wall]));
+    const bounds = boxesBounds([wall]);
+    expect(Math.min(...points.map((p) => p.y)) - HALF).toBeGreaterThan(bounds.yb + PLACEMENT_GAP);
+    const midX = (Math.min(...points.map((p) => p.x)) + Math.max(...points.map((p) => p.x))) / 2;
+    expect(Math.abs(midX - (bounds.xl + bounds.xr) / 2)).toBeLessThanOrEqual(CELL_W / 2);
+    expect(points.every((p) => footprintClear(p, [wall]))).toBe(true);
+    expect(points.every(onLattice)).toBe(true);
+  });
+});
+
+describe("boxesBounds / placementBounds", () => {
+  it("defaults an empty set and unions mixed boxes", () => {
+    expect(boxesBounds([])).toEqual({ xl: 0, yt: 0, xr: 1000, yb: 700 });
+    expect(
+      boxesBounds([
+        { x: 10, y: 20, w: 100, h: 50 },
+        { x: -40, y: 300, w: 10, h: 10 },
+        { x: Number.NaN, y: 0, w: 1, h: 1 },
+      ]),
+    ).toEqual({ xl: -40, yt: 20, xr: 110, yb: 310 });
+  });
+
+  it("covers each centre's footprint", () => {
+    expect(placementBounds({})).toEqual({ xl: 0, yt: 0, xr: 1000, yb: 700 });
+    expect(placementBounds({ a: { x: 100, y: 200 }, b: { x: 400, y: 50 } })).toEqual({
+      xl: 100 - HALF,
+      yt: 50 - HALF,
+      xr: 400 + HALF,
+      yb: 200 + HALF,
+    });
+  });
+});
+
+describe("pinCrowdedArrivals", () => {
+  // Newest first, the way the API returns them: "new" takes the 4th default cell.
+  const photos = [asset("new"), asset("c"), asset("b"), asset("a")];
+
+  it("leaves an arrival whose default slot is clear exactly where it is", () => {
+    const tiles = assetGallery(photos, {}).pos;
+    expect(pinCrowdedArrivals(tiles, new Set(["new"]), [])).toEqual({});
+  });
+
+  it("moves an arrival whose slot an earlier placement took", () => {
+    const tiles = assetGallery(photos, { a: { x: CX0 + 3 * CELL_W, y: CY0 } }).pos;
+    const out = pinCrowdedArrivals(tiles, new Set(["new"]), []);
+    expect(Object.keys(out)).toEqual(["new"]);
+    const others = tileObstacles(tiles, new Set(["new"]));
+    expect(footprintClear(out.new, others)).toBe(true);
+    expect(out.new.y - HALF).toBeGreaterThan(boxesBounds(others).yb);
+  });
+
+  it("counts extra boxes, and never a hidden tile", () => {
+    const tiles = assetGallery(photos, {}).pos;
+    const slot = tiles.new;
+    const note: CanvasBox = { x: slot.x + 20, y: slot.y + 20, w: 140, h: 140 };
+    const out = pinCrowdedArrivals(tiles, new Set(["new"]), [note]);
+    expect(Object.keys(out)).toEqual(["new"]);
+    expect(footprintClear(out.new, [note, ...tileObstacles(tiles, new Set(["new"]))])).toBe(true);
+
+    // A collapsed folder's member sitting on the slot is not drawn — not an obstacle.
+    const covered = assetGallery(photos, { a: { x: slot.cx, y: slot.cy } }).pos;
+    expect(pinCrowdedArrivals(covered, new Set(["new"]), [], new Set(["a"]))).toEqual({});
+  });
+});
+
+describe("defaultSlotCenters", () => {
+  // Newest first, as the API returns them: p0 is the oldest and takes cell 0.
+  const tenNewestFirst = ids(10, "p").reverse().map((id) => asset(id));
+
+  it("returns each listed tile's default centre, ignoring overrides", () => {
+    const defaults = assetGallery(tenNewestFirst, {}).pos;
+    const out = defaultSlotCenters(tenNewestFirst, new Set(["p0", "p9"]));
+    expect(out).toEqual({
+      p0: { x: defaults.p0.cx, y: defaults.p0.cy },
+      p9: { x: defaults.p9.cx, y: defaults.p9.cy },
+    });
+  });
+
+  it("keeps a placed block clear when OLDER files join the list (Paste)", () => {
+    // Row 0 full, row 1 holds cols 0-3; the viewport sits on cell (4, 1).
+    for (const k of [1, 2, 4]) {
+      const before = assetGallery(tenNewestFirst, {}).pos;
+      const pasted = ids(k, "old");
+      const placed = placeInFreeSpace(pasted, { x: CX0 + 4 * CELL_W, y: CY0 + CELL_H }, tileObstacles(before));
+      // The pasted files are older than every tile, so they sort LAST in the
+      // newest-first list and take the first default indexes after the refresh.
+      const after = [...tenNewestFirst, ...pasted.map((id) => asset(id))];
+      const clashes = (overrides: Record<string, { x: number; y: number }>) => {
+        const tiles = assetGallery(after, overrides).pos;
+        const others = tileObstacles(tiles, new Set(pasted));
+        return pasted.some((id) => !footprintClear(placed[id], others));
+      };
+      // Unpinned, the shift pushes the newest tiles into the reserved cells…
+      expect(clashes(placed)).toBe(true);
+      // …pinned before the list changes, nothing already drawn moves.
+      const freeze = defaultSlotCenters(tenNewestFirst, new Set(ids(10, "p")));
+      expect(clashes({ ...freeze, ...placed })).toBe(false);
+      const tiles = assetGallery(after, { ...freeze, ...placed }).pos;
+      for (const id of ids(10, "p")) expect([tiles[id].cx, tiles[id].cy]).toEqual([before[id].cx, before[id].cy]);
+    }
+  });
+});
+
+describe("withAssetOverrides", () => {
+  const base: { galleryOverrides: GalleryOverrides } = {
+    galleryOverrides: { ...EMPTY_GALLERY_OVERRIDES, asset: { kept: { x: 1, y: 2 } } },
+  };
+
+  it("never overwrites an existing placement", () => {
+    const out = withAssetOverrides(base, { kept: { x: 900, y: 900 }, fresh: { x: 5, y: 6 } });
+    expect(out.galleryOverrides.asset).toEqual({ kept: { x: 1, y: 2 }, fresh: { x: 5, y: 6 } });
+    expect(base.galleryOverrides.asset).toEqual({ kept: { x: 1, y: 2 } });
+  });
+
+  it("folds into every undo and redo snapshot", () => {
+    const history = [base, { galleryOverrides: EMPTY_GALLERY_OVERRIDES }];
+    const add = { fresh: { x: 5, y: 6 } };
+    const folded = history.map((h) => withAssetOverrides(h, add));
+    expect(folded.every((h) => h.galleryOverrides.asset.fresh?.x === 5)).toBe(true);
+    expect(folded[0].galleryOverrides.asset.kept).toEqual({ x: 1, y: 2 });
+  });
+});
+
+describe("revealBounds", () => {
+  const rect = { width: 1200, height: 800 };
+  const t = { scale: 0.75, tx: 0, ty: 0 };
+
+  it("leaves the camera alone when the block is already in view", () => {
+    expect(revealBounds({ xl: 200, yt: 200, xr: 400, yb: 400 }, t, rect)).toBeNull();
+  });
+
+  it("pans a block off the right edge into the middle at the same zoom", () => {
+    const bounds = { xl: 3000, yt: 200, xr: 3300, yb: 400 };
+    const next = revealBounds(bounds, t, rect);
+    expect(next).not.toBeNull();
+    if (!next) return;
+    expect(next.scale).toBe(0.75);
+    expect(next.ty).toBe(0); // already inside vertically — not moved
+    const left = bounds.xl * next.scale + next.tx;
+    const right = bounds.xr * next.scale + next.tx;
+    expect((left + right) / 2).toBeCloseTo(84 + (1200 - 60 - 84) / 2);
+  });
+
+  it("shows the top of a block taller than the viewport", () => {
+    const bounds = { xl: 200, yt: 5000, xr: 400, yb: 9000 };
+    const next = revealBounds(bounds, t, rect);
+    expect(next?.scale).toBe(0.75);
+    expect(next && bounds.yt * next.scale + next.ty).toBeCloseTo(70);
   });
 });
 
