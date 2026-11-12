@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  drawerStep,
   clampCam,
   fitBox,
   fitCam,
@@ -217,6 +218,41 @@ describe("viewerSequence", () => {
 
   it("still opens a start that the visible order does not contain", () => {
     expect(viewerSequence(order, [], "z")).toEqual({ ids: ["z", ...order], start: "z" });
+  });
+});
+
+describe("drawerStep", () => {
+  const order = ["a", "b", "c", "d", "e"];
+
+  it("moves the selection with the drawer when it was the drawer's own photo", () => {
+    expect(drawerStep(order, ["b"], "b", 1)).toEqual({ id: "c", selectedIds: ["c"] });
+    expect(drawerStep(order, ["b"], "b", -1)).toEqual({ id: "a", selectedIds: ["a"] });
+  });
+
+  it("selects the photo it steps to when nothing was selected, wrapping at the ends", () => {
+    expect(drawerStep(order, [], "e", 1)).toEqual({ id: "a", selectedIds: ["a"] });
+    expect(drawerStep(order, [], "a", -1)).toEqual({ id: "e", selectedIds: ["e"] });
+  });
+
+  it("walks a selection of two or more that holds the drawer's photo, in reading order, and keeps it whole", () => {
+    const selected = ["d", "b", "a"];
+    expect(drawerStep(order, selected, "b", 1)).toEqual({ id: "d", selectedIds: null });
+    expect(drawerStep(order, selected, "d", 1)).toEqual({ id: "a", selectedIds: null });
+    expect(drawerStep(order, selected, "a", -1)).toEqual({ id: "d", selectedIds: null });
+  });
+
+  it("takes the outline along when the selection is elsewhere — the viewer's rule on close", () => {
+    expect(drawerStep(order, ["d", "e"], "a", 1)).toEqual({ id: "b", selectedIds: ["b"] });
+    expect(drawerStep(order, ["e"], "a", 1)).toEqual({ id: "b", selectedIds: ["b"] });
+  });
+
+  it("counts only the selected photos the order still holds", () => {
+    // "z" is selected but hidden, so b alone is no set to walk.
+    expect(drawerStep(order, ["b", "z"], "b", 1)).toEqual({ id: "c", selectedIds: ["c"] });
+  });
+
+  it("has nowhere to go with one photo", () => {
+    expect(drawerStep(["a"], ["a"], "a", 1)).toBeNull();
   });
 });
 

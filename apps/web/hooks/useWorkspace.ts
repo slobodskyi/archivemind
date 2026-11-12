@@ -83,7 +83,7 @@ import {
   type Transform,
 } from "@/lib/layout";
 import { latestPointerPosition, solvePinch } from "@/lib/pinch";
-import { stepSequence, viewerAfterRemoval, viewerSequence } from "@/lib/viewer";
+import { drawerStep, stepSequence, viewerAfterRemoval, viewerSequence } from "@/lib/viewer";
 import {
   canvasArrangement,
   canvasStoreKey,
@@ -2973,10 +2973,13 @@ export function useWorkspace(
       // A drawer opened on a photo the canvas is not drawing (a search hit
       // outside the open Workspace) still steps, through every photo.
       const ids = order.includes(s.drawerId) ? order : s.photos.map((p) => p.id);
-      const next = stepSequence(ids, s.drawerId, dir);
-      if (next) openDrawer(next);
+      const step = drawerStep(ids, s.selectedIds, s.drawerId, dir);
+      if (!step) return;
+      openDrawer(step.id);
+      // The outline follows the drawer, unless a set is being walked.
+      if (step.selectedIds) setState({ selectedIds: step.selectedIds });
     },
-    [openDrawer, navOrder],
+    [openDrawer, navOrder, setState],
   );
 
   // ── Fullscreen viewer (ADR 0054) ─────────────────────────────────────────
