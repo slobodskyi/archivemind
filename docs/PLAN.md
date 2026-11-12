@@ -359,8 +359,8 @@ kept or removed on purpose.
    as `content_generated`. A server `content_drafts` domain and combined rendered
    packages remain a migration-owned follow-up.
 6. **Public preview links** ([ADR 0046](decisions/0046-publication-share-links.md)) —
-   a reviewed Article/Carousel draft can cross an explicit immutable Share
-   boundary and open at `/p/{token}` for a recipient with no account. The public
+   a reviewed Article/Carousel draft can cross an explicit immutable publish
+   boundary (the studio's **Preview link** button) and open at `/p/{token}` for a recipient with no account. The public
    version contains sanitized editorial content and opaque media ids, freezes
    the visible 1024px previews under a share-owned R2 prefix, exposes stored
    originals only when permitted (Drive stays honestly labelled web-size), and
@@ -383,6 +383,15 @@ kept or removed on purpose.
    asset provenance, service-role-only resolvers, ZIP guards and the sweep.
    Landing as four PRs: database → owner dialog → public page and downloads →
    uploads. Password-protected links follow separately.
+   **Scopes and details** ([ADR 0053](decisions/0053-share-scopes-and-details.md))
+   landed as four more: migration `20261112000001` (a link's scope — the
+   project, one Workspace or a fixed list of files — and opt-in details, with
+   `project_share_scope_assets()` as the one definition of what a link
+   carries), then one Share dialog from every entry point, then details and
+   filters on `/s/{token}`, then the closing pieces: a "reachable from outside"
+   marker on a shared Workspace's chip, "Show on canvas" for every link, and the
+   draft studio's Share renamed **Preview link** so that SHARE in the canvas
+   always means files.
 
 The original four-PR stack had no migrations; the dated ADR 0044 amendments and
 the paragraph above describe the backend that landed after it. Device/prod visual

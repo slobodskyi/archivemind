@@ -114,10 +114,23 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                edits the canvas in front of you, while Copy is a link
                                                into an archive you are not looking at
   app/api/projects/[id]/shares                 project share links (ADR 0051, migration
-                                               20261103000001): GET lists the unrevoked links for the
-                                               Share dialog — the hub card's Share… and the canvas
-                                               header's SHARE (hidden on the `all` canvas, which has no
-                                               project); POST mints one. Rights are
+                                               20261103000001; scopes + details ADR 0053, migration
+                                               20261112000001): GET lists the unrevoked links for the
+                                               ONE Share dialog (components/share/ShareDialog) — the hub
+                                               card's Share…, the canvas header's SHARE, the right-click
+                                               menu's Share N… and a Workspace chip's Share workspace…
+                                               (none on the `all` canvas, which has no project); POST
+                                               mints one. A link has a SCOPE inside its project — the
+                                               whole project, one Workspace, or a fixed list of ≤2,000
+                                               files — and the dialog opens on Download's rule: the
+                                               selection, else the open Workspace, else the project
+                                               (lib/share-scope). Scope and details are fixed at
+                                               creation; a list can't receive files. Each row carries the
+                                               scope, the scope's file count NOW and which details are
+                                               on: Workspaces as a filter (project scope only), colour
+                                               labels, tags, one caption lang × style — all off by
+                                               default, all needing download rights, refused in SQL
+                                               otherwise. Rights are
                                                per link — view & download, send files only, or both —
                                                and every link expires (1/7/30/90 days, no "never").
                                                The token is minted HERE and leaves only inside the
@@ -136,12 +149,32 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                or relabel. DELETE: turn the link off — terminal, any
                                                editor. Archiving a project does NOT stop its links, so
                                                archived cards keep Share…; Trash pauses them
-  app/api/project-shares/[id]/received         GET: what that link brought in and is still live in its
-                                               project — the Share dialog's "Show on canvas", which opens
-                                               /projects/{id}?received={shareId}; the canvas asks this
-                                               route itself (hooks/useReceivedSelection) and selects the
-                                               ids it has loaded. A turned-off link answers too. Editors
-                                               only (list_project_share_received checks is_editor)
+  app/api/project-shares/[id]/scope            GET: what that link CARRIES right now —
+                                               list_project_share_scope(), i.e. project_share_scope_assets(),
+                                               the same definition every public resolver joins (ADR 0053
+                                               §6). The Share dialog's "Show on canvas", offered on EVERY
+                                               link, opens /projects/{id}?share={shareId} (+ &board= for a
+                                               Workspace link, which opens that Workspace first; any other
+                                               link opens the project). A turned-off link answers too.
+                                               Editors only (the RPC checks is_editor)
+  app/api/project-shares/[id]/received         GET: what that link brought IN and is still live in its
+                                               project — the dialog's "Show received", on a row that took
+                                               any files, which opens /projects/{id}?received={shareId}
+                                               and leaves the scope as it is. Both questions go through
+                                               one parser and one hook (lib/share-canvas,
+                                               hooks/useShareCanvasSelection): the canvas asks the route
+                                               itself, selects the ids it has loaded and drops the keys
+                                               from the address. Editors only (list_project_share_received
+                                               checks is_editor)
+  app/api/projects/[id]/board-shares           GET: live links per Workspace → { counts } — the
+                                               "reachable from outside" marker on a header chip
+                                               (BoardBrowser), as a shared project's hub card carries one
+                                               (list_project_share_counts). list_board_share_counts()
+                                               reads liveness from project_share_is_live(), so a
+                                               Workspace in Trash counts nothing. Any member, signed in;
+                                               counts only, never a link. Re-read after the dialog makes,
+                                               extends or turns off a link and when the set of live
+                                               Workspaces changes (hooks/useBoardShareCounts)
   app/api/assets/[id]                          soft delete (status='deleted'; DB trigger stamps deleted_at)
   app/api/assets/delete · restore · purge      bulk trash ops (ADR 0033): move a selection to
                                                Trash · undo/Restore it (purged excluded) ·
@@ -349,17 +382,31 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                token that is NOT the Graph token, and listChildren
                                                had to exist anyway for the folder walk
 
-PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /settings; ADR 0051):
-  READ  app/s/[token]/page.tsx       dynamic Server Component: open_project_share() → name, the
-                                     owner's byline (components/share/RightsFooter, shared with
-                                     /p) and, on a download link, the first 200 files server-
-                                     rendered (components/share/ProjectShareFiles). A link with
+PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /settings; ADR 0051,
+scopes and details ADR 0053):
+  What a link carries has ONE definition, project_share_scope_assets(): the project's active
+  files, narrowed to one Workspace or a fixed list by the link's scope. Every resolver below
+  joins it, so a page, a thumbnail, a ZIP and a filter can never disagree about what is in.
+  READ  app/s/[token]/page.tsx       dynamic Server Component: open_project_share() → name, what
+                                     it shows (the project, a Workspace's name and colour, or
+                                     "N files"), which details are on, the owner's byline
+                                     (components/share/RightsFooter, shared with /p) and, on a
+                                     download link, the first 200 files of its scope server-
+                                     rendered (components/share/ProjectShareFiles) — with the
+                                     filter row (ShareFilterBar, from list_project_share_facets():
+                                     Workspaces, colour labels and top tags with counts, only for
+                                     details the link turned on) and a lightbox (ShareLightbox)
+                                     that carries the tags and the one caption when those are on. A link with
                                      upload rights adds the send form (ProjectShareSendForm); an
                                      upload-only link gets the name, the byline and that form —
                                      no file count. A LIVE window: every request re-resolves the
                                      project, unlike a /p publication's snapshot
-        app/s/[token]/assets         GET ?cursor= — keyset page of 200, (sort_at, id) carried as
-                                     an opaque cursor; no-store
+        app/s/[token]/assets         GET ?cursor=&board=&label=&tag= — keyset page of 200,
+                                     (sort_at, id) carried as an opaque cursor; no-store. Each
+                                     filter is shape-validated, and a filter on a detail the link
+                                     left off is refused in SQL (22023) — one 404 like every other
+                                     refusal. A detail that is off is null from SQL, never hidden
+                                     by the page
         app/s/[token]/media/[assetId]/[thumb|medium|original]
                                      re-resolves the token AND the asset's membership on every
                                      request, then 302s to a 5-minute presign (private,
@@ -369,7 +416,7 @@ PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /sett
                                      web-size preview, labelled so
   WRITE app/s/[token]/downloads      POST { assetIds ≤500 } → enqueue_project_share_download():
                                      the ordinary export job as a ZIP, ids intersected with the
-                                     project in SQL, share_id stamped, user_id null; per-link
+                                     link's scope in SQL, share_id stamped, user_id null; per-link
                                      (1 in flight, 20/day) and per-workspace (2 in flight)
                                      guards, an identical finished ZIP reused. Refusals reach
                                      the client as not-found / busy / limit / failed only
@@ -391,7 +438,9 @@ PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /sett
                                      POST { ids ≤100 } → claim (one winner per reservation) →
                                      server-side copy staging → {ws}/originals/{id}/{name} →
                                      HEAD the FINAL object (nobody else can write it) → one
-                                     transaction makes assets + files + project link and ONE
+                                     transaction makes assets + files + project link (and, on a
+                                     Workspace link, Workspace membership after its last
+                                     member — ADR 0053 §5) and ONE
                                      ingest job with share_id, user_id null. A size mismatch
                                      is rejected and both objects deleted; staging goes last.
                                      A retry learns the outcome from the ledger. The sender
@@ -412,7 +461,7 @@ PROJECT SHARE LINK PATH (public — proxy.ts opens the /s/* segment, never /sett
   Received files carry assets.received_share_id / received_from, which the drawer prints as
   "Received via link · from …"; added_by stays null and files.origin stays 'upload'.
   Every refusal (malformed, unknown, revoked, expired, wrong rights, another project's asset)
-  is one 404. All eight resolvers are service_role-only SECURITY DEFINER functions, reached
+  is one 404. All nine resolvers are service_role-only SECURITY DEFINER functions, reached
   through lib/integrations/project-shares.server (the admin-client fence), which validates
   the token's shape and sends only its SHA-256. The owner's canvas still refreshes when a
   link's job finishes, but toasts fire only for the viewer's own jobs (useJobProgress `own`)

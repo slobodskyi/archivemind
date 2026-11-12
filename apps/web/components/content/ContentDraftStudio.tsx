@@ -942,7 +942,7 @@ export default function ContentDraftStudio({
             <span role="status" style={{ marginRight: 4, color: saveState === "error" ? "var(--red)" : "var(--t3)", fontSize: 9.5 }}>{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</span>
             <button onClick={() => { setRailOpen((open) => !open); setSelectedMedia(null); }} aria-expanded={railOpen} aria-controls={sourcesId} style={{ ...chromeButton, background: railOpen ? "var(--bg-el)" : "transparent" }}>Sources</button>
             <button onClick={() => onRegenerate(draft)} style={chromeButton}>Regenerate</button>
-            <button onClick={onShare} aria-label="Share preview" title="Create a public preview link" style={{ ...chromeButton, color: "var(--t1)" }}>Share</button>
+            <button onClick={onShare} title="A view-only page of this draft for anyone with the link" style={{ ...chromeButton, color: "var(--t1)", whiteSpace: "nowrap" }}>Preview link</button>
             <DownloadMenu
               draft={draft}
               photoCount={usedIds.length || draft.sourceSnapshot.assetIds.length}

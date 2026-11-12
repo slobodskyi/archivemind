@@ -145,7 +145,7 @@ function SharePreviewDialogContent({
       open
       size="m"
       kicker={draftKind === "article" ? "Article preview" : "Carousel preview"}
-      title={`Share “${draftName}”`}
+      title={`Preview link for “${draftName}”`}
       subtitle="Create a view-only preview link anyone can open — no ArchiveMind account needed."
       busy={busy}
       onClose={onClose}

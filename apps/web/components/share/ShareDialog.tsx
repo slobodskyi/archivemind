@@ -39,6 +39,7 @@ import {
   type ShareScopeOption,
   type ShareScopes,
 } from "@/lib/share-scope";
+import { shareCanvasHref, shareCanvasStamp } from "@/lib/share-canvas";
 import { formatBytes, formatCount } from "@/lib/usage-format";
 
 /** Share by link (ADR 0051, scopes ADR 0053): make one — of the whole
@@ -57,6 +58,9 @@ export interface ShareDialogProps {
   /** The project's live-link count as the dialog closes, so the card's
    *  marker follows without a reload. */
   onLiveCountChange?: (projectId: string, liveShares: number) => void;
+  /** A link was made, extended or turned off — for anything outside the
+   *  dialog that marks what is reachable, like a Workspace chip (ADR 0053 §6). */
+  onSharesChange?: () => void;
 }
 
 const MODE_ORDER: readonly ProjectShareMode[] = ["download", "upload", "both"];
@@ -304,8 +308,10 @@ interface ShareRowProps {
   onStartRevoke: () => void;
   onRevoke: () => void;
   onCancel: () => void;
-  /** Open the project's canvas with what this link brought in selected. */
+  /** Open the canvas on this link's scope with what it carries selected. */
   onShowOnCanvas: () => void;
+  /** Open the project's canvas with what this link brought in selected. */
+  onShowReceived: () => void;
 }
 
 function ShareRow({
@@ -322,6 +328,7 @@ function ShareRow({
   onRevoke,
   onCancel,
   onShowOnCanvas,
+  onShowReceived,
 }: ShareRowProps) {
   const keepRef = useRef<HTMLButtonElement>(null);
   const firstDaysRef = useRef<HTMLButtonElement>(null);
@@ -406,17 +413,23 @@ function ShareRow({
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", gap: 6, marginTop: 8, paddingLeft: 15 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, paddingLeft: 15 }}>
           {share.status !== "inactive" ? (
             <button type="button" onClick={onStartExtend} disabled={busy} style={{ ...buttonStyle, minHeight: 30, opacity: busy ? 0.5 : 1 }}>
               {expired ? "Renew" : "Extend"}
             </button>
           ) : null}
-          {/* Files received stay after a link is turned off, so this shows on
-              every row that brought any — the count says whether it has. */}
+          {/* Every link can say what it reaches — a send-only link too, since
+              what it would show is what it sends into (ADR 0053 §6). */}
+          <button type="button" onClick={onShowOnCanvas} disabled={busy} title="Select what this link carries" style={{ ...buttonStyle, minHeight: 30, opacity: busy ? 0.5 : 1 }}>
+            Show on canvas
+          </button>
+          {/* What ARRIVED is a different answer from what is SHOWN, and files
+              received stay after a link is turned off, so this rides on every
+              row that brought any — the count says whether it has. */}
           {share.filesReceived > 0 ? (
-            <button type="button" onClick={onShowOnCanvas} disabled={busy} style={{ ...buttonStyle, minHeight: 30, opacity: busy ? 0.5 : 1 }}>
-              Show on canvas
+            <button type="button" onClick={onShowReceived} disabled={busy} title="Select the files this link brought in" style={{ ...buttonStyle, minHeight: 30, opacity: busy ? 0.5 : 1 }}>
+              Show received
             </button>
           ) : null}
           <button type="button" onClick={onStartRevoke} disabled={busy} style={{ ...buttonStyle, minHeight: 30, borderColor: "transparent", color: "var(--red)", opacity: busy ? 0.5 : 1 }}>
@@ -589,6 +602,7 @@ function ShareDialogContent({
   scopes = PROJECT_ONLY,
   onClose,
   onLiveCountChange,
+  onSharesChange,
 }: Omit<ShareDialogProps, "open" | "project"> & { project: { id: string; name: string } }) {
   const [shares, setShares] = useState<ProjectShareSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -694,11 +708,13 @@ function ShareDialogContent({
       const share = parsed.success ? parsed.data.share : null;
       if (!share?.path) {
         // The link exists but the answer didn't parse — the list still has it.
+        onSharesChange?.();
         await refresh();
         setWantsForm(false);
         return;
       }
       setShares((list) => [share, ...(list ?? []).filter((item) => item.id !== share.id)]);
+      onSharesChange?.();
       setCreated({ id: share.id, url: shareUrl(share.path), mode: share.mode, scope: share.scope });
       setCopied(null);
       setLabel("");
@@ -721,6 +737,7 @@ function ShareDialogContent({
     }
     // Re-read either way: success moves an expiry or drops a row, and a
     // failure usually means this list is stale (turned off elsewhere).
+    onSharesChange?.();
     await refresh();
     setExtendingId(null);
     setRevokingId(null);
@@ -1002,11 +1019,16 @@ function ShareDialogContent({
                   setRevokingId(null);
                 }}
                 onShowOnCanvas={() => {
-                  // The canvas asks /api/project-shares/[id]/received itself
-                  // (useReceivedSelection), so a stale list here can't select
-                  // a file that has since moved to Trash.
-                  onClose();
-                  router.push(`/projects/${project.id}?received=${share.id}`);
+                  // The canvas asks /api/project-shares/[id]/scope itself
+                  // (useShareCanvasSelection), so a stale list here can't
+                  // select a file that has since moved to Trash. A Workspace
+                  // link opens its Workspace first.
+                  close();
+                  router.push(shareCanvasHref(project.id, { kind: "scope", shareId: share.id, boardId: share.scope === "board" ? share.boardId : null, at: shareCanvasStamp() }));
+                }}
+                onShowReceived={() => {
+                  close();
+                  router.push(shareCanvasHref(project.id, { kind: "received", shareId: share.id, at: shareCanvasStamp() }));
                 }}
               />
             ))}
