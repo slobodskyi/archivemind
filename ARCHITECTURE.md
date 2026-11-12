@@ -36,7 +36,7 @@ superclustering each photo's EXIF GPS into thumbnail markers, geotagged photos
 only (ADR 0027, superseding 0018's inert country cloud; the worker labels those
 coordinates offline via ADR 0026, and reads iPhone HEIC EXIF at all only since
 the `exiftool-vendored` fallback in #113). The chat panel is the AI assistant, answering
-through Smart Search (#16): `send` in `hooks/useAssistant.ts` → `GET /api/search`
+through Smart Search (#16): `send` in `hooks/useAssistant.ts` → `POST /api/assistant`
 → results in relevance tiers (explicit tag/place/lexical matches read as
 "strong", cosine-only ones collapse behind "show more" — ADR 0029) with a thumb
 strip and, under it, an action row. Search is hybrid: image-embedding cosine +
@@ -46,7 +46,11 @@ beside date/place (ADR 0031). **The assistant proposes, the app executes (ADR
 forwards to a handler a button already calls — `useBoards`, `openShare`,
 `openExportFor`, `openBulkFor`, `applyLabel`, the Trash confirm — so the chat
 adds no write path. Which chips a result set gets, and what a reply offers, is
-`lib/assistant.ts`: pure functions over a snapshot of the canvas. `lib/chat.ts`
+`lib/assistant.ts`: pure functions over a snapshot of the canvas. A typed
+command is the same thing with one step in front: the route's single model call
+returns an intent beside the search parse, and `lib/assistant-intent.ts` turns
+it into a `ChatAction` — run at once only over photos the user has already
+seen, offered as a button when the message itself describes them. `lib/chat.ts`
 keeps only static help/greeting copy.
 
 ## Data flow (today — paths relative to `apps/web/`)
@@ -352,7 +356,22 @@ WRITE PATH (client → HTTP → route handlers; nothing client-side touches the 
                                                REPLAY_IMAGE_SECRET is set; rotating it revokes every token
   app/api/search                               GET §8.4: parse → embed → search_assets()
                                                (hybrid: cosine + FTS on description/facts,
-                                               tiered; date/place/EXIF filters — ADR 0029/0031)
+                                               tiered; date/place/EXIF filters — ADR 0029/0031).
+                                               NO UI CALLER since the chat moved to /api/assistant
+                                               (ADR 0056's amendment) — kept as the spec's search
+                                               endpoint, on the shared lib/search-server.ts pipeline
+  app/api/assistant                            POST: what a chat message asks for (ADR 0056). The same
+                                               ONE model call as the search parse, with an intent beside
+                                               it — an action out of a closed list, the photos it is
+                                               about, at most a Workspace name, a colour and a view.
+                                               Embed + search_assets() run only when the intent needs a
+                                               search (lib/search-server.ts, shared with GET /api/search),
+                                               so a command costs less than a search. It answers with a
+                                               description and never acts — there is no write in the
+                                               route; the client runs the intent through the handlers
+                                               buttons already call. A parser failure degrades to a
+                                               plain semantic search. Zero credits; a command logs no
+                                               usage event
   app/api/integrations/google · /connect       Drive connect: status/revoke · popup-code
                                                exchange → AES-GCM tokens (ADR 0025;
                                                token custody: lib/integrations/*, the

@@ -470,6 +470,7 @@ export default function ChatPanel({
           <textarea
             placeholder={CHAT_PLACEHOLDER}
             aria-label="Message the assistant"
+            maxLength={500}
             value={input}
             onChange={onInput}
             onKeyDown={onKey}

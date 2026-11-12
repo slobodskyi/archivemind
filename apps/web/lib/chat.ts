@@ -1,16 +1,16 @@
 /**
  * Static copy for the chat/help surfaces. The canned-response simulator that
  * used to live here retired with #16 — the assistant answers through the real
- * `GET /api/search` (see `send` in hooks/useAssistant.ts), and what it offers
- * to do with an answer is composed in lib/assistant.ts.
+ * `POST /api/assistant` (see `send` in hooks/useAssistant.ts), and what it
+ * says and offers is composed in lib/assistant.ts and lib/assistant-intent.ts.
  */
 
 export const CHAT_TITLE = "AI assistant";
 
 export const CHAT_GREETING =
-  "Search your archive by what's actually in the photos — people, places, objects, scenes — then act on what you find: add it to a workspace, label it, share or download it.";
+  "Search your archive by what's actually in the photos — people, places, objects, scenes — then act on what you find: add it to a workspace, label it, share or download it. Or just tell me what to do.";
 
-export const CHAT_PLACEHOLDER = "Search your archive — a place, object, or scene…";
+export const CHAT_PLACEHOLDER = "Search, or tell me what to do — “add these to Wedding”…";
 
 export const CHAT_FOOTNOTE = "Powered by Gemini · searches your analyzed photos";
 

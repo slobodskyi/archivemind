@@ -164,7 +164,9 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   (two controls, one scope).
   The chat panel is the
   **AI assistant**, and its answers are still Smart Search (#16): `send`
-  (`hooks/useAssistant.ts`) calls `GET /api/search` and renders results in
+  (`hooks/useAssistant.ts`) calls `POST /api/assistant` — the search parse with
+  an intent attached, sharing `lib/search-server.ts` with `GET /api/search` —
+  and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
   description/facts) outrank cosine-only rows and read as "strong", the rest
   collapse behind "show more" (ADR 0029). Search is **hybrid**: image-embedding
@@ -179,6 +181,12 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   action reaches only the photos the canvas draws, and the gates are the canvas
   menu's (`lib/assistant.ts`, pure). A search that finds nothing now offers
   **Analyze N photos…** instead of telling the user to go and find a ✨ badge.
+  **Typed commands** ("add these to Wedding", "show unlabelled", "analyze
+  everything") go the same road: the model only NAMES an intent out of a closed
+  list (`assistantIntentSchema`), `resolveIntent` (`lib/assistant-intent.ts`)
+  turns it into a `ChatAction`, and it runs only over photos the user has
+  already seen — a command that describes its photos ("add the dog photos to
+  Pets") shows the results and offers the action as a button instead.
   **Usage & Storage** (ADR 0037, 2026-07-27) is the homepage's fifth view, not a
   page of its own — the sidebar item and `/account/usage` both render
   `HomeClient` with `initialView="usage"`, so there is exactly ONE signed-in

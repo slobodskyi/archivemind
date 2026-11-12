@@ -39,6 +39,11 @@ export interface AssistantContext {
   activeBoardId: string | null;
   /** What "Analyze N" would select — the AI panel intro's own computation. */
   unanalyzed: UnanalyzedScope;
+  /** Drawn photos that ARE analyzed — the only ones a caption can be written
+   *  for, since a caption is built from the facts analysis leaves behind. */
+  analyzedIds: ReadonlySet<string>;
+  /** An AI job is running: the panel will refuse to open for another. */
+  jobActive: boolean;
   /** The archive's own most common tags — search examples that will match. */
   topTags: readonly string[];
   /** Drawn photos with / without a colour label. */
@@ -60,6 +65,8 @@ export interface AssistantContextInput {
    *  every photo it is given — only the Canvas view hides folder members. */
   drawn: Readonly<Record<string, unknown>> | null;
   busy: ReadonlySet<string>;
+  /** `ws.proc.active`. */
+  jobActive: boolean;
   boards: readonly AssistantBoard[];
   activeBoardId: string | null;
   labelFilter: AssetLabel | "none" | null;
@@ -83,6 +90,8 @@ export function buildAssistantContext(input: AssistantContextInput): AssistantCo
     boards: input.projectMode ? input.boards : [],
     activeBoardId: input.projectMode ? input.activeBoardId : null,
     unanalyzed: unanalyzedInScope(input.visiblePhotos, input.drawn, input.busy),
+    analyzedIds: new Set(drawnPhotos.filter((p) => p.processed).map((p) => p.id)),
+    jobActive: input.jobActive,
     topTags: topTags(drawnPhotos),
     labelled,
     unlabelled: drawnPhotos.length - labelled,

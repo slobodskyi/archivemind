@@ -64,6 +64,7 @@ function ctxOf(photos: Photo[], over: Partial<AssistantContextInput> = {}) {
     visiblePhotos: photos,
     drawn: null,
     busy: new Set(),
+    jobActive: false,
     boards: [],
     activeBoardId: null,
     labelFilter: null,
