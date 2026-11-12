@@ -361,6 +361,269 @@ export function droppedAssetCenters(ids: readonly string[], anchor: CanvasPoint)
   );
 }
 
+// ── Free placement for new files (ADR 0052) ─────────────────────────────────
+
+/** A top-left content-space rectangle. `TilePos`, `StickyNote` and a folder's
+ *  drawn box all satisfy it, so anything drawn on the Canvas can be an obstacle. */
+export interface CanvasBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Clear space (content px) a placed file keeps from every obstacle. Below the
+ *  default grid's tightest neighbour gap (176 - 148 - 2·5 = 18), so a new block
+ *  can still sit directly beside or below an ordinary row of tiles. */
+export const PLACEMENT_GAP = 12;
+/** Half of the square every placed file is checked as: the long edge of any
+ *  tile, so a cell that is free stays free whatever aspect the thumbnail turns
+ *  out to have once it is drawn. */
+const FOOTPRINT_HALF = ASSET_TILE_LONG_EDGE / 2;
+/** Centre of lattice cell (0, 0) — the default grid's first cell, without the
+ *  jitter. Cell (i, j) is at (LATTICE_CX0 + i·CELL_W, LATTICE_CY0 + j·CELL_H)
+ *  for ANY integer i and j, so a placed block lines up with the default columns
+ *  even far outside the six of them. */
+const LATTICE_CX0 = ASSET_GRID_X + ASSET_CELL_W / 2;
+const LATTICE_CY0 = ASSET_GRID_Y + ASSET_CELL_H / 2;
+/** How many cells out from the anchor the search looks before giving up and
+ *  going below everything. */
+const FREE_SEARCH_RADIUS = 24;
+
+const latticeX = (i: number) => LATTICE_CX0 + i * ASSET_CELL_W;
+const latticeY = (j: number) => LATTICE_CY0 + j * ASSET_CELL_H;
+
+const isFiniteBox = (b: CanvasBox) =>
+  Number.isFinite(b.x) && Number.isFinite(b.y) && Number.isFinite(b.w) && Number.isFinite(b.h);
+
+/** Union of a set of boxes; the same empty-canvas default as positionsBounds. */
+export function boxesBounds(boxes: readonly CanvasBox[]): Bounds {
+  let xl = Infinity,
+    yt = Infinity,
+    xr = -Infinity,
+    yb = -Infinity;
+  for (const b of boxes) {
+    if (!isFiniteBox(b)) continue;
+    xl = Math.min(xl, b.x);
+    yt = Math.min(yt, b.y);
+    xr = Math.max(xr, b.x + b.w);
+    yb = Math.max(yb, b.y + b.h);
+  }
+  if (xl === Infinity) return { xl: 0, yt: 0, xr: 1000, yb: 700 };
+  return { xl, yt, xr, yb };
+}
+
+/** The tiles of a layout as obstacles, in layout order, minus `skip`. */
+export function tileObstacles(
+  tiles: Readonly<Record<string, TilePos>>,
+  skip: ReadonlySet<string> = new Set(),
+): CanvasBox[] {
+  const out: CanvasBox[] = [];
+  for (const [id, tile] of Object.entries(tiles)) if (!skip.has(id)) out.push(tile);
+  return out;
+}
+
+/** Every block offset within FREE_SEARCH_RADIUS cells, nearest first. Ties go
+ *  below before above and right before left, so the order — and therefore the
+ *  result — never depends on anything but the inputs. Built once. */
+const FREE_SEARCH_OFFSETS: ReadonlyArray<{ di: number; dj: number }> = (() => {
+  const out: { di: number; dj: number; d2: number }[] = [];
+  for (let dj = -FREE_SEARCH_RADIUS; dj <= FREE_SEARCH_RADIUS; dj++) {
+    for (let di = -FREE_SEARCH_RADIUS; di <= FREE_SEARCH_RADIUS; di++) {
+      out.push({ di, dj, d2: (di * ASSET_CELL_W) ** 2 + (dj * ASSET_CELL_H) ** 2 });
+    }
+  }
+  out.sort((a, b) => a.d2 - b.d2 || b.dj - a.dj || b.di - a.di);
+  return out.map(({ di, dj }) => ({ di, dj }));
+})();
+
+/** Where a batch of new files goes: the nearest block of free cells to `anchor`
+ *  on the default grid lattice (ADR 0052).
+ *
+ *  The block has droppedAssetCenters' near-square shape, but its partial last
+ *  row is LEFT-aligned rather than centred — a row shorter by an odd count would
+ *  otherwise sit half a cell off the lattice. A cell is free when a 148×148
+ *  footprint at its centre misses every obstacle grown by PLACEMENT_GAP on each
+ *  side (touching an edge is not a hit). Obstacles are whatever the caller says
+ *  is on the canvas — tiles, notes, folder boxes.
+ *
+ *  The search walks FREE_SEARCH_OFFSETS outward from the block snapped to the
+ *  anchor and takes the first block whose cells are all free. If none is free
+ *  within the radius (or the anchor is not a number), the block goes directly
+ *  below everything, which is free by construction. No Math.random: the same
+ *  inputs always give the same centres, returned in `ids` order. */
+export function placeInFreeSpace(
+  ids: readonly string[],
+  anchor: CanvasPoint,
+  obstacles: readonly CanvasBox[],
+): Record<string, CanvasPoint> {
+  const n = ids.length;
+  if (n === 0) return {};
+  const cols = dropCols(n);
+  const rows = Math.ceil(n / cols);
+  const G = PLACEMENT_GAP;
+  const F = FOOTPRINT_HALF;
+
+  // Occupied cells: column i → set of rows j. Each obstacle marks only the few
+  // cells its grown box can reach.
+  const occupied = new Map<number, Set<number>>();
+  let minI = Infinity,
+    maxI = -Infinity,
+    minJ = Infinity,
+    maxJ = -Infinity;
+  for (const o of obstacles) {
+    if (!isFiniteBox(o)) continue;
+    const ex0 = o.x - G,
+      ex1 = o.x + o.w + G,
+      ey0 = o.y - G,
+      ey1 = o.y + o.h + G;
+    const i0 = Math.floor((ex0 - F - LATTICE_CX0) / ASSET_CELL_W);
+    const i1 = Math.ceil((ex1 + F - LATTICE_CX0) / ASSET_CELL_W);
+    const j0 = Math.floor((ey0 - F - LATTICE_CY0) / ASSET_CELL_H);
+    const j1 = Math.ceil((ey1 + F - LATTICE_CY0) / ASSET_CELL_H);
+    for (let i = i0; i <= i1; i++) {
+      const cx = latticeX(i);
+      if (!(cx - F < ex1 && cx + F > ex0)) continue;
+      for (let j = j0; j <= j1; j++) {
+        const cy = latticeY(j);
+        if (!(cy - F < ey1 && cy + F > ey0)) continue;
+        let column = occupied.get(i);
+        if (!column) occupied.set(i, (column = new Set()));
+        column.add(j);
+        if (i < minI) minI = i;
+        if (i > maxI) maxI = i;
+        if (j < minJ) minJ = j;
+        if (j > maxJ) maxJ = j;
+      }
+    }
+  }
+
+  const blockFree = (bi: number, bj: number): boolean => {
+    // Fast path: the block's whole cell rectangle is outside every occupied cell.
+    if (bi > maxI || bi + cols - 1 < minI || bj > maxJ || bj + rows - 1 < minJ) return true;
+    for (let k = 0; k < n; k++) {
+      if (occupied.get(bi + (k % cols))?.has(bj + Math.floor(k / cols))) return false;
+    }
+    return true;
+  };
+
+  let found: { bi: number; bj: number } | null = null;
+  if (Number.isFinite(anchor.x) && Number.isFinite(anchor.y)) {
+    const i0 = Math.round((anchor.x - LATTICE_CX0) / ASSET_CELL_W - (cols - 1) / 2);
+    const j0 = Math.round((anchor.y - LATTICE_CY0) / ASSET_CELL_H - (rows - 1) / 2);
+    for (const { di, dj } of FREE_SEARCH_OFFSETS) {
+      if (blockFree(i0 + di, j0 + dj)) {
+        found = { bi: i0 + di, bj: j0 + dj };
+        break;
+      }
+    }
+  }
+  if (!found) {
+    // Below all content: the first row whose footprint top clears the lowest
+    // grown obstacle, centred on the content's horizontal midpoint.
+    const b = boxesBounds(obstacles);
+    found = {
+      bi: Math.round(((b.xl + b.xr) / 2 - LATTICE_CX0) / ASSET_CELL_W - (cols - 1) / 2),
+      bj: Math.floor((b.yb + G + F - LATTICE_CY0) / ASSET_CELL_H) + 1,
+    };
+  }
+  const { bi, bj } = found;
+  return Object.fromEntries(
+    ids.map((id, k) => [id, { x: latticeX(bi + (k % cols)), y: latticeY(bj + Math.floor(k / cols)) }]),
+  );
+}
+
+/** The square a placed file is checked as, around its centre. Also how a
+ *  reservation whose photo has not arrived yet is held as an obstacle. */
+export function footprintBox(center: CanvasPoint): CanvasBox {
+  return {
+    x: center.x - FOOTPRINT_HALF,
+    y: center.y - FOOTPRINT_HALF,
+    w: 2 * FOOTPRINT_HALF,
+    h: 2 * FOOTPRINT_HALF,
+  };
+}
+
+/** The area a placed block covers: each centre's footprint, unioned. */
+export function placementBounds(centers: Readonly<Record<string, CanvasPoint>>): Bounds {
+  return boxesBounds(Object.values(centers).map(footprintBox));
+}
+
+const intersectsGrown = (a: CanvasBox, o: CanvasBox, gap: number) =>
+  a.x < o.x + o.w + gap && a.x + a.w > o.x - gap && a.y < o.y + o.h + gap && a.y + a.h > o.y - gap;
+
+/** The safety net for arrivals nobody placed (ADR 0052): of `arrivals`, the
+ *  ones whose tile in `tiles` (their default slot — they carry no override)
+ *  crowds another tile or an `extra` box are moved, as one block, into free
+ *  space below the content. An arrival whose slot is clear stays where the grid
+ *  put it, and nothing that is not an arrival is ever returned. `hidden` tiles
+ *  (members of a collapsed folder) are not drawn, so they are not obstacles. */
+export function pinCrowdedArrivals(
+  tiles: Readonly<Record<string, TilePos>>,
+  arrivals: ReadonlySet<string>,
+  extra: readonly CanvasBox[],
+  hidden: ReadonlySet<string> = new Set(),
+): Record<string, CanvasPoint> {
+  const ordered = Object.keys(tiles).filter((id) => arrivals.has(id));
+  if (ordered.length === 0) return {};
+  const others = [...tileObstacles(tiles, new Set([...arrivals, ...hidden])), ...extra];
+  const crowded = ordered.filter(
+    (id) => !hidden.has(id) && others.some((o) => intersectsGrown(tiles[id], o, PLACEMENT_GAP)),
+  );
+  if (crowded.length === 0) return {};
+  const obstacles = [...tileObstacles(tiles, new Set([...crowded, ...hidden])), ...extra];
+  return placeInFreeSpace(crowded, appendClusterAnchor(boxesBounds(obstacles), crowded.length), obstacles);
+}
+
+/** Fold reservations into a canvas arrangement's Canvas bucket (or an undo
+ *  snapshot's). An entry already there wins: a reservation never overwrites a
+ *  tile somebody placed. Generic so the live state, every history snapshot and a
+ *  stored blob all go through the same rule. */
+export function withAssetOverrides<T extends { galleryOverrides: GalleryOverrides }>(
+  x: T,
+  add: Readonly<Record<string, CanvasPoint>>,
+): T {
+  return {
+    ...x,
+    galleryOverrides: { ...x.galleryOverrides, asset: { ...add, ...x.galleryOverrides.asset } },
+  };
+}
+
+/** The camera that brings `bounds` into view at the SAME zoom, or null when it is
+ *  already inside the viewport's safe area (fitBounds' insets: the toolbar on the
+ *  left, the header on top, the bottom bars). Only an axis the block is outside
+ *  of moves; on that axis the block is centred where it fits and its left/top
+ *  edge is aligned to the safe edge where it does not, so a tall batch shows its
+ *  first rows rather than its middle. */
+export function revealBounds(bounds: Bounds, t: Transform, rect: Rect): Transform | null {
+  const left = 84,
+    right = rect.width - 60,
+    top = 70,
+    bottom = rect.height - 104;
+  const safeW = Math.max(1, right - left),
+    safeH = Math.max(1, bottom - top);
+  const s = t.scale;
+  const sx0 = bounds.xl * s + t.tx,
+    sx1 = bounds.xr * s + t.tx,
+    sy0 = bounds.yt * s + t.ty,
+    sy1 = bounds.yb * s + t.ty;
+  const insideX = sx0 >= left && sx1 <= right;
+  const insideY = sy0 >= top && sy1 <= bottom;
+  if (insideX && insideY) return null;
+  const centred = centerAtScale(bounds, { width: safeW, height: safeH }, s);
+  const tx = insideX
+    ? t.tx
+    : (bounds.xr - bounds.xl) * s <= safeW
+      ? left + centred.tx
+      : left - bounds.xl * s;
+  const ty = insideY
+    ? t.ty
+    : (bounds.yb - bounds.yt) * s <= safeH
+      ? top + centred.ty
+      : top - bounds.yt * s;
+  return { scale: s, tx, ty };
+}
+
 /** Packs the given tiles into an evenly-spaced, near-square grid centered on the
  *  centroid of their current positions, honoring each tile's cell footprint.
  *  Returns new CENTERS (galleryOverrides store centers, not top-lefts). Ids with
