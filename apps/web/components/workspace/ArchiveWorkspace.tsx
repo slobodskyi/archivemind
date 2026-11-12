@@ -6,6 +6,7 @@ import type { AssetLabel, Board, CanvasAnnotation, CanvasGroup, LabelNames } fro
 import type { Photo } from "@/types";
 import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWorkspace";
 import { useBoards } from "@/hooks/useBoards";
+import { useAssistant } from "@/hooks/useAssistant";
 import { useShareCanvasSelection } from "@/hooks/useShareCanvasSelection";
 import { useBoardShareCounts } from "@/hooks/useBoardShareCounts";
 import type { ShareCanvasRequest } from "@/lib/share-canvas";
@@ -266,8 +267,8 @@ export default function ArchiveWorkspace({
   }, [closeAiIntro]);
   const selectUnanalyzedIds = ws.selectUnanalyzed;
   const openBulkFor = ws.openBulkFor;
-  const analyzeUploaded = useCallback((ids: readonly string[]) => {
-    const opened = openBulkFor(ids);
+  const analyzeUploaded = useCallback((ids: readonly string[], mode: "analyze" | "caption" = "analyze") => {
+    const opened = openBulkFor(ids, mode);
     if (opened) setBulkFocusRequest((n) => n + 1);
     return opened;
   }, [openBulkFor]);
@@ -717,6 +718,22 @@ export default function ArchiveWorkspace({
     );
   };
 
+  // The assistant drives handlers that live on three owners — `ws`, `bd` and
+  // this component — so it is assembled here, where all three are in reach.
+  const assistant = useAssistant({
+    open: ws.chatOpen,
+    currentProjectId,
+    ws,
+    boards: bd.boards,
+    activeBoardId: bd.activeBoardId,
+    addToBoard: bd.addToBoard,
+    removeFromBoard: bd.removeFromBoard,
+    createBoard: bd.createBoard,
+    openBoard,
+    openShare: (ids) => openShare(ids, bd.activeBoard),
+    openAi: analyzeUploaded,
+  });
+
   return (
     <div
       style={{
@@ -1129,14 +1146,17 @@ export default function ArchiveWorkspace({
 
       <ChatPanel
         open={ws.chatOpen}
-        msgs={ws.chatMsgs}
-        input={ws.chatInput}
+        msgs={assistant.msgs}
+        input={assistant.input}
         onClose={ws.closeChat}
-        onInput={ws.onChatInput}
-        onKey={ws.onChatKey}
-        onSend={ws.sendChat}
+        onInput={assistant.onInput}
+        onKey={assistant.onKey}
+        onSend={assistant.send}
         onOpenResult={ws.openDrawer}
-        onSelectResults={ws.selectSearchResults}
+        onAction={assistant.runAction}
+        actionsFor={assistant.actionsFor}
+        starter={assistant.starter}
+        labelNames={ws.labelNames}
       />
 
       <LeftToolbar
@@ -1661,8 +1681,8 @@ export default function ArchiveWorkspace({
           use, with copy that matches the real behavior: trash + 30 days. */}
       <ConfirmModal
         open={ws.confirmDeleteCount > 0}
-        title={`Delete ${ws.confirmDeleteCount} files?`}
-        body={`${ws.confirmDeleteCount} files will move to Trash and be permanently removed after 30 days. You can restore them from Trash until then.`}
+        title={ws.confirmDeleteCount === 1 ? "Delete this file?" : `Delete ${ws.confirmDeleteCount} files?`}
+        body={`${ws.confirmDeleteCount === 1 ? "It" : `${ws.confirmDeleteCount} files`} will move to Trash and be permanently removed after 30 days. You can restore ${ws.confirmDeleteCount === 1 ? "it" : "them"} from Trash until then.`}
         confirmLabel="Move to Trash"
         danger
         onConfirm={ws.confirmDeleteNow}

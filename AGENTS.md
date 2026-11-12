@@ -162,13 +162,23 @@ Google Drive (#97–#103, ADR 0025) and Dropbox (#105–#107, ADR 0008), and Pha
   the header IS "all files"** — clicking it leaves the open workspace, a caret
   beside it opens the project switcher, and the old `All files` chip is gone
   (two controls, one scope).
-  The chat panel IS
-  Smart Search (#16): `sendChat` calls `GET /api/search` and renders results in
+  The chat panel is the
+  **AI assistant**, and its answers are still Smart Search (#16): `send`
+  (`hooks/useAssistant.ts`) calls `GET /api/search` and renders results in
   relevance tiers — explicit matches (a tag, place, or a lexical hit on the AI
   description/facts) outrank cosine-only rows and read as "strong", the rest
   collapse behind "show more" (ADR 0029). Search is **hybrid**: image-embedding
   cosine + Postgres FTS over description/facts + EXIF filters (camera/ISO/aperture)
   alongside date/place (ADR 0031). `lib/chat.ts` keeps only static help/greeting copy.
+  **The assistant proposes, the app executes (ADR 0056):** under an answer sits
+  an action row — Select, Workspace, Label, Share, Download, captions, full
+  screen, Trash — and each is a `ChatAction` that `runAction` forwards to the
+  handler a button already calls. The chat has no write path of its own.
+  Reversible things run at once; anything that spends credits opens the AI
+  panel and stops; Share and Download open their dialogs; Trash always asks. An
+  action reaches only the photos the canvas draws, and the gates are the canvas
+  menu's (`lib/assistant.ts`, pure). A search that finds nothing now offers
+  **Analyze N photos…** instead of telling the user to go and find a ✨ badge.
   **Usage & Storage** (ADR 0037, 2026-07-27) is the homepage's fifth view, not a
   page of its own — the sidebar item and `/account/usage` both render
   `HomeClient` with `initialView="usage"`, so there is exactly ONE signed-in
@@ -257,6 +267,9 @@ design from this file:**
   drawer's). It walks the visible reading order and owns the keyboard while open;
   its last quality step is the original (`GET /api/assets/[id]/original`, signed
   inline, files-RLS reach; read the ADR's amendment before widening what it signs).
+  **0056** is the AI assistant's one rule — it proposes, the app executes: a chat
+  action is a description forwarded to an existing handler, never a new write
+  path. Read it before giving the chat an action of its own.
   **0055** adds the step before it: a 2048 px `large` preview, written at ingest
   only when the source is bigger than medium and backfilled by the worker for
   R2-held originals only (never fetched from a user's Drive/OneDrive). An edit
