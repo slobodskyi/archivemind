@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { AssetLabel, LabelNames } from "@archivemind/shared";
 import { boundsOf, formatCount, markerSize, mosaicCells, type GeoPoint } from "@/lib/geo";
 import { LABEL_COLORS } from "@/lib/labels";
+import { announceBottomChromeChange } from "@/lib/ui";
 import {
   buildClusterIndex,
   coverCells,
@@ -268,8 +269,14 @@ function StackPanel({
   onSelectAssets: (ids: string[]) => void;
   onClose: () => void;
 }) {
+  // The upload pill docks above this panel (see Z.uploadPill); it only learns
+  // the panel exists through this event.
+  useEffect(() => {
+    announceBottomChromeChange();
+    return announceBottomChromeChange;
+  }, []);
   return (
-    <div style={stackPanel}>
+    <div className="am-map-stack" style={stackPanel}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <span style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--t3)" }}>
           {formatCount(stack.length)} {stack.length === 1 ? "file here" : "files here"}
