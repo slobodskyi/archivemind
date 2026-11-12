@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { EXPORT_MAX_ASSETS, type ArtboardSettings, type WorkspaceInfo } from "@archivemind/shared";
+import { EXPORT_MAX_ASSETS, type ArtboardSettings, type OfferedCaptionLang, type WorkspaceInfo } from "@archivemind/shared";
 import type { Photo } from "@/types";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
 import {
@@ -30,10 +30,9 @@ interface ExportDialogProps {
 
 type Phase = "config" | "working" | "ready" | "error";
 
-const LANGS: { key: ArtboardSettings["captionLang"]; label: string }[] = [
+const LANGS: { key: OfferedCaptionLang; label: string }[] = [
   { key: "en", label: "EN" },
   { key: "uk", label: "UK" },
-  { key: "ru", label: "RU" },
 ];
 const STYLES: { key: ArtboardSettings["captionStyle"]; label: string }[] = [
   { key: "social", label: "Social" },
@@ -368,7 +367,7 @@ export default function ExportDialog({
   const under = useMemo(() => underLabel(inc), [inc]);
 
   const subtitle = useMemo(() => {
-    if (isCsv) return "one row each · captions in EN, UK and RU";
+    if (isCsv) return "one row each · captions in EN and UK";
     if (plainFile) return zipContents === "originals" ? "the original file" : "a web-size image";
     if (isZip) {
       return `${zipContents === "originals" ? "original files" : "web-size images"} · captions.csv included`;

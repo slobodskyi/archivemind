@@ -215,6 +215,19 @@ describe("draft shapes", () => {
     ).toBeNull();
   });
 
+  it("still parses a stored draft whose brief says ru, and keeps it ru", () => {
+    // Russian is no longer offered, but drafts written before that live in
+    // localStorage and in content_drafts. They must keep loading WITHOUT their
+    // language being rewritten: the next save would persist the rewrite and the
+    // next publish would label Russian text lang="en".
+    const valid = article();
+    const stored = parseContentDraft({ ...valid, brief: { ...valid.brief, language: "ru" } });
+    expect(stored).not.toBeNull();
+    expect(stored?.brief.language).toBe("ru");
+    // The same draft with a still-offered language is untouched.
+    expect(parseContentDraft(valid)?.brief.language).toBe("uk");
+  });
+
   it("rejects content that points outside its captured source set", () => {
     const valid = article();
     expect(

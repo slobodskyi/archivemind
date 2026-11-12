@@ -2,6 +2,7 @@ import {
   resolveCaptionText,
   type ArtboardSettings,
   type CaptionLang,
+  type OfferedCaptionLang,
   type CaptionRowLike,
   type CaptionStyleKey,
 } from "@archivemind/shared";
@@ -14,13 +15,13 @@ import type { CaptionStyle, Language, Photo } from "@/types";
 
 /** ArtboardSettings speaks the DB's lowercase enums; Photo.captions is keyed by
  *  the UI's cased unions. */
-export const LANG_UI: Record<ArtboardSettings["captionLang"], Language> = { en: "EN", uk: "UK", ru: "RU" };
+export const LANG_UI: Record<OfferedCaptionLang, Language> = { en: "EN", uk: "UK" };
 export const STYLE_UI: Record<ArtboardSettings["captionStyle"], CaptionStyle> = {
   social: "Social",
   agency: "Agency",
   archival: "Archival",
 };
-const LANG_DB: Record<Language, CaptionLang> = { EN: "en", UK: "uk", RU: "ru" };
+const LANG_DB: Record<Language, CaptionLang> = { EN: "en", UK: "uk" };
 const STYLE_DB: Record<CaptionStyle, CaptionStyleKey> = {
   Social: "social",
   Agency: "agency",
@@ -54,7 +55,7 @@ export function captionRows(photo: Pick<Photo, "captions"> | undefined): Caption
  *  because every language ships as its own column. */
 export function captionStateFor(
   photo: Pick<Photo, "captions"> | undefined,
-  opts: { isDoc: boolean; lang: ArtboardSettings["captionLang"]; style: ArtboardSettings["captionStyle"] },
+  opts: { isDoc: boolean; lang: OfferedCaptionLang; style: ArtboardSettings["captionStyle"] },
 ): CaptionState {
   const rows = captionRows(photo);
   if (rows.length === 0) return "none";
@@ -92,8 +93,8 @@ export function pdfPageCount(photos: number, cover: boolean, layout: ArtboardSet
  *  predictable, and a selection with no captions at all returns null. */
 export function bestCaptionPair(
   photos: readonly (Pick<Photo, "captions"> | undefined)[],
-  fallback: { lang: ArtboardSettings["captionLang"]; style: ArtboardSettings["captionStyle"] },
-): { lang: ArtboardSettings["captionLang"]; style: ArtboardSettings["captionStyle"] } | null {
+  fallback: { lang: OfferedCaptionLang; style: ArtboardSettings["captionStyle"] },
+): { lang: OfferedCaptionLang; style: ArtboardSettings["captionStyle"] } | null {
   const counts = new Map<string, number>();
   for (const photo of photos) {
     for (const row of captionRows(photo)) {
@@ -115,7 +116,7 @@ export function bestCaptionPair(
   }
   const [lang, style] = bestKey.split("|");
   return {
-    lang: lang as ArtboardSettings["captionLang"],
+    lang: lang as OfferedCaptionLang,
     style: style as ArtboardSettings["captionStyle"],
   };
 }
@@ -124,7 +125,7 @@ export function bestCaptionPair(
  *  button so the choice is informed rather than hidden. */
 export function captionCoverage(
   photos: readonly (Pick<Photo, "captions"> | undefined)[],
-  lang: ArtboardSettings["captionLang"],
+  lang: OfferedCaptionLang,
   style: ArtboardSettings["captionStyle"],
 ): number {
   return photos.filter((p) => captionRows(p).some((r) => r.lang === lang && r.style === style)).length;

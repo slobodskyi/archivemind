@@ -17,7 +17,7 @@ AI archive workspace for documentary photographers / photojournalists whose file
 2. Connect Google Drive / Dropbox (OAuth, narrow scope) → pick files/folders via Picker/Chooser; and/or direct upload of local files.
 3. Files appear on the infinite canvas (neural view: source → folder clusters). "Organize" re-clusters by source / date / place / similarity; manual drags persist as overrides; undo/redo client-side.
 4. Create projects; add files from any source (M:N).
-5. Run AI actions on selection or project: **Smart analyze** (tags + embeddings + draft facts), **Generate captions** (EN/UK/RU × Social/Agency/Archival, promptable), **Smart search** (NL → metadata filters + semantic).
+5. Run AI actions on selection or project: **Smart analyze** (tags + embeddings + draft facts), **Generate captions** (EN/UK × Social/Agency/Archival, promptable), **Smart search** (NL → metadata filters + semantic).
 6. Review in drawer (captions, tags, EXIF, facts) → confirm facts → export the selection — a laid-out PDF, a captions CSV, or a ZIP of the files.
 
 **Import model:** snapshot import (no live sync). Google Drive originals stay in the source (worker streams the bytes at processing time); Dropbox originals and local uploads are stored in full in R2 (Dropbox direct links can't be re-fetched — ADR 0008). We always keep derivatives (previews, EXIF, tags, captions, embeddings). "Add more files" = re-open picker.
@@ -55,7 +55,7 @@ Cloudflare R2 (S3-compatible)
 | 3 | Queue = `ai_jobs` table + `FOR UPDATE SKIP LOCKED` (no pgmq, no Redis) | One table = queue + history + Realtime progress source; trivially inspectable; enough for thousands of files. |
 | 4 | Storage = Cloudflare R2 | Zero egress (media app serves lots of previews); S3-compatible presigned URLs. Supabase Storage unused — all binaries live in R2. |
 | 5 | Embeddings = **gemini-embedding-2** (multimodal, GA — not the deprecated `-preview` id) @ **768 dims** (auto-normalized). **No fallback** — `gemini-embedding-001` shuts down 2026-07-14 and its vector space is incompatible. | Killer feature is visual attribute search → embed the image itself, same space as text queries and PDF chunks. Spaces between models are incompatible → decide at build start, no mid-flight switch. |
-| 6 | Captions/analysis = **`gemini-3.1-flash-lite`** via `GEMINI_ANALYZE_MODEL` env (structured output) | ~$0.31–0.35 / 1000 images ($0.25/M in, $1.50/M out), multilingual EN/UK/RU, JSON schema support. `media_resolution` exposed per call (medium for tags, high when OCR matters). Re-verify model at Phase 2. See ADR 0010. |
+| 6 | Captions/analysis = **`gemini-3.1-flash-lite`** via `GEMINI_ANALYZE_MODEL` env (structured output) | ~$0.31–0.35 / 1000 images ($0.25/M in, $1.50/M out), multilingual EN/UK, JSON schema support. `media_resolution` exposed per call (medium for tags, high when OCR matters). Re-verify model at Phase 2. See ADR 0010. |
 | 7 | Drive via Google Picker + `drive.file` (**multi-file select**; folders = navigation only); Dropbox via Chooser **direct links, zero OAuth** (originals streamed once → stored in R2) | Avoids CASA verification (~$800–1500/yr + weeks). Access limited to user-picked items. Drive folder sync / full-Dropbox OAuth → post-MVP. See ADR 0008. |
 | 8 | Snapshot import, no live sync | Live sync needs broad scopes (`drive.readonly`, watch channels) → CASA + polling infra. Phase 2+. |
 | 9 | Files are workspace-global; projects are M:N curated subsets | "All my files" = workspace; one file can live in many projects. |
@@ -271,7 +271,7 @@ create table asset_tags (
   primary key (asset_id, tag_id)
 );
 
-create type caption_lang  as enum ('en','uk','ru');
+create type caption_lang  as enum ('en','uk','ru');  -- 'ru' is no longer offered anywhere (pickers, caption/export/content requests); kept only so rows and queued jobs written before it was retired still parse. Never displayed, never deleted.
 create type caption_style as enum ('social','agency','archival');
 
 create table captions (
@@ -578,7 +578,7 @@ Payload: `{group_id | asset_ids, options}` where `options` is the legacy-named
 - `format: 'captions_csv'` — the caption spreadsheet this section originally
   specified: one row per photo with filename, full EXIF (camera/lens/ISO/aperture/
   shutter), place + lat/lon, tags, the AI description, facts **split into
-  `facts_confirmed` / `facts_unreviewed`**, and `caption_en|uk|ru` for the chosen
+  `facts_confirmed` / `facts_unreviewed`**, and `caption_en|uk` for the chosen
   style (exact lookup — no English fallback, so an empty cell is the "still needs
   translating" signal). UTF-8 BOM + CRLF so Excel reads Cyrillic.
 

@@ -28,6 +28,12 @@ export const contentDraftBriefSchema = z.object({
   /** The answer to "What should this material be about?" */
   prompt: z.string().trim().max(4_000).default(""),
   audience: shortTextSchema.default(""),
+  // A READ schema for drafts already in localStorage and in content_drafts, so it
+  // still accepts "ru" (Russian is no longer offered, but nothing is deleted) and
+  // KEEPS it: a stored value is what the draft's text is written in, and every
+  // save re-serialises the whole board and every publish copies it into the /p
+  // snapshot's `lang`. Narrowing to the offered en | uk happens only where new
+  // work starts — the Create form and regenerationSeed (toOfferedCaptionLang).
   language: z.enum(["en", "uk", "ru"]).default("en"),
   /** Free text on purpose: presets can fill it without constraining the user. */
   tone: shortTextSchema.default(""),

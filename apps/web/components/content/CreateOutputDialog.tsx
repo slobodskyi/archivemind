@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
+import { toOfferedCaptionLang, type OfferedCaptionLang } from "@archivemind/shared";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
 import SegmentedTrack from "@/components/ui/SegmentedTrack";
 import Stepper from "@/components/ui/Stepper";
@@ -57,7 +58,7 @@ export default function CreateOutputDialog({
   );
   const [prompt, setPrompt] = useState(initial?.prompt ?? "");
   const [audience, setAudience] = useState(initial?.audience ?? "");
-  const [language, setLanguage] = useState<"en" | "uk" | "ru">(initial?.language ?? "en");
+  const [language, setLanguage] = useState<OfferedCaptionLang>(toOfferedCaptionLang(initial?.language));
   const [tone, setTone] = useState<"editorial" | "personal" | "social">(initial?.tone ?? "editorial");
   const [length, setLength] = useState<"short" | "medium" | "long">(initial?.kind === "article" ? (initial.length ?? "medium") : "medium");
   const [aspectRatio, setAspectRatio] = useState<"4:5" | "1:1">(initial?.kind === "instagram_carousel" ? (initial.aspectRatio ?? "4:5") : "4:5");
@@ -197,7 +198,6 @@ export default function CreateOutputDialog({
             options={[
               { value: "en", label: "English" },
               { value: "uk", label: "Українська" },
-              { value: "ru", label: "Русский" },
             ]}
             style={{ marginTop: 6 }}
           />

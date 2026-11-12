@@ -1,4 +1,9 @@
-import { artboardSettingsSchema, type ArtboardSettings } from "@archivemind/shared";
+import {
+  artboardSettingsSchema,
+  toOfferedCaptionLang,
+  type ArtboardSettings,
+  type OfferedCaptionLang,
+} from "@archivemind/shared";
 
 /** Export settings that are a PREFERENCE, not a per-export decision.
  *
@@ -21,8 +26,12 @@ const key = (workspaceId: string) => `${PREFIX}${workspaceId}`;
 
 export type ExportPrefs = Pick<
   ArtboardSettings,
-  "pageLayout" | "pageSize" | "orientation" | "captionLang" | "captionStyle" | "include" | "cover"
->;
+  "pageLayout" | "pageSize" | "orientation" | "captionStyle" | "include" | "cover"
+> & {
+  /** An offered language only: a "ru" stored before Russian was retired is read
+   *  back as "en" (see loadPrefs). */
+  captionLang: OfferedCaptionLang;
+};
 
 /** Defaults straight from the contract, so the dialog and the worker cannot
  *  disagree about what "unset" means. */
@@ -32,7 +41,7 @@ export function defaultPrefs(): ExportPrefs {
     pageLayout: d.pageLayout,
     pageSize: d.pageSize,
     orientation: d.orientation,
-    captionLang: d.captionLang,
+    captionLang: toOfferedCaptionLang(d.captionLang),
     captionStyle: d.captionStyle,
     include: d.include,
     cover: d.cover,
@@ -61,7 +70,7 @@ export function loadPrefs(workspaceId: string): { prefs: ExportPrefs; stored: bo
       pageLayout: d.pageLayout,
       pageSize: d.pageSize,
       orientation: d.orientation,
-      captionLang: d.captionLang,
+      captionLang: toOfferedCaptionLang(d.captionLang),
       captionStyle: d.captionStyle,
       include: d.include,
       cover: d.cover,

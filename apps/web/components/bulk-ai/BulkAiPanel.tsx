@@ -33,7 +33,7 @@ interface BulkAiPanelProps {
   onCloseIntro?: () => void;
 }
 
-const LANGS: Language[] = ["EN", "UK", "RU"];
+const LANGS: Language[] = ["EN", "UK"];
 const STYLES: CaptionStyle[] = ["Social", "Agency", "Archival"];
 
 interface OpCardProps {

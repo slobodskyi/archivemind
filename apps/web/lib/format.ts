@@ -9,7 +9,7 @@ export const FACT_STATUS_COLOR: Record<FactStatus, string> = {
 };
 
 /** UI labels → the DB caption enums (`caption_lang` / `caption_style`). */
-export const CAPTION_LANG_DB: Record<Language, "en" | "uk" | "ru"> = { EN: "en", UK: "uk", RU: "ru" };
+export const CAPTION_LANG_DB: Record<Language, "en" | "uk"> = { EN: "en", UK: "uk" };
 export const CAPTION_STYLE_DB: Record<CaptionStyle, "social" | "agency" | "archival"> = {
   Social: "social",
   Agency: "agency",

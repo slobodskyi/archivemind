@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { OfferedCaptionLang } from "@archivemind/shared";
 import { analyzeModel } from "@/lib/gemini";
 import {
   contentGenerationRequestSchema,
@@ -37,7 +38,7 @@ interface FactRow {
 
 interface CaptionRow {
   asset_id: string;
-  lang: "en" | "uk" | "ru";
+  lang: OfferedCaptionLang; // the query filters on the request language, which is an offered one
   style: "social" | "agency" | "archival";
   text: string;
 }

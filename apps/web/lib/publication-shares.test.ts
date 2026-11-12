@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createArticleDraft, createInstagramCarouselDraft } from "./content-drafts";
 import {
   createPublicationSnapshot,
+  publicationSnapshotSchema,
   deletePublicationShareLink,
   listPublicationSharesResponseSchema,
   loadPublicationShareLink,
@@ -45,7 +46,7 @@ describe("publication shares", () => {
       boardId: "board",
       sourceAssetIds: ["asset"],
       now: "2026-08-13T10:00:00.000Z",
-      brief: { language: "ru" },
+      brief: { language: "uk" },
       content: {
         caption: "Post copy",
         slides: [{ id: "cover", assetId: null, headline: "Cover", body: "Hook" }],
@@ -53,8 +54,41 @@ describe("publication shares", () => {
     });
     const snapshot = createPublicationSnapshot(draft, new Map());
     expect(snapshot.kind === "instagram_carousel" && snapshot.content.slides[0]?.publicAssetId).toBeNull();
-    expect(snapshot.language).toBe("ru");
+    expect(snapshot.language).toBe("uk");
     expect(serializePublicationText(snapshot)).toContain("Post copy");
+  });
+
+  it("publishes a stored Russian draft as Russian, not relabelled English", () => {
+    // Russian is no longer offered for NEW work, but a draft written in it is
+    // still Russian text: its snapshot's `lang` is what /p renders as lang=.
+    const draft = createInstagramCarouselDraft({
+      id: "draft",
+      boardId: "board",
+      sourceAssetIds: ["asset"],
+      now: "2026-08-13T10:00:00.000Z",
+      brief: { language: "ru" },
+      content: {
+        caption: "Post copy",
+        slides: [{ id: "cover", assetId: null, headline: "Cover", body: "Hook" }],
+      },
+    });
+    expect(draft.brief.language).toBe("ru");
+    expect(createPublicationSnapshot(draft, new Map()).language).toBe("ru");
+  });
+
+  it("still parses a stored snapshot published in Russian (retired, not deleted)", () => {
+    const draft = createInstagramCarouselDraft({
+      id: "draft",
+      boardId: "board",
+      sourceAssetIds: ["asset"],
+      now: "2026-08-13T10:00:00.000Z",
+      content: {
+        caption: "Post copy",
+        slides: [{ id: "cover", assetId: null, headline: "Cover", body: "Hook" }],
+      },
+    });
+    const stored = { ...createPublicationSnapshot(draft, new Map()), language: "ru" };
+    expect(publicationSnapshotSchema.parse(stored).language).toBe("ru");
   });
 
   it("fails closed when a placed asset has no public id", () => {

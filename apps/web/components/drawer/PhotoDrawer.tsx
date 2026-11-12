@@ -57,7 +57,7 @@ interface PhotoDrawerProps {
   onPickLabel: (label: AssetLabel | null) => void;
 }
 
-const LANGS: Language[] = ["EN", "UK", "RU"];
+const LANGS: Language[] = ["EN", "UK"];
 const STYLES: CaptionStyle[] = ["Social", "Agency", "Archival"];
 
 export default function PhotoDrawer({

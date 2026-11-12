@@ -19,7 +19,7 @@ export type FactStatus = "confirmed" | "pending" | "unknown";
 
 export type CaptionStyle = "Social" | "Agency" | "Archival";
 
-export type Language = "EN" | "UK" | "RU";
+export type Language = "EN" | "UK";
 
 /** Key into the CAPTIONS map; null until a photo is processed. */
 export type CaptionKey = "a" | "b" | "c" | "gen";
