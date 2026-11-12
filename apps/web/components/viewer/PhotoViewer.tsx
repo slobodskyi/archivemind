@@ -7,9 +7,16 @@ import type { Photo } from "@/types";
 import { useDialog } from "@/hooks/useDialog";
 import { isRealSource, photoSrc, photoSrcMedium } from "@/lib/img";
 import { LABEL_COLORS } from "@/lib/labels";
-import { mediumPreviewUrls, previewVersion } from "@/lib/preview-url-cache";
+import { mediumPreviewUrls, originalUrls, previewVersion } from "@/lib/preview-url-cache";
 import { Z } from "@/lib/ui";
 import type { Size } from "@/lib/viewer";
+import {
+  browserDecodes,
+  formatBytes,
+  planOriginal,
+  type OriginalAnswer,
+  type OriginalPlan,
+} from "@/lib/viewer-originals";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -41,6 +48,15 @@ interface PhotoViewerProps {
 
 /** Idle time before the bars fade out of the way of the photo. */
 const CHROME_IDLE_MS = 2500;
+/** How long a photo must stay on screen before its original is fetched on a
+ *  desktop — arrowing through a burst must not pull a dozen originals. */
+const ORIGINAL_DWELL_MS = 350;
+/** Why the chip says there is no sharper copy (its tooltip). */
+const NO_ORIGINAL_TITLE: Record<"not_stored" | "format" | "browser", string> = {
+  not_stored: "The original stays in Google Drive or OneDrive and is not stored in the archive, so this preview is the sharpest copy here.",
+  format: "The original's format (RAW, TIFF…) can't be shown in a browser, so this preview is the sharpest copy.",
+  browser: "This browser can't display the original's format (HEIC shows in Safari), so this preview is the sharpest copy.",
+};
 
 /** Fullscreen photo viewer (ADR 0054). The drawer's preview is a fixed 220 px
  *  `cover` crop, so until this nothing in the app showed a whole photo larger
@@ -105,13 +121,63 @@ function ViewerBody({
     (fetched?.key === key ? fetched.url : null) ??
     (real ? null : photoSrcMedium(photo, 1600, 1200));
 
+  // ── The original — the third step (ADR 0054). Asked for after a short dwell
+  //    on a desktop; on touch only at the first zoom, because a phone or iPad
+  //    decoding a 48 MP frame it may never zoom into is what kills the tab; or
+  //    by a click. An EDITED photo stays on its edit until "Original" is
+  //    pressed: the edit exists only as 1024 px previews, and swapping in the
+  //    unedited original unasked would quietly undo it on screen. ──
+  const [coarse] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true,
+  );
+  const autoOriginal = real && !notReady && !photo.edited;
+  const [asked, setAsked] = useState<{ key: string; explicit: boolean } | null>(null);
+  const ask = asked?.key === key ? asked : null;
+  useEffect(() => {
+    if (!autoOriginal || coarse) return;
+    const timer = window.setTimeout(
+      () => setAsked((a) => (a?.key === key ? a : { key, explicit: false })),
+      ORIGINAL_DWELL_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [autoOriginal, coarse, key]);
+  const [fetchedOriginal, setFetchedOriginal] = useState<{ key: string; answer: OriginalAnswer } | null>(null);
+  const originalAnswer =
+    ask && real
+      ? (originalUrls.peek(photo.id, "") ?? (fetchedOriginal?.key === key ? fetchedOriginal.answer : undefined))
+      : undefined;
+  useEffect(() => {
+    if (!ask || !real || originalAnswer) return;
+    let alive = true;
+    void originalUrls.get(photo.id, "").then((answer) => {
+      if (alive && answer) setFetchedOriginal({ key, answer });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [ask, real, originalAnswer, photo.id, key]);
+  // A decode that fails (an older Safari and HEIC, an expired URL) falls back
+  // to the preview quietly, and the chip says why.
+  const [failedOriginal, setFailedOriginal] = useState<string | null>(null);
+  const plan: OriginalPlan | null =
+    ask && originalAnswer
+      ? failedOriginal === key
+        ? { kind: "none", why: "browser" }
+        : planOriginal(originalAnswer, {
+            canDecode: (mime) => browserDecodes(mime, navigator.userAgent),
+            explicit: ask.explicit,
+          })
+      : null;
+  const askOriginal = () => setAsked({ key, explicit: true });
+
   // Natural sizes as each image lands. The best one sets the photo's shape and
   // what "100%" means; the tile's w/h stand in for the instant before.
-  const [loaded, setLoaded] = useState<{ key: string; thumb?: Size; medium?: Size }>({ key });
+  const [loaded, setLoaded] = useState<{ key: string; thumb?: Size; medium?: Size; original?: Size }>({ key });
   const sizes = loaded.key === key ? loaded : null;
   const estimate = useMemo(() => ({ w: photo.w, h: photo.h }), [photo.w, photo.h]);
-  const content = notReady ? null : (sizes?.medium ?? sizes?.thumb ?? estimate);
-  const onImageLoad = (which: "thumb" | "medium") => (e: SyntheticEvent<HTMLImageElement>) => {
+  const originalSize = plan?.kind === "load" ? (sizes?.original ?? null) : null;
+  const content = notReady ? null : (originalSize ?? sizes?.medium ?? sizes?.thumb ?? estimate);
+  const onImageLoad = (which: "thumb" | "medium" | "original") => (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
     if (!img.naturalWidth || !img.naturalHeight) return;
     const size = { w: img.naturalWidth, h: img.naturalHeight };
@@ -181,6 +247,9 @@ function ViewerBody({
     resetKey: photo.id,
     onSwipe: onNav,
     onTap: () => setChrome((c) => !c),
+    onZoomIn: () => {
+      if (coarse && autoOriginal) setAsked((a) => (a?.key === key ? a : { key, explicit: false }));
+    },
   });
 
   // ── Browser fullscreen. The DOCUMENT goes fullscreen, not this overlay: a
@@ -261,13 +330,22 @@ function ViewerBody({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // The chip names the image on screen — and when no sharper one exists, says
+  // so instead of letting a soft zoom read as a broken one.
+  const noOriginal = plan?.kind === "none" ? plan.why : null;
   const quality = notReady
     ? "Preview not ready"
     : !real
       ? "Preview"
-      : sizes?.medium
-        ? `${photo.edited ? "Edited · " : ""}Preview ${sizes.medium.w}×${sizes.medium.h}`
-        : "Loading…";
+      : originalSize
+        ? `Original${photo.edited ? " · unedited" : ""} ${originalSize.w}×${originalSize.h}`
+        : plan?.kind === "load"
+          ? "Loading original…"
+          : sizes?.medium
+            ? `${photo.edited && !ask ? "Edited · " : ""}Preview ${sizes.medium.w}×${sizes.medium.h}${
+                noOriginal ? (noOriginal === "not_stored" ? " · no original" : " · original not viewable") : ""
+              }`
+            : "Loading…";
   const label = photo.label ?? null;
   const chromeStyle: CSSProperties = {
     opacity: chrome ? 1 : 0,
@@ -341,6 +419,21 @@ function ViewerBody({
               style={{ ...imageStyle, opacity: sizes?.medium ? 1 : 0, transition: "opacity .18s ease" }}
             />
           )}
+          {/* Keyed per photo, so stepping away unmounts it: one original
+              alive at a time. */}
+          {plan?.kind === "load" && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`o:${key}`}
+              src={plan.url}
+              alt=""
+              draggable={false}
+              decoding="async"
+              onLoad={onImageLoad("original")}
+              onError={() => setFailedOriginal(key)}
+              style={{ ...imageStyle, opacity: originalSize ? 1 : 0, transition: "opacity .18s ease" }}
+            />
+          )}
         </div>
         {notReady && (
           <div
@@ -387,9 +480,32 @@ function ViewerBody({
           )}
         </div>
         <div data-ph-unmask="" style={{ display: "flex", alignItems: "center", gap: 6, flex: "none" }}>
-          <span className="am-viewer-chip" style={chip}>
+          <span className="am-viewer-chip" title={noOriginal ? NO_ORIGINAL_TITLE[noOriginal] : undefined} style={chip}>
             {quality}
           </span>
+          {plan?.kind === "ask" && (
+            <button
+              type="button"
+              className="am-touch-target"
+              onClick={askOriginal}
+              title="Load the full-resolution original"
+              style={barButton}
+            >
+              Original{plan.bytes != null ? ` · ${formatBytes(plan.bytes)}` : ""}
+            </button>
+          )}
+          {photo.edited && real && !notReady && (
+            <button
+              type="button"
+              className="am-touch-target"
+              onClick={() => setAsked(ask ? null : { key, explicit: true })}
+              aria-pressed={ask != null}
+              title={ask ? "Back to the edit" : "Show the unedited original at full resolution"}
+              style={{ ...barButton, color: ask ? "var(--ac)" : "#fff" }}
+            >
+              Original
+            </button>
+          )}
           <button
             type="button"
             className="am-touch-target"

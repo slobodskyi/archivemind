@@ -255,7 +255,8 @@ design from this file:**
   **0054** is the fullscreen photo Viewer — an overlay, not a fifth view, opened
   from the drawer's preview, `F` or the right-click menu (double-click stays the
   drawer's). It walks the visible reading order and owns the keyboard while open;
-  originals are not served to it yet — the ADR scopes that route as the next step.
+  its last quality step is the original (`GET /api/assets/[id]/original`, signed
+  inline, files-RLS reach; read the ADR's amendment before widening what it signs).
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.
