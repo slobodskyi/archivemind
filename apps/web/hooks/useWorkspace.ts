@@ -84,6 +84,7 @@ import {
 } from "@/lib/layout";
 import { latestPointerPosition, solvePinch } from "@/lib/pinch";
 import { drawerStep, stepSequence, viewerAfterRemoval, viewerSequence } from "@/lib/viewer";
+import { keysBelongToOverlay } from "@/lib/key-owner";
 import {
   canvasArrangement,
   canvasStoreKey,
@@ -5624,11 +5625,17 @@ export function useWorkspace(
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // The fullscreen viewer (ADR 0054) owns the keyboard while it is open:
-      // its digits label the photo ON SCREEN and its Delete trashes that one,
-      // so none of the canvas bindings below may also fire on the selection
-      // hidden behind it.
-      if (stateRef.current.viewerId) return;
+      // An overlay owns the keyboard while it is open: the fullscreen viewer's
+      // digits label the photo ON SCREEN and its Delete trashes that one, the
+      // image editor closes on its own Esc, and a dialog's keys are the
+      // dialog's. None of the canvas bindings below may also fire on the
+      // selection hidden behind it (`keysBelongToOverlay`).
+      {
+        const s = stateRef.current;
+        if (keysBelongToOverlay({ viewerId: s.viewerId, editorId: s.editorId, importOpen: s.imp.open }, e.target)) {
+          return;
+        }
+      }
       // F — open the viewer on the drawer's photo, else on the selection.
       if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat) {
         const t = e.target as HTMLElement | null;
@@ -5733,9 +5740,12 @@ export function useWorkspace(
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       // Space is preventDefault'ed for canvas pan, which also stops it
-      // activating a focused button inside a modal dialog. The viewer is not
+      // activating a focused button inside a modal dialog. An overlay is not
       // the canvas: a held Space there must not leave pan mode armed behind it.
-      if (stateRef.current.exportOpen || stateRef.current.viewerId) return;
+      const s = stateRef.current;
+      if (s.exportOpen || keysBelongToOverlay({ viewerId: s.viewerId, editorId: s.editorId, importOpen: s.imp.open }, e.target)) {
+        return;
+      }
       e.preventDefault();
       if (!stateRef.current.spacePan) setState({ spacePan: true });
     };
