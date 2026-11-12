@@ -170,8 +170,54 @@ describe("POST /api/projects/[id]/shares", () => {
       p_label: "Agency",
       p_token_hash: createHash("sha256").update(token).digest("hex"),
       p_token_ciphertext: "v1:sealed",
+      p_scope: "project",
+      p_board_id: null,
+      p_asset_ids: null,
     });
     expect(mocks.sealShareToken).toHaveBeenCalledWith(token);
+  });
+
+  it("passes a Workspace link's board and a list's ids through to the RPC", async () => {
+    const boardId = "66666666-6666-4666-8666-666666666666";
+    const assetId = "77777777-7777-4777-8777-777777777777";
+    const { rpc } = arrange();
+
+    expect((await POST(post({ mode: "both", expiresInDays: 7, scope: "board", boardId }), ctx())).status).toBe(201);
+    expect(rpc).toHaveBeenLastCalledWith("list_project_shares", { p_project_id: projectId });
+    expect((rpc.mock.calls[0] as unknown as [string, object])[1]).toMatchObject({ p_scope: "board", p_board_id: boardId, p_asset_ids: null });
+
+    rpc.mockClear();
+    expect((await POST(post({ mode: "download", expiresInDays: 7, scope: "selection", assetIds: [assetId] }), ctx())).status).toBe(201);
+    expect((rpc.mock.calls[0] as unknown as [string, object])[1]).toMatchObject({ p_scope: "selection", p_board_id: null, p_asset_ids: [assetId], p_can_upload: false });
+  });
+
+  it("refuses a list with upload rights before reaching the database", async () => {
+    const { rpc } = arrange();
+
+    const response = await POST(
+      post({ mode: "both", expiresInDays: 7, scope: "selection", assetIds: ["77777777-7777-4777-8777-777777777777"] }),
+      ctx(),
+    );
+
+    expect(response.status).toBe(400);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["invalid_project_share_board", "board_unavailable"],
+    ["project_share_selection_empty", "selection_empty"],
+    ["invalid_project_share_selection", "invalid_selection"],
+    ["invalid_project_share_rights", "invalid_rights"],
+    ["invalid_project_share_scope", "invalid_scope"],
+    ["invalid_project_share_details", "invalid_details"],
+    ["something_else", "invalid_share"],
+  ])("maps the RPC's %s to a 400 %s", async (message, code) => {
+    arrange({ createError: { code: "22023", message } });
+
+    const response = await POST(post({ mode: "download", expiresInDays: 7, scope: "board", boardId: "66666666-6666-4666-8666-666666666666" }), ctx());
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: code });
   });
 
   it("returns the fresh path even when the stored copy cannot be opened", async () => {

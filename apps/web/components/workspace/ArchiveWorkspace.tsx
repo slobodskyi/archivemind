@@ -42,7 +42,8 @@ import UploadManager from "@/components/upload/UploadManager";
 import Toast from "@/components/modals/Toast";
 // SearchModal retired — the magnifier now opens the real Smart Search panel (ChatPanel).
 import ConfirmModal from "@/components/modals/ConfirmModal";
-import ShareProjectDialog from "@/components/home/ShareProjectDialog";
+import ShareDialog from "@/components/share/ShareDialog";
+import { resolveShareScopes, type ShareScopes } from "@/lib/share-scope";
 import WorkspaceOutputActions from "@/components/content/WorkspaceOutputActions";
 import CanvasAnalyzeAction from "@/components/bulk-ai/CanvasAnalyzeAction";
 import CreateOutputDialog from "@/components/content/CreateOutputDialog";
@@ -219,9 +220,10 @@ export default function ArchiveWorkspace({
   // modal because they are the same question at different stakes: `trash` is
   // reversible and says so, `purge` is not.
   const [boardConfirm, setBoardConfirm] = useState<{ id: string; mode: "trash" | "purge" } | null>(null);
-  // The project's Share dialog (ADR 0051) — not `shareOpen`, which belongs to
-  // a content draft's preview link (ADR 0046).
-  const [projectShareOpen, setProjectShareOpen] = useState(false);
+  // The Share dialog (ADR 0051/0053) and what it may share from where it was
+  // opened — not `shareOpen`, which belongs to a content draft's preview link
+  // (ADR 0046).
+  const [shareRequest, setShareRequest] = useState<ShareScopes | null>(null);
   const confirmBoard = boardConfirm
     ? ([...bd.boards, ...bd.trashedBoards].find((b) => b.id === boardConfirm.id) ?? null)
     : null;
@@ -691,6 +693,22 @@ export default function ArchiveWorkspace({
 
   const hiddenPhotoCount = Math.max(0, initialPhotoTotal - initialPhotos.length);
 
+  /** Every Share starts the way Download does (ADR 0053 §7): the selection,
+   *  else the Workspace, else the project. No reading order here, unlike
+   *  `openExportFor`: a list link is a set — the database stores it as one. */
+  const openShare = (selectionIds: readonly string[], board: (typeof bd.boards)[number] | null) => {
+    if (!ws.projectMode) return;
+    setShareRequest(
+      resolveShareScopes({
+        selectionIds,
+        activeBoard: board
+          ? { id: board.id, name: board.name, color: board.color, count: boardCounts[board.id] ?? board.assetIds.length }
+          : null,
+        projectCount: ws.photos.length + hiddenPhotoCount,
+      }),
+    );
+  };
+
   return (
     <div
       style={{
@@ -1009,9 +1027,12 @@ export default function ArchiveWorkspace({
         canRedo={ws.canRedo}
         onUndo={ws.undo}
         onRedo={ws.redo}
-        // The same Share dialog as the hub card's Share… (ADR 0051). The
+        // The same Share dialog as the hub card's Share… (ADR 0051), opened on
+        // the selection, else the open Workspace (ADR 0053). The
         // workspace-wide `all` canvas has no project to share.
-        onShare={ws.projectMode ? () => setProjectShareOpen(true) : undefined}
+        onShare={ws.projectMode ? () => openShare([...ws.selectedIds], bd.activeBoard) : undefined}
+        shareSelectedCount={ws.selectedIds.size}
+        shareBoardName={bd.activeBoard?.name ?? null}
         onOpenAcct={ws.openAcct}
         accountInitials={account.initials}
         accountName={account.name}
@@ -1031,15 +1052,17 @@ export default function ArchiveWorkspace({
               }}
               onRename={bd.renameBoard}
               onDelete={(id) => setBoardConfirm({ id, mode: "trash" })}
+              onShare={(id) => openShare([], bd.boards.find((b) => b.id === id) ?? null)}
             />
           ) : undefined
         }
       />
 
-      <ShareProjectDialog
-        open={projectShareOpen && ws.projectMode}
+      <ShareDialog
+        open={shareRequest !== null && ws.projectMode}
         project={{ id: currentProjectId, name: ws.projLabel }}
-        onClose={() => setProjectShareOpen(false)}
+        scopes={shareRequest ?? undefined}
+        onClose={() => setShareRequest(null)}
       />
 
       {/* Persistent by design: this is archive-integrity information, not a
@@ -1527,6 +1550,8 @@ export default function ArchiveWorkspace({
         // one photo can be downloaded from the menu too, not only from two up.
         onExport={() => ws.openExportFor(labelTargetIds)}
         onOpenViewer={() => ws.openViewer(ws.contextMenu?.targetId ?? null)}
+        // Same target, shared by link (ADR 0053). The menu hides it on `all`.
+        onShare={ws.projectMode ? () => openShare(labelTargetIds, bd.activeBoard) : undefined}
         onUngroup={ws.ungroupSelection}
         hasGroup={ws.selectionHasGroup}
         onBringToFront={ws.bringToFront}

@@ -31,6 +31,11 @@ interface AppHeaderProps {
    *  workspace-wide `all` canvas, which has no project to share — and then
    *  the button is not drawn. */
   onShare?: () => void;
+  /** What SHARE will start from (ADR 0053 §7): the selection's size, badged
+   *  on the button as DOWNLOAD is; 0 for none. */
+  shareSelectedCount?: number;
+  /** The open Workspace's name, when SHARE would start from it. */
+  shareBoardName?: string | null;
   onOpenAcct?: () => void;
   /** Real account initials/name for the avatar (replaces the old hardcoded "AM"). */
   accountInitials?: string;
@@ -53,6 +58,8 @@ export default function AppHeader({
   onUndo,
   onRedo,
   onShare,
+  shareSelectedCount = 0,
+  shareBoardName = null,
   onOpenAcct,
   accountInitials = "",
   accountName,
@@ -299,8 +306,20 @@ export default function AppHeader({
         {onShare && (
           <button
             onClick={onShare}
-            aria-label="Share project"
-            title="Share"
+            aria-label={
+              shareSelectedCount > 0
+                ? `Share ${shareSelectedCount} selected`
+                : shareBoardName
+                  ? `Share workspace ${shareBoardName}`
+                  : "Share project"
+            }
+            title={
+              shareSelectedCount > 0
+                ? `Share ${shareSelectedCount} selected by link`
+                : shareBoardName
+                  ? `Share “${shareBoardName}” by link`
+                  : "Share this project by link"
+            }
             // Below 760px the word goes and the icon stays — a labelled button is
             // ~95px of a 390px header, and the icon is the half that identifies it.
             className="am-hdr-share"
@@ -322,6 +341,11 @@ export default function AppHeader({
           >
             <ShareArrowIcon />
             <span>SHARE</span>
+            {shareSelectedCount > 0 && (
+              <span className="am-hdr-badge" style={{ padding: "1px 5px", background: "var(--bg-el)", borderRadius: 2, fontSize: 9.5, fontWeight: 800 }}>
+                {shareSelectedCount}
+              </span>
+            )}
           </button>
         )}
         <button

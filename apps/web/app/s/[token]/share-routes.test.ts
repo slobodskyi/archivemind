@@ -49,6 +49,8 @@ const downloadShare = {
   expiresAt: "2026-11-10T00:00:00+00:00",
   rights: { creator: null, credit: null, copyrightNotice: null, usageTerms: null },
   fileCount: 3,
+  scope: "project" as const,
+  boardName: null,
 };
 
 async function expectUniform404(response: Response) {

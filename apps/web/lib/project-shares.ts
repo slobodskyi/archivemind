@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { uuidSchema } from "@archivemind/shared";
+import {
+  assetLabelSchema,
+  captionLangSchema,
+  captionStyleSchema,
+  uuidSchema,
+  type CaptionLang,
+  type CaptionStyleKey,
+} from "@archivemind/shared";
 
 /** Project share links (ADR 0051): the editor-side contracts. A link carries
  *  its own rights — download, upload, or both — and always expires. */
@@ -29,13 +36,41 @@ export function projectShareMode(canDownload: boolean, canUpload: boolean): Proj
   return canUpload ? "upload" : "download";
 }
 
+/** What a link carries inside its project (ADR 0053 §1): every file of the
+ *  project, the files of one Workspace, or a fixed list picked at creation. */
+export const shareScopeSchema = z.enum(["project", "board", "selection"]);
+export type ShareScope = z.infer<typeof shareScopeSchema>;
+/** create_project_share()'s bound on a selection link's list — the same number
+ *  as a link's upload quota. */
+export const PROJECT_SHARE_SELECTION_MAX = 2000;
+
 export const createProjectShareRequestSchema = z
   .object({
     mode: projectShareModeSchema,
     expiresInDays: expiryDaysSchema,
     label: z.string().trim().max(PROJECT_SHARE_LABEL_MAX).optional(),
+    // Optional so a browser built before ADR 0053 still makes project links.
+    scope: shareScopeSchema.default("project"),
+    boardId: uuidSchema.optional(),
+    assetIds: z.array(uuidSchema).min(1).max(PROJECT_SHARE_SELECTION_MAX).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    // Each scope names exactly its own target, so a stray id is a malformed
+    // request here rather than a 22023 from the database.
+    const wantsBoard = value.scope === "board";
+    const wantsList = value.scope === "selection";
+    if (wantsBoard !== (value.boardId !== undefined)) {
+      ctx.addIssue({ code: "custom", path: ["boardId"], message: "boardId belongs to a board link only" });
+    }
+    if (wantsList !== (value.assetIds !== undefined)) {
+      ctx.addIssue({ code: "custom", path: ["assetIds"], message: "assetIds belong to a selection link only" });
+    }
+    // A list never grows, so it cannot receive files (ADR 0053 §1).
+    if (wantsList && value.mode !== "download") {
+      ctx.addIssue({ code: "custom", path: ["mode"], message: "a selection link is download-only" });
+    }
+  });
 export type CreateProjectShareRequest = z.infer<typeof createProjectShareRequestSchema>;
 
 /** Extend (a new deadline counted from now; the URL does not change) and/or
@@ -77,6 +112,19 @@ export const projectShareRowSchema = z.object({
   bytes_received: z.number().nonnegative(),
   max_files: z.number().int().positive(),
   max_bytes: z.number().positive(),
+  // ADR 0053. Defaulted, so a row from before the migration still parses.
+  scope: shareScopeSchema.default("project"),
+  board_id: uuidSchema.nullable().default(null),
+  board_name: z.string().nullable().default(null),
+  // Text, not the enum: a colour or language added later must not fail the
+  // whole list. toProjectShareSummary narrows them.
+  board_color: z.string().nullable().default(null),
+  file_count: z.number().int().nonnegative().nullable().default(null),
+  show_boards: z.boolean().default(false),
+  show_labels: z.boolean().default(false),
+  show_tags: z.boolean().default(false),
+  caption_lang: z.string().nullable().default(null),
+  caption_style: z.string().nullable().default(null),
 });
 export type ProjectShareRow = z.infer<typeof projectShareRowSchema>;
 
@@ -100,6 +148,19 @@ export const projectShareSummarySchema = z.object({
   bytesReceived: z.number().nonnegative(),
   maxFiles: z.number().int().positive(),
   maxBytes: z.number().positive(),
+  scope: shareScopeSchema,
+  boardId: uuidSchema.nullable(),
+  /** Null once the Workspace is deleted for good: the link is dead then. */
+  boardName: z.string().nullable(),
+  boardColor: assetLabelSchema.nullable(),
+  /** Files the scope holds right now — live, not as it was at creation. */
+  fileCount: z.number().int().nonnegative().nullable(),
+  details: z.object({
+    boards: z.boolean(),
+    labels: z.boolean(),
+    tags: z.boolean(),
+    caption: z.object({ lang: captionLangSchema, style: captionStyleSchema }).nullable(),
+  }),
 });
 export type ProjectShareSummary = z.infer<typeof projectShareSummarySchema>;
 
@@ -131,7 +192,32 @@ export function toProjectShareSummary(row: ProjectShareRow, path: string | null)
     bytesReceived: row.bytes_received,
     maxFiles: row.max_files,
     maxBytes: row.max_bytes,
+    scope: row.scope,
+    boardId: row.board_id,
+    boardName: row.board_name,
+    boardColor: narrow(assetLabelSchema, row.board_color),
+    fileCount: row.file_count,
+    details: {
+      boards: row.show_boards,
+      labels: row.show_labels,
+      tags: row.show_tags,
+      caption: shareCaption(row.caption_lang, row.caption_style),
+    },
   };
+}
+
+function narrow<T>(schema: z.ZodType<T>, value: string | null): T | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function shareCaption(
+  lang: string | null,
+  style: string | null,
+): { lang: CaptionLang; style: CaptionStyleKey } | null {
+  const l = narrow(captionLangSchema, lang);
+  const s = narrow(captionStyleSchema, style);
+  return l && s ? { lang: l, style: s } : null;
 }
 
 export function liveShareCount(shares: readonly ProjectShareSummary[]): number {

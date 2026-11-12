@@ -5,6 +5,7 @@ import {
   projectShareMode,
   projectSharePath,
   projectShareRights,
+  projectShareRowSchema,
   toProjectShareSummary,
   updateProjectShareRequestSchema,
   type ProjectShareRow,
@@ -28,6 +29,16 @@ const row: ProjectShareRow = {
   bytes_received: 0,
   max_files: 2000,
   max_bytes: 21474836480,
+  scope: "project",
+  board_id: null,
+  board_name: null,
+  board_color: null,
+  file_count: 12,
+  show_boards: false,
+  show_labels: false,
+  show_tags: false,
+  caption_lang: null,
+  caption_style: null,
 };
 
 describe("project share rights", () => {
@@ -54,6 +65,35 @@ describe("createProjectShareRequestSchema", () => {
     const base = { mode: "download", expiresInDays: 7 };
     expect(createProjectShareRequestSchema.safeParse({ ...base, canUpload: true }).success).toBe(false);
     expect(createProjectShareRequestSchema.safeParse({ ...base, tokenHash: "00".repeat(32) }).success).toBe(false);
+  });
+
+  it("defaults to a project link, as a browser from before ADR 0053 sends", () => {
+    expect(createProjectShareRequestSchema.parse({ mode: "both", expiresInDays: 7 }).scope).toBe("project");
+  });
+
+  it("makes each scope name exactly its own target", () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    const base = { mode: "download", expiresInDays: 7 } as const;
+    const ok = (body: object) => createProjectShareRequestSchema.safeParse({ ...base, ...body }).success;
+    expect(ok({ scope: "board", boardId: id })).toBe(true);
+    expect(ok({ scope: "board" })).toBe(false);
+    expect(ok({ scope: "board", boardId: id, assetIds: [id] })).toBe(false);
+    expect(ok({ scope: "project", boardId: id })).toBe(false);
+    expect(ok({ scope: "selection", assetIds: [id] })).toBe(true);
+    expect(ok({ scope: "selection" })).toBe(false);
+    expect(ok({ scope: "selection", assetIds: [] })).toBe(false);
+    expect(ok({ scope: "selection", assetIds: ["not-a-uuid"] })).toBe(false);
+    expect(ok({ scope: "selection", assetIds: Array(2001).fill(id) })).toBe(false);
+    expect(ok({ scope: "project", assetIds: [id] })).toBe(false);
+    expect(ok({ scope: "everything" })).toBe(false);
+  });
+
+  it("refuses a list that could receive files", () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    for (const mode of ["upload", "both"]) {
+      expect(createProjectShareRequestSchema.safeParse({ mode, expiresInDays: 7, scope: "selection", assetIds: [id] }).success).toBe(false);
+    }
+    expect(createProjectShareRequestSchema.safeParse({ mode: "both", expiresInDays: 7, scope: "board", boardId: id }).success).toBe(true);
   });
 
   it("trims the label and caps it", () => {
@@ -83,6 +123,36 @@ describe("toProjectShareSummary", () => {
   it("drops the path of a link that is not live", () => {
     expect(toProjectShareSummary({ ...row, status: "expired" }, "/s/x").path).toBeNull();
     expect(toProjectShareSummary({ ...row, status: "inactive" }, "/s/x").path).toBeNull();
+  });
+
+  it("carries the scope and the details, narrowing values it does not know", () => {
+    const summary = toProjectShareSummary(
+      {
+        ...row,
+        scope: "board",
+        board_id: "33333333-3333-4333-8333-333333333333",
+        board_name: "Kyiv",
+        board_color: "chartreuse",
+        file_count: 48,
+        show_labels: true,
+        caption_lang: "uk",
+        caption_style: "agency",
+      },
+      "/s/x",
+    );
+    expect(summary).toMatchObject({
+      scope: "board",
+      boardName: "Kyiv",
+      boardColor: null,
+      fileCount: 48,
+      details: { boards: false, labels: true, tags: false, caption: { lang: "uk", style: "agency" } },
+    });
+  });
+
+  it("parses a row from before the scopes migration as a project link", () => {
+    const parsed = projectShareRowSchema.parse({ ...row, scope: undefined, file_count: undefined });
+    expect(parsed.scope).toBe("project");
+    expect(toProjectShareSummary(parsed, null).details.caption).toBeNull();
   });
 
   it("counts live links only", () => {

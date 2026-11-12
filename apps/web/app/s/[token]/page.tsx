@@ -4,6 +4,7 @@ import ProjectShareFiles from "@/components/share/ProjectShareFiles";
 import ProjectShareSendForm from "@/components/share/ProjectShareSendForm";
 import RightsFooter, { formatShareDate } from "@/components/share/RightsFooter";
 import { listProjectShareAssets, openProjectShare } from "@/lib/integrations/project-shares.server";
+import { shareScopeHeading } from "@/lib/share-scope";
 
 interface ProjectSharePageProps {
   params: Promise<{ token: string }>;
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 /** /s/{token} — a project share link, opened by somebody without an account
- *  (ADR 0051). A live window: every load re-resolves the project's current
+ *  (ADR 0051), titled by its scope (ADR 0053). A live window: every load re-resolves the project's current
  *  files. A download link shows them, the first 200 server-rendered; an
  *  upload-only link learns the project's name and the owner's byline and
  *  nothing else, beside the send form. Every refusal is the same not-found
@@ -27,11 +28,26 @@ export default async function ProjectSharePage({ params }: ProjectSharePageProps
   const firstPage = share.canDownload ? await listProjectShareAssets(token, null) : null;
   if (share.canDownload && !firstPage) notFound();
 
+  // Titled by what the link carries (ADR 0053): the project, the Workspace
+  // being shared, or a fixed set of files from the project.
+  const what = share.scope === "board" ? "Shared workspace" : share.scope === "selection" ? "Shared files" : "Shared project";
   const kicker = share.canDownload && share.canUpload
-    ? "Shared project · download and send files"
+    ? `${what} · download and send files`
     : share.canDownload
-      ? "Shared project · download files"
+      ? `${what} · download files`
       : "File request";
+  const heading = shareScopeHeading({
+    scope: share.scope,
+    projectName: share.projectName,
+    boardName: share.boardName,
+    fileCount: share.fileCount,
+  });
+  const noun = share.scope === "board" ? "Workspace" : "project";
+  const dek = !share.canDownload
+    ? `Send files into this ${noun}. The link works until ${formatShareDate(share.expiresAt)}.`
+    : share.scope === "selection"
+      ? `A set of files picked by the owner. The link works until ${formatShareDate(share.expiresAt)}.`
+      : `This link shows the ${noun} as it is now. It works until ${formatShareDate(share.expiresAt)}.`;
 
   return (
     <div className="public-share-scroll-root">
@@ -40,7 +56,7 @@ export default async function ProjectSharePage({ params }: ProjectSharePageProps
           <div className="public-share-brand">
             <strong>ArchiveMind</strong>
             <span aria-hidden="true">/</span>
-            <span>{share.canDownload ? "Shared project" : "File request"}</span>
+            <span>{share.canDownload ? what : "File request"}</span>
           </div>
         </div>
       </header>
@@ -48,12 +64,11 @@ export default async function ProjectSharePage({ params }: ProjectSharePageProps
       <main className="public-share-main">
         <header className="public-share-article-lead" style={{ maxWidth: 820 }}>
           <div className="public-share-kicker">{kicker}</div>
-          <h1>{share.projectName}</h1>
-          <p className="public-share-dek" style={{ fontSize: 17 }}>
-            {share.canDownload
-              ? `This link shows the project as it is now. It works until ${formatShareDate(share.expiresAt)}.`
-              : `Send files into this project. The link works until ${formatShareDate(share.expiresAt)}.`}
-          </p>
+          <h1>{heading}</h1>
+          {share.scope === "board" && share.boardName ? (
+            <div className="public-share-kicker" style={{ marginTop: 6 }}>From {share.projectName}</div>
+          ) : null}
+          <p className="public-share-dek" style={{ fontSize: 17 }}>{dek}</p>
         </header>
 
         {share.canDownload && firstPage ? (

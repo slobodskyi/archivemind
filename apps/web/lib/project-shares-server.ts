@@ -18,6 +18,19 @@ export interface ShareRpcError {
   message?: string;
 }
 
+/** create_project_share()'s scope refusals (ADR 0053), each its own code so
+ *  the dialog can say which part of the request no longer holds — usually a
+ *  Workspace trashed or files moved out since the dialog opened. */
+const SCOPE_REFUSALS: Record<string, string> = {
+  project_share_revoked: "share_revoked",
+  invalid_project_share_scope: "invalid_scope",
+  invalid_project_share_board: "board_unavailable",
+  invalid_project_share_selection: "invalid_selection",
+  project_share_selection_empty: "selection_empty",
+  invalid_project_share_rights: "invalid_rights",
+  invalid_project_share_details: "invalid_details",
+};
+
 /** One mapping from the RPCs' stable error codes to HTTP. Tokens, digests and
  *  ciphertexts are deliberately absent from the log line. */
 export function projectShareRpcFailure(error: ShareRpcError) {
@@ -28,8 +41,7 @@ export function projectShareRpcFailure(error: ShareRpcError) {
   }
   if (error.code === "53400") return NextResponse.json({ error: "share_limit" }, { status: 409 });
   if (error.code === "22023") {
-    const revoked = error.message === "project_share_revoked";
-    return NextResponse.json({ error: revoked ? "share_revoked" : "invalid_share" }, { status: 400 });
+    return NextResponse.json({ error: SCOPE_REFUSALS[error.message ?? ""] ?? "invalid_share" }, { status: 400 });
   }
   return NextResponse.json({ error: "share_unavailable" }, { status: 500 });
 }
