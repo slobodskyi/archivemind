@@ -246,6 +246,15 @@ export default function ArchiveWorkspace({
     (ids: readonly string[]) => uploadAnalyzeStatus(ids, ws.visiblePhotos, ws.uploadPreviews),
     [ws.visiblePhotos, ws.uploadPreviews],
   );
+  // The CTA unmounts the button it was activated from, so the panel it opens
+  // takes focus (BulkAiPanel.focusRequest) or a keyboard user lands on <body>.
+  const [bulkFocusRequest, setBulkFocusRequest] = useState(0);
+  const openBulkFor = ws.openBulkFor;
+  const analyzeUploaded = useCallback((ids: readonly string[]) => {
+    const opened = openBulkFor(ids);
+    if (opened) setBulkFocusRequest((n) => n + 1);
+    return opened;
+  }, [openBulkFor]);
   // Changes whenever the set of bottom chrome the pill docks above can change.
   const uploadDockKey = `${ws.view}|${bd.activeBoardId ?? ""}|${ws.bulkShow ? 1 : 0}|${ws.showViewTabs ? 1 : 0}`;
 
@@ -1316,6 +1325,7 @@ export default function ArchiveWorkspace({
         onToggleLang={ws.toggleBulkLang}
         onSetStyle={ws.setBulkStyle}
         onRun={ws.runBulk}
+        focusRequest={bulkFocusRequest}
       />
 
       {ws.projectMode && (
@@ -1336,7 +1346,7 @@ export default function ArchiveWorkspace({
         onBatchStart={ws.onUploadBatchStart}
         onBatchSettled={ws.onUploadBatchSettled}
         analyzeStatus={uploadAnalyzeStatusFor}
-        onAnalyzeUploaded={ws.openBulkFor}
+        onAnalyzeUploaded={analyzeUploaded}
         dockKey={uploadDockKey}
       />
 

@@ -4609,7 +4609,11 @@ export function useWorkspace(
 
   const openBulkFor = useCallback((ids: readonly string[]): boolean => {
     const s = stateRef.current;
-    if (activeJobId.current) {
+    // proc.active as well as activeJobId: a run is "active" from its
+    // "Queueing…" frame, but activeJobId is only set once /api/jobs answers.
+    // Opening inside that window would replace the selection under another
+    // set's progress bar, and the job's terminal branch would then clear it.
+    if (activeJobId.current || s.proc.active) {
       flashToast("An AI job is already running — wait for it to finish");
       return false;
     }

@@ -124,3 +124,36 @@ export function dockBottomFor(
   if (usable.length === 0) return null;
   return Math.round(viewportHeight - Math.min(...usable) + gap);
 }
+
+/** The pill's widest box and its side inset (UploadManager's `maxWidth` and
+ *  `left`/`right`): it is centred between the insets at up to this width. */
+export const UPLOAD_PILL_MAX_WIDTH = 420;
+export const UPLOAD_PILL_SIDE_INSET = 8;
+
+/** Whether a piece of bottom chrome spanning `rect` horizontally can sit under
+ *  the pill at its widest. A panel pinned to one side of a wide window (the
+ *  Map's photos-at-this-spot stack) is beside the pill, not under it, so it
+ *  must not push the pill up; on a phone the same panel is under it. */
+export function underUploadPill(
+  viewportWidth: number,
+  rect: { left: number; right: number },
+): boolean {
+  const width = Math.max(0, Math.min(UPLOAD_PILL_MAX_WIDTH, viewportWidth - 2 * UPLOAD_PILL_SIDE_INSET));
+  const left = (viewportWidth - width) / 2;
+  return rect.right > left && rect.left < left + width;
+}
+
+/** Whether the auto-close timer is held. Hover is a plain flag, NOT keyed to
+ *  the summary: a pointer resting on the pill when a summary settles (it was
+ *  over the progress bar, or it just clicked Retry) fires no new pointerenter,
+ *  so a seq-keyed hover would let the pill close under the cursor. It is reset
+ *  when the pill closes, since no pointerleave fires after an unmount. Focus IS
+ *  keyed to the summary's seq: a focused Retry button that unmounts may never
+ *  report a blur, and a stale focus must not hold the next summary open. */
+export function uploadPillHeld(
+  hold: { hover: boolean; focusSeq: number | null },
+  summarySeq: number | null,
+): boolean {
+  if (summarySeq === null) return false;
+  return hold.hover || hold.focusSeq === summarySeq;
+}

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { CheckIcon, CloseIcon, SparkleIcon, TagIcon } from "@/components/icons/icons";
 import { planAiRun, type AiOps } from "@/lib/ai-ops";
 import type { CaptionStyle, Language } from "@/types";
@@ -19,6 +20,11 @@ interface BulkAiPanelProps {
   onToggleLang: (l: Language) => void;
   onSetStyle: (s: CaptionStyle) => void;
   onRun: () => void;
+  /** Bumped by an opener that took focus with it (the upload pill's CTA
+   *  unmounts the button it was activated from): the panel then takes focus,
+   *  so the next Tab moves into it rather than restarting at the top of the
+   *  page. The container, not Run — a second Enter must not spend credits. */
+  focusRequest?: number;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -109,7 +115,16 @@ export default function BulkAiPanel({
   onToggleLang,
   onSetStyle,
   onRun,
+  focusRequest = 0,
 }: BulkAiPanelProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const handledFocus = useRef(focusRequest);
+  useEffect(() => {
+    if (focusRequest === handledFocus.current || !rootRef.current) return;
+    handledFocus.current = focusRequest;
+    rootRef.current.focus({ preventScroll: true });
+  }, [focusRequest, show]);
+
   if (!show) return null;
 
   const count = selectedIds.length;
@@ -125,7 +140,12 @@ export default function BulkAiPanel({
       // than the phone it opens on) and sits higher, because the action bar it
       // has to clear wraps to two rows there.
       className="am-bulk-ai"
+      ref={rootRef}
+      tabIndex={-1}
+      role="region"
+      aria-label="AI analysis"
       style={{
+        outline: "none",
         position: "absolute",
         // Clears the action bar (bottom:66), which now sits above the view switcher.
         bottom: 124,

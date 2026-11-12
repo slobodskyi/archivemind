@@ -12,11 +12,15 @@ import {
   type UploadProgress,
   type UploadStage,
 } from "@/lib/upload-client";
-import { Z } from "@/lib/ui";
+import { BOTTOM_CHROME_EVENT, Z } from "@/lib/ui";
 import {
   UPLOAD_PILL_PREPARE_MAX_MS,
+  UPLOAD_PILL_MAX_WIDTH,
+  UPLOAD_PILL_SIDE_INSET,
   dockBottomFor,
+  underUploadPill,
   uploadPillDismiss,
+  uploadPillHeld,
   type UploadAnalyzeStatus,
 } from "@/lib/upload-pill";
 import type {
@@ -203,38 +207,66 @@ function useAutoDismiss(
   }, [ms, paused, token]);
 }
 
+/** Announced, never shown (ExportDialog's idiom: no Tailwind utilities in
+ *  components, so no `sr-only` class). */
+const SR_ONLY: React.CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
 /** The bottom chrome the pill docks above. These class hooks are carried by
  *  ViewSwitcher (`am-viewswitcher`), SortingActionBar and WorkspaceActionBar
- *  (`am-bar`) and BulkAiPanel (`am-bulk-ai`) — renaming one drops the pill back
- *  to its fallback bottom, under the bars, where they win by z. */
-const CHROME_SELECTOR = ".am-viewswitcher, .am-bar, .am-bulk-ai";
+ *  (`am-bar`), BulkAiPanel (`am-bulk-ai`) and the Map's photos-at-this-spot
+ *  stack (`am-map-stack`) — renaming one drops the pill back to its fallback
+ *  bottom, under the bars, where they win by z. The Map stack is the exception
+ *  to that: the Map pane is its own stacking context at z 5, so nothing but
+ *  docking keeps the pill off it (Z.uploadPill). */
+const CHROME_SELECTOR = ".am-viewswitcher, .am-bar, .am-bulk-ai, .am-map-stack";
 
 /** Measured, not computed from props: the bars wrap at 760 px and below, are
  *  52 px strips on a coarse pointer, and BulkAiPanel's height follows its
- *  content. Re-queried only when `dockKey` changes (ArchiveWorkspace re-renders
- *  on every pan frame), re-measured by ResizeObserver and window resize. */
+ *  content. Re-queried when `dockKey` changes (ArchiveWorkspace re-renders
+ *  on every pan frame) and on BOTTOM_CHROME_EVENT (chrome that mounts on its
+ *  own), re-measured by ResizeObserver and window resize. Only chrome that can
+ *  sit under the pill horizontally counts (`underUploadPill`). */
 function useDockBottom(active: boolean, dockKey: string | undefined): number | null {
   const [bottom, setBottom] = useState<number | null>(null);
   useLayoutEffect(() => {
     if (!active || dockKey === undefined) return;
-    const els = Array.from(document.querySelectorAll<HTMLElement>(CHROME_SELECTOR));
+    let els: HTMLElement[] = [];
     const measure = () => setBottom(dockBottomFor(
       window.innerHeight,
       els
         .map((el) => el.getBoundingClientRect())
-        .filter((rect) => rect.height > 0)
+        .filter((rect) => rect.height > 0 && underUploadPill(window.innerWidth, rect))
         .map((rect) => rect.top),
     ));
     // ResizeObserver's initial observation does the first measure, so there is
     // no synchronous setState in this effect body.
     const observer = new ResizeObserver(measure);
-    for (const el of els) observer.observe(el);
-    const frame = els.length === 0 ? requestAnimationFrame(() => setBottom(null)) : 0;
+    let frame = 0;
+    const query = () => {
+      observer.disconnect();
+      els = Array.from(document.querySelectorAll<HTMLElement>(CHROME_SELECTOR));
+      for (const el of els) observer.observe(el);
+      if (frame) cancelAnimationFrame(frame);
+      frame = els.length === 0 ? requestAnimationFrame(() => setBottom(null)) : 0;
+    };
+    query();
     window.addEventListener("resize", measure);
+    window.addEventListener(BOTTOM_CHROME_EVENT, query);
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("resize", measure);
+      window.removeEventListener(BOTTOM_CHROME_EVENT, query);
     };
   }, [active, dockKey]);
   return active && dockKey !== undefined ? bottom : null;
@@ -503,30 +535,32 @@ export default function UploadManager({
     ? policy.ms
     : policy.kind === "wait" ? UPLOAD_PILL_PREPARE_MAX_MS : null;
 
-  // Pause while the pointer is over the pill or focus is inside it. Keyed to
-  // the summary's seq, so a pill closed while hovered (no pointerleave ever
-  // fires after an unmount) cannot leave the next one paused forever.
-  const [hold, setHold] = useState({ seq: -1, hover: false, focus: false });
-  const paused = summary !== null && hold.seq === summary.seq && (hold.hover || hold.focus);
-  const setHoldFor = (patch: { hover?: boolean; focus?: boolean }) => {
-    if (!summary) return;
-    const seq = summary.seq;
-    setHold((h) => {
-      const same = h.seq === seq;
-      return {
-        seq,
-        hover: patch.hover ?? (same && h.hover),
-        focus: patch.focus ?? (same && h.focus),
-      };
-    });
-  };
+  // Pause while the pointer is over the pill or focus is inside it
+  // (uploadPillHeld). Hover is tracked whatever the summary — a pointer that
+  // is already resting on the pill when a batch or a retry settles fires no
+  // new pointerenter — and cleared by closePill, because no pointerleave
+  // fires after an unmount. Focus is keyed to the summary's seq.
+  const [hold, setHold] = useState<{ hover: boolean; focusSeq: number | null }>(
+    { hover: false, focusSeq: null },
+  );
+  const paused = uploadPillHeld(hold, summary?.seq ?? null);
+  const closePill = useCallback(() => {
+    setPill(IDLE);
+    setHold({ hover: false, focusSeq: null });
+  }, []);
   useAutoDismiss(
     timerMs,
     paused,
     summary ? `${summary.batchId}:${summary.seq}:${policy.kind}` : "idle",
-    () => setPill(IDLE),
+    closePill,
   );
   const dock = useDockBottom(pill.active, dockKey);
+  // No running count: a polite region re-announces on every change.
+  const liveReadiness = policy.kind === "wait"
+    ? "preparing previews"
+    : showCta
+      ? `${ctaCount} ready to analyze with AI`
+      : "";
   const skipLabels = summary
     ? [
       summary.skippedReasons.empty > 0 ? `${summary.skippedReasons.empty} empty` : null,
@@ -584,11 +618,15 @@ export default function UploadManager({
       {pill.active && (
         <div
           data-upload-pill
-          onPointerEnter={() => setHoldFor({ hover: true })}
-          onPointerLeave={() => setHoldFor({ hover: false })}
-          onFocus={() => setHoldFor({ focus: true })}
+          onPointerEnter={() => setHold((h) => ({ ...h, hover: true }))}
+          onPointerLeave={() => setHold((h) => ({ ...h, hover: false }))}
+          onFocus={() => {
+            if (summary) setHold((h) => ({ ...h, focusSeq: summary.seq }));
+          }}
           onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoldFor({ focus: false });
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              setHold((h) => ({ ...h, focusSeq: null }));
+            }
           }}
           style={{
             position: "fixed",
@@ -597,13 +635,13 @@ export default function UploadManager({
             bottom: dock ?? "calc(18px + env(safe-area-inset-bottom, 0px))",
             // left/right + auto margins, not left:50% — a fixed box with only
             // left:50% can never be wider than half the viewport.
-            left: 8,
-            right: 8,
+            left: UPLOAD_PILL_SIDE_INSET,
+            right: UPLOAD_PILL_SIDE_INSET,
             marginInline: "auto",
             width: "fit-content",
             zIndex: Z.uploadPill,
             minWidth: 260,
-            maxWidth: "min(420px, calc(100vw - 16px))",
+            maxWidth: `min(${UPLOAD_PILL_MAX_WIDTH}px, calc(100vw - ${2 * UPLOAD_PILL_SIDE_INSET}px))`,
             background: "rgba(12,12,12,.97)",
             border: "1px solid var(--bd)",
             borderRadius: 2,
@@ -616,11 +654,16 @@ export default function UploadManager({
             aria-live={pill.stage === "done" ? "polite" : undefined}
             style={{ display: "flex", alignItems: "center", gap: 10 }}
           >
-            <div style={{ flex: 1, fontSize: 11, color: "var(--t2)", letterSpacing: "0.04em" }}>{label}</div>
+            <div style={{ flex: 1, fontSize: 11, color: "var(--t2)", letterSpacing: "0.04em" }}>
+              {label}
+              {/* The readiness lines below sit outside this live region, so
+                  their change (wait → the CTA appearing) is announced here. */}
+              {liveReadiness && <span style={SR_ONLY}>{` · ${liveReadiness}`}</span>}
+            </div>
             {pill.stage === "done" && (
               <button
                 type="button"
-                onClick={() => setPill(IDLE)}
+                onClick={closePill}
                 aria-label="Dismiss upload summary"
                 style={{ display: "flex", width: 22, height: 22, alignItems: "center", justifyContent: "center", border: 0, borderRadius: 2, background: "var(--bg-el)", color: "var(--t2b)", cursor: "pointer" }}
               >
@@ -639,10 +682,12 @@ export default function UploadManager({
               // Product copy and a count only (ADR 0050).
               data-ph-unmask=""
               onClick={() => {
-                if (onAnalyzeUploaded?.(status.analyzable)) setPill(IDLE);
+                if (onAnalyzeUploaded?.(status.analyzable)) closePill();
               }}
-              aria-label={`Analyze ${ctaCount} uploaded ${ctaCount === 1 ? "photo" : "photos"} with AI`}
-              title="Opens the AI panel — see the cost before anything runs"
+              // No aria-label: the visible "Analyze N with AI" is the name, so
+              // a speech-input user can say what they see (WCAG 2.5.3); the
+              // title adds the context as the description.
+              title={`Analyze the ${ctaCount} uploaded ${ctaCount === 1 ? "photo" : "photos"} — opens the AI panel, see the cost before anything runs`}
               style={{
                 marginTop: 9,
                 height: 28,

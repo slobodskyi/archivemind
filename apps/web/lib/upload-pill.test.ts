@@ -4,8 +4,10 @@ import {
   UPLOAD_PILL_SUCCESS_MS,
   analyzableUploadIds,
   dockBottomFor,
+  underUploadPill,
   uploadAnalyzeStatus,
   uploadPillDismiss,
+  uploadPillHeld,
 } from "./upload-pill";
 
 const CLEAN = {
@@ -149,5 +151,39 @@ describe("dockBottomFor", () => {
     expect(dockBottomFor(800, [700], 20)).toBe(120);
     expect(dockBottomFor(800, [300], 10, 400)).toBeNull();
     expect(dockBottomFor(800, [300], 10, 200)).toBe(510);
+  });
+});
+
+describe("underUploadPill", () => {
+  it("counts chrome under the centred pill and skips a panel beside it", () => {
+    // 1280 wide: the pill spans 430–850. The Map stack sits at 16–284.
+    expect(underUploadPill(1280, { left: 16, right: 284 })).toBe(false);
+    expect(underUploadPill(1280, { left: 500, right: 780 })).toBe(true); // centred bar
+    expect(underUploadPill(1280, { left: 840, right: 900 })).toBe(true); // clips the edge
+    expect(underUploadPill(1280, { left: 850, right: 900 })).toBe(false); // only touches it
+  });
+
+  it("on a phone the pill spans the width, so a side panel is under it", () => {
+    // 375 wide: the pill spans 8–367.
+    expect(underUploadPill(375, { left: 16, right: 284 })).toBe(true);
+    expect(underUploadPill(375, { left: 0, right: 8 })).toBe(false);
+  });
+});
+
+describe("uploadPillHeld", () => {
+  it("never holds while there is no summary", () => {
+    expect(uploadPillHeld({ hover: true, focusSeq: 1 }, null)).toBe(false);
+  });
+
+  it("keeps a resting pointer's hover across a new summary", () => {
+    // Pointer entered over the progress pill / the Retry button (seq 1), and
+    // the batch settled as seq 2 with no new pointerenter.
+    expect(uploadPillHeld({ hover: true, focusSeq: null }, 2)).toBe(true);
+    expect(uploadPillHeld({ hover: false, focusSeq: null }, 2)).toBe(false);
+  });
+
+  it("drops a focus recorded against an earlier summary", () => {
+    expect(uploadPillHeld({ hover: false, focusSeq: 2 }, 2)).toBe(true);
+    expect(uploadPillHeld({ hover: false, focusSeq: 1 }, 2)).toBe(false);
   });
 });
