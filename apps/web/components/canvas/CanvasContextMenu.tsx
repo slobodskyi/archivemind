@@ -61,6 +61,9 @@ interface CanvasContextMenuProps {
    *  which is the thing a Workspace is. */
   onFolder: () => void;
   onExport: () => void;
+  /** Open the fullscreen viewer (ADR 0054) on the right-clicked tile — walking
+   *  just the selection when it is two or more. */
+  onOpenViewer: () => void;
   /** Dissolve the bound group(s) the selection touches. */
   onUngroup: () => void;
   /** The selection overlaps a bound group — show Ungroup instead of Group. */
@@ -106,6 +109,7 @@ export default function CanvasContextMenu({
   onGroup,
   onFolder,
   onExport,
+  onOpenViewer,
   onUngroup,
   hasGroup,
   onBringToFront,
@@ -180,6 +184,11 @@ export default function CanvasContextMenu({
         }}
       />,
     );
+  }
+  // Looking changes nothing, so it is offered wherever Download is — one tile,
+  // a selection, the read-only all-files grid.
+  if (downloadable) {
+    sections.push(<MenuItem label="Open full screen" onClick={run(onOpenViewer)} />);
   }
   if (canAddToBoard || canGroup || downloadable) {
     sections.push(

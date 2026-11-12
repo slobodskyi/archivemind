@@ -252,6 +252,10 @@ design from this file:**
   filter, colour labels, tags, one caption). What a link carries has exactly
   one definition too, `project_share_scope_assets()`; every public resolver
   joins it. A detail that is off is null from SQL and cannot be filtered on.
+  **0054** is the fullscreen photo Viewer — an overlay, not a fifth view, opened
+  from the drawer's preview, `F` or the right-click menu (double-click stays the
+  drawer's). It walks the visible reading order and owns the keyboard while open;
+  originals are not served to it yet — the ADR scopes that route as the next step.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

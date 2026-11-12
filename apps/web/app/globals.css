@@ -960,3 +960,20 @@ textarea {
 .maplibregl-ctrl-group button:hover {
   background: var(--bg-el);
 }
+
+/* Fullscreen photo viewer (ADR 0054). Below 760px the photo runs edge to edge
+   under a 48px bar — the same numbers `viewerInsets` in lib/viewer.ts keeps
+   clear at fit, so a fitted photo is never under the bar. The quality chip is
+   the first thing to go when the bar runs out of room. */
+@media (max-width: 760px) {
+  .am-viewer-bar {
+    height: 48px !important;
+    padding: 0 10px !important;
+    gap: 8px !important;
+  }
+}
+@media (max-width: 640px) {
+  .am-viewer-chip {
+    display: none !important;
+  }
+}
