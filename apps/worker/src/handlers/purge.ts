@@ -102,10 +102,15 @@ async function purgeAsset(pool: pg.Pool, assetId: string): Promise<"purged" | "s
   const { rows: edits } = await pool.query<{
     edited_thumb_key: string | null;
     edited_medium_key: string | null;
-  }>(`select edited_thumb_key, edited_medium_key from asset_edits where asset_id = $1`, [assetId]);
+    edited_large_key: string | null;
+  }>(`select edited_thumb_key, edited_medium_key, edited_large_key from asset_edits where asset_id = $1`, [
+    assetId,
+  ]);
   for (const e of edits) {
     if (e.edited_thumb_key) keys.push(e.edited_thumb_key);
     if (e.edited_medium_key) keys.push(e.edited_medium_key);
+    // ADR 0055: the 2048 px render of an edit is a copy of the pixels too.
+    if (e.edited_large_key) keys.push(e.edited_large_key);
   }
 
   // R2 first; a throw here leaves every row in place for the retry.

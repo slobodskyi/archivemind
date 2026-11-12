@@ -257,6 +257,11 @@ design from this file:**
   drawer's). It walks the visible reading order and owns the keyboard while open;
   its last quality step is the original (`GET /api/assets/[id]/original`, signed
   inline, files-RLS reach; read the ADR's amendment before widening what it signs).
+  **0055** adds the step before it: a 2048 px `large` preview, written at ingest
+  only when the source is bigger than medium and backfilled by the worker for
+  R2-held originals only (never fetched from a user's Drive/OneDrive). An edit
+  gets its own large render (`asset_edits.edited_large_key`, migration
+  `20261112000002`), and an edited photo never answers with its unedited large.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.

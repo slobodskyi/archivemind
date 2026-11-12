@@ -7,7 +7,7 @@ import type { Photo } from "@/types";
 import { useDialog } from "@/hooks/useDialog";
 import { isRealSource, photoSrc, photoSrcMedium } from "@/lib/img";
 import { LABEL_COLORS } from "@/lib/labels";
-import { mediumPreviewUrls, originalUrls, previewVersion } from "@/lib/preview-url-cache";
+import { largePreviewUrls, mediumPreviewUrls, originalUrls, previewVersion } from "@/lib/preview-url-cache";
 import { Z } from "@/lib/ui";
 import type { Size } from "@/lib/viewer";
 import {
@@ -51,6 +51,9 @@ const CHROME_IDLE_MS = 2500;
 /** How long a photo must stay on screen before its original is fetched on a
  *  desktop — arrowing through a burst must not pull a dozen originals. */
 const ORIGINAL_DWELL_MS = 350;
+/** The same for the 2048 px preview (ADR 0055) — shorter, since it is a few
+ *  hundred KB rather than megabytes. */
+const LARGE_DWELL_MS = 150;
 /** Why the chip says there is no sharper copy (its tooltip). */
 const NO_ORIGINAL_TITLE: Record<"not_stored" | "format" | "browser", string> = {
   not_stored: "The original stays in Google Drive or OneDrive and is not stored in the archive, so this preview is the sharpest copy here.",
@@ -125,7 +128,7 @@ function ViewerBody({
   //    on a desktop; on touch only at the first zoom, because a phone or iPad
   //    decoding a 48 MP frame it may never zoom into is what kills the tab; or
   //    by a click. An EDITED photo stays on its edit until "Original" is
-  //    pressed: the edit exists only as 1024 px previews, and swapping in the
+  //    pressed: the edit exists only as rendered previews, and swapping in the
   //    unedited original unasked would quietly undo it on screen. ──
   const [coarse] = useState(
     () => typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true,
@@ -170,14 +173,50 @@ function ViewerBody({
       : null;
   const askOriginal = () => setAsked({ key, explicit: true });
 
+  // ── The large preview (ADR 0055) — 2048 px, between medium and the original.
+  //    It is what makes "fit" sharp on a retina screen for every photo the
+  //    original cannot serve (Drive, OneDrive, RAW, HEIC outside WebKit, an
+  //    edit), and on touch it is the fit step before the first zoom. A desktop
+  //    whose original is about to load anyway skips it: two downloads of one
+  //    photo for one look. The route answers null when there is nothing
+  //    larger than medium, and for an edit only ever with the edit's own
+  //    render. ──
+  const [dwelt, setDwelt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!real || notReady) return;
+    const timer = window.setTimeout(() => setDwelt(key), LARGE_DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [real, notReady, key]);
+  const largeWanted =
+    real && !notReady && dwelt === key && (!autoOriginal || coarse || (plan !== null && plan.kind !== "load"));
+  const [fetchedLarge, setFetchedLarge] = useState<{ key: string; url: string | null } | null>(null);
+  const largeAnswer = largeWanted
+    ? (largePreviewUrls.peek(photo.id, version) ?? (fetchedLarge?.key === key ? fetchedLarge : undefined))
+    : undefined;
+  useEffect(() => {
+    if (!largeWanted || largeAnswer) return;
+    let alive = true;
+    void largePreviewUrls.get(photo.id, version).then((answer) => {
+      if (alive && answer) setFetchedLarge({ key, url: answer.url });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [largeWanted, largeAnswer, photo.id, version, key]);
+  const [failedLarge, setFailedLarge] = useState<string | null>(null);
+  const largeUrl = largeAnswer?.url && failedLarge !== key ? largeAnswer.url : null;
+
   // Natural sizes as each image lands. The best one sets the photo's shape and
   // what "100%" means; the tile's w/h stand in for the instant before.
-  const [loaded, setLoaded] = useState<{ key: string; thumb?: Size; medium?: Size; original?: Size }>({ key });
+  const [loaded, setLoaded] = useState<{ key: string; thumb?: Size; medium?: Size; large?: Size; original?: Size }>({
+    key,
+  });
   const sizes = loaded.key === key ? loaded : null;
   const estimate = useMemo(() => ({ w: photo.w, h: photo.h }), [photo.w, photo.h]);
   const originalSize = plan?.kind === "load" ? (sizes?.original ?? null) : null;
-  const content = notReady ? null : (originalSize ?? sizes?.medium ?? sizes?.thumb ?? estimate);
-  const onImageLoad = (which: "thumb" | "medium" | "original") => (e: SyntheticEvent<HTMLImageElement>) => {
+  const largeSize = largeUrl ? (sizes?.large ?? null) : null;
+  const content = notReady ? null : (originalSize ?? largeSize ?? sizes?.medium ?? sizes?.thumb ?? estimate);
+  const onImageLoad = (which: "thumb" | "medium" | "large" | "original") => (e: SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
     if (!img.naturalWidth || !img.naturalHeight) return;
     const size = { w: img.naturalWidth, h: img.naturalHeight };
@@ -333,6 +372,7 @@ function ViewerBody({
   // The chip names the image on screen — and when no sharper one exists, says
   // so instead of letting a soft zoom read as a broken one.
   const noOriginal = plan?.kind === "none" ? plan.why : null;
+  const preview = largeSize ?? sizes?.medium;
   const quality = notReady
     ? "Preview not ready"
     : !real
@@ -341,8 +381,8 @@ function ViewerBody({
         ? `Original${photo.edited ? " · unedited" : ""} ${originalSize.w}×${originalSize.h}`
         : plan?.kind === "load"
           ? "Loading original…"
-          : sizes?.medium
-            ? `${photo.edited && !ask ? "Edited · " : ""}Preview ${sizes.medium.w}×${sizes.medium.h}${
+          : preview
+            ? `${photo.edited && !ask ? "Edited · " : ""}Preview ${preview.w}×${preview.h}${
                 noOriginal ? (noOriginal === "not_stored" ? " · no original" : " · original not viewable") : ""
               }`
             : "Loading…";
@@ -417,6 +457,19 @@ function ViewerBody({
               decoding="async"
               onLoad={onImageLoad("medium")}
               style={{ ...imageStyle, opacity: sizes?.medium ? 1 : 0, transition: "opacity .18s ease" }}
+            />
+          )}
+          {largeUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`l:${key}`}
+              src={largeUrl}
+              alt=""
+              draggable={false}
+              decoding="async"
+              onLoad={onImageLoad("large")}
+              onError={() => setFailedLarge(key)}
+              style={{ ...imageStyle, opacity: largeSize ? 1 : 0, transition: "opacity .18s ease" }}
             />
           )}
           {/* Keyed per photo, so stepping away unmounts it: one original

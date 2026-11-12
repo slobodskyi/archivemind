@@ -102,3 +102,16 @@ export const originalUrls = createUrlCache<OriginalAnswer>(async (id) => {
   if (!res.ok) return null;
   return (await res.json()) as OriginalAnswer;
 });
+
+/** The 2048 px preview's answer (ADR 0055): `{ url: null }` when the photo has
+ *  nothing larger than its medium. Wrapped in an object so that "none" is
+ *  cached for the TTL like a URL — it changes only when the worker's backfill
+ *  reaches the photo, which a 20-minute-old answer can wait for. Keyed on the
+ *  thumb path like the medium, so an edit landing asks again. */
+export type LargeAnswer = { url: string | null };
+export const largePreviewUrls = createUrlCache<LargeAnswer>(async (id) => {
+  const res = await fetch(`/api/assets/${id}/medium?size=large`);
+  if (!res.ok) return null;
+  const body = (await res.json()) as { url?: string | null };
+  return { url: body.url ?? null };
+});

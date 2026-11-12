@@ -121,14 +121,14 @@ export async function DELETE(_request: Request, ctx: { params: Promise<{ id: str
     .from("asset_edits")
     .delete()
     .eq("asset_id", id)
-    .select("edited_thumb_key, edited_medium_key");
+    .select("edited_thumb_key, edited_medium_key, edited_large_key");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Best-effort orphan cleanup (ADR 0033): the reset already succeeded — a
   // transient R2 failure must not turn it into an error. A re-edit would
   // overwrite the same stable keys anyway, so a rare leaked pair is benign.
   const keys = (dropped ?? []).flatMap((r) =>
-    [r.edited_thumb_key, r.edited_medium_key].filter((k): k is string => Boolean(k)),
+    [r.edited_thumb_key, r.edited_medium_key, r.edited_large_key].filter((k): k is string => Boolean(k)),
   );
   await Promise.all(
     keys.map((key) =>

@@ -24,7 +24,8 @@ describe("renderEditedPreviews", () => {
     const src = await solid(1000, 500);
     const previews = await renderEditedPreviews(src, recipe());
 
-    expect(previews.map((p) => p.size)).toEqual(PREVIEW_SIZES.map((s) => s.size));
+    // A 1000 px source has nothing a 2048 px render could add (ADR 0055).
+    expect(previews.map((p) => p.size)).toEqual(["thumb", "medium"]);
     for (const p of previews) {
       const edge = PREVIEW_SIZES.find((s) => s.size === p.size)!.edge;
       expect(Math.max(p.width, p.height)).toBeLessThanOrEqual(edge);
@@ -61,6 +62,23 @@ describe("renderEditedPreviews", () => {
     expect(medium.height).toBeGreaterThan(0);
     const meta = await sharp(medium.data).metadata();
     expect(meta.format).toBe("webp");
+  });
+});
+
+describe("renderEditedPreviews from a large source (ADR 0055)", () => {
+  it("adds a large render while the crop is still bigger than medium", async () => {
+    const src = await solid(2048, 1024); // a stored `large` preview
+    const previews = await renderEditedPreviews(src, recipe({ crop: { x: 0, y: 0, w: 0.75, h: 1 } }));
+    expect(previews.map((p) => p.size)).toEqual(PREVIEW_SIZES.map((s) => s.size));
+    const large = previews.find((p) => p.size === "large")!;
+    expect(large.width).toBe(1536); // the crop's own pixels, never enlarged
+    expect(large.height).toBe(1024);
+  });
+
+  it("drops it once the crop is no bigger than medium — no second copy of medium's pixels", async () => {
+    const src = await solid(2048, 1024);
+    const previews = await renderEditedPreviews(src, recipe({ crop: { x: 0.25, y: 0, w: 0.4, h: 0.8 } }));
+    expect(previews.map((p) => p.size)).toEqual(["thumb", "medium"]);
   });
 });
 
