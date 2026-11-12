@@ -6,13 +6,17 @@ import { StickyNoteIcon, TrashIcon, FolderIcon } from "@/components/icons/icons"
 
 interface WorkspaceActionBarProps {
   selCount: number;
-  /** The AI panel is open for this selection — keeps the ✨ button lit. */
+  /** The AI panel (or its no-selection intro) is open — keeps the ✨ button lit. */
   aiOpen: boolean;
+  /** The ✨ button, for focus to return to when the intro it opened closes. */
+  aiButtonRef?: React.Ref<HTMLButtonElement>;
   /** Drop a new sticky note on the canvas — moved off the left rail, which is
    *  now identical in every view. */
   onAddStickyNote: () => void;
   onTidy: () => void;
-  /** Opens the AI panel over the selection (analyze / captions). */
+  /** Opens the AI panel over the selection (analyze / captions) — or, with
+   *  nothing selected, the panel's intro, which explains AI and offers to
+   *  select what is unanalyzed. */
   onAi: () => void;
   /** Bind the selection into a move-/edit-together group (no folder — ADR 0034 folders live on the Folder button). */
   onGroup: () => void;
@@ -54,6 +58,7 @@ function Btn({
   disabled,
   danger,
   onClick,
+  buttonRef,
   children,
 }: {
   title: string;
@@ -61,11 +66,13 @@ function Btn({
   disabled?: boolean;
   danger?: boolean;
   onClick: () => void;
+  buttonRef?: React.Ref<HTMLButtonElement>;
   children: React.ReactNode;
 }) {
   const color = active ? "var(--ac)" : danger ? "var(--red)" : "var(--t2)";
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
       className="am-tb tw-top"
       title={title}
@@ -107,6 +114,7 @@ function Divider() {
 function WorkspaceActionBar({
   selCount,
   aiOpen,
+  aiButtonRef,
   onAddStickyNote,
   onTidy,
   onAi,
@@ -158,7 +166,15 @@ function WorkspaceActionBar({
       {/* The selection's AI entry point leads, followed by the note drop. Both
           are "make something new here"; the divider separates them from the
           arrange/curate/remove tools that act on what already exists. */}
-      <Btn title={selCount >= 2 ? `Analyze ${selCount} with AI` : "Analyze with AI"} active={aiOpen} disabled={noSel} onClick={onAi}>
+      {/* Never dimmed: with nothing selected it opens the AI panel's intro
+          (what AI writes, what it costs, "Select N unanalyzed"), the same as
+          AI ANALYZE outside a Workspace — so it is not a dead control. */}
+      <Btn
+        title={selCount >= 2 ? `Analyze ${selCount} with AI` : "Analyze with AI"}
+        active={aiOpen}
+        onClick={onAi}
+        buttonRef={aiButtonRef}
+      >
         <AnalyzeGlyph />
       </Btn>
       <Btn title="Sticky note" onClick={onAddStickyNote}>

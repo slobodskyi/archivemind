@@ -1,4 +1,5 @@
 import type { CanvasUploadPreview, Photo } from "@/types";
+import { analyzeReadiness } from "./unanalyzed";
 
 /** The upload summary pill's policy: when it closes itself, when it may offer
  *  "Analyze N with AI", and where it docks. Pure and React-free so the rules
@@ -63,9 +64,13 @@ type AnalyzablePhoto = Pick<Photo, "id" | "src" | "processed">;
  *    label filter applied), so a hidden tile is never offered or selected. An
  *    id ingest merged into an existing asset (dedup deletes the uploaded row)
  *    is simply absent and drops out.
- *  - Has a preview (`src`): the worker's analyze handler silently SKIPS an asset
- *    with no medium preview and still reports the job done, so offering one
- *    early would sell work that never happens. */
+ *  - Has a preview and is not analyzed: `analyzeReadiness` (lib/unanalyzed) is
+ *    "ready" — the same rule the AI panel's "Select N unanalyzed" uses. The
+ *    worker's analyze handler silently SKIPS an asset with no medium preview
+ *    and still reports the job done, so offering one early would sell work
+ *    that never happens. Unlike `unanalyzedInScope` there is no source, busy or
+ *    folder check: an upload is always a real source and lands outside any
+ *    folder, and `openBulkFor` refuses outright while a job runs. */
 export function analyzableUploadIds(
   ids: readonly string[],
   photos: readonly AnalyzablePhoto[],
@@ -77,7 +82,7 @@ export function analyzableUploadIds(
     if (seen.has(id)) continue;
     seen.add(id);
     const photo = byId.get(id);
-    if (photo && photo.src && !photo.processed) out.push(id);
+    if (photo && analyzeReadiness(photo) === "ready") out.push(id);
   }
   return out;
 }

@@ -36,6 +36,15 @@ describe("planAiRun", () => {
     expect(planAiRun(["a"], { tags: true, captions: false }, [], "Agency").calls).toBe(1);
   });
 
+  // The estimate shown before Run is in the unit the Usage view meters
+  // (ADR 0037): 1 credit per photo analyzed, 1 per photo per caption language.
+  it("prices the run in credits, matching the billed usage events", () => {
+    expect(planAiRun(IDS, { tags: true, captions: true }, ["EN", "UK"], "Agency").credits).toBe(9);
+    expect(planAiRun(IDS, { tags: false, captions: true }, ["EN"], "Agency").credits).toBe(3);
+    expect(planAiRun(["a"], { tags: true, captions: false }, [], "Agency").credits).toBe(1);
+    expect(planAiRun([], { tags: true, captions: true }, ["EN"], "Agency").credits).toBe(0);
+  });
+
   it("singularises the noun for one photo", () => {
     expect(planAiRun(["a"], { tags: true, captions: false }, [], "Agency").cta).toBe("Analyze 1 photo");
     expect(planAiRun(["a"], { tags: false, captions: true }, ["EN"], "Agency").cta).toBe("Caption 1 photo");

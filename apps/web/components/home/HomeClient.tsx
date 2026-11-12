@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createProjectResponseSchema } from "@archivemind/shared";
 import type { ProjectCard } from "@/lib/projects";
 import type { UsageSnapshot } from "@/lib/usage";
@@ -31,7 +31,9 @@ import {
   HelpIcon,
   PencilIcon,
   ShareIcon,
+  AddIcon,
 } from "@/components/icons/icons";
+import { hubCreateChrome } from "@/lib/home-hub";
 import ShareProjectDialog from "@/components/home/ShareProjectDialog";
 
 /** Homepage hub (issue #17): project-only navigation and project cards.
@@ -65,6 +67,8 @@ const VIEW_TITLE: Record<ViewMode, string> = {
 };
 
 const VIEW_EMPTY: Record<ViewMode, string> = {
+  // Never shown with an empty search: the empty Projects view is the dashed
+  // "Create your first project" card (lib/home-hub). Kept for the type.
   projects: "No projects yet — create one to group photos from your archive.",
   recents: "No recently opened projects yet.",
   archived: "No archived projects — archive a project to tuck it away without deleting it.",
@@ -222,6 +226,26 @@ export default function HomeClient({
 
   const q = query.trim().toLowerCase();
   const visibleProjects = q ? baseList.filter((p) => p.name.toLowerCase().includes(q)) : baseList;
+  const chrome = hubCreateChrome({
+    view,
+    activeCount: activeProjects.length,
+    query,
+    creating,
+    visibleCount: visibleProjects.length,
+  });
+  // A cancelled create unmounts the input that held focus. Hand it back to
+  // the door the form was opened from — the ghost card on the empty hub, the
+  // header "+ New project" otherwise — once the cancel has rendered, since
+  // the header button only remounts then (lib/home-hub hides it while the
+  // form is open on an otherwise-empty hub).
+  const headerNewRef = useRef<HTMLButtonElement>(null);
+  const newCardRef = useRef<HTMLButtonElement>(null);
+  const refocusOpener = useRef(false);
+  useEffect(() => {
+    if (creating || !refocusOpener.current) return;
+    refocusOpener.current = false;
+    (newCardRef.current ?? headerNewRef.current)?.focus({ preventScroll: true });
+  }, [creating]);
   async function patchProject(id: string, patch: { name?: string; archived?: boolean; deleted?: boolean }): Promise<boolean> {
     try {
       const resp = await fetch(`/api/projects/${id}`, {
@@ -286,6 +310,19 @@ export default function HomeClient({
     recordRecentProject(id);
     navProgressStart();
     router.push(`/projects/${id}`);
+  }
+
+  /** The form's one home is the Projects grid's first cell, so a create
+   *  started from Recents switches there first. */
+  function startCreate() {
+    setView("projects");
+    setCreating(true);
+  }
+
+  function cancelCreate() {
+    setCreating(false);
+    setName("");
+    refocusOpener.current = true;
   }
 
   async function createProject() {
@@ -422,9 +459,10 @@ export default function HomeClient({
           </button>
           <h1 style={{ flex: 1, minWidth: 0, fontSize: 19, fontWeight: 700, color: "var(--t1)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{VIEW_TITLE[view]}</h1>
           {view === "usage" && <UsagePlanPill plan={usage?.plan ?? null} />}
-          {(view === "projects" || view === "recents") && !creating && (
+          {chrome.headerButton && (
             <button
-              onClick={() => setCreating(true)}
+              ref={headerNewRef}
+              onClick={startCreate}
               // "+ New project" is 15 characters of a 390px row that also holds
               // the title and the drawer handle; on a phone the glyph carries it.
               aria-label="New project"
@@ -434,35 +472,6 @@ export default function HomeClient({
             </button>
           )}
         </div>
-
-        {(view === "projects" || view === "recents") && creating && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 18, maxWidth: 420 }}>
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void createProject();
-                if (e.key === "Escape") { setCreating(false); setName(""); }
-              }}
-              placeholder="Project name — e.g. Odesa 2026"
-              style={{ flex: 1, padding: "10px 12px", background: "var(--bg-in)", border: "1px solid var(--bdh)", borderRadius: 2, color: "var(--t1)", fontSize: 13, fontFamily: "inherit", outline: "none" }}
-            />
-            <button
-              onClick={() => void createProject()}
-              disabled={busy || !name.trim()}
-              style={{ padding: "0 16px", background: !busy && name.trim() ? "var(--ac)" : "var(--bg-el)", color: !busy && name.trim() ? "#050505" : "var(--tm)", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: !busy && name.trim() ? "pointer" : "default", fontFamily: "inherit" }}
-            >
-              {busy ? "…" : "Create"}
-            </button>
-            <button
-              onClick={() => { setCreating(false); setName(""); }}
-              style={{ padding: "0 12px", background: "transparent", color: "var(--t3)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
 
         {view === "usage" &&
           (usage ? (
@@ -481,6 +490,19 @@ export default function HomeClient({
             gap: 16,
           }}
         >
+          {chrome.newCard && (
+            <NewProjectCard
+              first={chrome.firstProject}
+              creating={creating}
+              name={name}
+              busy={busy}
+              onStart={() => setCreating(true)}
+              idleRef={newCardRef}
+              onNameChange={setName}
+              onSubmit={() => void createProject()}
+              onCancel={cancelCreate}
+            />
+          )}
           {visibleProjects.map((p) => (
             <ProjectCardView
               key={p.id}
@@ -511,17 +533,14 @@ export default function HomeClient({
           ))}
         </div>
 
-        {view !== "usage" &&
-          view !== "trash" &&
-          visibleProjects.length === 0 &&
-          !((view === "projects" || view === "recents") && creating) && (
+        {chrome.emptyLine !== "none" && (
           <div style={{ marginTop: 26, fontSize: 12.5, color: "var(--tm)" }}>
-            {q ? "Nothing matches your search." : VIEW_EMPTY[view]}
+            {chrome.emptyLine === "search" ? "Nothing matches your search." : VIEW_EMPTY[view]}
           </div>
         )}
       </main>
 
-      <UploadManager projectId="all" disabled disabledMessage="OPEN A PROJECT TO UPLOAD" />
+      <UploadManager projectId="all" disabled disabledMessage={chrome.uploadMessage} />
 
       <Toast
         show={!!toast}
@@ -746,6 +765,139 @@ function ProjectCardView({
       )}
       {children}
     </div>
+  );
+}
+
+/** The hub's create door and its name form, in the Projects grid's first cell
+ *  (lib/home-hub decides when it is there). Idle, it is a dashed ghost of a
+ *  project card — only ever on the empty hub; creating, the card itself is the
+ *  form, so there is one form in one place.
+ *
+ *  No replay markers: the input prints a project name the user typed, and
+ *  HomeClient carries none (masked by default once masking is on, ADR 0050). */
+function NewProjectCard({
+  first,
+  creating,
+  name,
+  busy,
+  onStart,
+  onNameChange,
+  onSubmit,
+  onCancel,
+  idleRef,
+}: {
+  first: boolean;
+  creating: boolean;
+  name: string;
+  busy: boolean;
+  onStart: () => void;
+  /** The idle ghost button — where focus returns after a cancel. */
+  idleRef?: React.Ref<HTMLButtonElement>;
+  onNameChange: (name: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const [hot, setHot] = useState(false);
+  // This instance survives the swap between the idle button and the form, and
+  // the button that would send mouseleave/blur is gone by then — so `hot` is
+  // reset on every swap (during render, React's pattern for state that follows
+  // a prop), or a cancelled form came back with the hover highlight stuck on.
+  const [hotFor, setHotFor] = useState(creating);
+  if (hotFor !== creating) {
+    setHotFor(creating);
+    setHot(false);
+  }
+  const title = first ? "Create your first project" : "New project";
+  const root: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    height: "100%",
+    // ProjectCardView's footprint: 122 preview + a 10/22/2/~16/10 text block +
+    // its border. A grid row stretches the card to its neighbours either way;
+    // this keeps it card-sized when it is alone.
+    minHeight: 182,
+    boxSizing: "border-box",
+    borderRadius: 3,
+    background: "transparent",
+    border: `1px dashed ${hot || creating ? "var(--ac)" : "var(--bdh)"}`,
+    transition: "border-color .15s",
+    fontFamily: "inherit",
+    color: "inherit",
+    padding: 0,
+    textAlign: "left",
+  };
+
+  if (creating) {
+    const ready = !busy && name.trim() !== "";
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
+        style={{ ...root, padding: 12, gap: 8, justifyContent: "center" }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--t1)" }}>{title}</div>
+        <input
+          autoFocus
+          value={name}
+          maxLength={80}
+          aria-label="Project name"
+          placeholder="Project name — e.g. Odesa 2026"
+          onChange={(e) => onNameChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onCancel();
+          }}
+          style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", background: "var(--bg-in)", border: "1px solid var(--bdh)", borderRadius: 2, color: "var(--t1)", fontSize: 13, fontFamily: "inherit", outline: "none" }}
+        />
+        <div className="am-home-newcard-actions" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button
+            type="submit"
+            disabled={!ready}
+            style={{ flex: 1, height: 32, padding: "0 16px", background: ready ? "var(--ac)" : "var(--bg-el)", color: ready ? "#050505" : "var(--tm)", border: 0, borderRadius: 2, fontSize: 12, fontWeight: 700, cursor: ready ? "pointer" : "default", fontFamily: "inherit" }}
+          >
+            {busy ? "…" : "Create"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{ height: 32, padding: "0 12px", background: "transparent", color: "var(--t3)", border: "1px solid var(--bd)", borderRadius: 2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <button
+      ref={idleRef}
+      type="button"
+      onClick={onStart}
+      onMouseEnter={() => setHot(true)}
+      onMouseLeave={() => setHot(false)}
+      onFocus={() => setHot(true)}
+      onBlur={() => setHot(false)}
+      style={{ ...root, cursor: "pointer" }}
+    >
+      {/* The subline sits in the preview area, not under the title: there it
+          never makes the ghost taller than a real card, even at 150px. */}
+      <span style={{ height: 122, flex: "0 0 auto", width: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: "0 16px" }}>
+        <span style={{ display: "flex", color: hot ? "var(--ac)" : "var(--t3)", transition: "color .15s" }}>
+          <AddIcon width={22} height={22} aria-hidden="true" />
+        </span>
+        <span style={{ fontSize: 11, lineHeight: 1.45, color: "var(--t3)", textAlign: "center" }}>
+          A project holds the photos you upload, analyze with AI and export together.
+        </span>
+      </span>
+      <span style={{ display: "block", width: "100%", boxSizing: "border-box", padding: "10px 12px", flex: 1 }}>
+        <span style={{ minHeight: 22, display: "flex", alignItems: "center", fontSize: 13, fontWeight: 700, color: hot ? "var(--t1)" : "var(--t2)" }}>
+          {title}
+        </span>
+      </span>
+    </button>
   );
 }
 

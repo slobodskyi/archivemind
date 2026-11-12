@@ -25,6 +25,12 @@ interface BulkAiPanelProps {
    *  so the next Tab moves into it rather than restarting at the top of the
    *  page. The container, not Run — a second Enter must not spend credits. */
   focusRequest?: number;
+  /** The no-selection intro (AI ANALYZE with nothing selected): counts from
+   *  `unanalyzedInScope`; `filtered` = a colour filter is narrowing what they
+   *  count. null → the normal panel over the selection. */
+  intro?: { count: number; hidden: number; pending: number; total: number; filtered: boolean } | null;
+  onSelectUnanalyzed?: () => void;
+  onCloseIntro?: () => void;
 }
 
 const LANGS: Language[] = ["EN", "UK", "RU"];
@@ -95,11 +101,39 @@ function OpCard({ icon, title, subtitle, checked, onToggle, children }: OpCardPr
   );
 }
 
-/** Bulk AI over the current selection. Every control here now actually drives
- *  the job that runs — the captions checkbox, the language chips and the style
- *  toggle used to render above a button hardcoded to `analyze`, so choosing
- *  "Generate captions · UK · Archival" and pressing it produced tags and no
- *  caption. The CTA also names the work instead of always saying "Analyze". */
+/** The panel's own name row — "Analyze with AI", the name the button that
+ *  opens it gives (CanvasAnalyzeAction). Static copy only. */
+function PanelHeading({ onClose }: { onClose?: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+      <span style={{ display: "flex", color: "var(--ai)" }}>
+        <SparkleIcon width={13} height={13} />
+      </span>
+      <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: "var(--t1)" }}>Analyze with AI</span>
+      {onClose && (
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, border: 0, background: "var(--bg-el)", borderRadius: 2, color: "var(--t2b)", cursor: "pointer" }}
+        >
+          <CloseIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** "Analyze with AI": bulk AI over the current selection. Every control here
+ *  now actually drives the job that runs — the captions checkbox, the language
+ *  chips and the style toggle used to render above a button hardcoded to
+ *  `analyze`, so choosing "Generate captions · UK · Archival" and pressing it
+ *  produced tags and no caption. The CTA also names the work instead of always
+ *  saying "Analyze".
+ *
+ *  With nothing selected (AI ANALYZE's click) it shows an intro instead: what
+ *  AI writes, that the count and credits come before anything runs, and
+ *  "Select N unanalyzed". The intro only SELECTS — the panel then turns into
+ *  the normal state above, and only its Run button spends credits. */
 export default function BulkAiPanel({
   show,
   idle,
@@ -116,6 +150,9 @@ export default function BulkAiPanel({
   onSetStyle,
   onRun,
   focusRequest = 0,
+  intro = null,
+  onSelectUnanalyzed,
+  onCloseIntro,
 }: BulkAiPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const handledFocus = useRef(focusRequest);
@@ -143,7 +180,9 @@ export default function BulkAiPanel({
       ref={rootRef}
       tabIndex={-1}
       role="region"
-      aria-label="AI analysis"
+      // No data-ph-unmask on the root: while a job runs it prints proc.label,
+      // which carries a filename ("Analyzing IMG_0412.jpg").
+      aria-label="Analyze with AI"
       style={{
         outline: "none",
         position: "absolute",
@@ -173,8 +212,9 @@ export default function BulkAiPanel({
         </div>
       )}
 
-      {idle && (
+      {idle && !intro && (
         <div style={{ padding: "14px 15px 15px" }}>
+          <PanelHeading />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 13 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div style={{ display: "flex" }}>
@@ -326,11 +366,85 @@ export default function BulkAiPanel({
           </button>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 9, fontSize: 10.5, color: "var(--tm)" }}>
             <span>
-              {blocked ? "Nothing to run" : `${plan.calls} AI ${plan.calls === 1 ? "call" : "calls"}`}
+              {/* Credits first: that is the unit the intro and the AI ANALYZE
+                  explainer promise, and the one the Usage view meters. */}
+              {blocked
+                ? "Nothing to run"
+                : `${plan.credits} ${plan.credits === 1 ? "credit" : "credits"} · ${plan.calls} AI ${plan.calls === 1 ? "call" : "calls"}`}
             </span>
             <span style={{ width: 3, height: 3, borderRadius: 999, background: "var(--tm)" }} />
             <span>Gemini Flash-Lite</span>
           </div>
+        </div>
+      )}
+
+      {idle && intro && (
+        // Static copy and counts only, so it may be unmasked (ADR 0050).
+        <div data-ph-unmask="" style={{ padding: "14px 15px 15px" }}>
+          <PanelHeading onClose={onCloseIntro} />
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--t2)", margin: "0 0 6px" }}>
+            AI reads each photo and writes tags, a description, facts and captions — so you can search your archive by what is in it.
+          </p>
+          <p style={{ fontSize: 10.5, lineHeight: 1.45, color: "var(--t3)", margin: "0 0 12px" }}>
+            Pick the photos first — the count and the credits are shown before anything runs.
+          </p>
+          {intro.total === 0 ? (
+            // The counts run over what the canvas draws, so a colour filter
+            // that matches nothing reads as an empty canvas — say which it is.
+            <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
+              {intro.filtered
+                ? "The colour filter hides every photo here — clear it on the bottom bar to see what can be analyzed."
+                : "Nothing to analyze yet — add photos to this canvas first."}
+            </div>
+          ) : intro.count === 0 ? (
+            <div style={{ fontSize: 11.5, color: "var(--t2)" }}>
+              {intro.hidden > 0 || intro.pending > 0
+                ? "Nothing here can be selected for analysis right now."
+                : "Everything here is already analyzed."}
+            </div>
+          ) : (
+            <button
+              onClick={onSelectUnanalyzed}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+                width: "100%",
+                height: 40,
+                background: "var(--ac)",
+                border: 0,
+                borderRadius: 2,
+                color: "#050505",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.07em",
+                fontFamily: "inherit",
+                cursor: "pointer",
+              }}
+            >
+              <SparkleIcon width={15} height={15} />
+              {`Select ${intro.count} unanalyzed`}
+            </button>
+          )}
+          {intro.hidden > 0 && (
+            <div style={{ marginTop: 8, fontSize: 10.5, lineHeight: 1.45, color: "var(--tm)" }}>
+              {`${intro.hidden} more ${intro.hidden === 1 ? "is" : "are"} inside a collapsed folder.`}
+            </div>
+          )}
+          {intro.pending > 0 && (
+            <div style={{ marginTop: 8, fontSize: 10.5, lineHeight: 1.45, color: "var(--tm)" }}>
+              {intro.pending === 1
+                ? "1 photo has no preview yet and can't be analyzed until it's ready."
+                : `${intro.pending} photos have no preview yet and can't be analyzed until they're ready.`}
+            </div>
+          )}
+          <button
+            onClick={onCloseIntro}
+            style={{ width: "100%", height: 34, marginTop: 8, background: "transparent", border: "1px solid var(--bd)", borderRadius: 2, color: "var(--t2)", fontSize: 11, fontFamily: "inherit", cursor: "pointer" }}
+          >
+            {intro.total > 0 ? "Select on canvas" : "Close"}
+          </button>
         </div>
       )}
     </div>

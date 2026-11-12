@@ -377,6 +377,16 @@ textarea {
   .am-home-newlabel {
     display: none;
   }
+
+  /* The hub's new-project form lives in a grid cell, ~150px wide here: Create
+     and Cancel side by side would squeeze "Create" to its glyphs, so they
+     stack under the name field instead. */
+  .am-home-newcard-actions {
+    flex-direction: column;
+  }
+  .am-home-newcard-actions > button {
+    flex: 0 0 auto !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -447,9 +457,11 @@ textarea {
 
   /* The canvas's top-right actions float on the canvas now, not in the header
      row, and on a 390px screen they compete with the photos underneath. A
-     Workspace shows two (CREATE, DOWNLOAD), the project canvas one (ANALYZE),
-     and together they still fit a phone row, so nothing drops its word: the
-     labels stay at every size and only the padding tightens. */
+     Workspace shows two (CREATE, DOWNLOAD), the project canvas one
+     (AI ANALYZE), and together they still fit a phone row, so here only the
+     padding tightens. Below 640px AI ANALYZE drops its "ANALYZE"
+     (`.am-analyze-word`, the 640px block); CREATE and DOWNLOAD keep their
+     labels at every size. */
   .am-wsactions button {
     padding: 0 9px !important;
     /* Desktop pins a width floor so the button never reads as a chip; here the
@@ -588,6 +600,12 @@ textarea {
     display: none;
   }
 
+  /* AI ANALYZE reads "✨ AI" here: the sparkle and "AI" carry it, and the
+     button's aria-label keeps the full name. */
+  .am-analyze-word {
+    display: none;
+  }
+
   .am-viewswitcher button {
     padding: 0 14px !important;
   }
@@ -716,6 +734,56 @@ textarea {
 .tw-top:hover .tip {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* A two-sentence explainer under the top-right AI ANALYZE button
+   (CanvasAnalyzeAction). The one-line `.tip` labels can't wrap, and opening
+   sideways or upward would clip at the right edge, so this one drops BELOW the
+   button, right-aligned. Its z-index only orders it inside the `.am-wsactions`
+   shell: that shell (zIndex 35 + backdrop-filter) is its own stacking context,
+   so a right-hand panel stacked above the shell can still cover it — the
+   component does not render it while the chat or Trash panel is open. */
+.am-ai-explain-host .am-ai-explain {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 264px;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  background: var(--bg-el);
+  color: var(--t2);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: normal;
+  padding: 9px 11px;
+  border: 1px solid var(--bdh);
+  border-radius: 2px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.8);
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
+  z-index: 1;
+}
+.am-ai-explain-host:hover .am-ai-explain,
+.am-ai-explain-host:focus-visible .am-ai-explain {
+  opacity: 1;
+  transform: none;
+}
+/* The panel is already explaining. */
+.am-ai-explain-host[aria-expanded="true"] .am-ai-explain {
+  display: none;
+}
+/* A tap opens the panel's intro, which says the same thing. */
+@media (hover: none) {
+  .am-ai-explain {
+    display: none !important;
+  }
 }
 
 .am-tb {

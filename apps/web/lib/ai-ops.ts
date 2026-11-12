@@ -1,3 +1,4 @@
+import { creditsFor } from "@archivemind/shared";
 import { CAPTION_LANG_DB, CAPTION_STYLE_DB } from "./format";
 import type { CaptionStyle, Language } from "@/types";
 
@@ -33,6 +34,10 @@ export interface AiPlan {
   /** Model calls this run will make: one per photo to analyze, plus one per
    *  photo per language to caption. */
   calls: number;
+  /** What this run costs in the unit the Usage view meters (ADR 0037), from
+   *  the same `creditsFor` the worker bills with — so the estimate shown
+   *  before Run and the meter after it cannot drift apart. */
+  credits: number;
   /** Button text and progress copy — derived here so the label can never again
    *  describe work the run doesn't do. */
   cta: string;
@@ -57,7 +62,7 @@ export function planAiRun(
   langs: Language[],
   style: CaptionStyle,
 ): AiPlan {
-  const empty = { analyze: null, caption: null, calls: 0 };
+  const empty = { analyze: null, caption: null, calls: 0, credits: 0 };
   if (assetIds.length === 0) {
     return { ...empty, blocked: "no-selection", cta: BLOCKED_CTA["no-selection"] };
   }
@@ -84,6 +89,11 @@ export function planAiRun(
     analyze,
     caption,
     calls: (ops.tags ? n : 0) + (ops.captions ? n * langs.length : 0),
+    // One usage event per photo analyzed and per photo × language captioned —
+    // the units the analyze and caption handlers write.
+    credits:
+      (ops.tags ? creditsFor("image_analyzed", n) : 0) +
+      (ops.captions ? creditsFor("caption_generated", n * langs.length) : 0),
     cta:
       analyze && caption
         ? `Analyze & caption ${n} ${noun}`
