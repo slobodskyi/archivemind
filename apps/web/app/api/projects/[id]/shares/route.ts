@@ -67,6 +67,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       p_scope: parsed.data.scope,
       p_board_id: parsed.data.boardId ?? null,
       p_asset_ids: parsed.data.assetIds ?? null,
+      // What the recipient sees beside the files — all off unless asked for.
+      // The RPC re-checks every rule the request schema does.
+      p_show_boards: parsed.data.showBoards,
+      p_show_labels: parsed.data.showLabels,
+      p_show_tags: parsed.data.showTags,
+      p_caption_lang: parsed.data.caption?.lang ?? null,
+      p_caption_style: parsed.data.caption?.style ?? null,
     })
     .single();
   if (error) return projectShareRpcFailure(error);

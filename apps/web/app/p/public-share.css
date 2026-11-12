@@ -613,3 +613,22 @@
     scroll-behavior: auto;
   }
 }
+
+/* A project share link's lightbox (ADR 0053): photo beside its details, and
+   the details under the photo once there is no room beside it. */
+.share-lightbox {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+}
+
+@media (max-width: 760px) {
+  .share-lightbox {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .share-lightbox-aside {
+    max-height: 45vh;
+    border-left: 0 !important;
+    border-top: 1px solid var(--bd);
+  }
+}

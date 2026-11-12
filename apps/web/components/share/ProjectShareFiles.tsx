@@ -1,44 +1,29 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { DEFAULT_LABEL_NAMES } from "@archivemind/shared";
+import { LABEL_COLORS } from "@/lib/labels";
+import { NO_SHARE_DETAILS, type ShareDetails } from "@/lib/project-shares";
 import {
+  activeShareFilters,
+  EMPTY_SHARE_FACETS,
+  filteredShareTotal,
   shareAssetsHref,
   shareDownloadsHref,
   shareMediaHref,
   type ProjectShareDownloadStatus,
+  type ProjectShareFacets,
   type ProjectShareFile,
+  type ProjectShareFilter,
   type ProjectSharePage,
 } from "@/lib/project-share-public";
+import ShareFilterBar from "./ShareFilterBar";
+import ShareLightbox from "./ShareLightbox";
+import { MONO, shareButton as button, sharePrimaryButton as primaryButton } from "./share-ui";
 
-const MONO = "var(--font-space-mono), var(--font-mono-cy), monospace";
 /** The export job's own cap: one ZIP carries at most this many files. */
 const ZIP_MAX_FILES = 500;
 const POLL_MS = 2_000;
-
-const button: CSSProperties = {
-  minHeight: 40,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 7,
-  padding: "0 12px",
-  border: "1px solid var(--bdh)",
-  borderRadius: 2,
-  background: "rgba(8,8,8,.78)",
-  color: "var(--t1)",
-  fontFamily: MONO,
-  fontSize: 10,
-  fontWeight: 700,
-  textDecoration: "none",
-  cursor: "pointer",
-};
-
-const primaryButton: CSSProperties = {
-  ...button,
-  borderColor: "var(--ac)",
-  background: "var(--ac)",
-  color: "#050505",
-};
 
 type ZipState =
   | { phase: "idle" }
@@ -73,34 +58,64 @@ function zipErrorCopy(error: string | null | undefined): string {
 function FileCard({
   token,
   file,
+  details,
   selected,
   onToggle,
+  onOpen,
 }: {
   token: string;
   file: ProjectShareFile;
+  details: ShareDetails;
   selected: boolean;
   onToggle: () => void;
+  onOpen: () => void;
 }) {
+  const label = details.labels ? file.label : null;
+  const caption = details.caption ? file.caption : null;
   return (
     <div
       className="public-share-file-card"
       style={selected ? { borderColor: "var(--ac)" } : undefined}
     >
       <div className="public-share-file-preview" style={{ position: "relative" }}>
-        {file.hasPreview ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={shareMediaHref(token, file.id, "thumb")}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={`Open ${file.filename}`}
+          style={{ display: "block", width: "100%", height: "100%", padding: 0, border: 0, background: "none", cursor: "zoom-in" }}
+        >
+          {file.hasPreview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={shareMediaHref(token, file.id, "thumb")}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="public-share-missing-media" role="img" aria-label="Preview unavailable" style={{ height: "100%" }}>
+              Preview unavailable
+            </div>
+          )}
+        </button>
+        {label ? (
+          <span
+            role="img"
+            aria-label={`${DEFAULT_LABEL_NAMES[label]} label`}
+            title={`${DEFAULT_LABEL_NAMES[label]} label`}
+            style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              width: 11,
+              height: 11,
+              borderRadius: "50%",
+              background: LABEL_COLORS[label],
+              boxShadow: "0 0 0 2px rgba(8,8,8,.78)",
+            }}
           />
-        ) : (
-          <div className="public-share-missing-media" role="img" aria-label="Preview unavailable">
-            Preview unavailable
-          </div>
-        )}
+        ) : null}
         <label
           style={{
             position: "absolute",
@@ -125,6 +140,23 @@ function FileCard({
       <div className="public-share-file-meta">
         <strong title={file.filename}>{file.filename}</strong>
         <span>{qualityLabel(file)}</span>
+        {caption ? (
+          <p
+            lang={details.caption?.lang}
+            style={{
+              margin: "8px 0 0",
+              color: "var(--t1)",
+              fontSize: 10,
+              lineHeight: 1.5,
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
+            {caption}
+          </p>
+        ) : null}
         <a href={shareMediaHref(token, file.id, "original")} rel="noreferrer" style={{ ...button, fontSize: 9.5 }}>
           <span aria-hidden="true">↓</span>
           {file.hasOriginal ? "Download original" : "Download web-size"}
@@ -142,18 +174,33 @@ export default function ProjectShareFiles({
   token,
   initialPage,
   fileCount,
+  details = NO_SHARE_DETAILS,
+  facets = EMPTY_SHARE_FACETS,
 }: {
   token: string;
   initialPage: ProjectSharePage;
   fileCount: number;
+  /** What the link shows beside its files (ADR 0053 §3). */
+  details?: ShareDetails;
+  /** The filter row's values and counts, server-rendered with the first page. */
+  facets?: ProjectShareFacets;
 }) {
   const [files, setFiles] = useState(initialPage.files);
   const [cursor, setCursor] = useState(initialPage.nextCursor);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [filter, setFilter] = useState<ProjectShareFilter>({});
+  const [filtering, setFiltering] = useState(false);
+  const [filterError, setFilterError] = useState(false);
+  const [viewing, setViewing] = useState<number | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [zip, setZip] = useState<ZipState>({ phase: "idle" });
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The newest filter request wins: a slow answer for a filter the recipient
+  // already left must not overwrite the one they are looking at.
+  const filterRequest = useRef(0);
+  const filtered = activeShareFilters(filter) > 0;
+  const total = filteredShareTotal(filter, facets, fileCount);
 
   useEffect(() => () => {
     if (pollTimer.current) clearTimeout(pollTimer.current);
@@ -161,12 +208,16 @@ export default function ProjectShareFiles({
 
   async function loadMore() {
     if (!cursor || loading) return;
+    const request = filterRequest.current;
     setLoading(true);
     setLoadError(false);
     try {
-      const response = await fetch(shareAssetsHref(token, cursor), { cache: "no-store" });
+      const response = await fetch(shareAssetsHref(token, cursor, filter), { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
       const page = (await response.json()) as ProjectSharePage;
+      // The filter changed while this page was on its way: it belongs to a
+      // list that is no longer on screen.
+      if (request !== filterRequest.current) return;
       setFiles((previous) => {
         const seen = new Set(previous.map((file) => file.id));
         return [...previous, ...page.files.filter((file) => !seen.has(file.id))];
@@ -178,6 +229,34 @@ export default function ProjectShareFiles({
       setLoading(false);
     }
   }
+
+  async function applyFilter(next: ProjectShareFilter) {
+    const request = ++filterRequest.current;
+    setFilter(next);
+    setFiltering(true);
+    setFilterError(false);
+    setViewing(null);
+    try {
+      const response = await fetch(shareAssetsHref(token, null, next), { cache: "no-store" });
+      if (!response.ok) throw new Error(String(response.status));
+      const page = (await response.json()) as ProjectSharePage;
+      if (request !== filterRequest.current) return;
+      setFiles(page.files);
+      setCursor(page.nextCursor);
+      setLoadError(false);
+      // The selection narrows to what is still on screen, so "Download N"
+      // never carries a file the recipient can no longer see (ADR 0040's rule
+      // for a canvas filter, applied to the page).
+      const visible = new Set(page.files.map((file) => file.id));
+      setSelected((previous) => new Set([...previous].filter((id) => visible.has(id))));
+    } catch {
+      if (request === filterRequest.current) setFilterError(true);
+    } finally {
+      if (request === filterRequest.current) setFiltering(false);
+    }
+  }
+
+  const closeViewer = useCallback(() => setViewing(null), []);
 
   function toggle(id: string) {
     setSelected((previous) => {
@@ -263,13 +342,36 @@ export default function ProjectShareFiles({
         </p>
       </div>
 
+      <ShareFilterBar
+        details={details}
+        facets={facets}
+        filter={filter}
+        busy={filtering}
+        onChange={(next) => void applyFilter(next)}
+      />
+      {filtered || filterError ? (
+        <div role="status" style={{ marginTop: 12, color: "var(--t2)", fontSize: 10 }}>
+          {filterError
+            ? "Could not apply that filter. Try again."
+            : filtering
+              ? "Filtering…"
+              : total !== null
+                ? `${total.toLocaleString("en-US")} of ${fileCount.toLocaleString("en-US")} ${fileCount === 1 ? "file" : "files"} match`
+                : `${files.length.toLocaleString("en-US")}${cursor ? "+" : ""} ${files.length === 1 && !cursor ? "file matches" : "files match"}`}
+        </div>
+      ) : null}
+
       {files.length ? (
         <div
           style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 22 }}
           aria-live="polite"
         >
+          {/* Acts on the files on screen — under a filter, the filtered set —
+              and says how many before it is pressed. */}
           <button type="button" style={button} onClick={selected.size ? () => setSelected(new Set()) : selectAll}>
-            {selected.size ? `Clear selection (${selected.size})` : `Select ${Math.min(files.length, ZIP_MAX_FILES)}`}
+            {selected.size
+              ? `Clear selection (${selected.size})`
+              : `Select ${Math.min(files.length, ZIP_MAX_FILES)}${filtered ? " matching" : ""}`}
           </button>
           <button
             type="button"
@@ -288,7 +390,9 @@ export default function ProjectShareFiles({
           ) : null}
         </div>
       ) : (
-        <div className="public-share-empty" style={{ marginTop: 28 }}>This project has no files yet.</div>
+        <div className="public-share-empty" style={{ marginTop: 28 }}>
+          {filtered ? "No files match this filter." : "This project has no files yet."}
+        </div>
       )}
 
       <div className="public-share-file-grid">
@@ -297,16 +401,33 @@ export default function ProjectShareFiles({
             key={file.id}
             token={token}
             file={file}
+            details={details}
             selected={selected.has(file.id)}
             onToggle={() => toggle(file.id)}
+            onOpen={() => setViewing(files.indexOf(file))}
           />
         ))}
       </div>
 
+      {viewing !== null && files[viewing] ? (
+        <ShareLightbox
+          token={token}
+          files={files}
+          index={viewing}
+          details={details}
+          onClose={closeViewer}
+          onStep={setViewing}
+          onTag={(tag) => {
+            setViewing(null);
+            void applyFilter({ ...filter, tag });
+          }}
+        />
+      ) : null}
+
       {cursor ? (
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, marginTop: 28 }}>
           <button type="button" style={button} disabled={loading} onClick={() => void loadMore()}>
-            {loading ? "Loading…" : `Show more (${files.length} of ${fileCount})`}
+            {loading ? "Loading…" : total !== null ? `Show more (${files.length} of ${total})` : "Show more"}
           </button>
           {loadError ? <span role="alert" style={{ color: "var(--t2)", fontSize: 10 }}>Could not load more files.</span> : null}
         </div>

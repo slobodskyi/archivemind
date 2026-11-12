@@ -5,6 +5,7 @@ import {
   shareScopeHeading,
   shareScopeLabel,
   shareScopeReach,
+  shareDetailsLabel,
 } from "./share-scope";
 
 const board = { id: "11111111-1111-4111-8111-111111111111", name: "Kyiv", color: "blue" as const, count: 48 };
@@ -68,5 +69,18 @@ describe("scope copy", () => {
     expect(shareScopeReach(ws, "P")).toContain("Workspace “Kyiv” holds now");
     expect(shareScopeReach(project, "P")).toContain("“P” holds now");
     expect(countedFiles(1200)).toBe("1,200 files");
+  });
+});
+
+describe("shareDetailsLabel", () => {
+  it("says nothing for a link that shows files only", () => {
+    expect(shareDetailsLabel({ boards: false, labels: false, tags: false, caption: null })).toBeNull();
+  });
+
+  it("names every detail a link shows, the caption by language and style", () => {
+    expect(
+      shareDetailsLabel({ boards: true, labels: true, tags: true, caption: { lang: "uk", style: "agency" } }),
+    ).toBe("Shows Workspaces · colour labels · tags · Ukrainian agency caption");
+    expect(shareDetailsLabel({ boards: false, labels: true, tags: false, caption: null })).toBe("Shows colour labels");
   });
 });

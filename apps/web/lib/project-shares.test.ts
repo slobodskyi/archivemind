@@ -96,6 +96,32 @@ describe("createProjectShareRequestSchema", () => {
     expect(createProjectShareRequestSchema.safeParse({ mode: "both", expiresInDays: 7, scope: "board", boardId: id }).success).toBe(true);
   });
 
+  it("defaults every detail to off (ADR 0053 §3)", () => {
+    const parsed = createProjectShareRequestSchema.parse({ mode: "download", expiresInDays: 7 });
+    expect(parsed).toMatchObject({ showBoards: false, showLabels: false, showTags: false });
+    expect(parsed.caption).toBeUndefined();
+  });
+
+  it("holds details to the rules create_project_share() enforces", () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    const ok = (body: object) => createProjectShareRequestSchema.safeParse({ expiresInDays: 7, ...body }).success;
+    expect(ok({ mode: "download", showBoards: true, showLabels: true, showTags: true, caption: { lang: "en", style: "social" } })).toBe(true);
+    expect(ok({ mode: "both", showLabels: true })).toBe(true);
+    // Details need download rights.
+    expect(ok({ mode: "upload", showTags: true })).toBe(false);
+    expect(ok({ mode: "upload", caption: { lang: "en", style: "agency" } })).toBe(false);
+    expect(ok({ mode: "upload", showLabels: false })).toBe(true);
+    // Workspaces are a filter on a project link only.
+    expect(ok({ mode: "download", scope: "board", boardId: id, showBoards: true })).toBe(false);
+    expect(ok({ mode: "download", scope: "selection", assetIds: [id], showBoards: true })).toBe(false);
+    expect(ok({ mode: "download", scope: "selection", assetIds: [id], showLabels: true })).toBe(true);
+    // A caption is both a language and a style; Russian is no longer offered.
+    expect(ok({ mode: "download", caption: { lang: "en" } })).toBe(false);
+    expect(ok({ mode: "download", caption: { style: "agency" } })).toBe(false);
+    expect(ok({ mode: "download", caption: { lang: "ru", style: "agency" } })).toBe(false);
+    expect(ok({ mode: "download", caption: { lang: "en", style: "agency", fallback: true } })).toBe(false);
+  });
+
   it("trims the label and caps it", () => {
     expect(createProjectShareRequestSchema.parse({ mode: "upload", expiresInDays: 1, label: "  Agency  " }).label).toBe("Agency");
     expect(createProjectShareRequestSchema.safeParse({ mode: "upload", expiresInDays: 1, label: "x".repeat(81) }).success).toBe(false);

@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
-import { SINGLE_PUT_MAX_BYTES } from "@archivemind/shared";
+import {
+  CAPTION_LANG_NAMES,
+  OFFERED_CAPTION_LANGS,
+  SINGLE_PUT_MAX_BYTES,
+  captionStyleSchema,
+  type CaptionStyleKey,
+  type OfferedCaptionLang,
+} from "@archivemind/shared";
 import Dialog, { DialogButton } from "@/components/modals/Dialog";
 import { REPLAY_BLOCK_CLASS } from "@/lib/analytics";
 import { LABEL_COLORS } from "@/lib/labels";
@@ -22,8 +29,10 @@ import {
   type ProjectShareSummary,
 } from "@/lib/project-shares";
 import {
+  CAPTION_STYLE_TITLES,
   countedFiles,
   resolveShareScopes,
+  shareDetailsLabel,
   shareScopeHeading,
   shareScopeLabel,
   shareScopeReach,
@@ -165,6 +174,8 @@ function errorCopy(code: string | null): string {
       return "That list can’t be shared. Pick up to 2,000 files from this project.";
     case "invalid_rights":
       return "A list of files can only be viewed and downloaded.";
+    case "invalid_details":
+      return "Those details can’t be shown on this link. A send-only link shows nothing about files, and Workspaces show only on a whole-project link.";
     case "unauthorized":
       return "Your session has ended. Sign in again to manage links.";
     default:
@@ -316,6 +327,7 @@ function ShareRow({
   const firstDaysRef = useRef<HTMLButtonElement>(null);
   const url = share.path ? shareUrl(share.path) : null;
   const expired = share.status === "expired";
+  const detailsLine = shareDetailsLabel(share.details);
 
   useEffect(() => {
     if (revoking) keepRef.current?.focus();
@@ -341,6 +353,9 @@ function ShareRow({
       <div style={{ marginTop: 5, paddingLeft: 15, display: "flex" }}>
         <ScopeChip share={share} />
       </div>
+      {detailsLine ? (
+        <div style={{ marginTop: 4, paddingLeft: 15, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.5 }}>{detailsLine}</div>
+      ) : null}
       <div style={{ marginTop: 4, paddingLeft: 15, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.5 }}>
         {share.label ? `${MODE_TITLE[share.mode]} · ` : ""}
         {statusLine(share)}
@@ -413,6 +428,146 @@ function ShareRow({
   );
 }
 
+/** The privacy line under the form: what stays inside whatever the boxes say
+ *  (ADR 0053 §3's "still never sent"), plus every detail left off. */
+function neverShownLine(details: { boards: boolean; labels: boolean; tags: boolean; caption: unknown }): string {
+  const hidden = [
+    details.tags ? null : "tags",
+    details.caption ? null : "captions",
+    details.labels ? null : "colour labels",
+    details.boards ? null : "Workspaces",
+    "AI descriptions",
+    "facts",
+    "notes",
+  ].filter((part): part is string => part !== null);
+  const list = `${hidden.slice(0, -1).join(", ")} and ${hidden[hidden.length - 1]}`;
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)} are never shown.`;
+}
+
+/** Why the Workspace filter is off the table for this scope (ADR 0053 §3). */
+function boardsDetail(scope: ShareScopeOption["scope"]): string {
+  if (scope === "board") return "Not on a Workspace link — the Workspace is what it shares.";
+  if (scope === "selection") return "Not on a list of files — there is nothing to filter it by.";
+  return "Their names, as a filter over the project’s files.";
+}
+
+interface ShareDetailsFieldsetProps {
+  busy: boolean;
+  offered: boolean;
+  boardsOffered: boolean;
+  scope: ShareScopeOption["scope"];
+  showBoards: boolean;
+  showLabels: boolean;
+  showTags: boolean;
+  captionOn: boolean;
+  captionLang: OfferedCaptionLang;
+  captionStyle: CaptionStyleKey;
+  onShowBoards: (on: boolean) => void;
+  onShowLabels: (on: boolean) => void;
+  onShowTags: (on: boolean) => void;
+  onCaptionOn: (on: boolean) => void;
+  onCaptionLang: (lang: OfferedCaptionLang) => void;
+  onCaptionStyle: (style: CaptionStyleKey) => void;
+}
+
+function DetailCheck({
+  checked,
+  disabled,
+  title,
+  detail,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  title: string;
+  detail: string;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 }}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        style={{ width: 15, height: 15, margin: "1px 0 0", flex: "0 0 auto", accentColor: "var(--ac)" }}
+      />
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", color: "var(--t1)", fontSize: 11.5, fontWeight: 700 }}>{title}</span>
+        <span style={{ display: "block", marginTop: 2, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.45 }}>{detail}</span>
+      </span>
+    </label>
+  );
+}
+
+/** "Visible to recipient" (ADR 0053 §3): four opt-in details, all off by
+ *  default. Each is fixed for the link's life — the copy says so, because a
+ *  URL someone already holds must never quietly start showing more. */
+function ShareDetailsFieldset(props: ShareDetailsFieldsetProps) {
+  const { busy, offered, boardsOffered, scope } = props;
+  return (
+    <fieldset disabled={busy} style={{ margin: "18px 0 0", padding: 0, border: 0 }}>
+      <legend style={legendStyle}>Visible to recipient</legend>
+      <div style={{ marginTop: 4, color: "var(--t3)", fontSize: 10, lineHeight: 1.45 }}>
+        Off unless you tick it. Fixed for the life of the link.
+      </div>
+      <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+        <DetailCheck
+          checked={props.showBoards}
+          disabled={!boardsOffered}
+          title="Workspaces"
+          detail={boardsDetail(scope)}
+          onChange={props.onShowBoards}
+        />
+        <DetailCheck
+          checked={props.showLabels}
+          disabled={!offered}
+          title="Colour labels"
+          detail="Each file’s colour, and a colour filter."
+          onChange={props.onShowLabels}
+        />
+        <DetailCheck
+          checked={props.showTags}
+          disabled={!offered}
+          title="Tags"
+          detail="The AI tag names on each file, and a tag filter."
+          onChange={props.onShowTags}
+        />
+        <DetailCheck
+          checked={props.captionOn}
+          disabled={!offered}
+          title="Caption"
+          detail="Exactly one language and style. A file without that caption shows none."
+          onChange={props.onCaptionOn}
+        />
+        {offered && props.captionOn ? (
+          <div style={{ display: "grid", gap: 6, paddingLeft: 25 }}>
+            <div role="group" aria-label="Caption language" style={{ display: "flex", gap: 6 }}>
+              {OFFERED_CAPTION_LANGS.map((lang) => (
+                <button key={lang} type="button" aria-pressed={props.captionLang === lang} onClick={() => props.onCaptionLang(lang)} style={choiceStyle(props.captionLang === lang, busy)}>
+                  {CAPTION_LANG_NAMES[lang]}
+                </button>
+              ))}
+            </div>
+            <div role="group" aria-label="Caption style" style={{ display: "flex", gap: 6 }}>
+              {captionStyleSchema.options.map((style) => (
+                <button key={style} type="button" aria-pressed={props.captionStyle === style} onClick={() => props.onCaptionStyle(style)} style={choiceStyle(props.captionStyle === style, busy)}>
+                  {CAPTION_STYLE_TITLES[style]}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {offered ? null : (
+        <div style={{ marginTop: 8, color: "var(--t2)", fontSize: 10.5, lineHeight: 1.45 }}>
+          A send-only link shows no files, so it shows nothing about them.
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
 const PROJECT_ONLY: ShareScopes = resolveShareScopes({ selectionIds: [], activeBoard: null, projectCount: null });
 
 function optionTitle(option: ShareScopeOption): string {
@@ -444,6 +599,14 @@ function ShareDialogContent({
   const [chosenMode, setMode] = useState<ProjectShareMode>("download");
   const [expiresInDays, setExpiresInDays] = useState<ProjectShareExpiryDays>(PROJECT_SHARE_DEFAULT_EXPIRY_DAYS);
   const [label, setLabel] = useState("");
+  // What the recipient sees beside the files (ADR 0053 §3) — all off, so the
+  // default link is still the ADR 0051 one: files and nothing else.
+  const [showBoards, setShowBoards] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
+  const [showTags, setShowTags] = useState(false);
+  const [captionOn, setCaptionOn] = useState(false);
+  const [captionLang, setCaptionLang] = useState<OfferedCaptionLang>("en");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyleKey>("agency");
   const [created, setCreated] = useState<{ id: string; url: string; mode: ProjectShareMode; scope: ShareScopeOption["scope"] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -471,6 +634,17 @@ function ShareDialogContent({
   const listOnly = option.scope === "selection";
   const mode: ProjectShareMode = listOnly ? "download" : chosenMode;
   const unavailable = option.unavailable !== null;
+  // A send-only link shows no files, so it can show nothing about them; and
+  // on a Workspace or a list the Workspace filter means nothing. What is not
+  // offered is never sent, whatever the boxes said a moment ago.
+  const detailsOffered = mode !== "upload";
+  const boardsOffered = detailsOffered && option.scope === "project";
+  const details = {
+    boards: boardsOffered && showBoards,
+    labels: detailsOffered && showLabels,
+    tags: detailsOffered && showTags,
+    caption: detailsOffered && captionOn ? { lang: captionLang, style: captionStyle } : null,
+  };
   const loading = shares === null && loadError === null;
   const hasShares = Boolean(shares?.length);
   // A project with no links opens straight on the form: there is nothing to
@@ -506,6 +680,10 @@ function ShareDialogContent({
           scope: option.scope,
           ...(option.scope === "board" ? { boardId: option.boardId } : {}),
           ...(option.scope === "selection" ? { assetIds: option.assetIds } : {}),
+          showBoards: details.boards,
+          showLabels: details.labels,
+          showTags: details.tags,
+          ...(details.caption ? { caption: details.caption } : {}),
         }),
       });
       if (!resp.ok) {
@@ -702,6 +880,25 @@ function ShareDialogContent({
             </div>
           </fieldset>
 
+          <ShareDetailsFieldset
+            busy={busy}
+            offered={detailsOffered}
+            boardsOffered={boardsOffered}
+            scope={option.scope}
+            showBoards={details.boards}
+            showLabels={details.labels}
+            showTags={details.tags}
+            captionOn={details.caption !== null}
+            captionLang={captionLang}
+            captionStyle={captionStyle}
+            onShowBoards={setShowBoards}
+            onShowLabels={setShowLabels}
+            onShowTags={setShowTags}
+            onCaptionOn={setCaptionOn}
+            onCaptionLang={setCaptionLang}
+            onCaptionStyle={setCaptionStyle}
+          />
+
           <fieldset disabled={busy} style={{ margin: "18px 0 0", padding: 0, border: 0 }}>
             <legend style={legendStyle}>Link expires after</legend>
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
@@ -733,8 +930,7 @@ function ShareDialogContent({
             {mode !== "upload" ? (
               <div>
                 Downloads are the original files where the project holds them — camera details and GPS location
-                included — and a high-quality web-size copy otherwise. Tags, AI descriptions, captions, labels and
-                notes are never shown.
+                included — and a high-quality web-size copy otherwise. {neverShownLine(details)}
               </div>
             ) : null}
             {mode !== "download" ? (

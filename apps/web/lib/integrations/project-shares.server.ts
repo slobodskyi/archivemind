@@ -1,15 +1,17 @@
 import { z } from "zod";
-import type { ExportJobPayload } from "@archivemind/shared";
+import { assetLabelSchema, type ExportJobPayload } from "@archivemind/shared";
 import { decryptToken, encryptToken, parseTokenKey } from "@archivemind/shared/token-crypto";
 import {
   encodeShareCursor,
   PROJECT_SHARE_PAGE_SIZE,
   type ProjectShareDownloadStatus,
+  type ProjectShareFacets,
+  type ProjectShareFilter,
   type ProjectShareMediaVariant,
   type ProjectSharePage,
   type ProjectShareView,
 } from "@/lib/project-share-public";
-import { shareScopeSchema } from "@/lib/project-shares";
+import { shareCaption, shareScopeSchema } from "@/lib/project-shares";
 import { publicationRightsSchema } from "@/lib/publication-shares";
 import { shareTokenHash, shareTokenSchema } from "@/lib/share-token";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -49,7 +51,7 @@ export function openShareToken(ciphertext: string): string | null {
 }
 
 // ── public surface (/s/*) ────────────────────────────────────────────────
-// The resolvers a link's holder reaches, and nothing else: five that read and
+// The resolvers a link's holder reaches, and nothing else: six that read and
 // three that write (the upload reservation ledger, ADR 0051 §9). They are
 // SECURITY DEFINER functions granted to service_role only (migration
 // 20261103000001), so they are called through the admin client behind the
@@ -60,6 +62,7 @@ export function openShareToken(ciphertext: string): string | null {
 const PUBLIC_RESOLVERS = [
   "open_project_share",
   "list_project_share_assets",
+  "list_project_share_facets",
   "resolve_project_share_media",
   "enqueue_project_share_download",
   "project_share_download_status",
@@ -92,6 +95,11 @@ const openRowSchema = z.object({
   // ADR 0053. Defaulted, so the page keeps working against an older resolver.
   scope: shareScopeSchema.default("project"),
   board_name: z.string().nullable().default(null),
+  show_boards: z.boolean().default(false),
+  show_labels: z.boolean().default(false),
+  show_tags: z.boolean().default(false),
+  caption_lang: z.string().nullable().default(null),
+  caption_style: z.string().nullable().default(null),
 });
 
 /** The page's head: name, rights, byline. Null for every refusal. */
@@ -111,6 +119,16 @@ export async function openProjectShare(token: string): Promise<ProjectShareView 
     fileCount: row.data.can_download ? row.data.file_count : null,
     scope: row.data.scope,
     boardName: row.data.scope === "board" ? row.data.board_name : null,
+    // The SQL refuses details on an upload-only link; the page reads none on
+    // one either, whatever a row says.
+    details: row.data.can_download
+      ? {
+          boards: row.data.scope === "project" && row.data.show_boards,
+          labels: row.data.show_labels,
+          tags: row.data.show_tags,
+          caption: shareCaption(row.data.caption_lang, row.data.caption_style),
+        }
+      : { boards: false, labels: false, tags: false, caption: null },
   };
 }
 
@@ -125,13 +143,22 @@ const assetRowSchema = z.object({
   has_preview: z.boolean(),
   has_original: z.boolean(),
   sort_at: timestampSchema,
+  // ADR 0053: null for every detail the link did not turn on. Defaulted, so a
+  // row from the pre-0053 resolver still parses. The label stays text: a
+  // colour added later must blank one dot, not fail the page.
+  label: z.string().nullable().default(null),
+  tags: z.array(z.string().min(1).max(500)).max(64).nullable().default(null),
+  caption: z.string().max(20_000).nullable().default(null),
 });
 
-/** One page of the project's live files, newest first. Null for every refusal,
- *  an upload-only link included. */
+/** One page of the link's live files, newest first, optionally narrowed by
+ *  the recipient's filters. Null for every refusal — an upload-only link, and
+ *  a filter on a detail the link did not turn on (the SQL's 22023
+ *  `invalid_project_share_filter`), which the route turns into its one 404. */
 export async function listProjectShareAssets(
   token: string,
   cursor: { sortAt: string; id: string } | null,
+  filter: ProjectShareFilter = {},
 ): Promise<ProjectSharePage | null> {
   const digest = await tokenDigest(token);
   if (!digest) return null;
@@ -140,13 +167,18 @@ export async function listProjectShareAssets(
     p_before_sort_at: cursor?.sortAt ?? null,
     p_before_id: cursor?.id ?? null,
     p_limit: PROJECT_SHARE_PAGE_SIZE,
+    p_board_id: filter.board ?? null,
+    p_label: filter.label ?? null,
+    p_tag: filter.tag ?? null,
   });
   if (error || !Array.isArray(data)) return null;
   const rows = z.array(assetRowSchema).max(PROJECT_SHARE_PAGE_SIZE).safeParse(data);
   if (!rows.success) return null;
   // No rows is also how the SQL refuses — a dead link, or one that cannot
   // download — so an empty page has to prove the link still lists files before
-  // it may say "no more files" instead of the uniform 404.
+  // it may say "no more files" (or "nothing carries that tag") instead of the
+  // uniform 404. A filter on a detail that is off never gets here: that is an
+  // error above, not an empty page.
   if (rows.data.length === 0) {
     const share = await openProjectShare(token);
     if (!share?.canDownload) return null;
@@ -163,11 +195,59 @@ export async function listProjectShareAssets(
       takenAt: row.taken_at,
       hasPreview: row.has_preview,
       hasOriginal: row.has_original,
+      label: narrowLabel(row.label),
+      tags: row.tags,
+      caption: row.caption?.trim() ? row.caption : null,
     })),
     nextCursor: last && rows.data.length === PROJECT_SHARE_PAGE_SIZE
       ? encodeShareCursor(last.sort_at, last.id)
       : null,
   };
+}
+
+function narrowLabel(value: string | null) {
+  const parsed = assetLabelSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+const facetRowSchema = z.object({
+  facet: z.enum(["board", "label", "tag"]),
+  value: z.string().min(1).max(500),
+  name: z.string().max(500).nullable(),
+  color: z.string().nullable(),
+  file_count: z.number().int().nonnegative(),
+});
+
+/** The filter row for a link's page (ADR 0053 §4): Workspaces in their own
+ *  order, colours, and the 40 most-used tags, each counted over the link's
+ *  live files — only for the details the link turned on. Null for every
+ *  refusal. Zero rows is ambiguous like an empty page (a dead link, or a link
+ *  whose details have nothing to count), so it re-checks the link first. */
+export async function listProjectShareFacets(token: string): Promise<ProjectShareFacets | null> {
+  const digest = await tokenDigest(token);
+  if (!digest) return null;
+  const { data, error } = await publicResolver("list_project_share_facets", { p_token_hash: digest });
+  if (error || !Array.isArray(data)) return null;
+  // Three facets: at most a project's Workspaces, seven colours, 40 tags.
+  const rows = z.array(facetRowSchema).max(2_000).safeParse(data);
+  if (!rows.success) return null;
+  if (rows.data.length === 0) {
+    const share = await openProjectShare(token);
+    if (!share?.canDownload) return null;
+  }
+  const facets: ProjectShareFacets = { boards: [], labels: [], tags: [] };
+  for (const row of rows.data) {
+    if (row.facet === "board") {
+      if (!z.string().uuid().safeParse(row.value).success || !row.name) continue;
+      facets.boards.push({ id: row.value, name: row.name, color: narrowLabel(row.color), count: row.file_count });
+    } else if (row.facet === "label") {
+      const label = narrowLabel(row.value);
+      if (label) facets.labels.push({ label, count: row.file_count });
+    } else {
+      facets.tags.push({ name: row.value, count: row.file_count });
+    }
+  }
+  return facets;
 }
 
 const mediaRowSchema = z.object({

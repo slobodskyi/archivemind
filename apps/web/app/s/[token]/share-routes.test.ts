@@ -139,13 +139,53 @@ describe("GET /s/{token}/assets", () => {
     expect(await response.json()).toEqual(page);
     expect(response.headers.get("cache-control")).toContain("no-store");
     // The microseconds survive: a rounded cursor would skip or repeat a file.
-    expect(mocks.listProjectShareAssets).toHaveBeenCalledWith(token, { sortAt, id: assetId });
+    expect(mocks.listProjectShareAssets).toHaveBeenCalledWith(token, { sortAt, id: assetId }, {});
   });
 
   it("asks for the first page without a cursor", async () => {
     mocks.listProjectShareAssets.mockResolvedValue({ files: [], nextCursor: null });
     await listAssets(new Request(`http://localhost/s/${token}/assets`), ctx({ token }));
-    expect(mocks.listProjectShareAssets).toHaveBeenCalledWith(token, null);
+    expect(mocks.listProjectShareAssets).toHaveBeenCalledWith(token, null, {});
+  });
+
+  it("passes a Workspace, colour and tag filter beside the cursor (ADR 0053 §4)", async () => {
+    mocks.listProjectShareAssets.mockResolvedValue({ files: [], nextCursor: null });
+    const board = "66666666-6666-4666-8666-666666666666";
+    const cursor = encodeShareCursor("2026-10-01T09:30:00+00:00", assetId);
+
+    const response = await listAssets(
+      new Request(`http://localhost/s/${token}/assets?cursor=${cursor}&board=${board.toUpperCase()}&label=red&tag=${encodeURIComponent("river bank")}`),
+      ctx({ token }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listProjectShareAssets).toHaveBeenCalledWith(
+      token,
+      { sortAt: "2026-10-01T09:30:00+00:00", id: assetId },
+      { board, label: "red", tag: "river bank" },
+    );
+  });
+
+  it("treats an empty filter parameter as no filter", async () => {
+    mocks.listProjectShareAssets.mockResolvedValue({ files: [], nextCursor: null });
+    await listAssets(new Request(`http://localhost/s/${token}/assets?board=&label=&tag=`), ctx({ token }));
+    expect(mocks.listProjectShareAssets).toHaveBeenCalledWith(token, null, {});
+  });
+
+  it.each([
+    ["a board that is not a uuid", "board=kyiv"],
+    ["a colour outside the seven", "label=pink"],
+    ["an over-long tag", `tag=${"x".repeat(201)}`],
+    ["a tag with a control character", "tag=a%00b"],
+  ])("refuses %s with the same 404, before the database", async (_name, query) => {
+    await expectUniform404(await listAssets(new Request(`http://localhost/s/${token}/assets?${query}`), ctx({ token })));
+    expect(mocks.listProjectShareAssets).not.toHaveBeenCalled();
+  });
+
+  it("is the same 404 for a filter on a detail the link does not show", async () => {
+    // The resolver's 22023 invalid_project_share_filter reaches the route as null.
+    mocks.listProjectShareAssets.mockResolvedValue(null);
+    await expectUniform404(await listAssets(new Request(`http://localhost/s/${token}/assets?tag=river`), ctx({ token })));
   });
 
   it("refuses a forged cursor with the same 404", async () => {

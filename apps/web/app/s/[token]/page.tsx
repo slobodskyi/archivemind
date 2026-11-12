@@ -3,7 +3,12 @@ import { notFound } from "next/navigation";
 import ProjectShareFiles from "@/components/share/ProjectShareFiles";
 import ProjectShareSendForm from "@/components/share/ProjectShareSendForm";
 import RightsFooter, { formatShareDate } from "@/components/share/RightsFooter";
-import { listProjectShareAssets, openProjectShare } from "@/lib/integrations/project-shares.server";
+import {
+  listProjectShareAssets,
+  listProjectShareFacets,
+  openProjectShare,
+} from "@/lib/integrations/project-shares.server";
+import { EMPTY_SHARE_FACETS } from "@/lib/project-share-public";
 import { shareScopeHeading } from "@/lib/share-scope";
 
 interface ProjectSharePageProps {
@@ -25,7 +30,16 @@ export default async function ProjectSharePage({ params }: ProjectSharePageProps
   const share = await openProjectShare(token);
   if (!share) notFound();
 
-  const firstPage = share.canDownload ? await listProjectShareAssets(token, null) : null;
+  // The filter row is counted in SQL (ADR 0053 §4) and rendered with the
+  // first page, so it is never a second round trip from the browser. A link
+  // that shows no filterable detail asks for none.
+  const filterable = share.details.boards || share.details.labels || share.details.tags;
+  const [firstPage, facets] = share.canDownload
+    ? await Promise.all([
+        listProjectShareAssets(token, null),
+        filterable ? listProjectShareFacets(token) : Promise.resolve(EMPTY_SHARE_FACETS),
+      ])
+    : [null, null];
   if (share.canDownload && !firstPage) notFound();
 
   // Titled by what the link carries (ADR 0053): the project, the Workspace
@@ -72,7 +86,15 @@ export default async function ProjectSharePage({ params }: ProjectSharePageProps
         </header>
 
         {share.canDownload && firstPage ? (
-          <ProjectShareFiles token={token} initialPage={firstPage} fileCount={share.fileCount ?? firstPage.files.length} />
+          <ProjectShareFiles
+            token={token}
+            initialPage={firstPage}
+            fileCount={share.fileCount ?? firstPage.files.length}
+            details={share.details}
+            // A filter row that failed to load is left out; the files and
+            // every detail on them still show.
+            facets={facets ?? EMPTY_SHARE_FACETS}
+          />
         ) : null}
 
         {share.canUpload ? <ProjectShareSendForm token={token} /> : null}
