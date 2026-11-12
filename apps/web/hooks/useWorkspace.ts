@@ -29,8 +29,6 @@ import type {
   CaptionStyle,
   CanvasPoint,
   CanvasUploadPreview,
-  ChatMessage,
-  ChatResult,
   FactStatus,
   Language,
   Photo,
@@ -95,8 +93,6 @@ import {
   type CanvasArrangement,
   type LegacyStickyNote,
 } from "@/lib/canvas-store";
-import type { SearchResponse } from "@archivemind/shared";
-import { CHAT_GREETING } from "@/lib/chat";
 import { clusterTopicKey } from "@/lib/topics";
 import { committedTopicDropKey, topicDropTargetAt } from "@/lib/topic-drag";
 import { UPLOAD_SELECTION_LIMIT } from "@/lib/upload-client";
@@ -312,8 +308,6 @@ interface WorkspaceState {
   tool: Tool;
   view: ViewMode;
   chatOpen: boolean;
-  chatMsgs: ChatMessage[];
-  chatInput: string;
   acctOpen: boolean;
   projOpen: boolean;
   addProjOpen: boolean;
@@ -942,16 +936,24 @@ export interface Workspace {
   /** Copy the open photo's Metadata / EXIF block to the clipboard (drawer). */
   copyMetadata: () => void;
 
-  // Chat
+  // Chat — only the panel's open state lives here (layout and Escape read
+  // it). The conversation itself is hooks/useAssistant.
   chatOpen: boolean;
-  chatMsgs: ChatMessage[];
-  chatInput: string;
   toggleChat: () => void;
   closeChat: () => void;
-  sendChat: (text?: string) => void;
+  /** Select the loaded ones among these ids — the Map's cluster select and a
+   *  share link's "Show on canvas". */
   selectSearchResults: (ids: string[]) => void;
-  onChatInput: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onChatKey: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  /** Select exactly the ids this canvas draws (Workspace scope, label filter,
+   *  collapsed folders respected) and say how many. The assistant's "Select". */
+  selectIds: (ids: readonly string[]) => void;
+  /** Open the fullscreen viewer walking exactly these (drawn) photos. */
+  viewIds: (ids: readonly string[]) => void;
+  /** Set or clear the colour label on explicit ids — `applyLabel`, with its
+   *  Undo toast. The pickers above reach it through the selection. */
+  labelIds: (ids: readonly string[], label: AssetLabel | null) => void;
+  /** Ask before moving these (drawn) photos to Trash, at any count. */
+  confirmDelete: (ids: readonly string[]) => void;
 
   // Project / account dropdowns
   acctOpen: boolean;
@@ -1057,8 +1059,10 @@ export interface Workspace {
   toggleBulkPanel: () => void;
   /** The upload pill's "Analyze N with AI": select exactly these ids that this
    *  canvas shows (Workspace scope + label filter, not yet analyzed) and open
-   *  BulkAiPanel. Never runs AI. false = nothing opened (a toast says why). */
-  openBulkFor: (ids: readonly string[]) => boolean;
+   *  BulkAiPanel. `mode: "caption"` is the assistant's "Write captions…": the
+   *  ALREADY analyzed ones instead, on a caption-only plan. Never runs AI.
+   *  false = nothing opened (a toast says why). */
+  openBulkFor: (ids: readonly string[], mode?: "analyze" | "caption") => boolean;
   bulkShow: boolean;
   bulkIdle: boolean;
   /** Exactly the ids `runBulk` will act on — the panel plans its button text
@@ -1171,8 +1175,6 @@ export function useWorkspace(
     tool: "select",
     view: "neural",
     chatOpen: false,
-    chatMsgs: [{ role: "assistant", text: CHAT_GREETING }],
-    chatInput: "",
     acctOpen: false,
     projOpen: false,
     addProjOpen: false,
@@ -2998,6 +3000,25 @@ export function useWorkspace(
     [navOrder, setState],
   );
 
+  /** The assistant's "Full screen": walk exactly these photos. Selecting them
+   *  is what makes the viewer walk the set (two or more) and what it hands
+   *  back to the canvas on close. It opens on the first id given — the best
+   *  match — while the walk itself is in reading order. Drawn tiles only. */
+  const viewIds = useCallback(
+    (ids: readonly string[]) => {
+      const order = navOrder(stateRef.current);
+      const drawn = new Set(order);
+      const found = [...new Set(ids)].filter((id) => drawn.has(id));
+      const seq = viewerSequence(order, found, found[0] ?? null);
+      if (!seq) {
+        flashToast("Those photos aren't on this canvas");
+        return;
+      }
+      setState({ selectedIds: found, viewerId: seq.start, viewerIds: seq.ids, labelMenuOpen: false });
+    },
+    [navOrder, setState, flashToast],
+  );
+
   /** Close, leaving the canvas pointing at where you got to: the last photo
    *  viewed becomes the selection — unless you were walking a selection, which
    *  is kept whole (collapsing a culling set to one photo would lose it). An
@@ -3588,6 +3609,23 @@ export function useWorkspace(
   const cancelConfirmDelete = useCallback(
     () => setState({ confirmDeleteIds: null }),
     [setState],
+  );
+
+  /** The assistant's Trash: it always asks, whatever the count. A delete
+   *  reached through a chat button or a typed command is one step further from
+   *  the photos than a click on them, so the "small selections go straight
+   *  away" half of `requestDeletePhotos` does not apply. Drawn tiles only. */
+  const confirmDelete = useCallback(
+    (ids: readonly string[]) => {
+      const drawn = new Set(navOrder(stateRef.current));
+      const found = [...new Set(ids)].filter((id) => drawn.has(id));
+      if (!found.length) {
+        flashToast("Those photos aren't on this canvas");
+        return;
+      }
+      setState({ confirmDeleteIds: found });
+    },
+    [navOrder, setState, flashToast],
   );
 
   /** Drawer's single-photo "Analyze & caption" — analyze chained into caption.
@@ -4405,89 +4443,12 @@ export function useWorkspace(
     return false;
   }, [rect, setState, neuralGalleryFor, fitDefaultZoom]);
 
-  // ── Chat = Smart Search (#16) — the assistant's answers ARE search results ─
+  // ── Chat (the assistant) — the conversation lives in hooks/useAssistant ────
 
-  const chatBusy = useRef(false);
-
-  /** Swap the trailing "Searching…" placeholder for the real answer. */
-  const patchLastChatMsg = useCallback(
-    (text: string, results?: ChatResult[]) => {
-      const msgs = stateRef.current.chatMsgs.slice();
-      msgs[msgs.length - 1] = { role: "assistant", text, ...(results?.length ? { results } : {}) };
-      setState({ chatMsgs: msgs });
-    },
-    [setState],
-  );
-
-  const sendChat = useCallback(
-    async (text?: string) => {
-      const s = stateRef.current;
-      const t = (typeof text === "string" ? text : s.chatInput || "").trim();
-      if (!t || chatBusy.current) return;
-      chatBusy.current = true;
-      setState({
-        chatMsgs: [...s.chatMsgs, { role: "user", text: t }, { role: "assistant", text: "Searching your archive…" }],
-        chatInput: "",
-      });
-      try {
-        const qs = new URLSearchParams({ q: t });
-        if (currentProjectId !== "all") qs.set("projectId", currentProjectId);
-        const resp = await fetch(`/api/search?${qs.toString()}`);
-        if (!resp.ok) throw new Error(String(resp.status));
-        const data = (await resp.json()) as SearchResponse;
-
-        const byId = new Map(stateRef.current.photos.map((p) => [p.id, p]));
-        const results: ChatResult[] = data.results.map((r) => {
-          const p = byId.get(r.assetId);
-          return {
-            assetId: r.assetId,
-            src: p ? photoSrc(p, 76, 76) : undefined,
-            filename: p?.filename ?? "outside this view",
-            tier: r.tier,
-            matchedTags: r.matchedTags,
-            matchedPlace: r.matchedPlace,
-            matchedText: r.matchedText,
-          };
-        });
-
-        // Honest filter note (ADR 0029/0031): name only what actually filtered
-        // or matched a result — never the parsed wish-list. Dates/places/EXIF
-        // genuinely filter in SQL; tags and description text only rank, so they
-        // appear only when a returned result carries the match.
-        const filters: string[] = [];
-        if (data.parsed.date_from || data.parsed.date_to)
-          filters.push(`dates ${data.parsed.date_from ?? "…"} – ${data.parsed.date_to ?? "…"}`);
-        if (data.parsed.place_terms.length) filters.push(`place: ${data.parsed.place_terms.join(", ")}`);
-        if (data.parsed.camera_terms.length) filters.push(`camera: ${data.parsed.camera_terms.join(", ")}`);
-        if (data.parsed.iso_min || data.parsed.iso_max)
-          filters.push(`ISO ${data.parsed.iso_min ?? "…"}–${data.parsed.iso_max ?? "…"}`);
-        if (data.parsed.aperture) filters.push(`aperture ${data.parsed.aperture}`);
-        const hitTags = [...new Set(results.flatMap((r) => r.matchedTags))];
-        if (hitTags.length) filters.push(`tagged: ${hitTags.join(", ")}`);
-        if (results.some((r) => r.matchedText)) filters.push("in description");
-        const filterNote = filters.length ? ` (${filters.join("; ")})` : "";
-
-        const strong = results.filter((r) => r.tier === "strong").length;
-        const weak = results.length - strong;
-        patchLastChatMsg(
-          results.length
-            ? `${strong} best match${strong === 1 ? "" : "es"}${filterNote}${weak ? ` — plus ${weak} more distant below` : ""}. Tap a thumb to open it.`
-            // Names a real affordance: the ✨ badge sits on every unanalyzed
-            // tile. The old copy pointed at an "Analyze with AI" button that
-            // did not exist anywhere in the UI.
-            : `No matches${filterNote}. Only analyzed photos are searchable — click the ✨ badge on a photo to analyze it, or try different wording.`,
-          results,
-        );
-      } catch {
-        patchLastChatMsg("Search is unavailable right now — try again in a moment.");
-      } finally {
-        chatBusy.current = false;
-      }
-    },
-    [setState, patchLastChatMsg, currentProjectId],
-  );
-
-  /** Chat's "Select N results": select the matches that are on this canvas. */
+  /** Select the ids that are loaded. Its callers are the Map (a cluster's
+   *  photos) and a share link's "Show on canvas" — both hand over ids the
+   *  canvas is about to show. The chat used to call it too, and for a search
+   *  answer "loaded" was too wide: see `selectIds`. */
   const selectSearchResults = useCallback(
     (ids: string[]) => {
       const loaded = new Set(stateRef.current.photos.map((p) => p.id));
@@ -4498,19 +4459,20 @@ export function useWorkspace(
     [setState, flashToast],
   );
 
-  const onChatInput = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => setState({ chatInput: e.target.value }),
-    [setState],
-  );
-
-  const onChatKey = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendChat();
-      }
+  /** The assistant's "Select": the ids this canvas DRAWS, and only those. A
+   *  search answer can name a photo the open Workspace or the label filter is
+   *  hiding; selecting it anyway meant the next "Move N to Trash" acted on
+   *  tiles nobody could see (ADR 0040). */
+  const selectIds = useCallback(
+    (ids: readonly string[]) => {
+      const drawn = new Set(navOrder(stateRef.current));
+      const found = [...new Set(ids)].filter((id) => drawn.has(id));
+      if (found.length) setState({ selectedIds: found });
+      flashToast(
+        found.length ? `${found.length} photo${found.length === 1 ? "" : "s"} selected` : "Those photos aren't on this canvas",
+      );
     },
-    [sendChat],
+    [navOrder, setState, flashToast],
   );
 
   const toggleChat = useCallback(
@@ -5104,7 +5066,7 @@ export function useWorkspace(
     void runAi(ids, s.bulkOps, s.bulkLangs, s.bulkStyle);
   }, [runAi]);
 
-  const openBulkFor = useCallback((ids: readonly string[]): boolean => {
+  const openBulkFor = useCallback((ids: readonly string[], mode: "analyze" | "caption" = "analyze"): boolean => {
     const s = stateRef.current;
     // proc.active as well as activeJobId: a run is "active" from its
     // "Queueing…" frame, but activeJobId is only set once /api/jobs answers.
@@ -5116,9 +5078,16 @@ export function useWorkspace(
     }
     // Same visibility rule as the marquee: a hidden tile is never selected.
     const shown = filterByLabel(canvasPhotos(s.photos, s.boardScope), s.labelFilter);
-    const target = analyzableUploadIds(ids, shown);
+    // A caption is written from the facts analysis leaves behind, so a
+    // caption-only plan takes the analyzed photos and nothing else — the
+    // mirror image of "Analyze N", which takes only the unanalyzed.
+    const analyzed = new Set(shown.filter((p) => p.processed).map((p) => p.id));
+    const target =
+      mode === "caption" ? [...new Set(ids)].filter((id) => analyzed.has(id)) : analyzableUploadIds(ids, shown);
     if (target.length === 0) {
-      flashToast("Those photos aren't on this canvas any more");
+      flashToast(
+        mode === "caption" ? "Those photos need to be analyzed first" : "Those photos aren't on this canvas any more",
+      );
       return false;
     }
     setState({
@@ -5127,8 +5096,14 @@ export function useWorkspace(
       bulkPanelOpen: true,
       bulkIntroOpen: false,
       // "Analyze N" must not open a caption-only plan; captions keep the
-      // user's last choice. Nothing runs until the panel's Run button.
-      bulkOps: s.bulkOps.tags ? s.bulkOps : { ...s.bulkOps, tags: true },
+      // user's last choice. "Caption N" opens exactly that plan, since its
+      // photos are analyzed already. Nothing runs until the panel's Run button.
+      bulkOps:
+        mode === "caption"
+          ? { captions: true, tags: false }
+          : s.bulkOps.tags
+            ? s.bulkOps
+            : { ...s.bulkOps, tags: true },
     });
     return true;
   }, [setState, flashToast]);
@@ -6322,14 +6297,13 @@ export function useWorkspace(
     copyMetadata,
 
     chatOpen: state.chatOpen,
-    chatMsgs: state.chatMsgs,
-    chatInput: state.chatInput,
     toggleChat,
     closeChat,
-    sendChat,
     selectSearchResults,
-    onChatInput,
-    onChatKey,
+    selectIds,
+    viewIds,
+    labelIds: applyLabel,
+    confirmDelete,
 
     acctOpen: state.acctOpen,
     projOpen: state.projOpen,
