@@ -244,9 +244,14 @@ design from this file:**
   (download / upload / both) for somebody with no account, and the first public
   surface that WRITES. Read it before touching `/s/*`, `project_shares` or
   `project_share_uploads`. A link's liveness has exactly one definition,
-  `project_share_by_token()`. Downloads 302 to five-minute presigns rather than
+  `project_share_is_live()` (which `project_share_by_token()` calls). Downloads 302 to five-minute presigns rather than
   streaming. An anonymous browser PUTs only to a staging key the server copies
   from, never to an original. A link's ingest never revives a trashed duplicate.
+  **0053** gives every link a SCOPE inside its project — the whole project, one
+  Workspace, or a fixed list of files — and opt-in details (Workspaces as a
+  filter, colour labels, tags, one caption). What a link carries has exactly
+  one definition too, `project_share_scope_assets()`; every public resolver
+  joins it. A detail that is off is null from SQL and cannot be filtered on.
 
 Work the tracked GitHub issues in phase order; don't jump ahead of the current
 phase.
