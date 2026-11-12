@@ -88,6 +88,7 @@ import { CHAT_GREETING } from "@/lib/chat";
 import { clusterTopicKey } from "@/lib/topics";
 import { committedTopicDropKey, topicDropTargetAt } from "@/lib/topic-drag";
 import { UPLOAD_SELECTION_LIMIT } from "@/lib/upload-client";
+import { analyzableUploadIds } from "@/lib/upload-pill";
 import {
   createThumbQueue,
   renderUploadThumb,
@@ -907,6 +908,10 @@ export interface Workspace {
   // Bulk AI
   bulkPanelOpen: boolean;
   toggleBulkPanel: () => void;
+  /** The upload pill's "Analyze N with AI": select exactly these ids that this
+   *  canvas shows (Workspace scope + label filter, not yet analyzed) and open
+   *  BulkAiPanel. Never runs AI. false = nothing opened (a toast says why). */
+  openBulkFor: (ids: readonly string[]) => boolean;
   bulkShow: boolean;
   bulkIdle: boolean;
   /** Exactly the ids `runBulk` will act on — the panel plans its button text
@@ -4602,6 +4607,30 @@ export function useWorkspace(
     void runAi(ids, s.bulkOps, s.bulkLangs, s.bulkStyle);
   }, [runAi]);
 
+  const openBulkFor = useCallback((ids: readonly string[]): boolean => {
+    const s = stateRef.current;
+    if (activeJobId.current) {
+      flashToast("An AI job is already running — wait for it to finish");
+      return false;
+    }
+    // Same visibility rule as the marquee: a hidden tile is never selected.
+    const shown = filterByLabel(canvasPhotos(s.photos, s.boardScope), s.labelFilter);
+    const target = analyzableUploadIds(ids, shown);
+    if (target.length === 0) {
+      flashToast("Those photos aren't on this canvas any more");
+      return false;
+    }
+    setState({
+      selectedIds: target,
+      drawerId: null,
+      bulkPanelOpen: true,
+      // "Analyze N" must not open a caption-only plan; captions keep the
+      // user's last choice. Nothing runs until the panel's Run button.
+      bulkOps: s.bulkOps.tags ? s.bulkOps : { ...s.bulkOps, tags: true },
+    });
+    return true;
+  }, [setState, flashToast]);
+
   /** Drawer/tile entry points name the op explicitly rather than inheriting the
    *  panel's checkboxes — a photo-level button must not change meaning because
    *  of a toggle the user set somewhere else. */
@@ -5824,6 +5853,7 @@ export function useWorkspace(
 
     bulkPanelOpen: state.bulkPanelOpen,
     toggleBulkPanel,
+    openBulkFor,
     bulkShow,
     bulkIdle: !state.proc.active,
     bulkSelectedIds,

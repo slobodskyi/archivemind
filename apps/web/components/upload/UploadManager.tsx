@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { CloseIcon } from "@/components/icons/icons";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CloseIcon, SparkleIcon } from "@/components/icons/icons";
 import { useSmoothProgress } from "@/hooks/useSmoothProgress";
 import {
   createUploadBatchId,
@@ -13,6 +13,12 @@ import {
   type UploadStage,
 } from "@/lib/upload-client";
 import { Z } from "@/lib/ui";
+import {
+  UPLOAD_PILL_PREPARE_MAX_MS,
+  dockBottomFor,
+  uploadPillDismiss,
+  type UploadAnalyzeStatus,
+} from "@/lib/upload-pill";
 import type {
   CanvasPoint,
   IndexedUploadFile,
@@ -36,6 +42,16 @@ interface UploadManagerProps {
   disabledMessage?: string;
   onBatchStart?: (batch: UploadBatchStart) => void;
   onBatchSettled?: (result: UploadBatchResult) => void;
+  /** Readiness of just-uploaded ids on this canvas (ArchiveWorkspace derives it
+   *  from photos + upload previews, lib/upload-pill). Absent → no AI call to
+   *  action. */
+  analyzeStatus?: (assetIds: readonly string[]) => UploadAnalyzeStatus;
+  /** Select these ids and open BulkAiPanel. Never runs AI. false = could not
+   *  open (the pill stays). */
+  onAnalyzeUploaded?: (assetIds: string[]) => boolean;
+  /** Changes whenever the set of bottom chrome can change; absent → no docking
+   *  (the pill keeps its fallback bottom). */
+  dockKey?: string;
 }
 
 interface PillState {
@@ -55,6 +71,9 @@ interface LinkRetry {
 }
 
 interface UploadSummary {
+  /** Bumped on every settle (first upload and each retry), so the dismiss
+   *  timer and the hover/focus hold start fresh for each summary. */
+  seq: number;
   batchId: string;
   projectId: string;
   clientPoint: CanvasPoint;
@@ -63,6 +82,9 @@ interface UploadSummary {
   skippedReasons: Record<UploadSkipReason, number>;
   retryFiles: IndexedUploadFile[];
   retryLinks: LinkRetry[];
+  /** Every asset id this batch uploaded, retries included — what the
+   *  "Analyze N with AI" call to action is computed over. */
+  assetIds: string[];
 }
 
 const MAX_VISIBLE_ERRORS = 3;
@@ -145,18 +167,95 @@ function linkRetriesFor(
   });
 }
 
+/** Fires `onDismiss` after `ms`, pausing (not restarting) while `paused`.
+ *  A new `token` or `ms` starts a fresh countdown; `ms === null` clears it.
+ *  The effect cleanup also covers unmount. */
+function useAutoDismiss(
+  ms: number | null,
+  paused: boolean,
+  token: string,
+  onDismiss: () => void,
+) {
+  const remaining = useRef<number | null>(null);
+  const forKey = useRef<string | null>(null);
+  const callback = useRef(onDismiss);
+  useEffect(() => {
+    callback.current = onDismiss;
+  });
+  useEffect(() => {
+    const key = `${token}|${ms}`;
+    if (forKey.current !== key) {
+      forKey.current = key;
+      remaining.current = ms;
+    }
+    if (ms === null || paused || remaining.current === null) return;
+    const started = Date.now();
+    const timer = window.setTimeout(() => {
+      remaining.current = 0;
+      callback.current();
+    }, remaining.current);
+    return () => {
+      window.clearTimeout(timer);
+      if (remaining.current !== null) {
+        remaining.current = Math.max(0, remaining.current - (Date.now() - started));
+      }
+    };
+  }, [ms, paused, token]);
+}
+
+/** The bottom chrome the pill docks above. These class hooks are carried by
+ *  ViewSwitcher (`am-viewswitcher`), SortingActionBar and WorkspaceActionBar
+ *  (`am-bar`) and BulkAiPanel (`am-bulk-ai`) — renaming one drops the pill back
+ *  to its fallback bottom, under the bars, where they win by z. */
+const CHROME_SELECTOR = ".am-viewswitcher, .am-bar, .am-bulk-ai";
+
+/** Measured, not computed from props: the bars wrap at 760 px and below, are
+ *  52 px strips on a coarse pointer, and BulkAiPanel's height follows its
+ *  content. Re-queried only when `dockKey` changes (ArchiveWorkspace re-renders
+ *  on every pan frame), re-measured by ResizeObserver and window resize. */
+function useDockBottom(active: boolean, dockKey: string | undefined): number | null {
+  const [bottom, setBottom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!active || dockKey === undefined) return;
+    const els = Array.from(document.querySelectorAll<HTMLElement>(CHROME_SELECTOR));
+    const measure = () => setBottom(dockBottomFor(
+      window.innerHeight,
+      els
+        .map((el) => el.getBoundingClientRect())
+        .filter((rect) => rect.height > 0)
+        .map((rect) => rect.top),
+    ));
+    // ResizeObserver's initial observation does the first measure, so there is
+    // no synchronous setState in this effect body.
+    const observer = new ResizeObserver(measure);
+    for (const el of els) observer.observe(el);
+    const frame = els.length === 0 ? requestAnimationFrame(() => setBottom(null)) : 0;
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+    };
+  }, [active, dockKey]);
+  return active && dockKey !== undefined ? bottom : null;
+}
+
 export default function UploadManager({
   projectId,
   disabled = false,
   disabledMessage,
   onBatchStart,
   onBatchSettled,
+  analyzeStatus,
+  onAnalyzeUploaded,
+  dockKey,
 }: UploadManagerProps) {
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
   const [pill, setPill] = useState<PillState>(IDLE);
   const dragDepth = useRef(0);
   const busy = useRef(false);
+  const settleSeq = useRef(0);
 
   const upload = useCallback(
     async (files: File[], clientPoint: CanvasPoint) => {
@@ -184,12 +283,14 @@ export default function UploadManager({
 
       if (candidates.length > 0) onBatchSettled?.({ batchId: id, ...result });
       if (result.assetIds.length > 0) router.refresh();
+      const seq = ++settleSeq.current;
       setPill((prev) => ({
         ...prev,
         active: true,
         progress: 1,
         stage: "done",
         summary: {
+          seq,
           batchId: id,
           projectId,
           clientPoint,
@@ -198,6 +299,7 @@ export default function UploadManager({
           skippedReasons: mergeSkipCounts(EMPTY_SKIP_COUNTS, result),
           retryFiles: retryFilesFor(candidates, result),
           retryLinks: linkRetriesFor(candidates, result),
+          assetIds: result.uploaded.map((u) => u.assetId),
         },
         ...boundedErrors(result.errors),
       }));
@@ -296,6 +398,7 @@ export default function UploadManager({
     };
     onBatchSettled?.({ batchId: previous.batchId, ...combinedResult });
     if (combinedResult.assetIds.length > 0) router.refresh();
+    const seq = ++settleSeq.current;
     setPill((current) => ({
       ...current,
       active: true,
@@ -303,11 +406,17 @@ export default function UploadManager({
       stage: "done",
       summary: {
         ...previous,
+        seq,
         uploadedCount: previous.uploadedCount + uploadResult.uploaded.length,
         skippedCount: previous.skippedCount + uploadResult.skipped,
         skippedReasons: mergeSkipCounts(previous.skippedReasons, uploadResult),
         retryFiles: retryFilesFor(previous.retryFiles, uploadResult),
         retryLinks: [...remainingPreviousLinks, ...newLinkRetries],
+        // Retried link uploads are already in previous.assetIds.
+        assetIds: Array.from(new Set([
+          ...previous.assetIds,
+          ...uploadResult.uploaded.map((u) => u.assetId),
+        ])),
       },
       ...boundedErrors(combinedResult.errors),
     }));
@@ -374,6 +483,50 @@ export default function UploadManager({
   const pct = Math.round(smooth * 100);
   const summary = pill.summary;
   const failedCount = (summary?.retryFiles.length ?? 0) + (summary?.retryLinks.length ?? 0);
+  const done = pill.stage === "done" && summary !== null;
+  const status: UploadAnalyzeStatus = done && summary && analyzeStatus
+    ? analyzeStatus(summary.assetIds)
+    : { pending: 0, analyzable: [] };
+  const policy = uploadPillDismiss({
+    done,
+    failedCount,
+    skippedCount: summary?.skippedCount ?? 0,
+    linkFailedCount: summary?.retryLinks.length ?? 0,
+    errorCount: pill.errors.length + pill.hiddenErrorCount,
+    pending: status.pending,
+    // No handler → no call to action, so the plain-success timer applies.
+    analyzableCount: onAnalyzeUploaded ? status.analyzable.length : 0,
+  });
+  const showCta = policy.kind === "auto" && status.analyzable.length > 0 && Boolean(onAnalyzeUploaded);
+  const ctaCount = status.analyzable.length;
+  const timerMs = policy.kind === "auto"
+    ? policy.ms
+    : policy.kind === "wait" ? UPLOAD_PILL_PREPARE_MAX_MS : null;
+
+  // Pause while the pointer is over the pill or focus is inside it. Keyed to
+  // the summary's seq, so a pill closed while hovered (no pointerleave ever
+  // fires after an unmount) cannot leave the next one paused forever.
+  const [hold, setHold] = useState({ seq: -1, hover: false, focus: false });
+  const paused = summary !== null && hold.seq === summary.seq && (hold.hover || hold.focus);
+  const setHoldFor = (patch: { hover?: boolean; focus?: boolean }) => {
+    if (!summary) return;
+    const seq = summary.seq;
+    setHold((h) => {
+      const same = h.seq === seq;
+      return {
+        seq,
+        hover: patch.hover ?? (same && h.hover),
+        focus: patch.focus ?? (same && h.focus),
+      };
+    });
+  };
+  useAutoDismiss(
+    timerMs,
+    paused,
+    summary ? `${summary.batchId}:${summary.seq}:${policy.kind}` : "idle",
+    () => setPill(IDLE),
+  );
+  const dock = useDockBottom(pill.active, dockKey);
   const skipLabels = summary
     ? [
       summary.skippedReasons.empty > 0 ? `${summary.skippedReasons.empty} empty` : null,
@@ -431,14 +584,26 @@ export default function UploadManager({
       {pill.active && (
         <div
           data-upload-pill
+          onPointerEnter={() => setHoldFor({ hover: true })}
+          onPointerLeave={() => setHoldFor({ hover: false })}
+          onFocus={() => setHoldFor({ focus: true })}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoldFor({ focus: false });
+          }}
           style={{
             position: "fixed",
-            bottom: 18,
-            left: "50%",
-            transform: "translateX(-50%)",
+            // Docked above the bottom chrome (useDockBottom); the fallback is
+            // the old spot, safe area included.
+            bottom: dock ?? "calc(18px + env(safe-area-inset-bottom, 0px))",
+            // left/right + auto margins, not left:50% — a fixed box with only
+            // left:50% can never be wider than half the viewport.
+            left: 8,
+            right: 8,
+            marginInline: "auto",
+            width: "fit-content",
             zIndex: Z.uploadPill,
             minWidth: 260,
-            maxWidth: 420,
+            maxWidth: "min(420px, calc(100vw - 16px))",
             background: "rgba(12,12,12,.97)",
             border: "1px solid var(--bd)",
             borderRadius: 2,
@@ -463,6 +628,43 @@ export default function UploadManager({
               </button>
             )}
           </div>
+          {policy.kind === "wait" && (
+            <div style={{ fontSize: 10.5, color: "var(--t3)", marginTop: 6, lineHeight: 1.4 }}>
+              Preparing previews · {status.pending} left
+            </div>
+          )}
+          {showCta && (
+            <button
+              type="button"
+              // Product copy and a count only (ADR 0050).
+              data-ph-unmask=""
+              onClick={() => {
+                if (onAnalyzeUploaded?.(status.analyzable)) setPill(IDLE);
+              }}
+              aria-label={`Analyze ${ctaCount} uploaded ${ctaCount === 1 ? "photo" : "photos"} with AI`}
+              title="Opens the AI panel — see the cost before anything runs"
+              style={{
+                marginTop: 9,
+                height: 28,
+                padding: "0 10px",
+                display: "flex",
+                gap: 5,
+                alignItems: "center",
+                border: 0,
+                borderRadius: 2,
+                background: "var(--ai)",
+                color: "#050505",
+                fontFamily: "inherit",
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: ".04em",
+                cursor: "pointer",
+              }}
+            >
+              <SparkleIcon width={12} height={12} strokeWidth={2} />
+              Analyze {ctaCount} with AI
+            </button>
+          )}
           {summary && pill.stage === "done" && (failedCount > 0 || summary.skippedCount > 0) && (
             <div style={{ fontSize: 9.5, color: "var(--tm)", marginTop: 5, letterSpacing: ".04em" }}>
               Batch {summary.batchId.slice(0, 8)}

@@ -8,6 +8,7 @@ import { useWorkspace, type BoardDrop, type ProjectOption } from "@/hooks/useWor
 import { useBoards } from "@/hooks/useBoards";
 import { useReceivedSelection } from "@/hooks/useReceivedSelection";
 import { LABEL_COLORS } from "@/lib/labels";
+import { uploadAnalyzeStatus } from "@/lib/upload-pill";
 import BoardBrowser from "@/components/header/BoardBrowser";
 import InfiniteGrid from "@/components/canvas/InfiniteGrid";
 import PanZoomCanvas from "@/components/canvas/PanZoomCanvas";
@@ -239,6 +240,14 @@ export default function ArchiveWorkspace({
   // and a Workspace's own sorting views — gets the narrow one. Derived once so
   // the two gates cannot drift into showing both or neither.
   const workingBar = bd.activeBoardId !== null && ws.view === "neural";
+  // The upload pill's readiness check (lib/upload-pill): pending while an
+  // upload tile is still ingesting, analyzable over what this canvas shows.
+  const uploadAnalyzeStatusFor = useCallback(
+    (ids: readonly string[]) => uploadAnalyzeStatus(ids, ws.visiblePhotos, ws.uploadPreviews),
+    [ws.visiblePhotos, ws.uploadPreviews],
+  );
+  // Changes whenever the set of bottom chrome the pill docks above can change.
+  const uploadDockKey = `${ws.view}|${bd.activeBoardId ?? ""}|${ws.bulkShow ? 1 : 0}|${ws.showViewTabs ? 1 : 0}`;
 
   // Workspace → Draft is a separate state machine from the canvas. Drafts
   // snapshot their source ids, so membership changes only raise a warning; they
@@ -1326,6 +1335,9 @@ export default function ArchiveWorkspace({
         disabledMessage={ws.allFilesMode ? "OPEN A PROJECT TO UPLOAD" : undefined}
         onBatchStart={ws.onUploadBatchStart}
         onBatchSettled={ws.onUploadBatchSettled}
+        analyzeStatus={uploadAnalyzeStatusFor}
+        onAnalyzeUploaded={ws.openBulkFor}
+        dockKey={uploadDockKey}
       />
 
       <CreateHubDialog

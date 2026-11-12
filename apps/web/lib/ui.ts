@@ -4,7 +4,8 @@
  *  numbers (the audit found a toast wedged *between* two modals at 58/60/65):
  *  canvas internals stay 0–35, header 40, drawer/sidebar 45, menus 60,
  *  modals 70, toasts 80, tooltip 85 (cursor-attached, tops toasts),
- *  upload overlay/pill 90/91, nav progress bar 130. */
+ *  upload drop overlay 90 (the upload pill lives at 34, inside the canvas
+ *  band), nav progress bar 130. */
 export const Z = {
   header: 40,
   drawer: 45,
@@ -15,7 +16,10 @@ export const Z = {
   toast: 80,
   tooltip: 85,
   uploadOverlay: 90,
-  uploadPill: 91,
+  /** Under the canvas bars (35) and BulkAiPanel (36) on purpose: it docks
+   *  above them (UploadManager), and if anything still overlaps, the control
+   *  wins. */
+  uploadPill: 34,
   navProgress: 130,
 } as const;
 
