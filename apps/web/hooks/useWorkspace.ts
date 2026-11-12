@@ -345,6 +345,10 @@ interface WorkspaceState {
   bulkLangs: Language[];
   bulkStyle: CaptionStyle;
   bulkPanelOpen: boolean;
+  /** The no-selection intro of the AI panel — opened by AI ANALYZE with
+   *  nothing selected. Its own flag: `bulkPanelOpen` is force-closed on an
+   *  empty selection (see the latch effect), which is exactly this state. */
+  bulkIntroOpen: boolean;
   proc: ProcState;
   /** Assets covered by the AI job currently running — drives the per-tile
    *  "working" badge, so a photo shows its own progress instead of only the
@@ -1024,6 +1028,12 @@ export interface Workspace {
 
   // Bulk AI
   bulkPanelOpen: boolean;
+  /** AI ANALYZE's no-selection intro is open (see WorkspaceState). */
+  bulkIntroOpen: boolean;
+  /** The intro's "Select N unanalyzed": select these ids and open the normal
+   *  panel. Only selects — AI runs from the panel's Run button alone. */
+  selectUnanalyzed: (ids: readonly string[]) => void;
+  closeBulkIntro: () => void;
   toggleBulkPanel: () => void;
   /** The upload pill's "Analyze N with AI": select exactly these ids that this
    *  canvas shows (Workspace scope + label filter, not yet analyzed) and open
@@ -1177,6 +1187,7 @@ export function useWorkspace(
     bulkLangs: ["EN"],
     bulkStyle: "Agency",
     bulkPanelOpen: false,
+    bulkIntroOpen: false,
     proc: { active: false, label: "", pct: 0 },
     aiBusyIds: [],
     toast: { show: false, text: "" },
@@ -3673,6 +3684,7 @@ export function useWorkspace(
         view: v,
         marquee: null,
         bulkPanelOpen: false,
+        bulkIntroOpen: false,
         tilesAnimating: true,
         focusedCloudKey: null,
         // View changes retire the right-side source browser so it cannot
@@ -4915,13 +4927,41 @@ export function useWorkspace(
   );
   const setBulkStyleAction = useCallback((st: CaptionStyle) => setState({ bulkStyle: st }), [setState]);
 
+  const closeBulkIntro = useCallback(() => setState({ bulkIntroOpen: false }), [setState]);
+
+  /** The intro's "Select N unanalyzed". It only SELECTS: the normal panel then
+   *  shows the count and the call estimate above Run, and AI never runs from
+   *  here. `ids` come from `unanalyzedInScope` over what the canvas draws, so
+   *  nothing hidden is selected; ids that left the canvas since are dropped. */
+  const selectUnanalyzed = useCallback((ids: readonly string[]) => {
+    const loaded = new Set(stateRef.current.photos.map((p) => p.id));
+    const found = ids.filter((id) => loaded.has(id));
+    if (!found.length) return;
+    setState({ selectedIds: found, drawerId: null, bulkPanelOpen: true, bulkIntroOpen: false });
+  }, [setState]);
+
+  // A selection made on the canvas (or a job started from a tile) ends the
+  // intro — the same reasoning as the latch effect below: the intro is a mode
+  // over an EMPTY selection, and the button, now badged, reopens the real panel.
+  useEffect(() => {
+    if (state.bulkIntroOpen && (state.selectedIds.length > 0 || state.proc.active)) {
+      setState({ bulkIntroOpen: false });
+    }
+  }, [state.bulkIntroOpen, state.selectedIds.length, state.proc.active, setState]);
+
   const toggleBulkPanel = useCallback(() => {
     const s = stateRef.current;
     if (!s.selectedIds.length) {
-      flashToast("Select files first");
+      if (s.proc.active) {
+        flashToast("An AI job is already running — wait for it to finish");
+        return;
+      }
+      // Nothing selected: the panel's intro explains AI and offers a
+      // selection, instead of a toast that left the button a dead end.
+      setState({ bulkIntroOpen: !s.bulkIntroOpen });
       return;
     }
-    setState({ bulkPanelOpen: !s.bulkPanelOpen });
+    setState({ bulkPanelOpen: !s.bulkPanelOpen, bulkIntroOpen: false });
   }, [setState, flashToast]);
 
   /** Run the panel's checked operations over the selection (spec §8.2, #12).
@@ -4957,6 +4997,7 @@ export function useWorkspace(
       selectedIds: target,
       drawerId: null,
       bulkPanelOpen: true,
+      bulkIntroOpen: false,
       // "Analyze N" must not open a caption-only plan; captions keep the
       // user's last choice. Nothing runs until the panel's Run button.
       bulkOps: s.bulkOps.tags ? s.bulkOps : { ...s.bulkOps, tags: true },
@@ -5519,6 +5560,7 @@ export function useWorkspace(
       else if (s.chatOpen) closeChat();
       else if (s.trashOpen) closeTrash();
       else if (s.sidebarTabs.length) closeSidebar();
+      else if (s.bulkIntroOpen) closeBulkIntro();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -5533,6 +5575,7 @@ export function useWorkspace(
     pasteFiles,
     applyLabel,
     closeLabelMenu,
+    closeBulkIntro,
   ]);
 
   // Hold Space to pan (Figma/Miro/Photoshop): a transient mode layered over the
@@ -6186,6 +6229,9 @@ export function useWorkspace(
     visiblePreviews,
 
     bulkPanelOpen: state.bulkPanelOpen,
+    bulkIntroOpen: state.bulkIntroOpen,
+    selectUnanalyzed,
+    closeBulkIntro,
     toggleBulkPanel,
     openBulkFor,
     bulkShow,

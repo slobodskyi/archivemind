@@ -80,6 +80,7 @@ import {
   savePublicationShareLink,
   type PublicationShareSummary,
 } from "@/lib/publication-shares";
+import { unanalyzedInScope } from "@/lib/unanalyzed";
 
 interface Account {
   initials: string;
@@ -256,7 +257,9 @@ export default function ArchiveWorkspace({
     return opened;
   }, [openBulkFor]);
   // Changes whenever the set of bottom chrome the pill docks above can change.
-  const uploadDockKey = `${ws.view}|${bd.activeBoardId ?? ""}|${ws.bulkShow ? 1 : 0}|${ws.showViewTabs ? 1 : 0}`;
+  // The AI panel's no-selection intro is the same `.am-bulk-ai` element, so it
+  // counts as the panel being up.
+  const uploadDockKey = `${ws.view}|${bd.activeBoardId ?? ""}|${ws.bulkShow || ws.bulkIntroOpen ? 1 : 0}|${ws.showViewTabs ? 1 : 0}`;
 
   // Workspace → Draft is a separate state machine from the canvas. Drafts
   // snapshot their source ids, so membership changes only raise a warning; they
@@ -376,6 +379,21 @@ export default function ArchiveWorkspace({
     const selectedSet = new Set(selected);
     return orderedBoardAssetIds.filter((id) => selectedSet.has(id));
   }, [orderedBoardAssetIds, ws.selectedIds]);
+
+  // AI ANALYZE with nothing selected opens BulkAiPanel's intro. Its "Select N
+  // unanalyzed" is computed here, once, from the same sets the canvas draws, so
+  // the N on the button is exactly what gets selected. Only the Canvas view
+  // hides collapsed-folder members (activePositions drops them whenever there
+  // is no cloud layout, Map included, but Map, Timeline and Topic draw no
+  // folder boxes), so elsewhere every in-scope photo counts as drawn. Computed
+  // only while the intro is up, to stay off the hot path.
+  const aiIntro = ws.bulkIntroOpen && ws.selectedIds.size === 0 && !ws.proc.active;
+  const unanalyzed = useMemo(
+    () => (aiIntro
+      ? unanalyzedInScope(ws.visiblePhotos, ws.view === "neural" ? ws.activePositions : null, ws.aiBusyIds)
+      : null),
+    [aiIntro, ws.visiblePhotos, ws.view, ws.activePositions, ws.aiBusyIds],
+  );
 
   const openDraft = useCallback((draft: ContentDraft) => {
     const current = loadContentDraft(draft.boardId, draft.id) ?? draft;
@@ -1207,7 +1225,7 @@ export default function ArchiveWorkspace({
           What the slot holds is the scope's own question about the same tiles:
           inside a Workspace you are taking work out (CREATE, DOWNLOAD), outside
           one you are still building the archive, and building it means
-          analyzing what arrived (ANALYZE). The primary always sits on the right
+          analyzing what arrived (AI ANALYZE). The primary always sits on the right
           edge, so the green or purple button never moves between scopes. They
           are mutually exclusive rather than stacked — a Workspace already
           carries the ✨ button on its action bar, and the project canvas has no
@@ -1259,8 +1277,11 @@ export default function ArchiveWorkspace({
              accept, so the badge would count a batch the click then refused. */
           <CanvasAnalyzeAction
             selectedCount={ws.selectedIds.size}
-            open={ws.bulkPanelOpen}
+            open={ws.bulkPanelOpen || ws.bulkIntroOpen}
             onOpen={ws.toggleBulkPanel}
+            // The chat and Trash panels stack above this shell and would cover
+            // its hover explainer, so it is not drawn under them.
+            explain={!ws.chatOpen && !ws.trashOpen}
           />
         )}
       </div>
@@ -1311,7 +1332,7 @@ export default function ArchiveWorkspace({
       />
 
       <BulkAiPanel
-        show={ws.bulkShow}
+        show={ws.bulkShow || aiIntro}
         idle={ws.bulkIdle}
         selectedIds={ws.bulkSelectedIds}
         thumbs={ws.bulkThumbs}
@@ -1326,6 +1347,16 @@ export default function ArchiveWorkspace({
         onSetStyle={ws.setBulkStyle}
         onRun={ws.runBulk}
         focusRequest={bulkFocusRequest}
+        intro={unanalyzed && {
+          count: unanalyzed.ids.length,
+          hidden: unanalyzed.hidden,
+          pending: unanalyzed.pending,
+          total: unanalyzed.total,
+        }}
+        onSelectUnanalyzed={() => {
+          if (unanalyzed) ws.selectUnanalyzed(unanalyzed.ids);
+        }}
+        onCloseIntro={ws.closeBulkIntro}
       />
 
       {ws.projectMode && (
